@@ -173,12 +173,6 @@ export async function showCard(page: Page, id: string): Promise<void> {
 export async function showTab(page: Page, name: string): Promise<void> {
   const changes = ['diff', 'log', 'pr'].includes(name);
   const icon = page.getByTestId(`tab-${changes ? 'diff' : name}`);
-  // a phone keeps the terminal in the card's menu until it is open
-  if (name === 'terminal' && !(await icon.count())) {
-    await page.getByTestId('card-actions').click();
-    await page.getByTestId('action-terminal').click();
-    return;
-  }
   if ((await icon.getAttribute('aria-selected')) !== 'true') await icon.click();
   if (!changes) return;
   const leaf = page.getByTestId(name === 'diff' ? 'changes-diff' : `tab-${name}`);
