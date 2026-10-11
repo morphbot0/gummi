@@ -43,6 +43,7 @@ func TestBoardShape(t *testing.T) {
 				Goal: &RowGoal{ID: "GL-001", Title: "Stable board"}, Waits: []string{"FD-010"},
 			},
 			{ID: "FD-001", Kind: "feature", Title: "Landed thing", Stage: "done", Status: StatusDone, Landed: true, PR: "#12 merged"},
+			{ID: "FF-020", Kind: "freeform", Title: "Watch the nightly CI", Stage: "open", Status: StatusIdle, Home: ".gummi/homes/FF-020"},
 		},
 		Resume:  &ResumeOffer{Cards: []CardRef{{ID: "FD-012", Title: "Dark mode", Stage: "plan"}}, Since: "3m ago", At: at},
 		EventID: "1760000000000042",

@@ -53,8 +53,12 @@ type Pool struct {
 	fs          ForkPointStore
 	exclude     bool // run EnsureGummiExcluded on creation (mutating commands)
 	mu          sync.Mutex
-	byName      map[string]string // configured name -> resolved repo root; under mu
-	byRoot      map[string]*Manager
+	// homeMu serializes making an agent's home; ceilOnce is the one time
+	// this process is told not to climb out of the homes directory.
+	homeMu   sync.Mutex
+	ceilOnce sync.Once
+	byName   map[string]string // configured name -> resolved repo root; under mu
+	byRoot   map[string]*Manager
 	// discover rescans the named set; nil when the set is fixed config.
 	// ambiguous is its last report of the folder names nobody got.
 	discover  Discover
@@ -323,8 +327,12 @@ func (p *Pool) Names() []string {
 // belongs to a goal resolves to the manager rooted at the goal's worktree
 // instead, so its branch forks from and lands on the goal branch, and a
 // card a freeform session created resolves to the manager rooted at that
-// freeform card's worktree, for the same reason.
+// freeform card's worktree, for the same reason. An agent names no
+// repository at all and resolves to the manager rooted at its home.
 func (p *Pool) ManagerFor(ctx context.Context, f *domain.Feature) (*Manager, error) {
+	if f.Home {
+		return p.managerForHome(ctx, f)
+	}
 	if f.GoalID != "" {
 		return p.managerForGoalCard(ctx, f)
 	}
@@ -728,6 +736,10 @@ func (p *Pool) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
 // card would leave the others checked out forever — so the siblings go
 // first, each with the branch it was holding.
 func (p *Pool) Remove(ctx context.Context, f *domain.Feature, force bool) error {
+	// an agent has no worktree, and its home is never a cleanup's to take
+	if f.Home {
+		return nil
+	}
 	if f.IsGoal() {
 		if err := p.removeGoalTrees(ctx, f); err != nil {
 			return err

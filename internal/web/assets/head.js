@@ -64,7 +64,7 @@ function render () {
   menuBtn?.addEventListener('click', () => openActions())
   append(el, [
     h('div', { class: 'head-row' },
-      h('span', { class: 'kind', testid: 'card-kind' }, kindTag(c)),
+      h('span', { class: ['kind', c.home && 'ag'], testid: 'card-kind' }, kindTag(c)),
       h('span', { class: 'cid', testid: 'card-id' }, c.id),
       h('h1', { testid: 'card-title', title: c.title }, c.title),
       h('div', { class: 'head-actions' },
@@ -77,6 +77,8 @@ function render () {
         menuBtn)),
     h('div', { class: 'subline' },
       stages(c),
+      c.home ? h('span', { class: 'home', testid: 'card-home' }, h('i', { 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'mono' }, c.home)) : null,
+      c.home ? h('span', null, 'no repository') : null,
       h('span', { class: 'sp' }),
       c.pr ? h('span', { class: 'mono', testid: 'card-pr' }, c.pr) : null,
       c.elsewhere ? h('span', null, 'driven by another gummi') : null,

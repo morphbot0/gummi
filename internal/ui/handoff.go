@@ -97,8 +97,12 @@ func handOffDetail(f domain.Feature, base string, dependents []domain.FeatureID,
 		// No branch and no worktree to keep: what the card leaves behind
 		// is the loose work in the checkout the person works in, and that
 		// is what the confirm says is kept.
-		b.WriteString("  " + pad("checkout") + "the session's loose work in the main checkout — kept\n")
-		b.WriteString("  " + pad(base) + "unchanged")
+		if f.Home {
+			b.WriteString("  " + pad("home") + "everything in the agent's home — kept")
+		} else {
+			b.WriteString("  " + pad("checkout") + "the session's loose work in the main checkout — kept\n")
+			b.WriteString("  " + pad(base) + "unchanged")
+		}
 	} else {
 		b.WriteString("  " + pad("branch") + f.BranchName() + " — kept\n")
 		b.WriteString("  " + pad("worktree") + f.WorktreePath() + " — kept\n")
@@ -166,6 +170,9 @@ func (m *Shell) handOffFeature(f domain.Feature) tea.Cmd {
 			done := string(f.ID) + " → done · " + f.BranchName() + " is yours — nothing landed on " + m.baseBranch(f)
 			if f.MainCheckout {
 				done = string(f.ID) + " → done — its work stays loose in the main checkout, yours to commit"
+				if f.Home {
+					done = string(f.ID) + " → done — its home is kept, with everything in it"
+				}
 			}
 			return noticeMsg{
 				text:       done,

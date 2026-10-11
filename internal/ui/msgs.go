@@ -515,6 +515,9 @@ type formResult struct {
 	// own — no branch cut, no worktree created (DESIGN §19). Refused at
 	// the mint on every other kind.
 	MainCheckout bool
+	// Home is the third "runs in" choice: an agent, working in a home of
+	// its own and in no repository (domain.Feature.Home).
+	Home bool
 }
 
 // cardCreatedMsg is createCard's success: the shell reloads rows, keeps
@@ -570,6 +573,10 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			// somewhere, which is what a provisional home is.
 			repo = m.provisionalRepo()
 		}
+		if res.Home {
+			// an agent is in no repository, whatever the form's row held
+			repo = ""
+		}
 		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
 			Kind: kind, Mode: res.Mode, Description: res.Desc, Profile: res.Profile, Envelope: env,
 			Repo: repo, RequireRepo: m.requireRepo, Base: res.Base,
@@ -577,7 +584,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
 			Discussion:     res.Discussion,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
-			MainCheckout: res.MainCheckout,
+			MainCheckout: res.MainCheckout, Home: res.Home,
 		})
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
@@ -665,7 +672,8 @@ func (m *Shell) requireRepo(name string) error {
 // over: the external ref stays on the original (re-ingest dedupe
 // resolves items by ref, which must stay unambiguous), and the adopted
 // branch, stack position, goal membership, spend, session backend/model,
-// main-checkout, and gate approval all stay unset, as does the copy's
+// main-checkout, and gate approval all stay unset (an agent's copy alone
+// keeps its mark: it is an agent, in a fresh home), as does the copy's
 // record of work — it has no artifacts, and a blank template is seeded
 // when it enters design (spec.EnsureDraft). The shared slug is safe:
 // branch, worktree, and artifact paths are all keyed by ID.
@@ -693,6 +701,8 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 			Slug: src.Slug, Stage: workflow.InitialFor(src.Kind),
 			Profile: src.Profile, Budget: domain.Budget{Envelope: src.Budget.Envelope},
 			Repo: src.Repo, Base: src.Base, Severity: src.Severity,
+			// an agent's copy is an agent, in a fresh home of its own
+			MainCheckout: src.Home, Home: src.Home,
 			BranchScheme: domain.DefaultBranchScheme,
 			CreatedAt:    now, UpdatedAt: now,
 		}
@@ -1612,16 +1622,9 @@ func (m *Shell) dependentsOutside(ctx context.Context, f domain.Feature, cards [
 	return nil
 }
 
-// deleteCard takes one card off disk and out of the store: its worktree,
-// its branch, its record, and the workspace files keyed to it. A goal's
-// trees in the repositories it spans go too — its home one is its own
-// card's worktree and goes with every other card's.
-func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
-	if f.IsGoal() {
-		if err := m.wt.DeleteGoalTrees(ctx, f); err != nil {
-			return err
-		}
-	}
+// deleteCardTrees removes what a deleted card held on disk in its
+// repository: its worktree, its scratch tree and its branch.
+func (m *Shell) deleteCardTrees(ctx context.Context, f *domain.Feature) error {
 	// a card whose repository was dropped from `repos:` after it was
 	// minted has nothing on disk left to reach — same story as a goal
 	// card whose tree is gone (ErrGoalWorktreeMissing) — so the record
@@ -1650,6 +1653,27 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 		}
 	} else if ok && !f.Adopted() {
 		if err := m.wt.DeleteBranch(ctx, f, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteCard takes one card off disk and out of the store: its worktree,
+// its branch, its record, and the workspace files keyed to it. A goal's
+// trees in the repositories it spans go too — its home one is its own
+// card's worktree and goes with every other card's.
+func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
+	if f.IsGoal() {
+		if err := m.wt.DeleteGoalTrees(ctx, f); err != nil {
+			return err
+		}
+	}
+	// an agent has no tree and no branch, and its home is kept: there is
+	// nothing on disk to take, and asking would make the home of an agent
+	// that never ran
+	if !f.Home {
+		if err := m.deleteCardTrees(ctx, f); err != nil {
 			return err
 		}
 	}

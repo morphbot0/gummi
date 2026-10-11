@@ -28,6 +28,9 @@ func (e *Engine) SetRepo(ctx context.Context, id domain.FeatureID, repo string) 
 		// moving it by hand would strand the branch its cards fork from.
 		return domain.Feature{}, fmt.Errorf("%s: a goal's repository follows its cards; set each card's `repo:` in the goal doc", id)
 	}
+	if f.Home {
+		return domain.Feature{}, fmt.Errorf("%s is an agent: it runs in its home, in no repository", id)
+	}
 	// The repo is locked once the card has a worktree: the tree is cut
 	// from that repo, so moving the card would orphan it. Under one
 	// worktree per card that happens at the card's first stage run, so

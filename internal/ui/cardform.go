@@ -115,6 +115,11 @@ type cardForm struct {
 	// session does not have; moving the kind row off freeform clears it,
 	// because the row that sets it goes with the kind.
 	mainCheckout bool
+	// home is the row's third cell: an agent, working in a home of its
+	// own (domain.Feature.Home). It is set with mainCheckout, never
+	// without it — the home is the checkout the agent runs in — so every
+	// rule above about a session with no branch holds for it unasked.
+	home bool
 
 	// expanded shows the run options as rows instead of one readout line.
 	expanded bool
@@ -436,7 +441,7 @@ func (d *cardForm) setKind(c domain.CardType) {
 	d.text.Placeholder = cardPlaceholderFor(c)
 	if c.Kind != domain.KindFreeform {
 		// the where row goes with the kind; so does the choice it holds
-		d.mainCheckout = false
+		d.mainCheckout, d.home = false, false
 	}
 	if d.focus == cardStopSeverity && c.Kind != domain.KindBug {
 		d.setFocus(cardStopAfter)
@@ -895,7 +900,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		Base: d.base, Adopt: d.adopt, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		Start: start, FromPicker: d.fromPicker,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
-		MainCheckout: d.mainCheckout,
+		MainCheckout: d.mainCheckout, Home: d.home,
 	}
 	if d.ct.Kind == domain.KindBug {
 		res.Severity = bugSeverityChoices[d.sev]
@@ -1254,7 +1259,7 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 		out += s.Faint.Render(" · from ") + from
 	}
 	if d.mainCheckout {
-		out += " · in the main checkout"
+		out += " · in " + d.whereChoices()[d.whereIdx()]
 	}
 	if d.ct.Kind == domain.KindBug && bugSeverityChoices[d.sev] != "" {
 		out += " · severity " + string(bugSeverityChoices[d.sev])
@@ -1284,7 +1289,7 @@ func (d *cardForm) runsLine(s *theme.Styles) string {
 		out += " · " + st
 	}
 	if d.mainCheckout {
-		out += " · in the main checkout"
+		out += " · in " + d.whereChoices()[d.whereIdx()]
 	}
 	if d.base != "" {
 		out += " · on " + d.base
@@ -1848,14 +1853,18 @@ func (d *cardForm) cycleAdopt(dir int) {
 
 // whereChoices is the "runs in" row's cells: the card's own worktree,
 // which is what nearly every session wants and what every card minted
-// before the choice existed got, then the main checkout.
+// before the choice existed got, then the main checkout, then a home of
+// its own — an agent, in no repository at all.
 func (d *cardForm) whereChoices() []string {
-	return []string{"its own worktree", "the main checkout"}
+	return []string{"its own worktree", "the main checkout", "a home of its own"}
 }
 
 // whereIdx is the selected cell of whereChoices.
 func (d *cardForm) whereIdx() int {
-	if d.mainCheckout {
+	switch {
+	case d.home:
+		return 2
+	case d.mainCheckout:
 		return 1
 	}
 	return 0
@@ -1867,11 +1876,12 @@ func (d *cardForm) whereIdx() int {
 // readouts above stop showing them the same frame. Moving back restores
 // nothing: the rows open on their defaults, as a fresh form would.
 func (d *cardForm) cycleWhere(dir int) {
-	i := (d.whereIdx() + dir) % 2
+	n := len(d.whereChoices())
+	i := (d.whereIdx() + dir) % n
 	if i < 0 {
-		i += 2
+		i += n
 	}
-	d.mainCheckout = i == 1
+	d.mainCheckout, d.home = i >= 1, i == 2
 	if d.mainCheckout {
 		d.base = ""
 		d.stackOnto, d.stackLabel, d.stackInto = "", "", ""

@@ -85,7 +85,7 @@ export function initPanel (c) {
     // (without opening the panel the way a person's choice of a tab does).
     // No card yet is the next card's head still in flight, which says
     // nothing: a tab only a session has must survive the switch to one.
-    if (state.card && byName[state.tab]?.hidden?.(state.card)) { set({ tab: 'diff' }); writeHash(state.sel, shownTab()) }
+    if (state.card && byName[state.tab]?.hidden?.(state.card)) { set({ tab: state.card.home ? 'stats' : 'diff' }); writeHash(state.sel, shownTab()) }
     prefetch()
     renderTabs()
     // the tab may have been drawn before the head arrived (its read can

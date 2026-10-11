@@ -117,6 +117,16 @@ func (w Workspace) EvidenceDir(owner domain.FeatureID) string {
 	return filepath.Join(w.GummiDir(), "evidence", string(owner))
 }
 
+// HomesDir holds the agents' homes, one directory per agent card (DESIGN
+// §19.3d). Workspace content, never committed, and never cleaned with the
+// card: what an agent built for itself is not a cleanup's to discard.
+func (w Workspace) HomesDir() string { return filepath.Join(w.GummiDir(), "homes") }
+
+// HomeDir is one agent's home: the directory its sessions run in.
+func (w Workspace) HomeDir(id domain.FeatureID) string {
+	return filepath.Join(w.HomesDir(), string(id))
+}
+
 // MemoryDir holds freeform cards' project memory: the global memory file
 // every freeform session here reads, and one subdirectory per card
 // holding that card's own session memory. Workspace content, never

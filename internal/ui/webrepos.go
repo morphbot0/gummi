@@ -170,7 +170,8 @@ func (h webRepoHandles) claims(repo string, cards []domain.Feature, out *webapi.
 	)
 	for i := range cards {
 		f := &cards[i]
-		if !f.IsGoal() && f.Repo != repo {
+		// an agent names no repository, which is not the default's name
+		if f.Home || (!f.IsGoal() && f.Repo != repo) {
 			continue
 		}
 		if !f.IsGoal() && f.Stage != domain.StageDone {

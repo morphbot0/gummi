@@ -86,6 +86,11 @@ type Input struct {
 	// walks the whole workflow; a main-checkout card has no branch to
 	// walk any of it on). False is every card minted before it existed.
 	MainCheckout bool
+	// Home mints an agent: a freeform card that runs in a home of its
+	// own, in no repository (domain.Feature.Home). It implies
+	// MainCheckout — the home is the repository it runs in the checkout
+	// of — and refuses a repository, a base, a stack and an adoption.
+	Home bool
 	// Repo is the managed repository the card belongs to: a configured
 	// `repos:` name, or "" for the workspace default.
 	Repo string
@@ -306,8 +311,11 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 			slug = rest
 		}
 	}
-	if err := requireRepo(in.RequireRepo, in.Repo); err != nil {
-		return domain.Feature{}, err
+	// an agent names no repository, so there is none to require of it
+	if !in.Home {
+		if err := requireRepo(in.RequireRepo, in.Repo); err != nil {
+			return domain.Feature{}, err
+		}
 	}
 	// Two refusals a freeform card earns by being off the graph (DESIGN
 	// §19), both before a sequence number is spent.
@@ -327,6 +335,21 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	// reasons about their stages; a card with no stage is invisible to it.
 	if in.Kind == domain.KindFreeform && in.Goal != "" {
 		return domain.Feature{}, fmt.Errorf("goal %s cannot hold a freeform card: a goal conducts cards through the workflow, and a freeform card is not in it", in.Goal)
+	}
+	// An agent is in no repository: everything that names one, or a
+	// branch in one, is a mint that lost track of what it was making.
+	if in.Home {
+		switch {
+		case in.Kind != domain.KindFreeform:
+			return domain.Feature{}, fmt.Errorf("a home of its own is an agent's: a %s runs in its own branch worktree", in.Kind)
+		case in.Repo != "":
+			return domain.Feature{}, fmt.Errorf("an agent is in no repository, but names %q", in.Repo)
+		case in.Base != "":
+			return domain.Feature{}, fmt.Errorf("an agent forks from no branch, but names base %q", in.Base)
+		case in.Adopt != "":
+			return domain.Feature{}, fmt.Errorf("an agent cannot adopt %s: it holds no branch", in.Adopt)
+		}
+		in.MainCheckout = true
 	}
 	// MainCheckout is the freeform kind's own opt-out, and nothing else
 	// has a use for it: every other kind exists to end as a branch.
@@ -373,6 +396,14 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if err != nil {
 		return domain.Feature{}, err
 	}
+	// A home is kept when its card goes, so one can outlive the record
+	// that numbered it. An agent minted onto such a number would wake up
+	// with another agent's files, config and skills and no word of it.
+	if in.Home {
+		if _, err := os.Lstat(ws.HomeDir(id)); err == nil {
+			return domain.Feature{}, fmt.Errorf("%s: an earlier agent's home still stands at %s — move it away, or try again for the next number", id, ws.HomeDir(id))
+		}
+	}
 	gate := in.GateApproval
 	if gate == "" {
 		gate = domain.GateAttended
@@ -393,7 +424,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		Slug: slug, Stage: workflow.InitialFor(in.Kind),
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		SessionBackend: in.SessionBackend, SessionModel: in.SessionModel,
-		MainCheckout: in.MainCheckout,
+		MainCheckout: in.MainCheckout, Home: in.Home,
 		GateApproval: gate,
 		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
 		Base: in.Base,

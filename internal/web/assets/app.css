@@ -13,7 +13,7 @@
   --bg:#F6F5FA; --panel:#FFFFFF; --rail:#EFEDF6; --sunk:#F1EFF8; --line:#E2DFEC; --line2:#D3CFE0;
   --fg:#1D1B26; --fg2:#4A4759; --fg3:#625E70; --fg4:#A29EB2;
   --accent:#5B44D9; --accent-fg:#FFFFFF; --accent-soft:rgba(107,80,255,.10); --band:#E6E0FF;
-  --s-todo:#8A879A; --s-plan:#D2317A; --s-impl:#A87F00; --s-verify:#23924A; --s-done:#62756B; --s-open:#1C7FC4;
+  --s-todo:#8A879A; --s-plan:#D2317A; --s-impl:#A87F00; --s-verify:#23924A; --s-done:#62756B; --s-open:#1C7FC4; --s-home:#0B8A84;
   --ok:#1A6B36; --warn:#805500; --err:#B02C3F; --on-err:#FFFFFF;
   --r0:#2D63C7; --r1:#B25A00; --r2:#8A3FCB; --r3:#3C7A1F; --r4:#B0306A; --r5:#8A7000;
   /* text in a stage's hue is darkened in the light theme, where the fills
@@ -36,7 +36,7 @@
     --bg:#16151C; --panel:#1B1A22; --rail:#121118; --sunk:#211F29; --line:#2A2834; --line2:#393645;
     --fg:#ECEAF4; --fg2:#B9B5C9; --fg3:#9896A4; --fg4:#5E5B6B;
     --accent:#9886FF; --accent-fg:#14121C; --accent-soft:rgba(140,120,255,.14); --band:#29234A;
-    --s-todo:#858392; --s-plan:#FF5FA2; --s-impl:#F2D24B; --s-verify:#79E06A; --s-done:#8C9D94; --s-open:#4FB4FF;
+    --s-todo:#858392; --s-plan:#FF5FA2; --s-impl:#F2D24B; --s-verify:#79E06A; --s-done:#8C9D94; --s-open:#4FB4FF; --s-home:#4FD8CF;
     --ok:#79E06A; --warn:#F2C14B; --err:#FF6B7F; --on-err:#14121C;
   --r0:#7FB2FF; --r1:#FFB15C; --r2:#C7A0FF; --r3:#9CE07A; --r4:#FF8AC0; --r5:#E8D36A;
     --t-keep:100%;
@@ -52,7 +52,7 @@
   --bg:#16151C; --panel:#1B1A22; --rail:#121118; --sunk:#211F29; --line:#2A2834; --line2:#393645;
   --fg:#ECEAF4; --fg2:#B9B5C9; --fg3:#9896A4; --fg4:#5E5B6B;
   --accent:#9886FF; --accent-fg:#14121C; --accent-soft:rgba(140,120,255,.14); --band:#29234A;
-  --s-todo:#858392; --s-plan:#FF5FA2; --s-impl:#F2D24B; --s-verify:#79E06A; --s-done:#8C9D94; --s-open:#4FB4FF;
+  --s-todo:#858392; --s-plan:#FF5FA2; --s-impl:#F2D24B; --s-verify:#79E06A; --s-done:#8C9D94; --s-open:#4FB4FF; --s-home:#4FD8CF;
   --ok:#79E06A; --warn:#F2C14B; --err:#FF6B7F; --on-err:#14121C;
   --r0:#7FB2FF; --r1:#FFB15C; --r2:#C7A0FF; --r3:#9CE07A; --r4:#FF8AC0; --r5:#E8D36A;
   --t-keep:100%;
@@ -551,6 +551,13 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .draft-hero .starters{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
 .rail-foot .newsession{border-style:solid;border-color:var(--accent);color:var(--accent);font-weight:500}
 .rail-foot .newsession:hover{background:var(--accent-soft)}
+/* an agent: a session with a home of its own (rail group, row, head) */
+.group.agents{padding-bottom:8px;border-bottom:1px solid var(--line)}
+.group.agents h3,.subline .home i{color:color-mix(in srgb,var(--s-home) var(--t-keep),#000)}
+.kind.ag{border-color:color-mix(in srgb,var(--s-home) 55%,var(--line2));color:color-mix(in srgb,var(--s-home) var(--t-keep),#000)}
+.subline .home{display:inline-flex;align-items:center;gap:6px}
+.subline .home i{font-style:normal}
+.row .dot.q-session.home{background:var(--s-home);border-color:var(--s-home)}
 .spec-body{display:flex;flex-direction:column;gap:14px}
 .spec-body .spec-about{margin:0;color:var(--fg2);font-size:13.5px}
 .spec-body .fh{font-size:12px;color:var(--fg3)}

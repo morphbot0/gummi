@@ -406,6 +406,8 @@ func writespecDraftable(f domain.Feature, agentWired bool) string {
 		return string(f.ID) + " is a " + string(f.Kind) + " card: it runs through its stages"
 	case f.Stage != domain.StageOpen:
 		return string(f.ID) + " is closed"
+	case f.Home:
+		return string(f.ID) + " is an agent: it is in no repository, so there is no branch for a spec to continue on"
 	case !agentWired:
 		return string(f.ID) + " cannot continue as a spec: this board has no agent to run the handoff brief's turn"
 	}
@@ -791,7 +793,7 @@ func (m *Shell) repoPickable(r featureRow) bool {
 // repoMovable is repoPickable without the names: a card whose repository can
 // still move — not a goal, no worktree yet, not watch-only.
 func (m *Shell) repoMovable(r featureRow) bool {
-	return !r.F.IsGoal() && !r.HasWorktree && !r.watchOnly()
+	return !r.F.IsGoal() && !r.F.Home && !r.HasWorktree && !r.watchOnly()
 }
 
 // refreshReposFor reads the repositories off the loop before the card id's
@@ -1011,6 +1013,9 @@ func (m *Shell) webMessageRoute(r featureRow) (webapi.Route, string) {
 // into (DESIGN §19) — where nothing is committed for it and the work
 // stays loose.
 func freeformTurnRoute(r featureRow) string {
+	if r.F.Home {
+		return "a turn for this agent — it works in its own home"
+	}
 	if r.F.MainCheckout {
 		return "a turn for this card's agent — it works in the main checkout, uncommitted"
 	}

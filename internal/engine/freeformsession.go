@@ -998,6 +998,9 @@ func (e *Engine) CommitFreeform(ctx context.Context, id domain.FeatureID, messag
 	if !f.IsFreeform() {
 		return false, fmt.Errorf("%s is a %s card: its stages commit its work", id, f.Kind)
 	}
+	if f.Home {
+		return false, fmt.Errorf("%s is an agent: what it keeps in its home it commits there itself", id)
+	}
 	if f.MainCheckout {
 		return false, fmt.Errorf("%s runs in the main checkout: there is no branch to commit to — commit your work there yourself", id)
 	}

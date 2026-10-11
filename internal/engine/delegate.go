@@ -340,6 +340,11 @@ func (e *Engine) SetDelegation(ctx context.Context, id domain.FeatureID, d domai
 	if !cur.IsFreeform() {
 		return fmt.Errorf("%s is not a freeform card: only a session delegates", id)
 	}
+	// a delegated card forks from its parent's branch and lands back on
+	// it, and an agent holds no branch in any repository
+	if cur.Home && d.Enabled() {
+		return fmt.Errorf("%s is an agent: it has no branch for a card to fork from, so it cannot delegate", id)
+	}
 	if err := e.cfg.Store.SetDelegation(ctx, id, d); err != nil {
 		return err
 	}

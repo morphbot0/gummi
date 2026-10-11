@@ -496,7 +496,8 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// leaves behind. One inventory for both faces — the web menu
 			// lists this row, not a second one of its own.
 			"writespec", "w", "write a spec", specWhy, false,
-			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
+			// an agent's home is no repository a feature's branch could be cut in
+			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly() && !r.F.Home,
 		},
 		{
 			// keyless like the other setting changes: it defines a

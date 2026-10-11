@@ -16,6 +16,8 @@ import { toast } from './toast.js?v=__ASSET_V__'
 
 export const logTab = {
   name: 'log',
+  // an agent has no branch: nothing to diff, log or publish
+  hidden: (c) => !!c?.home,
   label: 'Log',
   key: 'g l',
   fetch: (id) => get(cardPath(id, 'log')),

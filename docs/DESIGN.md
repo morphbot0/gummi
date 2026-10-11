@@ -3782,6 +3782,68 @@ inside the workspace's git exclusions, and the web face displays them
 read-only (§20). What distills from session memory into global is
 deferred with §19.7's list.
 
+### 19.3d Agents — a session with a home of its own
+
+A session may also be minted into **a home of its own** (`Feature.Home`):
+the third "runs in" answer, after a worktree and the main checkout. Such a
+card is an **agent**. It is in no repository of the person's. Its working
+directory is `.gummi/homes/<card>`, which outlives its conversations, and
+it is told to keep there what makes it better at its work the next time:
+notes, scripts, and skills in the form its own CLI discovers from its
+working directory. gummi adds nothing to that discovery (§4.1a) and
+manages none of it: there is no skill list, no memory view and no review
+of what the agent wrote for itself. A person reads the home in their own
+shell — the web face's Terminal tab opens in it.
+
+**The home is a repository, and the agent is its main-checkout card.**
+Every seam already knows a card with a checkout and no branch (§19.3b),
+so `Pool.ManagerFor` makes the home a git repository on first use (one
+empty commit, under an identity of gummi's own) and roots the agent's
+manager there. `Validate` demands `MainCheckout` with `Home` and refuses
+a repository name. What follows is what a main-checkout card already
+does without: no branch, no landing, no `CommitFreeform`, no stack, no
+"write a spec" — a feature's branch cannot be cut in a home. Delegation
+(§19.10) is refused too: a delegated card forks from its parent's branch
+and an agent has none. Work that belongs in a repository is the person's
+to start as a card.
+
+**A home is only ever a directory gummi made, and git stays inside it.**
+The home sits under the workspace, which is usually a repository itself,
+so two things are held on every resolve (`worktree/home.go`). A link, or
+a `.git` file naming a repository elsewhere, standing where the home
+should be is refused: following it would run the "in no repository"
+agent in whatever it points at. And the process, with every child it
+starts, carries `GIT_CEILING_DIRECTORIES` naming `.gummi/homes`, so a
+home whose `.git` is gone finds no repository rather than the workspace's
+— an agent's own `git reset` cannot land on the person's work. A home
+missing its `.git` or its first commit is finished on the next resolve,
+not trusted. Looking does not make one: the terminal and the file route
+answer only for a home a turn has made, and deleting an agent that never
+ran leaves nothing behind.
+
+**It is budgeted like any card.** One envelope, the card's own; a
+heartbeat (§19.9) or an objective (§19.11) spends it and stops when it is
+spent, and raising it is the person's. Nothing about an agent's budget is
+recurring.
+
+**The home is never cleaned up.** Handing the agent off closes the card;
+`Pool.Remove` leaves the home where it is, because what an agent built is
+not a cleanup's to discard. Removing a home is `rm -r` by a person.
+Because a home can outlive the record that numbered it, a mint that is
+handed a number where a home still stands is refused: an agent never
+wakes among another's files without word of it.
+
+**The faces.** The TUI's "runs in" row has the third cell; the web rail
+has a New agent button that opens the session draft as an agent's, lists
+agents in a group of their own above the status groups (which reorder
+with every turn), and gives an agent's page two tabs, Stats and Terminal.
+The card keeps a session's `FF-` id; the page tags it `AG`.
+
+Deferred: a files explorer for the home; letting an agent file cards in
+the workspace's repositories; confining an agent's writes to its home by
+sandbox rather than by instruction; and a rule for when a long-lived
+agent's conversation restarts.
+
 ### 19.4 The review loop
 
 A freeform card is the **simplest consumer** of the diff-review machinery

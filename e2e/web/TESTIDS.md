@@ -46,7 +46,7 @@ request once).
 |---|---|
 | `rail` | the rail landmark |
 | `rail-filter` | filter box |
-| `rail-kinds`, `rail-kind-<TAG>` | kind chips (`all`, `FD`, `BG`, `RS`, `FF`, `GL`) |
+| `rail-kinds`, `rail-kind-<TAG>` | kind chips (`all`, `FD`, `BG`, `RS`, `FF`, `GL`, `AG` for agents) |
 | `rail-repos`, `rail-repo-<name>` | repo chips (`all`, then each repo; `default` for the default repo); hidden unless the board spans more than one repo |
 | `rail-row-repo-<ID>` | a card's repo chip; shown only when the board spans repos and the card is not in the default repo |
 | `rail-cards` | the scrolling list |
@@ -54,7 +54,8 @@ request once).
 | `rail-row-<ID>` | a card row; `data-status`, `aria-current="true"` when open |
 | `rail-more-done`, `rail-empty` | "Show all N" landed ("+N" on the compact rail); no cards / no match |
 | `rail-filtered` | compact rail only: a filter still applies; opens the full rail |
-| `rail-foot`, `rail-new-session`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new` the new-card form) |
+| `rail-foot`, `rail-new-session`, `rail-new-agent`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new-agent`, behind the button's arrow, the same draft as an agent's, `rail-new` the new-card form) |
+| `rail-group-agents` | the agents' own group, above the status groups |
 | `rail-more-menu`, `menu-goals`, `menu-stacks`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
 ## Resume offer
@@ -73,7 +74,7 @@ choosing), `resume-picked`, `resume-none` ("Not now").
 ## Card head
 
 `card-head`, `card-kind`, `card-id`, `card-title`, `card-stages`,
-`stage-<stage>` (a past stage jumps to it in the thread), `card-branch`, `card-scratch` (a research card: scratch tree, no branch),
+`stage-<stage>` (a past stage jumps to it in the thread), `card-branch`, `card-scratch` (a research card: scratch tree, no branch), `card-home` (an agent: its home's path),
 `card-spend`, `card-context` (context-window meter, shown once the running
 session reports a limit), `card-error`, `toggle-panel` (`]`), `card-actions` (menu),
 `card-actions-menu`, `action-<id>` (menu item), `action-btn-<id>` (pause/resume
@@ -121,7 +122,7 @@ and `merge`. Choosing `merge` hides `action-input` and `action-hint`).
 | `dock`, `composer`, `composer-input`, `composer-says`, `composer-send` | composer; `composer-says` is the enter line (the server's reading of the line, or the decision's answer) |
 | `composer-model`, `model-picker-btn` | a session's model beside Send (a draft's, or an open session's); absent on a card in the workflow |
 | `model-picker`, `model-search`, `model-<agent>-<model>`, `model-typed-<agent>`, `model-recent-<agent>-<model>` | the picker: search or type an id; a suggested model (`default` for the agent's own), a typed id, a recent pair |
-| `composer-draft`, `draft-repo`, `draft-base`, `draft-budget`, `draft-budget-pop`, `draft-budget-<n>`, `draft-budget-input`, `draft-budget-set`, `draft-budget-error` | a session draft's row above the line: repository, base, budget (`0` is uncapped) |
+| `composer-draft`, `draft-where` (an agent's draft: where it will run), `draft-repo`, `draft-base`, `draft-budget`, `draft-budget-pop`, `draft-budget-<n>`, `draft-budget-input`, `draft-budget-set`, `draft-budget-error` | a session draft's row above the line: repository, base, budget (`0` is uncapped) |
 | `draft-hero`, `draft-starter`, `draft-cancel` | a session draft's empty conversation, its starter lines, and leaving the draft |
 | `composer-note` | a line about the last send: handed back mid-turn, or refused |
 

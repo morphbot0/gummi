@@ -68,7 +68,9 @@ function budgetWord (env) {
 // newSession opens an empty draft in the conversation column. cameFrom
 // is the card open before it, which Cancel goes back to.
 let cameFrom = null
-export async function newSession () {
+// opts.home opens the draft as an agent's: a home of its own, no repository.
+export async function newSession (opts) {
+  const home = opts?.home === true
   closePop()
   if (state.sel) cameFrom = state.sel
   // the draft opens at once, on what the page already knows; the form's
@@ -78,7 +80,7 @@ export async function newSession () {
   // would start the session uncapped
   const draftOf = (f) => {
     const d = f?.sessions?.default || {}
-    return { repo: f?.repos?.[0] || '', base: '', envelope: f ? (f.envelope || 0) : null, backend: d.backend || '', model: d.model || '', mainCheckout: false }
+    return { repo: f?.repos?.[0] || '', base: '', envelope: f ? (f.envelope || 0) : null, backend: d.backend || '', model: d.model || '', mainCheckout: false, home }
   }
   set({
     sel: null,
@@ -102,6 +104,7 @@ function pickedOnly (d) {
   for (const k of ['repo', 'base', 'backend', 'model']) if (d[k]) out[k] = d[k]
   if (d.envelope != null) out.envelope = d.envelope
   if (d.mainCheckout) out.mainCheckout = true
+  if (d.home) out.home = true
   return out
 }
 
@@ -122,9 +125,13 @@ export async function startSession (text, atts = []) {
     if (d.envelope == null) throw new Error('The board’s default budget did not load. Set a budget beside the composer, then send again.')
   }
   const req = { kind: 'freeform', description: text, backend: d.backend, model: d.model, envelope: d.envelope }
-  if (d.repo) req.repo = d.repo
-  if (d.mainCheckout) req.mainCheckout = true
-  else if (d.base) req.base = d.base
+  // an agent is in no repository: its draft sends neither a repo nor a base
+  if (d.home) req.home = true
+  else {
+    if (d.repo) req.repo = d.repo
+    if (d.mainCheckout) req.mainCheckout = true
+    else if (d.base) req.base = d.base
+  }
   if (atts.length) req.attachments = atts
   const c = await post('/api/cards', req)
   set({ sessionDraft: null })
@@ -143,12 +150,14 @@ export function draftHead () {
   const d = state.sessionDraft
   return [
     h('div', { class: 'head-row' },
-      h('span', { class: 'kind', testid: 'card-kind' }, 'session'),
-      h('h1', { testid: 'card-title' }, 'New session'),
+      h('span', { class: ['kind', d.home && 'ag'], testid: 'card-kind' }, d.home ? 'agent' : 'session'),
+      h('h1', { testid: 'card-title' }, d.home ? 'New agent' : 'New session'),
       h('div', { class: 'head-actions' },
         h('button', { class: 'btn', type: 'button', testid: 'draft-cancel', onclick: cancelDraft }, 'Cancel'))),
     h('div', { class: 'subline' },
-      h('span', null, d.repo || state.board?.repo || 'this repository', d.mainCheckout ? ' · the main checkout' : (d.base ? [' · from ', h('span', { class: 'mono' }, d.base)] : ' · a new worktree')),
+      d.home
+        ? h('span', { testid: 'draft-where' }, 'a home of its own · no repository')
+        : h('span', null, d.repo || state.board?.repo || 'this repository', d.mainCheckout ? ' · the main checkout' : (d.base ? [' · from ', h('span', { class: 'mono' }, d.base)] : ' · a new worktree')),
       h('span', null, `budget ${budgetWord(d.envelope)}`))
   ]
 }
@@ -158,6 +167,11 @@ export function draftHero () {
   const d = state.sessionDraft
   const where = d.repo || state.board?.repo || 'this repository'
   const starters = ['Fix a failing test', 'Explain how this part of the code works', 'Review this branch before I merge it']
+  if (d.home) {
+    return h('div', { class: 'draft-hero', testid: 'draft-hero' },
+      h('b', null, 'What is this agent for?'),
+      h('p', null, 'An agent is a session with a home of its own instead of a repository. Its home persists across conversations, so it can keep notes and skills there. It is budgeted like any card, and it starts when you send the first message.'))
+  }
   return h('div', { class: 'draft-hero', testid: 'draft-hero' },
     h('b', null, `What are we working on in ${where}?`),
     h('p', null, 'A session is one agent in its own worktree, with no stages and no gates. It starts when you send the first message. The model is next to Send, and you can switch it later.'),
@@ -219,7 +233,7 @@ function render () {
   row.hidden = !d
   if (!d) return
   const repos = form?.repos || []
-  if (repos.length > 1) {
+  if (repos.length > 1 && !d.home) {
     row.append(h('label', { class: 'dsel' }, h('span', { class: 'sr-only' }, 'Repository'),
       h('select', {
         testid: 'draft-repo',
@@ -232,12 +246,15 @@ function render () {
   const branches = form?.branches || []
   row.append(h('button', {
     class: 'dsel dbtn', type: 'button', testid: 'draft-main',
-    title: d.mainCheckout ? 'The session works in the main checkout: no branch, no worktree, its changes left uncommitted' : 'The session works in its own branch worktree',
-    // the base stays picked across the toggle: the main checkout only sets
-    // it aside (startSession sends no base with it), and coming back finds it
-    onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout } })
-  }, d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
-  if (!d.mainCheckout) {
+    title: d.home
+      ? 'An agent: it works in a home of its own, in no repository, and keeps what it builds there'
+      : d.mainCheckout ? 'The session works in the main checkout: no branch, no worktree, its changes left uncommitted' : 'The session works in its own branch worktree',
+    // the row cycles its three answers: own worktree, the main checkout, a
+    // home of its own. The base stays picked across it: the other two only
+    // set it aside (startSession sends no base with them)
+    onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout && !d.home, home: d.mainCheckout } })
+  }, d.home ? h('b', null, 'a home of its own') : d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
+  if (!d.mainCheckout && !d.home) {
     row.append(h('label', { class: 'dsel' }, h('span', { class: 'lbl' }, 'from'),
       h('select', {
         testid: 'draft-base', 'aria-label': 'Branch the session forks from',
@@ -595,7 +612,8 @@ export async function openWriteSpec (card, a) {
 // workflow cards it creates. Off until the person sets a budget — a session
 // without one is not offered the card tools at all.
 export function delegateButton (card) {
-  if (!card?.session || card.stage === 'done') return null
+  // an agent holds no branch a delegated card could fork from
+  if (!card?.session || card.stage === 'done' || card.home) return null
   const d = card.delegation
   const label = d ? `Delegating · ${cr(Math.max(0, d.left))} left` : 'Delegate'
   return h('button', { class: ['btn', 'hide-s', d && 'on'], type: 'button', testid: 'delegate', title: 'Let this session create workflow cards under a budget', onclick: () => openDelegate(card) }, label)

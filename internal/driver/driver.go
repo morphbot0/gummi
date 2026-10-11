@@ -524,7 +524,7 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string,
 	// loose in the checkout the person works in.
 	if f.IsFreeform() && f.MainCheckout {
 		return d.fail(ctx, string(id),
-			fmt.Errorf("%s runs in the main checkout and holds no branch — there is nothing to land; commit your work there and hand the card off", id))
+			fmt.Errorf("%s runs in %s and holds no branch — there is nothing to land; hand the card off", id, f.CheckoutName()))
 	}
 	wt, err := d.eng.WorktreesFor(ctx, &f)
 	if err != nil {
