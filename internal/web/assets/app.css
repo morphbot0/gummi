@@ -889,9 +889,9 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .keys{padding:14px 16px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px;color:var(--fg2)}
 .keys h3{grid-column:1/-1;margin:8px 0 0;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--fg3)}
 .keys h3:first-child{margin-top:0}
-/* just above what is docked at the bottom (toast.js sets --toast-bottom):
-   a notice never stands over the composer or Send */
-.toasts{position:fixed;left:50%;bottom:var(--toast-bottom,24px);transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;z-index:60;max-width:calc(100% - 32px);pointer-events:none}
+/* under the top bar at the right, clear of the thread and of what is
+   docked at its foot */
+.toasts{position:fixed;right:16px;top:52px;display:flex;flex-direction:column;gap:6px;align-items:flex-end;z-index:60;max-width:min(680px,calc(100% - 32px));pointer-events:none}
 .toast{background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;box-shadow:var(--shadow);pointer-events:none;white-space:pre-line;overflow-wrap:anywhere}
 .toast.err{background:var(--err);color:var(--on-err)}
 .toast.multi{white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;width:min(680px,calc(100vw - 32px))}
@@ -1112,6 +1112,9 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   .app > .mcard{grid-row:3} .app > .main{grid-row:4} .app > .mdec{grid-row:5}
   html.kb .app{grid-template-rows:0 auto auto minmax(0,1fr) 0;padding-bottom:0}
   html.kb .top,html.kb .mdec,html.kb .mcard .tabs{display:none}
+  /* a phone has no room beside its thread: a notice stands just above
+     what is docked at the bottom (toast.js sets --toast-bottom) */
+  .toasts{left:50%;right:auto;top:auto;bottom:var(--toast-bottom,24px);transform:translateX(-50%);align-items:center;max-width:calc(100% - 32px)}
   html.kb .toasts{bottom:auto;top:8px}
   html.kb .scrim{padding-top:6px;padding-bottom:6px}
   html.kb .head{padding:6px 12px;gap:0}

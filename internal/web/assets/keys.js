@@ -1,6 +1,6 @@
 // keys.js — the board's keyboard: j/k walk the rail, n opens the next card
 // that needs you, g then s/m/d/p/r picks a panel tab, [ and ] fold the rail
-// and the panel, / writes, ? lists the keys, ⌘K/Ctrl-K jumps. Digits pick
+// and the panel, / filters the rail, c writes, ? lists the keys, ⌘K/Ctrl-K jumps. Digits pick
 // an answer and enter gives it. Letter keys never fire while typing, and
 // nothing uses alt (alt+d is the address bar on Windows and Linux).
 
@@ -35,7 +35,8 @@ export function initKeys (a) {
       case 'n': e.preventDefault(); a.nextNeeding(); break
       case '[': e.preventDefault(); a.toggleRail(); break
       case ']': e.preventDefault(); a.togglePanel(); break
-      case '/': e.preventDefault(); a.focusComposer(); break
+      case '/': e.preventDefault(); a.focusFilter(); break
+      case 'c': e.preventDefault(); a.focusComposer(); break
       case '?': e.preventDefault(); a.keysHelp(); break
       case 'Enter': if (d && state.conn === 'live') { e.preventDefault(); answer() } break
       default:

@@ -1,4 +1,5 @@
-// toast.js — short notices at the bottom of the screen: the server's own
+// toast.js — short notices under the top bar at the right (on a phone, at
+// the bottom of the screen): the server's own
 // (the TUI's status band, over SSE) and the page's answers to what a person
 // just did. A failure stays a little longer and reads in the error colour.
 //
@@ -31,9 +32,10 @@ export function hush (text, ms = 15000) {
   for (const el of [...(box?.children || [])]) if (norm(el.dataset.text) === k) el.remove()
 }
 
-// place stands the notices just above whatever is docked at the bottom —
-// the decision and composer, the phone's decision bar — so a
-// notice never covers the composer or Send, nor the tabs at the top.
+// place is for a phone, whose notices stand at the bottom (app.css reads
+// --toast-bottom there alone): just above whatever is docked — the
+// decision and composer, the decision bar — so a notice never covers the
+// composer or Send, nor the tabs at the top.
 function place (box) {
   const vh = window.visualViewport?.height || window.innerHeight
   const tops = ['.dock', '#mdec']

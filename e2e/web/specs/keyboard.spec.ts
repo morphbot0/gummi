@@ -103,8 +103,19 @@ test('the whole loop, from the keyboard alone', async ({ page, server }, info) =
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('view-doctor')).toHaveCount(0);
 
-  // / writes, esc leaves the composer, ? lists the keys
+  // / filters the rail (esc clears it and leaves), c writes, esc leaves
+  // the composer, ? lists the keys
   await page.keyboard.press('/');
+  await expect(page.getByTestId('rail-filter')).toBeFocused();
+  await page.keyboard.type('no such card');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('rail-filter')).toHaveValue('');
+  await expect(page.getByTestId('rail-filter')).not.toBeFocused();
+  await page.keyboard.press('[');
+  await page.keyboard.press('/');
+  await expect(page.getByTestId('rail-filter'), 'a folded rail opens for it').toBeFocused();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('c');
   await expect(page.getByTestId('composer-input')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('composer-input')).not.toBeFocused();

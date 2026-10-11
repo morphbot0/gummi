@@ -72,6 +72,16 @@ function focusComposer () {
   $('#composer-input').focus()
 }
 
+// focusFilter puts the caret in the rail's filter, opening the rail when
+// it is folded and a phone's cards list when it is behind a card.
+function focusFilter () {
+  if (isMobile()) set({ view: 'cards' })
+  else if ($('#app').classList.contains('rail-compact')) set({ railManual: false })
+  const box = $('#filter')
+  box.focus()
+  box.select()
+}
+
 async function unpair () {
   openModal({
     title: 'Unpair this browser',
@@ -143,7 +153,8 @@ async function startBoard () {
     setTab,
     toggleRail,
     togglePanel,
-    focusComposer
+    focusComposer,
+    focusFilter
   })
   setUnauthorizedHandler(() => { closeEvents(); closeOverlay(); location.reload() })
   // a read that failed is asked again, everything the page shows, until
