@@ -21,7 +21,7 @@ export const memoryTab = {
   empty: (m) => !m || m.none || !(m.global?.text || m.memory?.text || m.deadEnds?.text),
   // a workflow card's documents are its stages'; memory belongs to a
   // session (the mirror of the spec tab's hiding on one)
-  hidden: (c) => !(c?.kind === 'freeform' || c?.stage === 'open'),
+  hidden: (c) => !(c?.kind === 'freeform' || c?.stage === 'open') || !!c?.home,
   render
 }
 

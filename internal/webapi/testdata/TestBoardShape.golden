@@ -71,6 +71,16 @@
       "envelope": 0,
       "landed": true,
       "pr": "#12 merged"
+    },
+    {
+      "id": "FF-020",
+      "kind": "freeform",
+      "title": "Watch the nightly CI",
+      "stage": "open",
+      "status": "idle",
+      "spend": 0,
+      "envelope": 0,
+      "home": ".gummi/homes/FF-020"
     }
   ],
   "resume": {

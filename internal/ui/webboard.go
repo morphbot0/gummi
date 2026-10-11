@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -68,6 +69,7 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		Envelope:  f.Budget.Envelope,
 		Profile:   f.Profile,
 		Repo:      f.Repo,
+		Home:      webHome(m.ws, f),
 		Autopilot: f.GateApproval == domain.GateAutopilot,
 		Elsewhere: r.DrivenAbroad,
 		Severity:  string(f.Severity),
@@ -123,6 +125,19 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 }
 
 // webKind is the card's kind with the empty default spelled out.
+// webHome is an agent's home as the page names it: relative to the
+// workspace root, "" for every card that is not an agent.
+func webHome(ws state.Workspace, f domain.Feature) string {
+	if !f.Home {
+		return ""
+	}
+	rel, err := filepath.Rel(ws.Root, ws.HomeDir(f.ID))
+	if err != nil {
+		return ws.HomeDir(f.ID)
+	}
+	return filepath.ToSlash(rel)
+}
+
 func webKind(f domain.Feature) domain.Kind {
 	if f.Kind == "" {
 		return domain.KindFeature

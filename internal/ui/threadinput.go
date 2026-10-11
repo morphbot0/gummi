@@ -117,6 +117,10 @@ const freeformPlaceholderText = "say what to do next — it works in this card's
 // freeformMainPlaceholderText is the same promise for a session minted
 // into the main checkout: there is no branch to land, so the line names
 // what the work actually is there — loose, until the person commits it.
+// agentPlaceholderText is the same promise for an agent, which has no
+// diff to review and nothing to land.
+const agentPlaceholderText = "say what to do next — it works in its own home"
+
 const freeformMainPlaceholderText = "say what to do next — it works in the main checkout, uncommitted; alt+d to review the loose changes"
 
 // drivenAbroadPlaceholderText is the composer's placeholder on a card
@@ -1328,6 +1332,8 @@ func (m *Shell) inputBlock(_ *theme.Styles, r featureRow, w int) string {
 		m.threadInput.Placeholder = drivenAbroadPlaceholderText
 	} else if r.conducted() {
 		m.threadInput.Placeholder = fmt.Sprintf(conductedPlaceholderText, goalDriver(r.F.GoalID), r.F.GoalID)
+	} else if r.F.IsFreeform() && r.F.Home {
+		m.threadInput.Placeholder = agentPlaceholderText
 	} else if r.F.IsFreeform() && r.F.MainCheckout {
 		m.threadInput.Placeholder = freeformMainPlaceholderText
 	} else {

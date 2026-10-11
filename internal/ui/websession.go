@@ -246,6 +246,11 @@ type sessionSwitchedMsg struct {
 // clean exactly like any feature's.
 func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, envelope int) tea.Cmd {
 	eng, pool, actor := m.engine, m.wt, m.humanActor()
+	if f.Home {
+		return func() tea.Msg {
+			return noticeMsg{text: string(f.ID) + " is an agent: its home is no repository a feature's branch could be cut in — start the feature as a card of its own", isErr: true, id: f.ID}
+		}
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		if _, diffOpen, _, err := eng.GateBlockers(ctx, f.ID); err != nil {

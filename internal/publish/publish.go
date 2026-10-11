@@ -164,7 +164,7 @@ func Refusal(c Card) *Error {
 	case f.IsGoal():
 		return fail(CodeNoBranch, "a goal lands its own branch through `gummi goal`; publishing a goal branch is not supported yet", "")
 	case f.MainCheckout:
-		return fail(CodeNoBranch, "this card works in the main checkout and has no branch of its own", "")
+		return fail(CodeNoBranch, "this card works in "+f.CheckoutName()+" and has no branch of its own", "")
 	case f.Stage == domain.StageTodo:
 		return fail(CodeNoBranch, "this card has not started, so its branch is not cut yet", "")
 	case f.StackID != "":

@@ -347,6 +347,16 @@ type Feature struct {
 	// not a thing it does: there is no branch to squash, its work stays
 	// loose in the checkout, and the person commits what they keep.
 	MainCheckout bool
+	// Home marks an agent: a freeform card that works in no repository of
+	// the person's at all, but in a home of its own (DESIGN §19.3d) — a
+	// directory under .gummi/homes that outlives its conversations, where
+	// it keeps what it builds for itself. gummi makes that directory a
+	// git repository and the card runs in its checkout, so a home card is
+	// a main-checkout card whose repository is its home: Validate demands
+	// MainCheckout with it and refuses a repository name, and everything
+	// a main-checkout card does without — a branch, a landing — an agent
+	// does without for the same reason.
+	Home bool
 	// ContinuedAs names the feature a freeform card's work went on as,
 	// once a spec was written from it (DESIGN §19.8). That feature's
 	// branch is cut from this card's, so it carries every commit here and
@@ -692,6 +702,15 @@ func (f *Feature) IsGoal() bool { return f.kind() == KindGoal }
 // reader asks before assuming a card has a stage to advance, and every
 // artifact reader asks before assuming there is a document.
 func (f *Feature) IsFreeform() bool { return f.kind() == KindFreeform }
+
+// CheckoutName is what a card that holds no branch works in, in the words
+// a sentence about it uses: an agent's home, or the main checkout.
+func (f *Feature) CheckoutName() string {
+	if f.Home {
+		return "its home"
+	}
+	return "the main checkout"
+}
 
 // ErrNotVerified is the refusal a card in the workflow gets when it is
 // asked to land before its branch is verified. It is a sentinel so a
@@ -1065,6 +1084,17 @@ func (f *Feature) Validate() error {
 		}
 		if f.StackID != "" {
 			return fmt.Errorf("feature %s: a main-checkout card has no branch to stack", f.ID)
+		}
+	}
+	if f.Home {
+		if !f.MainCheckout {
+			return fmt.Errorf("feature %s: an agent runs in its home's own checkout, but is not marked main-checkout", f.ID)
+		}
+		if f.Repo != "" {
+			return fmt.Errorf("feature %s: an agent is in no repository, but names %q", f.ID, f.Repo)
+		}
+		if f.ParentID != "" {
+			return fmt.Errorf("feature %s: an agent is nobody's delegated card", f.ID)
 		}
 	}
 	if f.Budget.Envelope < 0 {

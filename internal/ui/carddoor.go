@@ -170,7 +170,10 @@ func (m *Shell) restorePendingCard() {
 
 // cardCreated is what the shell does once a card exists.
 func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
-	m.lastRepo = msg.f.Repo
+	// an agent names no repository: it is not the one the next card wants
+	if !msg.f.Home {
+		m.lastRepo = msg.f.Repo
+	}
 	text := fmt.Sprintf("%s created", msg.f.ID)
 	if msg.warn != "" {
 		text += " — dependency not recorded: " + msg.warn

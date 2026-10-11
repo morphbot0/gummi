@@ -744,7 +744,7 @@ func (m *Shell) openRepoPicker(id domain.FeatureID) {
 	if i < 0 {
 		return
 	}
-	if r := m.rows[i]; r.F.IsGoal() || r.HasWorktree {
+	if r := m.rows[i]; r.F.IsGoal() || r.F.Home || r.HasWorktree {
 		return
 	}
 	if len(m.repoNames) == 0 {
@@ -2847,7 +2847,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case foreignTickMsg:
 		// keep the probe running whether or not anything is driven
 		// elsewhere: a run can start in another terminal at any moment.
-		return m, tea.Batch(foreignTick(), m.probeForeign)
+		return m, tea.Batch(foreignTick(), m.probeForeign())
 
 	case foreignMsg:
 		return m, m.applyForeignMsg(msg)
@@ -3687,6 +3687,10 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			if r.F.Stage != domain.StageOpen {
 				m.notice = noticeMsg{text: string(r.F.ID) + " is closed: a session continues as a spec only while it is open", isErr: true, id: r.F.ID}
+				return nil
+			}
+			if r.F.Home {
+				m.notice = noticeMsg{text: string(r.F.ID) + " is an agent: it is in no repository, so there is no branch for a spec to continue on", isErr: true, id: r.F.ID}
 				return nil
 			}
 			if m.engine == nil {

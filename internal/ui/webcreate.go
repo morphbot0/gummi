@@ -215,7 +215,18 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 		}
 		d.sessionBackend, d.sessionModel = req.Backend, strings.TrimSpace(req.Model)
 	}
-	if req.MainCheckout {
+	if req.Home {
+		// an agent: the third "runs in" answer, in no repository at all
+		switch {
+		case d.ct.Kind != domain.KindFreeform:
+			return "only a session can be an agent with a home of its own — a " + d.ct.Name() + " works in a branch worktree"
+		case req.Repo != "":
+			return "an agent is in no repository — drop repo"
+		case req.Base != "" || req.StackOn != "":
+			return "an agent holds no branch — drop base and stackOn"
+		}
+		d.mainCheckout, d.home = true, true
+	} else if req.MainCheckout {
 		// the freeform kind's "runs in" choice, refused everywhere else
 		// for the same reason the model pick is: every other kind exists
 		// to end as a branch.

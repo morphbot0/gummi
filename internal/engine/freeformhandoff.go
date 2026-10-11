@@ -265,6 +265,9 @@ func (e *Engine) WritespecRefusal(ctx context.Context, id domain.FeatureID) erro
 	if err != nil {
 		return err
 	}
+	if f.Home {
+		return fmt.Errorf("%s is an agent: it is in no repository, so there is no branch for a spec to continue on", id)
+	}
 	if !f.IsFreeform() || f.MainCheckout {
 		return nil
 	}

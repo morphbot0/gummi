@@ -86,6 +86,7 @@ const ICONS = {
   filter: '<path d="M4 7h16M7 12h10M10 17h4"/>',
   settings: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  home: '<path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/>',
   chevron: '<path d="M7 10l5 5 5-5"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>',
   unpair: '<path d="M15 7h3a4 4 0 0 1 0 8h-3M9 17H6a4 4 0 0 1 0-8h3M4 4l16 16"/>'
@@ -107,6 +108,8 @@ export const ROLE = { plan: 'architect', implement: 'implementer', verify: 'veri
 
 // kindTag is the rail's short kind: the card id's prefix (FD, BG, RS, FF, GL).
 export function kindTag (row) {
+  // an agent is a session by id and an agent by what it is
+  if (row.home) return 'AG'
   const m = /^([A-Z]+)-/.exec(row.id || '')
   return m ? m[1] : (row.kind || '').slice(0, 2).toUpperCase()
 }

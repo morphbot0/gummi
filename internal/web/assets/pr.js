@@ -15,6 +15,8 @@ import { workLock } from './work.js?v=__ASSET_V__'
 
 export const prTab = {
   name: 'pr',
+  // an agent has no branch: nothing to diff, log or publish
+  hidden: (c) => !!c?.home,
   label: 'PR',
   key: 'g p',
   fetch: (id) => get(cardPath(id, 'pr')),

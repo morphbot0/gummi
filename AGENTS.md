@@ -187,7 +187,10 @@ still work — the board just stays static. Key env vars are tabled in
   instead of on a verified branch. Both floors live in one predicate,
   `domain.Feature.MayLand`; read it before touching any landing path. A
   freeform card may not adopt a branch, belong to a goal, or be driven by
-  `run`/`resume`.
+  `run`/`resume`. An **agent** is a freeform card minted into a home of
+  its own (`Feature.Home`, DESIGN §19.3d): in no repository, a
+  main-checkout card whose checkout is `.gummi/homes/<card>`
+  (`worktree/home.go`), budgeted like any card and never landed.
 - **The spec is the context carrier**, not chat transcripts. Keep token
   windows small: pass specs between stages, not conversation history.
 - **gummi's job ends at a verified branch — and a person may publish it.**

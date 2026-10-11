@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS features (
 	session_backend TEXT NOT NULL DEFAULT '',
 	session_model   TEXT NOT NULL DEFAULT '',
 	main_checkout   INTEGER NOT NULL DEFAULT 0,
+	home            INTEGER NOT NULL DEFAULT 0,
 	verified_rev    TEXT NOT NULL DEFAULT '',
 	continued_as    TEXT NOT NULL DEFAULT '',
 	parent_id       TEXT NOT NULL DEFAULT '',
@@ -827,6 +828,10 @@ var migrations = []string{
 	// its own worktree (DESIGN §19). Empty (0) is every row written
 	// before the column existed, and every card that works in a worktree.
 	`ALTER TABLE features ADD COLUMN main_checkout INTEGER NOT NULL DEFAULT 0`,
+	// An agent: a freeform card that works in a home of its own instead
+	// of a repository (DESIGN §19.3d). Empty (0) is every row written
+	// before the column existed, and every card that is not one.
+	`ALTER TABLE features ADD COLUMN home INTEGER NOT NULL DEFAULT 0`,
 	// The branch tip a card's verify pass ran on, beside verified_at's
 	// when (domain.Feature.VerifiedRev). Empty on every row stamped before
 	// the column existed, which domain.Feature.MayLandAt reads as a verify
@@ -885,9 +890,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 			research_mode,
 			base, branch_scheme, branch, stack_id, stack_pos,
-			session_backend, session_model, main_checkout,
+			session_backend, session_model, main_checkout, home,
 			parent_id, delegate_budget, delegate_all)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -901,7 +906,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
 		string(f.Mode),
 		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
-		f.SessionBackend, f.SessionModel, f.MainCheckout,
+		f.SessionBackend, f.SessionModel, f.MainCheckout, f.Home,
 		string(f.ParentID), f.Delegate.Budget, f.Delegate.ConfirmAll)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
@@ -928,7 +933,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
-	session_backend, session_model, main_checkout, verified_rev, continued_as,
+	session_backend, session_model, main_checkout, home, verified_rev, continued_as,
 	parent_id, delegate_budget, delegate_all`
 
 // writtenFeatureColumns returns the set of feature columns the store
@@ -970,7 +975,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
-		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.VerifiedRev, &continuedAs,
+		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.Home, &f.VerifiedRev, &continuedAs,
 		&parentID, &f.Delegate.Budget, &f.Delegate.ConfirmAll)
 	if err != nil {
 		return f, err

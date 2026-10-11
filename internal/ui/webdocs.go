@@ -523,11 +523,17 @@ func (d *WebDocs) FilesDir(ctx context.Context) (string, bool) {
 	return filesDir(ctx, d.pool, d.f)
 }
 
-// filesDir is a card's branch worktree when it exists. A research card's
-// scratch tree is left out: it is a throwaway checkout, not the card's.
+// filesDir is a card's branch worktree when it exists, or an agent's
+// home. A research card's scratch tree is left out: it is a throwaway
+// checkout, not the card's.
 func filesDir(ctx context.Context, pool *worktree.Pool, f domain.Feature) (string, bool) {
 	if pool == nil || f.Kind == domain.KindResearch {
 		return "", false
+	}
+	if f.Home {
+		// an agent's files are its home's, once a turn has made it:
+		// looking is not what creates one
+		return pool.HomeIfMade(&f)
 	}
 	if ok, err := pool.Exists(ctx, &f); err != nil || !ok {
 		return "", false

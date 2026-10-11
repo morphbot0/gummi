@@ -88,6 +88,9 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 			return ""
 		}
 		if f.MainCheckout {
+			if f.Home {
+				return string(f.ID) + " is an agent — it works in its own home and has nothing to land"
+			}
 			return string(f.ID) + " runs in the main checkout — there is no branch to land; commit your work there yourself, then hand the card off"
 		}
 		if m.freeformTurnBusy(r) {

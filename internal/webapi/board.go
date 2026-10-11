@@ -102,6 +102,10 @@ type Row struct {
 	Profile string `json:"profile,omitempty"`
 	// Repo names the card's managed repository; empty is the default.
 	Repo string `json:"repo,omitempty"`
+	// Home is set on an agent: where its home is, relative to the
+	// workspace root (DESIGN §19.3d). Such a card is in no repository,
+	// so its empty Repo does not mean the default.
+	Home string `json:"home,omitempty"`
 	// Autopilot marks a card whose gates cross unattended.
 	Autopilot bool `json:"autopilot,omitempty"`
 	// Elsewhere marks a card another gummi process is driving: this board

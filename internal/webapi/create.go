@@ -50,6 +50,10 @@ type CreateCardRequest struct {
 	// on every other kind, and with Base or StackOn set: a main-checkout
 	// session has no branch to fork from or stack onto.
 	MainCheckout bool `json:"mainCheckout,omitempty"`
+	// Home is the third "runs in" choice: an agent, a session that works
+	// in a home of its own and in no repository (DESIGN §19.3d). Refused
+	// on every other kind, and with Repo, Base or StackOn set.
+	Home bool `json:"home,omitempty"`
 	// Attachments are the ids of images (already uploaded via POST
 	// /api/attachments) to link into the card's seeded description —
 	// stored by reference, so every later stage that reads the spec sees

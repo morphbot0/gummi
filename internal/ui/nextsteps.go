@@ -123,6 +123,10 @@ type nextInput struct {
 	// works in (DESIGN §19). It is what the answer set reads instead of
 	// hasWorktree — which is false for such a card by definition.
 	mainCheckout bool
+	// home is an agent (domain.Feature.Home): a main-checkout card whose
+	// checkout is its own home, with no diff a person reads and nothing
+	// a spec could continue.
+	home bool
 	// hasWorktree is whether the card's worktree exists on disk right
 	// now — the same question cardactions' own attach row asks, and the
 	// only thing that makes attaching a raw agent CLI possible.
@@ -518,6 +522,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		goal:             r.Goal,
 		landed:           r.Landed,
 		mainCheckout:     r.F.MainCheckout,
+		home:             r.F.Home,
 		hasWorktree:      r.HasWorktree,
 		reviewRound:      m.round(r.F.ID, domain.RoundKindReview),
 		verifyBounces:    verifyBounces(r.History),
@@ -1094,6 +1099,10 @@ func stageAnswers(in nextInput) []nextAction {
 		// it, loose, for the person to commit) — but no landing, because
 		// there is no branch to squash. Offering one would be offering the
 		// refusal the floor answers with.
+		if in.home {
+			return []nextAction{nextStep("handoff", "h", "hand off",
+				"close the agent — its home stays where it is, with everything in it")}
+		}
 		if in.mainCheckout {
 			acts := []nextAction{
 				nextStep("diff", "d", "read the diff", "what the session has left loose in the main checkout"),

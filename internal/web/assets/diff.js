@@ -31,6 +31,8 @@ function noteRead (id, rev) {
 
 export const diffTab = {
   name: 'diff',
+  // an agent has no branch: nothing to diff, log or publish
+  hidden: (c) => !!c?.home,
   label: 'Diff',
   key: 'g d',
   fetch: (id) => {

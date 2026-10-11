@@ -19,7 +19,7 @@ const GROUPS = [
   ['done', 'Done']
 ]
 const DONE_SHOWN = 3
-const KINDS = { FD: 'Feature', BG: 'Bug', RS: 'Research', GL: 'Goal', FF: 'Session' }
+const KINDS = { FD: 'Feature', BG: 'Bug', RS: 'Research', GL: 'Goal', FF: 'Session', AG: 'Agent' }
 // SHOWS is what a row's second line may add to its status word
 const SHOWS = [['stage', 'Stage'], ['stack', 'Stack position'], ['spend', 'Spend']]
 // NEAR is how much of its budget a card has spent before the row says so
@@ -100,17 +100,20 @@ function word (r) {
   if (r.status === 'running') return r.running?.pausing ? 'pausing' : (r.running?.autopilot || r.autopilot) ? 'autopilot' : (r.running?.verb || 'working')
   if (r.status === 'watching') return 'watching'
   if (r.status === 'paused') return 'paused'
-  const session = r.stage === 'open' || r.kind === 'freeform'
-  if (r.status === 'done') return [session && 'session', r.landed && 'landed'].filter(Boolean).join(' · ')
-  return session ? 'session' : ''
+  const session = r.home ? 'agent' : (r.stage === 'open' || r.kind === 'freeform') && 'session'
+  if (r.status === 'done') return [session, r.landed && 'landed'].filter(Boolean).join(' · ')
+  return session || ''
 }
 
-const spread = () => new Set(rows().map(r => r.repo || '')).size > 1
+// an agent is in no repository: its empty repo is not the default
+const inRepo = () => rows().filter(r => !r.home)
+
+const spread = () => new Set(inRepo().map(r => r.repo || '')).size > 1
 
 function matches (r, repo) {
   if (state.kinds.length && !state.kinds.includes(kindTag(r))) return false
   if (state.statuses.length && !state.statuses.includes(r.status)) return false
-  if (repo !== 'all' && (r.repo || '') !== repo) return false
+  if (repo !== 'all' && (r.home || (r.repo || '') !== repo)) return false
   if (!state.filter) return true
   const group = GROUPS.find(g => g[0] === r.status)?.[1] || ''
   return `${r.id} ${r.title} ${r.stage} ${word(r)} ${group} ${KINDS[kindTag(r)] || ''} ${r.repo || ''} ${r.pr || ''} ${r.stack?.name || ''} ${r.goal?.title || ''}`.toLowerCase().includes(state.filter)
@@ -145,7 +148,7 @@ function openFilters () {
   const all = rows()
   // read when drawn and again while the menu stays open (retickMenu)
   const n = (fn) => () => rows().filter(fn).length
-  const repos = [...new Set(all.map(r => r.repo || ''))].sort()
+  const repos = [...new Set(inRepo().map(r => r.repo || ''))].sort()
   // the repositories exist only where the board spans them (the default
   // counts as one): a board that does not has nothing to tell apart
   const wide = repos.length > 1
@@ -166,7 +169,7 @@ function openFilters () {
   ]
   if (wide) {
     items.push({ head: 'Repository' }, ...repos.map(k => ({
-      label: k || 'default', radio: true, count: n(r => (r.repo || '') === k), testid: `rail-repo-${k || 'default'}`, checked: () => state.repo === k, onClick: () => set({ repo: state.repo === k ? 'all' : k })
+      label: k || 'default', radio: true, count: n(r => !r.home && (r.repo || '') === k), testid: `rail-repo-${k || 'default'}`, checked: () => state.repo === k, onClick: () => set({ repo: state.repo === k ? 'all' : k })
     })))
   }
   items.push({ head: 'A row shows' }, ...SHOWS.map(([k, label]) => ({
@@ -233,9 +236,20 @@ function renderRail () {
       onclick: () => { set({ railManual: false }); storage.set('railManual', false) }
     }, icon('search'), h('span', null, state.kinds[0] || '…')))
   }
-  if (state.railGroup === 'repo' && wide) {
-    for (const repo of [...new Set(all.map(r => r.repo || ''))].sort()) {
-      const list = vis.filter(r => (r.repo || '') === repo)
+  // agents first, in a group of their own whatever their status: the
+  // status groups reorder with every turn, and an agent is there for months.
+  // A closed one goes to Done with every other closed card, unless the rail
+  // is grouped by repository: an agent is in none, so this is its only group
+  const byRepo = state.railGroup === 'repo' && wide
+  const agents = vis.filter(r => r.home && (byRepo || r.status !== 'done'))
+  if (agents.length) {
+    box.append(h('section', { class: 'group agents', testid: 'rail-group-agents', 'aria-label': 'Agents' },
+      h('h3', null, 'Agents', h('span', null, String(agents.length))),
+      agents.map(r => rowEl(r, false))))
+  }
+  if (byRepo) {
+    for (const repo of [...new Set(inRepo().map(r => r.repo || ''))].sort()) {
+      const list = vis.filter(r => !r.home && (r.repo || '') === repo)
       if (!list.length) continue
       box.append(h('section', { class: 'group', testid: `rail-repo-group-${repo || 'default'}`, 'aria-label': repo || 'default' },
         h('h3', null, repo || 'default', h('span', null, String(list.length))),
@@ -243,7 +257,7 @@ function renderRail () {
     }
   } else {
     for (const [k, label] of GROUPS) {
-      let list = vis.filter(r => r.status === k)
+      let list = vis.filter(r => r.status === k && !(r.home && k !== 'done'))
       if (!list.length) continue
       const total = list.length
       const fold = k === 'done' && !state.doneAll && !state.filter && total > DONE_SHOWN
@@ -316,7 +330,7 @@ function rowEl (r, wide) {
     'aria-current': sel ? 'true' : null,
     type: 'button'
   },
-  h('span', { class: ['dot', `q-${q}`], 'aria-hidden': 'true' }, q === 'done' ? '✔' : ''),
+  h('span', { class: ['dot', `q-${q}`, r.home && 'home'], 'aria-hidden': 'true' }, q === 'done' ? '✔' : ''),
   h('span', { class: 't' }, r.title),
   h('span', { class: 'id' }, r.id),
   h('span', { class: 'meta' }, h('span', { class: 'l' }, bits.flatMap((b, i) => i ? [sep(), b] : [b])), money))
@@ -356,6 +370,7 @@ function showHover (id) {
       fact('Asks', r.needs?.question),
       fact('Doing', r.running?.why),
       fact('Repository', r.repo),
+      fact('Home', r.home),
       fact('Stack', r.stack ? `${r.stack.name || 'stack'} · ${r.stack.pos + 1} of ${r.stack.of}${r.stack.stale ? ' · base moved' : ''}` : ''),
       fact('Goal', r.goal ? `${r.goal.id}${r.goal.title ? ' · ' + r.goal.title : ''}` : ''),
       fact('Waits on', r.waits?.join(', ')),
@@ -391,8 +406,9 @@ function renderFoot (unpair, newSession) {
     openMenu(more, items, { up: true, testid: 'rail-more-menu' })
   })
   // what else can be started, behind the one button's arrow
-  const other = h('button', { class: 'split-more', testid: 'rail-new-menu', title: 'New card, or import', 'aria-label': 'New card, or import', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('chevron'))
+  const other = h('button', { class: 'split-more', testid: 'rail-new-menu', title: 'New agent, new card, or import', 'aria-label': 'New agent, new card, or import', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('chevron'))
   other.addEventListener('click', () => openMenu(other, [
+    { label: 'New agent', icon: 'home', testid: 'rail-new-agent', hint: 'A session with a home of its own, in no repository', onClick: () => newSession?.({ home: true }) },
     { label: 'New card', icon: 'plus', testid: 'rail-new', hint: 'Work that walks the stages: plan, implement, verify', onClick: () => openView('newcard') },
     { ...item('ingest', 'Import spec', 'import'), testid: 'rail-new-ingest' },
     { ...item('bugs', 'Import bugs', 'bug'), testid: 'rail-new-bugs' }
