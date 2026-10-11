@@ -99,7 +99,7 @@ and `merge`. Choosing `merge` hides `action-input` and `action-hint`).
 | `thread-items` | the polite live region holding items |
 | `stage-group-<stage>` | a stage segment (`<details>`; `open` when unfolded; the current one has class `cur`) |
 | `thread-item` | an item without a more specific id; `data-key`, `data-type` on every item |
-| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `activity` (a run of tool calls, folded), `stretch`, `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
+| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `activity` (a run of tool calls, open while it is being added to and folded after; `activity-last` the step its folded line ends on), `stretch`, `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
 | `verify-no-checks` | a verify item's head when gummi had no gummi-checks to run (never "all passed") |
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
@@ -113,6 +113,7 @@ and `merge`. Choosing `merge` hides `action-input` and `action-hint`).
 | `decision-slot`, `decision` | the pinned decision (`data-kind`, `data-ref`) |
 | `decision-question`, `decision-against`, `decision-more`, `decision-jump` | its parts |
 | `decision-option-<optionId>` | a numbered answer (`aria-pressed` = highlighted; on a multi-pick question, picked) |
+| `decision-all` | a phone's "More answers": the pinned decision shows its first answer alone until pressed (`pairedPage` presses it for a spec) |
 | `decision-note` and its kinds `decision-answered`, `decision-moved`, `decision-needs`, `decision-busy`, `decision-newcard`, `decision-error`, `decision-pick` | what happened to the last answer (a 409 said who got there first or that the card moved; a 202 question what it still needs; enter with nothing highlighted) |
 | `decision-confirm`, `decision-confirm-question`, `decision-confirm-yes`, `decision-confirm-no` | a confirmation an answer's flow asked for (a 202 `confirm` question), drawn beside the decision (never inside its capped box) and focused when it appears; the question is the server's, verbatim (line breaks kept); yes sends the answer again with the token it came with as `confirm` |
 | `decision-carry` | "+ N diff comments" on an answer that takes them |
@@ -130,7 +131,7 @@ and `merge`. Choosing `merge` hides `action-input` and `action-hint`).
 |---|---|
 | `panel` | the right landmark |
 | `panel-tabs`, `tab-memory`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats` | tabs (`aria-selected`) |
-| `tab-terminal` | the Terminal tab (a board served with `--terminal`, a card with a worktree) |
+| `tab-terminal` | the Terminal tab (a board served with `--terminal`, a card with a worktree); a phone reaches it from the card's menu, `action-terminal`, and shows the tab only while it is open |
 | `terminal`, `terminal-screen`, `terminal-note`, `terminal-again`, `terminal-off` | the shell (`data-state` = `open` \| `closed`), xterm's screen, the note over it (opening, reconnecting, exited), its retry / new-shell button, and the pane on a card with no worktree |
 | `terminal-end` | end the shell (a second press confirms) |
 | `terminal-keys`, `terminal-key-<id>` | a touch screen's key bar and its keys: `esc`, `tab`, `ctrl`, `alt` (`aria-pressed` while held), `left`, `down`, `up`, `right`, `home`, `end`, `pgup`, `pgdn`, `dash`, `slash`, `pipe`, `tilde` |
@@ -140,7 +141,7 @@ and `merge`. Choosing `merge` hides `action-input` and `action-hint`).
 | `panel-draft` | the pane under a new session's draft (no tabs: nothing has documents yet) |
 | `resizer` | panel resizer (drag, ←/→, double-click resets) |
 
-Spec: `spec`, `spec-toc`, `spec-toc-<i>`, `spec-doc`, `spec-src`, `spec-title`,
+Spec: `spec`, `spec-toc` (the Sections button), `spec-toc-menu`, `spec-toc-<i>`, `spec-doc`, `spec-src`, `spec-title`,
 `spec-section-<i>`, `spec-comment-<i>`, `spec-note-draft`, `spec-note-input`,
 `spec-note-save`, `spec-note`, `spec-prompt` (gummi's own `%%` prompts),
 `spec-note-hint` (a note is one line: line breaks become spaces),
@@ -215,7 +216,8 @@ Stats: `stats`, `stats-spent`, `stats-left` (a session's), `stats-passes`,
 to the cards), `card-back-needs` (its count of cards that need you),
 `tab-thread` (the card's thread, first in its tab row; `aria-selected` on the
 shown one), `mdec-card` (the card the docked decision bar is for, over the
-cards), `mobile-decision` (docked decision bar), `mdec-toggle`,
+cards), `mobile-decision` (docked decision bar), `mdec-toggle`, `mdec-go` (the
+first answer as one button, while the bar is folded),
 `mdec-option-<optionId>`, `mdec-note`, `mdec-confirm`, `mdec-confirm-question`,
 `mdec-confirm-yes`, `mdec-confirm-no` (the bar's own copy of the confirmation).
 

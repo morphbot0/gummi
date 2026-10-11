@@ -6,7 +6,7 @@
 
 import { $, h, icon, clear, kindTag, repoSlot, needsWord, STAGES, cr, isMobile, storage } from './dom.js?v=__ASSET_V__'
 import { on, set, state, rows } from './store.js?v=__ASSET_V__'
-import { openView, openMenu } from './views.js?v=__ASSET_V__'
+import { openView, openMenu, retickMenu } from './views.js?v=__ASSET_V__'
 import { openPush } from './push.js?v=__ASSET_V__'
 
 const GROUPS = [
@@ -60,6 +60,7 @@ export function initRail ({ select, unpair, newSession }) {
   })
   renderFoot(unpair, newSession)
   on(['board', 'sel', 'filter', 'kinds', 'statuses', 'repo', 'doneAll', 'railGroup', 'railShow'], renderRail)
+  on(['board'], retickMenu)
   on(['railManual'], applyRail)
   window.addEventListener('resize', applyRail)
   applyRail()
@@ -142,7 +143,8 @@ const flip = (list, v) => list.includes(v) ? list.filter(x => x !== v) : [...lis
 // with how many cards it has), and what a row's second line adds.
 function openFilters () {
   const all = rows()
-  const n = (fn) => all.filter(fn).length
+  // read when drawn and again while the menu stays open (retickMenu)
+  const n = (fn) => () => rows().filter(fn).length
   const repos = [...new Set(all.map(r => r.repo || ''))].sort()
   // the repositories exist only where the board spans them (the default
   // counts as one): a board that does not has nothing to tell apart
@@ -158,7 +160,7 @@ function openFilters () {
       label: KINDS[k] || k, count: n(r => kindTag(r) === k), testid: `rail-kind-${k}`, checked: () => state.kinds.includes(k), onClick: () => set({ kinds: flip(state.kinds, k) })
     })),
     ...(all.length ? [{ head: 'Status' }] : []),
-    ...GROUPS.filter(([k]) => n(r => r.status === k)).map(([k, label]) => ({
+    ...GROUPS.filter(([k]) => all.some(r => r.status === k)).map(([k, label]) => ({
       label, count: n(r => r.status === k), testid: `rail-status-${k}`, checked: () => state.statuses.includes(k), onClick: () => set({ statuses: flip(state.statuses, k) })
     }))
   ]

@@ -68,6 +68,36 @@ test.describe('a design gate', () => {
     await shot(page, info, 'gate-approved');
   });
 
+  // A phone's decision is its first answer as one button: in the thread
+  // with the others behind "More", and beside the question on the bar
+  // that follows the card into its documents.
+  test('a phone offers the first answer as one button', async ({ pairedPage: page, server }, info) => {
+    test.skip(!isPhone(info), 'the list of answers fits beside a thread');
+    await page.removeLocatorHandler(page.getByTestId('decision-all'));
+    await open(page, server, id);
+    const answers = page.getByTestId('decision').locator('.opt');
+    await expect(page.getByTestId('decision-option-advance')).toBeVisible();
+    await expect(answers.nth(1)).toBeHidden();
+    await shot(page, info, 'gate-brief');
+    await page.getByTestId('decision-all').click();
+    await expect(answers.nth(1)).toBeVisible();
+    await expect(page.getByTestId('decision-all')).toHaveCount(0);
+
+    await showTab(page, 'diff');
+    const go = page.getByTestId('mdec-go');
+    await expect(go).toHaveText('approve');
+    await shot(page, info, 'gate-bar');
+    // the rest of the answers open from the question, and the button
+    // makes way for them
+    await page.getByTestId('mdec-toggle').click();
+    await expect(page.getByTestId('mdec-option-pause')).toBeVisible();
+    await expect(go).toHaveCount(0);
+    await page.getByTestId('mdec-toggle').click();
+    await go.click();
+    await page.getByTestId('tab-thread').click();
+    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
+  });
+
   // "stop here" leaves the card at its gate, and the thread says who
   // stopped it; approving afterwards passes the headless run's stop, and
   // the thread stops drawing it as the decision waiting

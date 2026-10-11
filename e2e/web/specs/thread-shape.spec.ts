@@ -37,7 +37,12 @@ test('a session thread has bubbles, reply footers, step rows and changed files',
   await expect(foot.getByTestId('reply-copy')).toHaveCount(1);
 
   // each step is a row; one with output opens to show it, with a copy
+  // what a finished turn did is one line, ending on its last step, and
+  // opens to the steps
   const activity = page.getByTestId('activity').last();
+  await expect(activity).not.toHaveAttribute('open', '');
+  await expect(activity.getByTestId('activity-last')).toBeVisible();
+  await activity.locator(':scope > summary').click();
   await expect(activity).toHaveAttribute('open', '');
   const edit = activity.getByTestId('tool-row').filter({ hasText: 'NOTES.md' }).last();
   await expect(edit).toContainText('Edited');

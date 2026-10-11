@@ -134,7 +134,7 @@ test.describe('a phone at a board served with --terminal', () => {
     fs.writeFileSync(path.join(dir, 'marker-quokka.txt'), 'here\n');
 
     await page.goto(`${server.url}/#${id}`);
-    await page.getByTestId('tab-terminal').tap();
+    await showTab(page, 'terminal');
     const term = page.getByTestId('terminal');
     await expect(term).toHaveAttribute('data-state', 'open');
     const key = (name: string) => page.getByTestId(`terminal-key-${name}`);

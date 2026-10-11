@@ -53,7 +53,7 @@ export async function select (id, { tab = null, view = true, named = true } = {}
   const mine = ++picks
   const changed = id !== state.sel
   if (changed) {
-    set({ sel: id, card: null, cardErr: null, thread: null, live: null, hi: 0, showNext: null, mdecOpen: false, gone: null })
+    set({ sel: id, card: null, cardErr: null, thread: null, live: null, hi: 0, showNext: null, mdecOpen: false, decAll: false, gone: null })
   }
   // on a phone a link that names a tab opens that document, not the
   // thread; a remembered tab only says which document waits behind it

@@ -299,9 +299,14 @@ export function openMenu (anchor, items, { up = false, testid = 'menu' } = {}) {
             ? () => { it.onClick?.(); retick() }
             : () => { closeMenu(); if (document.contains(anchor)) anchor.focus(); it.onClick?.() }
         }, it.checked ? h('span', { class: 'chk', 'aria-hidden': 'true' }) : null, it.icon ? icon(it.icon) : null, h('span', { class: 'ml' }, it.label),
-        it.count !== undefined ? h('span', { class: 'mc' }, String(it.count)) : null, it.key ? h('kbd', { class: 'kh' }, it.key) : null)))
+        it.count !== undefined ? h('span', { class: 'mc' }, String(typeof it.count === 'function' ? it.count() : it.count)) : null, it.key ? h('kbd', { class: 'kh' }, it.key) : null)))
   const ticks = items.filter(it => it !== 'sep' && !it.head)
-  const retick = () => [...menu.querySelectorAll('button')].forEach((b, i) => { if (ticks[i]?.checked) b.setAttribute('aria-checked', String(!!ticks[i].checked())) })
+  // a count given as a function is read again with the ticks, so a menu
+  // left open over a board that moves does not go on saying the old figure
+  const retick = () => [...menu.querySelectorAll('button')].forEach((b, i) => {
+    if (ticks[i]?.checked) b.setAttribute('aria-checked', String(!!ticks[i].checked()))
+    if (typeof ticks[i]?.count === 'function') b.querySelector('.mc').textContent = String(ticks[i].count())
+  })
   // on the body, placed against the anchor: the surface that drew the
   // anchor may redraw (the card head does on every change) without taking
   // an open menu with it, and a long menu scrolls inside the window
@@ -327,7 +332,7 @@ export function openMenu (anchor, items, { up = false, testid = 'menu' } = {}) {
   const resized = () => { if (menuOpen?.menu === menu) closeMenu() }
   window.addEventListener('resize', resized)
   menu.addEventListener('keydown', keys)
-  menuOpen = { menu, anchor, outside, resized, done: pushLayer(() => closeMenu()) }
+  menuOpen = { menu, anchor, outside, resized, retick, done: pushLayer(() => closeMenu()) }
   menu.querySelector('button')?.focus()
   return menu
 }
@@ -347,6 +352,9 @@ function place (menu, anchor, up) {
     menu.style.setProperty('max-height', Math.max(120, vh - r.bottom - 12) + 'px')
   }
 }
+
+// retickMenu reads the open menu's ticks and counts again.
+export function retickMenu () { menuOpen?.retick() }
 
 export function closeMenu () {
   if (!menuOpen) return

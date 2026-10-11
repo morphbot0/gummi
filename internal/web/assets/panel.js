@@ -40,9 +40,10 @@ const surfaceOf = (tab) => SURFACES.find(s => s.tabs.some(t => t.name === tab))
 // tab left has no icon
 const surfaces = () => SURFACES.map(s => ({ ...s, tabs: s.tabs.filter(t => !t.hidden?.(state.card)) })).filter(s => s.tabs.length)
 
-// lastIn is the tab a person last had open on a surface: where its icon
-// goes back to
+// lastIn is the tab a person last had open on a surface of a card: where
+// its icon goes back to on that card
 const lastIn = {}
+const lastKey = (name) => `${state.sel} ${name}`
 
 let cache = {} // tab name -> { data, fresh, err, loading, stale }
 let cacheFor = null
@@ -72,7 +73,7 @@ export function initPanel (c) {
     // however the tab came to show (a press, a link, a card's own last
     // one), it is where its surface's icon goes back to
     const s = surfaceOf(state.tab)
-    if (s) lastIn[s.name] = state.tab
+    if (s) lastIn[lastKey(s.name)] = state.tab
     load(state.tab); renderTabs(); applyWidth(); renderPane(false)
   })
   on(['cardRev'], () => {
@@ -120,7 +121,7 @@ function openSurface (s) {
   const open = surfaceOf(state.tab)?.name === s.name
   if (!isMobile() && open && !state.rightHidden) { togglePanel(); return }
   if (isMobile() && open && state.view === 'panel') return
-  const last = s.tabs.find(t => t.name === lastIn[s.name])
+  const last = s.tabs.find(t => t.name === lastIn[lastKey(s.name)])
   setTab((open ? byName[state.tab] : last || s.tabs[0]).name)
 }
 
@@ -232,6 +233,9 @@ function renderTabs () {
   const list2 = state.sel ? surfaces() : []
   list2.forEach((s, i) => {
     const on = open && cur === s.name
+    // a phone's row is for what a card is read by: the terminal waits in
+    // the card's menu (head.js), and takes a tab only while it is the one open
+    if (phone && s.name === 'terminal' && !on && state.card?.actions?.length) return
     const es = s.tabs.map(t => cache[t.name])
     // dim once its first tab has loaded with nothing to show, and no
     // other of its tabs loaded with something
@@ -338,7 +342,7 @@ function tabKeys (e) {
   if (to === undefined) return
   e.preventDefault()
   const s = list[(to + list.length) % list.length]
-  setTab((s.tabs.find(t => t.name === lastIn[s.name]) || s.tabs[0]).name)
+  setTab((s.tabs.find(t => t.name === lastIn[lastKey(s.name)]) || s.tabs[0]).name)
   $(`#tab-${s.tabs[0].name}`)?.focus()
 }
 

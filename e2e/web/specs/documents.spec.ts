@@ -20,7 +20,13 @@ test('the thread shows the stages the card walked and its verify', async ({ pair
 test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage: page }, info) => {
   await showCard(page, id);
   await showTab(page, 'spec');
-  await expect(page.getByTestId('spec-toc')).toContainText('Chosen approach');
+  // the outline is a menu, on a phone as well; picking a section goes to it
+  await page.getByTestId('spec-toc').click();
+  const outline = page.getByTestId('spec-toc-menu');
+  await expect(outline).toContainText('Chosen approach');
+  await outline.getByRole('menuitem', { name: /Chosen approach/ }).click();
+  await expect(outline).toHaveCount(0);
+  await expect(page.getByTestId('spec-doc').getByRole('heading', { name: /Chosen approach/ })).toBeInViewport();
   await expect(page.getByTestId('spec-checks')).toContainText('go build');
   await shot(page, info, 'real-spec');
 

@@ -26,6 +26,7 @@ export const state = {
   rightHidden: storage.get('rightHidden', true), // the surface beside the thread starts closed
   view: 'cards', // phone view: cards | thread | panel — the cards are the root screen
   mdecOpen: false,
+  decAll: false, // a phone's pinned decision shows every answer, not its first alone
   filter: '',
   kinds: [], // the rail's kind filter: card id prefixes, none meaning all
   statuses: [], // and its status filter: the rail's groups, none meaning all

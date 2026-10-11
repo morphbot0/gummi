@@ -10,6 +10,7 @@ import { get, post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { changesButton } from './actions.js?v=__ASSET_V__'
+import { openMenu } from './views.js?v=__ASSET_V__'
 
 export const specTab = {
   name: 'spec',
@@ -59,7 +60,7 @@ function render (pane, entry, ctx) {
   const firstLine = sections.length ? sections[0].line : lines.length + 1
   const pre = lines.slice(0, firstLine - 1).filter(l => !/^#\s/.test(l.trim()) || l.replace(/^#\s+/, '').trim() !== s.title)
   const doc = h('article', { class: 'doc', testid: 'spec-doc' },
-    h('div', { class: 'src', testid: 'spec-src' }, [s.path, s.rev ? `@ ${String(s.rev).slice(0, 7)}` : null].filter(Boolean).join(' '),
+    h('div', { class: 'src', testid: 'spec-src' }, h('span', { class: 'at', title: s.path || null }, [s.path, s.rev ? `@ ${String(s.rev).slice(0, 7)}` : null].filter(Boolean).join(' ')),
       s.draft ? h('span', { class: 'draftflag' }, ' · draft, not on the branch yet') : null),
     h('h1', { testid: 'spec-title' }, s.title || ctx.card?.title || ''),
     markdown(pre.join('\n'), opts),
@@ -67,9 +68,11 @@ function render (pane, entry, ctx) {
     notes.filter(n => !n.anchor).map(n => noteEl(n, ctx)),
     notesIn(notes.filter(n => n.anchor), 1, firstLine - 1, ctx))
   const headings = new Map() // section line -> its h2, for reopening drafts
+  const empty = new Set() // the sections nothing is written under yet
   sections.forEach((sec, i) => {
     const end = i + 1 < sections.length ? sections[i + 1].line - 1 : lines.length
     const body = lines.slice(sec.line, end).join('\n')
+    if (!body.trim()) empty.add(i)
     // a landed card's spec is the record of what was built: no new notes
     const heading = h('h2', { class: 'sec', id: slug(sec.name, i), testid: `spec-section-${i}` }, sec.name,
       ctx.closed ? null : h('button', { class: 'sc', type: 'button', testid: `spec-comment-${i}`, 'aria-label': `Comment on ${sec.name}`, onclick: (e) => openNote(e.currentTarget.closest('h2'), sec, ctx) }, 'Comment'))
@@ -95,14 +98,21 @@ function render (pane, entry, ctx) {
       changesButton(ctx.id, 'spec', [ctx.card?.stage, s.rev, s.openComments].join('|'),
         'Send the open comments to the stage that writes what they are about')))
   }
-  pane.append(h('div', { class: 'spec', testid: 'spec' },
-    h('nav', { class: 'toc', 'aria-label': 'Sections', testid: 'spec-toc' }, h('h2', null, 'Sections'),
-      sections.map((sec, i) => h('a', {
-        href: '#' + slug(sec.name, i),
+  // the outline is a menu on the line that says which file this is, which
+  // stays in view: the document keeps the surface's whole width, a phone
+  // has the outline too, and a section nothing is written under says so
+  if (sections.length) {
+    doc.querySelector('.src').append(h('button', {
+      class: 'toc', type: 'button', testid: 'spec-toc', 'aria-haspopup': 'menu',
+      onclick: (e) => openMenu(e.currentTarget, sections.map((sec, i) => ({
+        label: sec.name,
+        count: empty.has(i) ? 'empty' : undefined,
         testid: `spec-toc-${i}`,
-        onclick: (e) => { e.preventDefault(); document.getElementById(slug(sec.name, i))?.scrollIntoView({ block: 'start' }) }
-      }, sec.name))),
-    doc))
+        onClick: () => document.getElementById(slug(sec.name, i))?.scrollIntoView({ block: 'start' })
+      })), { testid: 'spec-toc-menu' })
+    }, 'Sections ', h('span', { 'aria-hidden': 'true' }, '▾')))
+  }
+  pane.append(h('div', { class: 'spec', testid: 'spec' }, doc))
 }
 
 function notesIn (notes, from, to, ctx) {

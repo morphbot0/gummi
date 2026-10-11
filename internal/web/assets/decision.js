@@ -65,7 +65,7 @@ const EXPLAINED_MS = 10000
 
 export function initDecision (c) {
   ctx = c
-  on(['card', 'hi', 'conn', 'diffPending', 'sel', 'picked', 'decNote', 'decConfirm'], renderDecision)
+  on(['card', 'hi', 'conn', 'diffPending', 'sel', 'picked', 'decNote', 'decConfirm', 'decAll'], renderDecision)
   on(['showNext', 'board', 'sel'], renderNext)
   on(['card', 'hi', 'conn', 'view', 'mdecOpen', 'sel', 'diffPending', 'picked', 'decNote', 'decConfirm', 'showNext', 'board'], renderMdec)
   // a note is about the card it was said on
@@ -106,7 +106,7 @@ export function initDecision (c) {
       // new set (the same place in a new list is a different answer):
       // nothing is highlighted until they choose again, so enter cannot
       // give an answer they never picked
-      set({ picked: [], decConfirm: null, hi: chose || told ? -1 : 0, hiUser: false })
+      set({ picked: [], decConfirm: null, decAll: false, hi: chose || told ? -1 : 0, hiUser: false })
       if (chose && !told) note(`${state.sel} moved while you were choosing — read it again, then answer.`, { tone: 'warn', testid: 'decision-moved' })
       else if (wrote && !told) note(`${state.sel} moved while you were writing — read it again; your words are still here.`, { tone: 'warn', testid: 'decision-moved' })
       // kept across the card's next moves (it may run a while before its
@@ -115,7 +115,7 @@ export function initDecision (c) {
     }
   })
   on(['draft'], () => { if (!state.draft.trim()) held = false })
-  window.addEventListener('resize', renderMdec)
+  window.addEventListener('resize', () => { renderDecision(); renderMdec() })
 }
 
 export function openDecision () { return state.card?.decision || null }
@@ -141,6 +141,22 @@ export function wordsOption () {
 export function note (text, { tone = 'info', testid = 'decision-note' } = {}) {
   if (text) hush(text)
   set({ decNote: text ? { text, tone, testid } : null })
+}
+
+// lead is the answer a phone offers as one button: the decision's first,
+// which is the one its asker leads with and enter gives untouched. A
+// question that takes several answers has none, nor has one whose first
+// answer is words to write or cannot be undone — those are read as a list.
+function lead (d) {
+  const o = d.options[0]
+  return !d.multi && o && !o.chat && !o.words && !o.danger ? o : null
+}
+
+// brief is the pinned decision on a phone before "More" is pressed: its
+// lead as one button, the other answers folded behind it. The highlight
+// off the lead (a key, or a decision that moved) shows the list.
+function brief (d) {
+  return isMobile() && !state.decAll && d.options.length > 1 && !!lead(d) && state.hi === 0
 }
 
 // pickable: a multi-pick question's own options (never its chat row).
@@ -328,7 +344,7 @@ function drawDecision (box) {
   const offline = state.conn !== 'live'
   const jump = jumpFor(d, state.card)
   box.append(h('section', {
-    class: ['decision', offline && 'paused', answering && 'sending'],
+    class: ['decision', offline && 'paused', answering && 'sending', brief(d) && 'brief'],
     style: { '--dc': decisionColor(d, stage) },
     'aria-label': 'Open decision',
     'aria-busy': answering ? 'true' : null,
@@ -347,7 +363,10 @@ function drawDecision (box) {
             d.multi ? h('span', null, isMobile() ? ' · pick any, then Answer' : ' · pick any, then enter') : '']),
       jump ? h('button', { class: 'link', type: 'button', testid: 'decision-jump', onclick: () => ctx.setTab(jump[0]) }, jump[1]) : null)),
   h('div', { class: 'q', testid: 'decision-question' }, d.question),
-  optionButtons(d, false)),
+  optionButtons(d, false),
+  brief(d)
+    ? h('button', { class: 'allopts', type: 'button', testid: 'decision-all', 'aria-expanded': 'false', onclick: () => set({ decAll: true }) }, `More answers (${d.options.length - 1})`)
+    : null),
   confirmEl(false) || '')
   const opts = box.querySelector('.decision > .opts')
   if (opts) opts.scrollTop = was
@@ -418,7 +437,7 @@ function drawMdec (box) {
   if (!show) return
   if (!d) {
     if (nx) box.style.setProperty('--dc', needsColor(nx.needs, nx.stage))
-    box.classList.remove('open')
+    box.classList.remove('open', 'lead')
     box.append(noteEl(true) || '', nx ? h('div', { class: 'mnext' }, nextChip(nx)) : '')
     return
   }
@@ -428,6 +447,12 @@ function drawMdec (box) {
     h('span', { class: 'k' }, decisionWord(d, state.card.stage)),
     h('span', { class: 'q' }, d.question),
     h('span', { class: 'chev', 'aria-hidden': 'true' }, '▴')))
+  // the lead answer is one press from a document too; the rest open above
+  const o = lead(d)
+  if (o && !state.mdecOpen && !state.decConfirm) {
+    box.classList.add('lead')
+    box.append(h('button', { class: 'btn pri mgo', type: 'button', testid: 'mdec-go', title: o.detail || o.label, disabled: answering || state.conn !== 'live', onclick: () => onOption(0, true) }, o.label))
+  } else box.classList.remove('lead')
   if (state.mdecOpen || state.decNote || state.decConfirm) {
     box.append(noteEl(true) || '')
     if (state.mdecOpen) {
