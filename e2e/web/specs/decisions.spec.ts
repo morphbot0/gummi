@@ -1,4 +1,4 @@
-import { expect, test, pair, type GummiServer } from '../fixtures/test';
+import { expect, pair, showTab, test, type GummiServer } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,7 +25,7 @@ async function open(page: Page, server: GummiServer, id: string) {
 // a yes) is the server's to ask.
 async function answerOption(page: Page, phone: boolean, option: string) {
   if (phone) {
-    await page.getByTestId('tab-diff').click();
+    await showTab(page, 'diff');
     await page.getByTestId('mdec-toggle').click();
     await page.getByTestId(`mdec-option-${option}`).click();
     return;
@@ -66,6 +66,36 @@ test.describe('a design gate', () => {
     const items = await thread(page, isPhone(info));
     await expect(items.getByTestId('receipt').last()).toContainText('Tester');
     await shot(page, info, 'gate-approved');
+  });
+
+  // A phone's decision is its first answer as one button: in the thread
+  // with the others behind "More", and beside the question on the bar
+  // that follows the card into its documents.
+  test('a phone offers the first answer as one button', async ({ pairedPage: page, server }, info) => {
+    test.skip(!isPhone(info), 'the list of answers fits beside a thread');
+    await page.removeLocatorHandler(page.getByTestId('decision-all'));
+    await open(page, server, id);
+    const answers = page.getByTestId('decision').locator('.opt');
+    await expect(page.getByTestId('decision-option-advance')).toBeVisible();
+    await expect(answers.nth(1)).toBeHidden();
+    await shot(page, info, 'gate-brief');
+    await page.getByTestId('decision-all').click();
+    await expect(answers.nth(1)).toBeVisible();
+    await expect(page.getByTestId('decision-all')).toHaveCount(0);
+
+    await showTab(page, 'diff');
+    const go = page.getByTestId('mdec-go');
+    await expect(go).toHaveText('approve');
+    await shot(page, info, 'gate-bar');
+    // the rest of the answers open from the question, and the button
+    // makes way for them
+    await page.getByTestId('mdec-toggle').click();
+    await expect(page.getByTestId('mdec-option-pause')).toBeVisible();
+    await expect(go).toHaveCount(0);
+    await page.getByTestId('mdec-toggle').click();
+    await go.click();
+    await page.getByTestId('tab-thread').click();
+    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
   });
 
   // "stop here" leaves the card at its gate, and the thread says who
@@ -187,7 +217,7 @@ test.describe('a design gate', () => {
       const phone = isPhone(info);
       const go = async (p: Page) => {
         if (phone) {
-          await p.getByTestId('tab-diff').click();
+          await showTab(p, 'diff');
           await p.getByTestId('mdec-toggle').click();
           return p.getByTestId('mdec-option-advance');
         }
@@ -263,7 +293,7 @@ test.describe('a failed verify', () => {
   test('a diff comment goes back with the failure', async ({ pairedPage: page, server, api }, info) => {
     const phone = isPhone(info);
     await open(page, server, id);
-    if (phone) await page.getByTestId('tab-diff').click();
+    await showTab(page, 'diff');
     await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
     await page.locator('[data-testid^="diff-line-"]').nth(3).locator('.n').click();
     await page.getByTestId('annotation-input').fill('Return early on an empty name');
@@ -321,7 +351,7 @@ test.describe('two cards at their design gates', () => {
     const [a, b] = ids;
     await open(page, server, a);
     if (isPhone(info)) {
-      await page.getByTestId('tab-spec').click();
+      await showTab(page, 'spec');
       await page.getByTestId('mdec-toggle').click();
       await page.getByTestId('mdec-option-advance').click();
     } else {
@@ -720,7 +750,7 @@ test('a phone sends a multi-pick answer from the docked bar', async ({ pairedPag
   card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
   await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.multi).toBe(true);
   await open(page, server, c.id);
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await page.getByTestId('mdec-toggle').click();
   await expect(page.getByTestId('mdec-send')).toBeDisabled();
   await page.getByTestId('mdec-option-0').click();

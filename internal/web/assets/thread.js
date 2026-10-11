@@ -160,7 +160,9 @@ function render () {
     keepGroups.add(grp.key)
     place(box, gnode.el, gi)
     grp.items.forEach((it, ii) => {
-      const n = itemNode(it)
+      // the activity a running stage is still adding to stays open between
+      // its calls
+      const n = itemNode(it, last && ii === grp.items.length - 1 && !!state.live?.busy)
       keepItems.add(it.key)
       place(gnode.body, n, ii)
     })
@@ -232,11 +234,12 @@ function groupNode (grp, last) {
   return g
 }
 
-function itemNode (it) {
-  const sig = `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}`
+function itemNode (it, live = false) {
+  live = live && it.t === 'activity'
+  const sig = `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}|${live}`
   const have = nodes.get(it.key)
   if (have && have.sig === sig) return have.el
-  const el = itemEl(it)
+  const el = itemEl(it, live)
   el.dataset.key = it.key
   el.dataset.type = it.t
   if (!el.dataset.testid) el.dataset.testid = 'thread-item'
@@ -246,11 +249,11 @@ function itemNode (it) {
 }
 
 // itemEl draws one thread item.
-export function itemEl (it) {
+export function itemEl (it, live = false) {
   switch (it.t) {
     case 'message': return message(it)
     case 'you': return you(it)
-    case 'activity': return activity(it.items || [], it.key)
+    case 'activity': return activity(it.items || [], it.key, live)
     case 'receipt': return receipt(it)
     case 'verify': return verify(it)
     case 'decision': return decision(it)
@@ -406,10 +409,13 @@ function toolRow (t, fold) {
 const ACTIVITY_SHOWN = 6
 
 // activity is everything the agent did between two messages — its tool calls
-// and thoughts, in order — as a list of steps, open by default, its summary
-// saying what it came to. fold is the row's identity, what the person's
-// fold is remembered by.
-export function activity (items, fold) {
+// and thoughts, in order — as a list of steps. It is open while the work is
+// going on in it (a call in flight, or live: the run a busy session is still
+// adding to) and folds to its summary once that is over: what was done is
+// one line, and the reply under it is what a person came to read. The
+// folded line ends on the last step, so it says where the work got to.
+// fold is the row's identity, what the person's fold is remembered by.
+export function activity (items, fold, live = false) {
   const calls = items.flatMap(i => i.tools || [])
   const thoughts = items.filter(i => i.t === 'message').length
   const fails = calls.filter(t => t.status === 'fail').length
@@ -425,6 +431,7 @@ export function activity (items, fold) {
   if (thoughts) parts.push(plural(thoughts, 'thought'))
   if (watching) parts.push(h('span', { class: 'watching' }, 'watching'))
   else if (inFlight) parts.push(h('span', { class: 'shimmer' }, String(inFlight.label || inFlight.tool).replace(/\s+/g, ' ').trim()))
+  else if (calls.length) parts.push(h('span', { class: 'last', testid: 'activity-last' }, lastStep(calls[calls.length - 1])))
   // each step's fold is keyed by its place in the run, which only grows
   let n = 0
   const steps = items.flatMap(it => {
@@ -445,8 +452,17 @@ export function activity (items, fold) {
   const el = h('details', { class: 'tools activity', testid: 'activity' },
     h('summary', null, parts.flatMap((p, i) => i ? [' · ', p] : [p])),
     h('div', { class: 'body' }, list))
-  applyFold(el, fold, true)
+  applyFold(el, fold, live || watching || !!inFlight)
   return el
+}
+
+// lastStep is a call in the words its row uses: the verb and what it
+// touched.
+function lastStep (t) {
+  const label = String(t.label || '').replace(/\s+/g, ' ').trim()
+  const rest = label.startsWith(t.tool + ' ') || label === t.tool ? label.slice(t.tool.length).trim() : label
+  const k = /^gummi \//.test(t.tool) ? { kind: 'gummi', verb: t.tool.slice(6) } : toolKind(t.tool)
+  return [k.kind === 'other' ? t.tool : k.verb, rest || t.detail].filter(Boolean).join(' ')
 }
 
 function receipt (it) {
@@ -668,11 +684,13 @@ function conversation (kind, c, role, stage) {
   const turns = c.turns || []
   let run = []
   let start = 0
-  const flush = () => {
+  // live is the run a busy session is still adding to: the last one, with
+  // nothing said after it yet
+  const flush = (live = false) => {
     if (!run.length) return
-    const sig = run.map(t => t.tool ? `${t.tool.status}|${t.tool.label}|${t.tool.ms || 0}|${(t.tool.output || '').length}` : `k|${(t.text || '').length}`).join(';')
+    const sig = `${live}:` + run.map(t => t.tool ? `${t.tool.status}|${t.tool.label}|${t.tool.ms || 0}|${(t.tool.output || '').length}` : `k|${(t.text || '').length}`).join(';')
     const key = `${kind}:act:${start}`
-    out.push(cached(key, sig, () => activity(activityItems(run), key)))
+    out.push(cached(key, sig, () => activity(activityItems(run), key, live)))
     run = []
   }
   turns.forEach((t, i) => {
@@ -699,7 +717,7 @@ function conversation (kind, c, role, stage) {
       ? you({ text: t.text, by: t.by, time: t.time, rewind: back ? () => rewind(state.sel, back) : null })
       : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text, key: mkey, time: t.time, ms, model: t.author === 'gummi' ? null : c.model })))
   })
-  flush()
+  flush(!!c.busy && !c.streaming)
   if (c.streaming) {
     out.push(h('div', { class: ['msg reply live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
       // a message left half-written when its session stopped (paused,

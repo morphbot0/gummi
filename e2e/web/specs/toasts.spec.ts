@@ -1,18 +1,18 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
-// A notice stands just above what is docked at the bottom. The decision
-// under it can grow while the notice is up (resolving the last diff
-// comment gives a verified card its landing answers back): the notice
-// must move up with it rather than stand over the answers.
+// A notice stands under the top bar at the right, clear of what is docked
+// at the bottom. The decision there can grow while the notice is up
+// (resolving the last diff comment gives a verified card its landing
+// answers back): the notice must not come to stand over the answers.
 
 let id: string;
 test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a noticed helper'); } } });
 
-test('a notice follows the decision up when it grows', async ({ pairedPage: page }, info) => {
+test('a notice stands top right, clear of a decision that grows', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name === 'phone', 'the phone docks a folded decision bar');
   await expect(page.getByTestId('card-id')).toHaveText(id);
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await page.locator('[data-testid^="diff-line-"]').nth(3).locator('.n').click();
   await page.getByTestId('annotation-input').fill('Name it after what it does');
   await page.getByTestId('annotation-save').click();
@@ -29,6 +29,10 @@ test('a notice follows the decision up when it grows', async ({ pairedPage: page
   // its cap (a short window): either way the notice stays above it
   expect(await dockTop()).toBeLessThanOrEqual(before);
   await expect.poll(async () => (await toast.boundingBox())!.y + (await toast.boundingBox())!.height).toBeLessThanOrEqual(await dockTop());
+  const at = (await toast.boundingBox())!;
+  const top = (await page.locator('.top').boundingBox())!;
+  expect(at.y, 'under the top bar').toBeGreaterThanOrEqual(top.y + top.height);
+  expect(at.x + at.width, 'at the right').toBeGreaterThan(page.viewportSize()!.width - 40);
   await shot(page, info, 'toast-above-decision');
 
   // and a plain notice never takes a press meant for what is under it

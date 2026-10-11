@@ -5,7 +5,7 @@
 
 import { $, isMobile } from './dom.js?v=__ASSET_V__'
 import { get, post, setUnauthorizedHandler, setReadHandlers } from './api.js?v=__ASSET_V__'
-import { set, state, rows, on } from './store.js?v=__ASSET_V__'
+import { set, state, rows, on, shownTab } from './store.js?v=__ASSET_V__'
 import { connect, close as closeEvents } from './events.js?v=__ASSET_V__'
 import { parse, onRoute, restore as restoreHash, clear as clearHash } from './router.js?v=__ASSET_V__'
 import { initTheme } from './theme.js?v=__ASSET_V__'
@@ -30,7 +30,7 @@ import { showPair, showPending } from './pair.js?v=__ASSET_V__'
 import { initApprovals } from './approvals.js?v=__ASSET_V__'
 import { h } from './dom.js?v=__ASSET_V__'
 import {
-  initSelection, loadBoard, select, refresh, refreshAll, loadLive, nextNeeding, step
+  initSelection, loadBoard, select, refresh, refreshAll, loadLive, nextNeeding, nextRunning, step
 } from './selection.js?v=__ASSET_V__'
 import { initResume } from './resume.js?v=__ASSET_V__'
 import { registerWorker, openPush } from './push.js?v=__ASSET_V__'
@@ -70,6 +70,16 @@ async function boot () {
 function focusComposer () {
   if (isMobile()) set({ view: 'thread' })
   $('#composer-input').focus()
+}
+
+// focusFilter puts the caret in the rail's filter, opening the rail when
+// it is folded and a phone's cards list when it is behind a card.
+function focusFilter () {
+  if (isMobile()) set({ view: 'cards' })
+  else if ($('#app').classList.contains('rail-compact')) set({ railManual: false })
+  const box = $('#filter')
+  box.focus()
+  box.select()
 }
 
 async function unpair () {
@@ -122,7 +132,7 @@ async function startBoard () {
     { id: 'newsession', label: 'New session', run: newSession },
     { id: 'push', label: 'Notifications on this device', run: openPush }
   ])
-  initTop({ nextNeeding: () => nextNeeding(toast), palette: openPalette, keysHelp, toggleRail })
+  initTop({ nextNeeding: () => nextNeeding(toast), nextRunning: () => nextRunning(toast), palette: openPalette, keysHelp, toggleRail })
   initRail({ select: ctx.select, unpair, newSession })
   initHead(ctx)
   initThread()
@@ -143,7 +153,8 @@ async function startBoard () {
     setTab,
     toggleRail,
     togglePanel,
-    focusComposer
+    focusComposer,
+    focusFilter
   })
   setUnauthorizedHandler(() => { closeEvents(); closeOverlay(); location.reload() })
   // a read that failed is asked again, everything the page shows, until
@@ -184,8 +195,10 @@ async function startBoard () {
     // on a phone's cards a link to the card already picked (a boot's
     // pick, kept out of the address) still opens its screen
     const opens = isMobile() && state.view === 'cards'
-    if (id !== state.sel || (tab && tab !== state.tab) || opens) select(id, { tab })
-  }, () => ({ id: state.sel, tab: state.tab }))
+    // a link naming the tab already waiting behind a closed surface still opens it
+    const closed = !!tab && !isMobile() && state.rightHidden
+    if (id !== state.sel || (tab && tab !== state.tab) || opens || closed) select(id, { tab })
+  }, () => ({ id: state.sel, tab: shownTab() }))
   await loadBoard()
   if (routed && state.sel) { startFocus(); return connectEvents(early) }
   const route = parse()
