@@ -16,7 +16,7 @@ func TestACommitByAnotherProcessReachesTheBoard(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("ok"))
 	ctx := context.Background()
 	// the first probe only takes the store's version
-	m = pump(t, m, m.probeForeign)
+	m = pump(t, m, m.probeForeign())
 	if m.storeVersion == 0 {
 		t.Fatal("the probe read no data_version")
 	}
@@ -34,11 +34,29 @@ func TestACommitByAnotherProcessReachesTheBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m = pump(t, m, m.probeForeign)
+	m = pump(t, m, m.probeForeign())
 	if _, ok := m.rowByID(f.ID); !ok {
 		t.Fatal("a card another process made never reached the board")
 	}
 	if _, needs := m.inbox.get(f.ID); !needs {
 		t.Error("the gate another process raised is not in the needs-you queue")
 	}
+}
+
+// The probe reads the disk off the update loop while the loop goes on
+// replacing the board's rows, so it takes what it needs of them before
+// it leaves the loop. Run under -race, this fails if it reads them later.
+func TestTheProbeReadsNoRowsOffTheLoop(t *testing.T) {
+	m, _ := chatWorkspace(t, agent.NewFake("ok"))
+	done := make(chan struct{})
+	probe := m.probeForeign()
+	go func() {
+		defer close(done)
+		probe()
+	}()
+	for i := 0; i < 100; i++ {
+		m.rows = append([]featureRow(nil), m.rows...)
+		m.foreignTicks++
+	}
+	<-done
 }

@@ -2847,7 +2847,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case foreignTickMsg:
 		// keep the probe running whether or not anything is driven
 		// elsewhere: a run can start in another terminal at any moment.
-		return m, tea.Batch(foreignTick(), m.probeForeign)
+		return m, tea.Batch(foreignTick(), m.probeForeign())
 
 	case foreignMsg:
 		return m, m.applyForeignMsg(msg)

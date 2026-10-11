@@ -248,24 +248,32 @@ func foreignTick() tea.Cmd {
 	return subscription(tea.Tick(foreignInterval, func(time.Time) tea.Msg { return foreignTickMsg{} }))
 }
 
-// probeForeign re-reads which cards another process is driving. It runs
-// as a command (off the update loop) because it touches the filesystem,
-// though only with a stat and a signal probe per row.
-func (m *Shell) probeForeign() tea.Msg {
-	drives := map[domain.FeatureID]state.ForeignDrive{}
-	for _, r := range m.rows {
-		if d, ok := state.ForeignDriver(m.ws, r.F.ID); ok {
-			drives[r.F.ID] = d
-		}
+// probeForeign re-reads which cards another process is driving. The
+// read runs as a command (off the update loop) because it touches the
+// filesystem, though only with a stat and a signal probe per row; what
+// it needs of the board's own state is taken here, on the loop, since
+// the loop goes on writing the rows while the command runs.
+func (m *Shell) probeForeign() tea.Cmd {
+	ids := make([]domain.FeatureID, len(m.rows))
+	for i, r := range m.rows {
+		ids[i] = r.F.ID
 	}
 	m.foreignTicks++
-	reload := len(drives) > 0 && m.foreignTicks%foreignReloadEvery == 0
-	var version, changes int64
-	if m.store != nil {
-		version, _ = m.store.DataVersion(context.Background())
-		changes, _ = m.store.Changes(context.Background())
+	due := m.foreignTicks%foreignReloadEvery == 0
+	return func() tea.Msg {
+		drives := map[domain.FeatureID]state.ForeignDrive{}
+		for _, id := range ids {
+			if d, ok := state.ForeignDriver(m.ws, id); ok {
+				drives[id] = d
+			}
+		}
+		var version, changes int64
+		if m.store != nil {
+			version, _ = m.store.DataVersion(context.Background())
+			changes, _ = m.store.Changes(context.Background())
+		}
+		return foreignMsg{drives: drives, reload: due && len(drives) > 0, storeVersion: version, changes: changes, revs: m.watchedRevs(context.Background())}
 	}
-	return foreignMsg{drives: drives, reload: reload, storeVersion: version, changes: changes, revs: m.watchedRevs(context.Background())}
 }
 
 // applyForeign updates the rows' driven-elsewhere state in place. It
