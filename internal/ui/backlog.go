@@ -296,7 +296,7 @@ func (m *Shell) askDesignGate() bool {
 		id:           "confirm-design-gate",
 		cancelLabel:  "Stay",
 		confirmLabel: "Advance",
-		question:     "advance " + string(f.ID) + ": " + string(f.Stage) + " → " + string(to) + "?",
+		question:     "advance " + f.Name() + ": " + string(f.Stage) + " → " + string(to) + "?",
 		detail:       f.Title + " — crossing approves the " + artifactNoun(f.Kind) + " and closes the design phase",
 		onConfirm:    func() tea.Cmd { return m.advanceStage(f.ID) },
 	})

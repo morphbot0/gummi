@@ -636,7 +636,7 @@ func TestCardFormAfterRow(t *testing.T) {
 		t.Fatalf("visible order = %+v, want lxd's cards first", vis)
 	}
 	view := ansi.Strip(form.View(s, 100, 30))
-	if !strings.Contains(view, "── other repos ──") || !strings.Contains(view, "FD-097") {
+	if !strings.Contains(view, "── other repos ──") || !strings.Contains(view, "#97") {
 		t.Errorf("list missing the divider or the other repo's card:\n%s", view)
 	}
 
@@ -668,7 +668,7 @@ func TestCardFormAfterRow(t *testing.T) {
 		t.Errorf("backspace with an empty filter should drop the last chip: %v", form.after)
 	}
 	form.HandleKey(altO)
-	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "after BG-104") {
+	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "after #104") {
 		t.Errorf("collapsed readout missing the chip:\n%s", v)
 	}
 	form.setFocus(cardStopText)
@@ -786,7 +786,7 @@ func TestBoardNOpensTheDoorAndRemembersTheRepo(t *testing.T) {
 	if m.Overlay.HasDialogs() || len(m.rows) != 1 {
 		t.Fatalf("create: dialogs=%v rows=%d notice=%q", m.Overlay.HasDialogs(), len(m.rows), m.notice.text)
 	}
-	if !strings.Contains(m.notice.text, "FD-001 created") {
+	if !strings.Contains(m.notice.text, "“Dark mode” created") {
 		t.Errorf("notice = %q", m.notice.text)
 	}
 }

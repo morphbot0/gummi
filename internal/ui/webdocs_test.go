@@ -517,7 +517,7 @@ func TestReviewInputOnADoneCardIsRefused(t *testing.T) {
 	ctx := context.Background()
 	landed := domain.Feature{ID: "FD-005", Num: 5, Title: "landed", Slug: "landed", Stage: domain.StageDone, LandedSHA: "abc123"}
 	d := &WebDocs{f: landed}
-	if _, err := d.AddSpecNote(ctx, 1, "one more thing", "Simon", nil); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "FD-005 has landed") {
+	if _, err := d.AddSpecNote(ctx, 1, "one more thing", "Simon", nil); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "“landed” has landed") {
 		t.Errorf("a spec note on a landed card = %v, want a conflict saying it landed", err)
 	}
 	if _, err := d.AddAnnotation(ctx, 0, "nit", "", "Simon"); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "no new comments") {

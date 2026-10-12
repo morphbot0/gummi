@@ -1,6 +1,7 @@
 {
   "id": "FD-012",
   "kind": "feature",
+  "type": "Feature",
   "title": "Dark mode",
   "stage": "plan",
   "status": "needs",

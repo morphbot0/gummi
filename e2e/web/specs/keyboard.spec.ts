@@ -41,7 +41,7 @@ test('the whole loop, from the keyboard alone', async ({ page, server }, info) =
   await page.keyboard.type(await server.freshCode());
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  await expect(page.getByTestId('card-id')).toHaveText(/FD-/);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /FD-/);
 
   // tabbing through the page: every stop shows where it is
   const unseen: string[] = [];
@@ -55,11 +55,11 @@ test('the whole loop, from the keyboard alone', async ({ page, server }, info) =
   await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
 
   // j and k walk the rail
-  const first = await page.getByTestId('card-id').textContent();
+  const first = await page.getByTestId('card-id').getAttribute('data-id');
   await page.keyboard.press('j');
-  await expect(page.getByTestId('card-id')).not.toHaveText(first!);
+  await expect(page.getByTestId('card-id')).not.toHaveAttribute('data-id', first!);
   await page.keyboard.press('k');
-  await expect(page.getByTestId('card-id')).toHaveText(first!);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', first!);
 
   // g then a letter picks a document tab
   await page.keyboard.press('g');
@@ -91,7 +91,7 @@ test('the whole loop, from the keyboard alone', async ({ page, server }, info) =
   await page.keyboard.type(other);
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('palette')).toHaveCount(0);
-  await expect(page.getByTestId('card-id')).toHaveText(other);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', other);
 
   // …and opens a view by name; esc closes it and the keys work again
   await page.keyboard.press('Control+k');

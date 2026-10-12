@@ -94,7 +94,7 @@ func TestActionBudgetAndDelete(t *testing.T) {
 	if h.card(c.ID).ID != c.ID {
 		t.Fatal("an unconfirmed delete removed the card")
 	}
-	if e.Confirm == "" || !strings.HasPrefix(e.Text, "delete "+c.ID+"?\n") {
+	if e.Confirm == "" || !strings.HasPrefix(e.Text, "delete “"+c.Title+"”?\n") {
 		t.Fatalf("the confirm %+v carries no token, or not the question whole", e)
 	}
 	// a bare yes is not a yes: the JSON boolean the page used to send is

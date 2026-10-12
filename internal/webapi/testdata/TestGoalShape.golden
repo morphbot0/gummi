@@ -4,6 +4,7 @@
       {
         "id": "GL-001",
         "kind": "goal",
+        "type": "Goal",
         "title": "Stable board",
         "stage": "implement",
         "status": "running",
@@ -62,6 +63,7 @@
       {
         "id": "FD-004",
         "kind": "feature",
+        "type": "Feature",
         "title": "Loader",
         "stage": "done",
         "status": "done",

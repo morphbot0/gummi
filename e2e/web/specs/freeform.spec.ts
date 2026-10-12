@@ -10,7 +10,7 @@ test('a freeform turn is sent by one enter and ends on the page when it ends', a
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the rounding' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   // the card's opening turn runs and ends
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
@@ -73,7 +73,7 @@ test('a landed freeform card claims no stages', async ({ pairedPage: page, serve
   }
   await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage, { timeout: 30_000 }).toBe('done');
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('card-stages')).toContainText('session');
   await expect(page.getByTestId('card-stages')).not.toContainText('verify');
   await expect(page.getByTestId('stage-verify')).toHaveCount(0);
@@ -89,7 +89,7 @@ test('a line sent mid-turn is queued and can be taken back', async ({ pairedPage
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: '[slow] Queue behind a turn' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('live-freeform')).toBeVisible({ timeout: 30_000 });
 
@@ -120,7 +120,7 @@ test('a line sent while the last is still on its way is not lost', async ({ pair
   test.skip(info.project.name !== 'desktop', 'the composer’s rule is the same at every width');
   const id = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the rounding' })).json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
 
   // hold the first send's answer until the second line has been typed
@@ -153,7 +153,7 @@ test('a freeform conversation can be rewound to before a message', async ({ pair
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the rewind' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
 
@@ -183,7 +183,7 @@ test('a project command is offered while its name is typed', async ({ pairedPage
   test.setTimeout(90_000);
   const id = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Offer the commands' })).json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
   const dir = path.join(workspace.repo, '.gummi', 'worktrees', id, '.claude', 'commands');
@@ -273,7 +273,7 @@ test('a question asked in a session is answered in your words', async ({ pairedP
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the persistence' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
 

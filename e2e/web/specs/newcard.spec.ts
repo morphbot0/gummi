@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, ref, test } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import { shot } from '../fixtures/shots';
 
@@ -37,7 +37,7 @@ test('a feature that waits on one card and stacks on another', async ({ pairedPa
   await page.getByTestId('newcard-create').click();
   await expect(page.getByTestId('view-newcard')).toHaveCount(0);
   await expect(page.getByTestId('card-title')).toHaveText('Add a farewell helper');
-  const id = (await page.getByTestId('card-id').textContent())!;
+  const id = (await page.getByTestId('card-id').getAttribute('data-id'))!;
   const card = (await api('GET', `/api/cards/${id}`)).json;
   expect(card).toMatchObject({ kind: 'feature', stage: 'todo', envelope: 300, profile: 'e2e-alt' });
   expect(card.stack).toMatchObject({ pos: 1, of: 2 });
@@ -67,7 +67,7 @@ test('a bug with its severity and report', async ({ pairedPage: page, api }, inf
   await shot(page, info, 'newcard-bug');
   await page.getByTestId('newcard-create').click();
   await expect(page.getByTestId('card-title')).toHaveText('Greet panics on an empty name');
-  const id = (await page.getByTestId('card-id').textContent())!;
+  const id = (await page.getByTestId('card-id').getAttribute('data-id'))!;
   expect(id).toMatch(/^BG-/);
   expect((await api('GET', `/api/cards/${id}`)).json.severity).toBe('high');
   expect((await api('GET', `/api/board`)).json.rows.find((r: any) => r.id === id).severity).toBe('high');
@@ -81,7 +81,7 @@ test('a freeform card opens at once', async ({ pairedPage: page }, info) => {
   await page.getByTestId('newcard-title').fill('Tidy the readme');
   await page.getByTestId('newcard-create').click();
   await expect(page.getByTestId('card-title')).toHaveText('Tidy the readme');
-  await expect(page.getByTestId('card-id')).toHaveText(/^FF-/);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /^FF-/);
   // an open session has no stages at all, so it shows no badge for them
   await expect(page.getByTestId('card-stages')).toHaveCount(0);
   if (phone(info)) await page.getByTestId('tab-thread').click();
@@ -102,8 +102,8 @@ test('a research card, and a diagnosis', async ({ pairedPage: page, api }, info)
   await expect(page.getByTestId('newcard-error-envelope')).toContainText('negative');
   await page.getByTestId('newcard-envelope').fill('1.5');
   await page.getByTestId('newcard-create').click();
-  await expect(page.getByTestId('card-id')).toHaveText(/^RS-/);
-  const rs = (await page.getByTestId('card-id').textContent())!;
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /^RS-/);
+  const rs = (await page.getByTestId('card-id').getAttribute('data-id'))!;
   expect((await api('GET', `/api/cards/${rs}`)).json).toMatchObject({ kind: 'research', envelope: 150 });
   // the created card opened; back to the cards for the next form
   if (phone(info)) await page.getByTestId('card-back').click();
@@ -120,7 +120,7 @@ test('create & autopilot hands the new card to autopilot', async ({ pairedPage: 
   await page.getByTestId('newcard-title').fill('Add a wink helper');
   await page.getByTestId('newcard-autopilot').click();
   await expect(page.getByTestId('card-title')).toHaveText('Add a wink helper');
-  const id = (await page.getByTestId('card-id').textContent())!;
+  const id = (await page.getByTestId('card-id').getAttribute('data-id'))!;
   await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.autopilot).toBe(true);
 });
 
@@ -133,7 +133,7 @@ test('a title in any script makes a card', async ({ pairedPage: page, api }, inf
     await page.getByTestId('newcard-desc').fill('Say hello in the reader’s own words.');
     await page.getByTestId('newcard-create').click();
     await expect(page.getByTestId('card-title')).toHaveText(title);
-    const id = (await page.getByTestId('card-id').innerText()).trim();
+    const id = (await page.getByTestId('card-id').getAttribute('data-id'))!.trim();
     expect((await api('GET', `/api/cards/${id}`)).json.branch).toMatch(branch);
     // the created card opened; back to the cards for the next one
     if (phone(info)) await page.getByTestId('card-back').click();
@@ -153,7 +153,7 @@ test('adopt refusals sit under their field, and a stack sets the base', async ({
   const branch = (await api('GET', `/api/cards/${gate}`)).json.branch;
   const held = adopt.locator(`option[value="${branch}"]`);
   await expect(held).toHaveAttribute('disabled', '');
-  await expect(held).toHaveText(`${branch} — ${gate} has it`);
+  await expect(held).toHaveText(`${branch} — ${ref(gate)} has it`);
 
   await page.getByTestId('newcard-stack').selectOption(gate);
   await expect(page.getByTestId('newcard-base')).toBeDisabled();

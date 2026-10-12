@@ -10,7 +10,7 @@
 // act turns the plan's steps into a checklist the board marks as it goes
 // (the "work" events), the one that failed marked where it stopped.
 
-import { h, clear, plural } from './dom.js?v=__ASSET_V__'
+import { h, clear, plural, cardName } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { openModal } from './views.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -35,7 +35,7 @@ function refusal (e) {
 // repository's, so a choice reads them again. typed carries the title and
 // description across that.
 export async function openPublish (card, act, { returnTo = '[data-testid="card-actions"]', done, baseRepo = '', typed = null } = {}) {
-  const title = `${TITLE[act] || act} · ${card.id}`
+  const title = `${TITLE[act] || act} · ${cardName(card.id)}`
   // the read asks GitHub about the repository, the remote branch and the
   // PR: the dialog is up, saying so, for as long as that takes
   let gone = false

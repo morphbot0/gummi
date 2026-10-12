@@ -244,7 +244,7 @@ func (m *Shell) WebGoalAction(id, action string, req webapi.GoalActionRequest, p
 			if err := eng.RaiseGoalSubstrate(engine.WithActor(context.Background(), by), f.ID, runs, minutes); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
-			return noticeMsg{text: string(f.ID) + ": substrate budget raised", reload: true}
+			return noticeMsg{text: f.Name() + ": substrate budget raised", reload: true}
 		}, nil
 
 	case webapi.GoalActionTopUp:
@@ -355,12 +355,12 @@ func (b *Bridge) CreateGoal(ctx context.Context, req webapi.GoalCreateRequest) (
 	if serr := eng.SeedGoal(ctx, made.f.ID, after, refs); serr != nil {
 		// The goal is real and numbered; what failed is the seeding, and
 		// the owner can note it to the lead or start over.
-		out.Err, out.Text = true, string(made.f.ID)+" created, but "+sanitize(serr.Error())
+		out.Err, out.Text = true, made.f.Name()+" created, but "+sanitize(serr.Error())
 	}
 	b.deliver(made)
 	if !req.Autopilot || out.Err {
 		if out.Text == "" {
-			out.Text = string(made.f.ID) + " created"
+			out.Text = made.f.Name() + " created"
 		}
 		return out, nil
 	}
@@ -372,7 +372,7 @@ func (b *Bridge) CreateGoal(ctx context.Context, req webapi.GoalCreateRequest) (
 	}
 	started.ID = out.ID
 	if started.Text == "" {
-		started.Text = string(made.f.ID) + " created and started"
+		started.Text = made.f.Name() + " created and started"
 	}
 	return started, nil
 }

@@ -113,7 +113,7 @@ func (d *confirmDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 // autopilot card, raised) is answered by confirm.
 func (d *envelopeDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	if in.number == nil {
-		return webAnswer{needs: webapi.ActionNeedsNumber, question: "set " + string(d.feature.ID) + "'s budget (dollars; 0 = uncapped)"}
+		return webAnswer{needs: webapi.ActionNeedsNumber, question: "set " + d.feature.Name() + "'s budget (dollars; 0 = uncapped)"}
 	}
 	if *in.number < 0 {
 		return webAnswer{refused: "a budget is $0 (uncapped) or more"}
@@ -130,7 +130,7 @@ func (d *envelopeDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 		return webAnswer{cmd: cmd}
 	case d.askResume:
 		d.askResume = false
-		q := fmt.Sprintf("raised to %s — resume %s on autopilot?", domain.FormatDollars(float64(d.resumeTo)), d.feature.ID)
+		q := fmt.Sprintf("raised to %s — resume %s on autopilot?", domain.FormatDollars(float64(d.resumeTo)), d.feature.Name())
 		if in.takeConfirm(webConfirmToken("envelope-resume", d.feature.ID, q)) {
 			cmd = tea.Batch(cmd, d.resumeNotice())
 			return webAnswer{cmd: cmd}
@@ -164,7 +164,7 @@ func (d *autopilotDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 		mode = d.submitMode()
 	}
 	if !in.handoverAsked && mode == domain.GateAutopilot {
-		q := "Hand " + string(d.feature.ID) + " to autopilot?\n" +
+		q := "Hand " + d.feature.Name() + " to autopilot?\n" +
 			strings.Join(autopilotBody(d.feature, d.plan, mode, d.base()), "\n")
 		if !in.takeConfirm(webConfirmToken(d.ID(), in.card, q)) {
 			return confirmAsk(d.ID(), in.card, q)
@@ -240,7 +240,7 @@ func (d *commitMsgDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 // the picker offers.
 func (d *repoPickerDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	if in.repo == "" {
-		return webAnswer{needs: webapi.ActionNeedsRepo, question: "choose a repository for " + string(d.feature.ID) + ": " + strings.Join(d.candidates, ", ")}
+		return webAnswer{needs: webapi.ActionNeedsRepo, question: "choose a repository for " + d.feature.Name() + ": " + strings.Join(d.candidates, ", ")}
 	}
 	for i, c := range d.candidates {
 		if c == in.repo {
@@ -278,7 +278,7 @@ func (d *prLinkDialog) webAnswer(_ *Shell, in *webInput) webAnswer { //nolint:un
 // page shows, with the lead's reasons beside each; the request is told to
 // go there.
 func (d *reverseDialog) webAnswer(_ *Shell, _ *webInput) webAnswer {
-	return webAnswer{needs: webapi.ActionNeedsDecision, question: "pick the decision to reverse on " + string(d.f.ID) + "'s page"}
+	return webAnswer{needs: webapi.ActionNeedsDecision, question: "pick the decision to reverse on " + d.f.Name() + "'s page"}
 }
 
 // tooLong is the refusal for a value longer than the terminal's input
@@ -302,7 +302,7 @@ func (d *verifyDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 		return webAnswer{dismiss: true}
 	}
 	lines := make([]string, 0, len(d.checks)+1)
-	lines = append(lines, "run "+string(d.feature)+"'s verify checks in its worktree?")
+	lines = append(lines, "run "+d.feature.Ref()+"'s verify checks in its worktree?")
 	for _, ch := range d.checks {
 		lines = append(lines, sanitize(ch.Name)+": "+sanitize(ch.Cmd))
 	}

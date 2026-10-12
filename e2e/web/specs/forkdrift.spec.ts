@@ -14,7 +14,7 @@ const isPhone = (info: { project: { name: string } }) => info.project.name === '
 
 async function open(page: Page, server: GummiServer, id: string) {
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
 }
 

@@ -494,7 +494,7 @@ func TestRS_CardLine_BadgeTint(t *testing.T) {
 	bugLine := m.cardLine(m.rows[1], 2, false, true, 100)
 	rsLine := m.cardLine(m.rows[2], 3, false, true, 100)
 
-	wantID := m.styles.CardIDResearch.Render(string(rid))
+	wantID := m.styles.CardIDResearch.Render(cardLead(m.rows[2].F))
 	if !strings.Contains(rsLine, wantID) {
 		t.Errorf("RS card line does not carry the CardIDResearch tint:\n%s", rsLine)
 	}
@@ -529,7 +529,7 @@ func TestRS_WorktreeKeys_Refuse(t *testing.T) {
 			}
 
 			m = press(t, m, tea.KeyPressMsg{Code: tc.key, Text: string(tc.key)})
-			want := "RS-001: no " + tc.verb + " — research cards carry no branch"
+			want := "“research card”: no " + tc.verb + " — research cards carry no branch"
 			if m.notice.text != want {
 				t.Errorf("notice = %q, want %q", m.notice.text, want)
 			}
@@ -609,7 +609,7 @@ func TestRS_V_RunsDocVerify(t *testing.T) {
 		m, f := rsCardShell(t, "")
 		writeRSArtifact(t, m, f, rsCleanDoc)
 		m.runDocVerify(f)
-		want := "RS-001: document verify — clean"
+		want := "“research card”: document verify — clean"
 		if m.notice.text != want {
 			t.Errorf("notice = %q, want %q", m.notice.text, want)
 		}
@@ -621,7 +621,7 @@ func TestRS_V_RunsDocVerify(t *testing.T) {
 	t.Run("no_doc", func(t *testing.T) {
 		m, f := rsCardShell(t, "")
 		m.runDocVerify(f)
-		want := "RS-001: no doc yet — verifydoc runs on the artifact"
+		want := "“research card”: no doc yet — verifydoc runs on the artifact"
 		if m.notice.text != want {
 			t.Errorf("notice = %q, want %q", m.notice.text, want)
 		}
@@ -631,7 +631,7 @@ func TestRS_V_RunsDocVerify(t *testing.T) {
 		m, f := rsCardShell(t, "no-such-repo")
 		writeRSArtifact(t, m, f, rsCleanDoc)
 		m.runDocVerify(f)
-		wantPrefix := "RS-001: repo unresolved — "
+		wantPrefix := "“research card”: repo unresolved — "
 		if !strings.HasPrefix(m.notice.text, wantPrefix) {
 			t.Errorf("notice = %q, want prefix %q", m.notice.text, wantPrefix)
 		}

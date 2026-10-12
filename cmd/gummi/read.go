@@ -54,19 +54,11 @@ func withReadWorkspace(fn func(context.Context, *state.Store, *worktree.Pool, st
 	return fn(context.Background(), store, pool, ws)
 }
 
-// resolveFeatureID loads the work item named by arg, which is either a
-// canonical id (FD-NNN/BG-NNN, the primary handle) or an external
-// correlation ref persisted at creation (--ref, D11). FD-NNN stays primary:
-// a well-formed id is looked up directly; anything else is tried as a ref.
+// resolveFeatureID loads the work item named by arg: a card's number
+// ("178"), its canonical id, or an external correlation ref persisted at
+// creation (--ref, D11). The reading is the store's (ResolveFeature).
 func resolveFeatureID(ctx context.Context, store *state.Store, arg string) (domain.Feature, error) {
-	if id, err := domain.ParseFeatureID(arg); err == nil {
-		return store.GetFeature(ctx, id)
-	}
-	f, err := store.FeatureByExternalRef(ctx, arg)
-	if err != nil {
-		return domain.Feature{}, fmt.Errorf("no work item %q (not an FD-NNN/BG-NNN/RS-NNN/GL-NNN id, and no card carries it as --ref): %w", arg, err)
-	}
-	return f, nil
+	return store.ResolveFeature(ctx, arg)
 }
 
 // oneID pulls the single work-item id out of a command's positional args.

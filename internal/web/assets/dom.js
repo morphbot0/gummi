@@ -106,12 +106,43 @@ export const STAGES = ['todo', 'plan', 'implement', 'verify', 'done']
 export const GLYPH = { todo: '○', plan: '●', implement: '●', verify: '◐', done: '✔', open: '◆' }
 export const ROLE = { plan: 'architect', implement: 'implementer', verify: 'verify', open: 'session' }
 
-// kindTag is the rail's short kind: the card id's prefix (FD, BG, RS, FF, GL).
+// kindTag is a card's kind as a short key (FD, BG, RS, FF, GL, AG): what the
+// rail's kind filter and its test ids are keyed on. It is read from the
+// card's kind, never from its id. A person reads typeName instead.
+const KIND_TAGS = { feature: 'FD', bug: 'BG', research: 'RS', goal: 'GL', freeform: 'FF' }
 export function kindTag (row) {
-  // an agent is a session by id and an agent by what it is
+  // an agent is a session by kind and an agent by what it is
   if (row.home) return 'AG'
-  const m = /^([A-Z]+)-/.exec(row.id || '')
-  return m ? m[1] : (row.kind || '').slice(0, 2).toUpperCase()
+  return KIND_TAGS[row.kind] || (row.kind || '').slice(0, 2).toUpperCase()
+}
+
+// typeName is what kind of card a row is, in the server's word: Feature,
+// Bug, Research, Goal, Session or Agent (domain.Feature.TypeName).
+export function typeName (row) {
+  return row?.type || ''
+}
+
+// ref is how the page names a card: its number alone ("#178"), the way
+// domain.FeatureID.Ref says it. Anything that is not a card id (a stack's
+// name, an empty value) reads as itself.
+export function ref (id) {
+  const m = /^(?:FD|BG|RS|GL|FF)-0*(\d+)$/.exec(id || '')
+  return m ? `#${m[1]}` : (id || '')
+}
+
+// cardName is how a sentence on the page names a card: its title in
+// quotes, cut short, the way domain.Feature.Name says it. A person knows a
+// card by what it is about; its number (ref) is for the card's own head and
+// for a card the board holds no row for.
+const NAME_WIDTH = 40
+let rowOf = () => null
+export function nameRows (fn) { rowOf = fn }
+export function cardName (id) {
+  let t = (rowOf(id)?.title || '').trim().replace(/\s+/g, ' ')
+  if (!t) return ref(id)
+  const cs = [...t]
+  if (cs.length > NAME_WIDTH) t = cs.slice(0, NAME_WIDTH - 1).join('').trimEnd() + '…'
+  return `“${t}”`
 }
 
 // REPO_SLOTS is the repo palette's size: theme.RepoSlots on the server.

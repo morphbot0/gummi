@@ -788,10 +788,10 @@ func TestASessionContinuedAsASpecDoesNotLand(t *testing.T) {
 			t.Errorf("a session has no spec to carry, but the bug row says %q", a.why)
 		}
 	}
-	if s := endingSentence(in); !strings.Contains(s, "Continued as the spec FD-032") || strings.Contains(s, "Landing it after all") {
+	if s := endingSentence(in); !strings.Contains(s, "Continued as the spec #32") || strings.Contains(s, "Landing it after all") {
 		t.Errorf("the closing sentence = %q, want it to name the spec and offer no landing", s)
 	}
-	if q := decisionQuestion(decisionClosed, r, in); q != "FF-031 is closed — continued as FD-032." {
+	if q := decisionQuestion(decisionClosed, r, in); q != "“drop the leaked pty fd” is closed — continued as #32." {
 		t.Errorf("the closing head = %q, want it to name the spec", q)
 	}
 	why := (&Shell{}).landingRefusalIn(r.F, r, true, &in)

@@ -42,18 +42,18 @@ func (m *Shell) readPRReview(f domain.Feature) tea.Cmd {
 		// before trusting PullRequest rather than testing the captured f.
 		cur, err := m.store.GetFeature(ctx, f.ID)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(f.Name() + ": " + err.Error()), isErr: true}
 		}
 		f = cur
 		if f.PullRequest.Empty() {
-			return noticeMsg{text: string(f.ID) + " has no linked PR", isErr: true}
+			return noticeMsg{text: f.Name() + " has no linked PR", isErr: true}
 		}
 		if m.fetchPRReviewThreads == nil {
 			return noticeMsg{text: "pull PR review is unavailable — no PR backend wired", isErr: true}
 		}
 		threads, _, headSHA, err := m.fetchPRReviewThreads(ctx, f.PullRequest)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": fetching review threads: " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(f.Name() + ": fetching review threads: " + err.Error()), isErr: true}
 		}
 		if headSHA != "" && headSHA != f.PullRequest.HeadSHA {
 			refreshed := f.PullRequest
@@ -67,7 +67,7 @@ func (m *Shell) readPRReview(f domain.Feature) tea.Cmd {
 		}
 		res, err := pr.Ingest(ctx, m.store, f.ID, worktreeLines, threads)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(f.Name() + ": " + err.Error()), isErr: true}
 		}
 		text := fmt.Sprintf("%s: %d new review thread(s) → diff (%d already ingested, %d could not be anchored)",
 			f.ID, res.Written, res.AlreadyExisting, res.Orphaned)

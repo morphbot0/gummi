@@ -102,7 +102,7 @@ func TestUnsetModeIsNotRunningOnAutopilot(t *testing.T) {
 	if len(auto) != 0 {
 		t.Errorf("the quit dialog lists an unset-mode card as running on autopilot: %v", auto)
 	}
-	if len(plain) != 1 || !strings.HasPrefix(plain[0], "FD-001") {
+	if len(plain) != 1 || !strings.HasPrefix(plain[0], "“Dark mode”") {
 		t.Errorf("plain list = %v, want the card named with its stage", plain)
 	}
 

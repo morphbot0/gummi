@@ -177,7 +177,7 @@ func (d *closeOutDialog) View(s *theme.Styles, width, height int) string {
 		return closeOutFrame(s, "close out", s.Base.Render("nothing is waiting to land."))
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s · %s\n", s.CardID.Render(string(r.F.ID)), r.F.Title)
+	fmt.Fprintf(&b, "%s · %s\n", s.CardID.Render(r.F.ID.Ref()), r.F.Title)
 	fmt.Fprintf(&b, "   %s\n\n", s.Faint.Render(
 		"verified · "+featureSpend(r.F.Spend)+" · lands on "+r.baseBranch()))
 	if n := len(ready); n > 1 {
@@ -198,7 +198,7 @@ func (d *closeOutDialog) sweepView(s *theme.Styles, _, _ int) string {
 		b.WriteString(s.Base.Render("nothing to clean up — every landed card is already tidy.\n"))
 	} else {
 		for _, c := range d.sweep.Clean {
-			fmt.Fprintf(&b, "   %s   %s\n", s.CardID.Render(string(c.ID)),
+			fmt.Fprintf(&b, "   %s   %s\n", s.CardID.Render(c.ID.Ref()),
 				s.Faint.Render("worktree + branch   "+humanBytes(c.Bytes)))
 		}
 		fmt.Fprintf(&b, "\n   %s\n", s.Faint.Render(
@@ -207,7 +207,7 @@ func (d *closeOutDialog) sweepView(s *theme.Styles, _, _ int) string {
 	if len(d.sweep.Held) > 0 {
 		b.WriteString("\n" + s.Faint.Render("   held back\n"))
 		for _, h := range d.sweep.Held {
-			fmt.Fprintf(&b, "   %s   %s\n", s.CardID.Render(string(h.ID)), s.Faint.Render(h.Why))
+			fmt.Fprintf(&b, "   %s   %s\n", s.CardID.Render(h.ID.Ref()), s.Faint.Render(h.Why))
 		}
 	}
 	b.WriteString("\n")

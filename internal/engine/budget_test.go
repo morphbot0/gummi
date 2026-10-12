@@ -552,12 +552,21 @@ func TestBudgetExhaustionStopsSession(t *testing.T) {
 	}
 	waitFor(t, e, EventExhausted)
 
-	st, err := livelog.Stat(ws.LiveFile(f.ID))
-	if err != nil {
-		t.Fatalf("livelog.Stat: %v", err)
-	}
-	if !st.Stopped {
-		t.Fatalf("live file Stopped = false after exhaustion, want true (session.stop() never ran)")
+	// exhaust() sends the event and then stops the session, so the
+	// terminal record lands a moment after the event is read.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		st, err := livelog.Stat(ws.LiveFile(f.ID))
+		if err != nil {
+			t.Fatalf("livelog.Stat: %v", err)
+		}
+		if st.Stopped {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("live file Stopped = false after exhaustion, want true (session.stop() never ran)")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

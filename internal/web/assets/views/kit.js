@@ -3,7 +3,7 @@
 // from plain strings, a segmented control, an inline confirm strip, and
 // the one way they show a server's refusal.
 
-import { h, clear } from '../dom.js?v=__ASSET_V__'
+import { h, clear, ref } from '../dom.js?v=__ASSET_V__'
 
 // field wraps a control in a label with its words above it.
 export function field (label, control, { hint, testid, cls } = {}) {
@@ -79,7 +79,7 @@ export function cardLinks (cards, ctx, testid = 'created') {
         class: 'link',
         testid: `${testid}-${c.id}`,
         onclick: () => { ctx.close(); ctx.select(c.id) }
-      }, c.id),
+      }, ref(c.id)),
       h('span', { class: 't' }, c.title || ''),
       c.stage ? h('span', { class: 'st' }, c.stage) : null)))
 }

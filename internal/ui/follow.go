@@ -162,23 +162,23 @@ func (m *Shell) watchConducted(f domain.Feature) tea.Cmd {
 	if f.Stage == domain.StageDone {
 		drives = "conducted it"
 	}
-	m.notice = noticeMsg{text: fmt.Sprintf("watching %s — %s %s (read-only; type into %s to reach its lead)", f.ID, goalDriver(f.GoalID), drives, f.GoalID)}
+	m.notice = noticeMsg{text: fmt.Sprintf("watching %s — %s %s (read-only; type into %s to reach its lead)", f.Name(), goalDriver(f.GoalID), drives, m.cardName(f.GoalID))}
 	return open
 }
 
 // goalDriver names the driver of a card inside a goal, for the sentences
 // a watched card owes its reader. One phrase, one place: the refusal
 // notice, the action inventory and the thread footer all say it.
-func goalDriver(id domain.FeatureID) string { return string(id) + "'s lead" }
+func goalDriver(domain.FeatureID) string { return "its goal's lead" }
 
 // noteWatching says who owns the run being watched, so the read-only
 // pane never reads as a broken chat.
 func (m *Shell) noteWatching(id domain.FeatureID) {
 	if d, ok := m.foreignFor(id); ok {
-		m.notice = noticeMsg{text: fmt.Sprintf("watching %s — driven by pid %d (read-only)", id, d.PID)}
+		m.notice = noticeMsg{text: fmt.Sprintf("watching %s — driven by pid %d (read-only)", m.cardName(id), d.PID)}
 		return
 	}
-	m.notice = noticeMsg{text: fmt.Sprintf("watching %s (read-only)", id)}
+	m.notice = noticeMsg{text: fmt.Sprintf("watching %s (read-only)", m.cardName(id))}
 }
 
 // foreignSummary is the dashboard's one-line account of a card another

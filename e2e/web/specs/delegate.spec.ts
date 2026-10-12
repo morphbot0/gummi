@@ -10,7 +10,7 @@ test('a session with a delegation budget hands work to a card that lands back on
   test.skip(info.project.name === 'phone', 'the phone answers decisions from its own dock; decisions.spec covers that path');
   const id = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Tidy the greetings' })).json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   const says = page.getByTestId('composer-says');
   await expect(says).not.toContainText('stop this turn', { timeout: 30_000 });
   const thread = page.getByTestId('thread');

@@ -121,19 +121,19 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 		delete(m.goalTicking, msg.goal)
 		var cmds []tea.Cmd
 		if msg.err != nil {
-			m.notice = noticeMsg{text: string(msg.goal) + ": " + sanitize(msg.err.Error()), isErr: true, id: msg.goal}
+			m.notice = noticeMsg{text: m.cardName(msg.goal) + ": " + sanitize(msg.err.Error()), isErr: true, id: msg.goal}
 		}
 		if msg.res.Stalled != "" {
 			// The backend could not serve the goal. The conductor dropped
 			// nothing and started nothing; saying so once is the whole of
 			// what the board can do, and the goal picks itself back up on
 			// the next tick after the backend returns.
-			m.notice = noticeMsg{text: string(msg.goal) + ": waiting on the agent backend — " + sanitize(msg.res.Stalled), isErr: true, id: msg.goal}
+			m.notice = noticeMsg{text: m.cardName(msg.goal) + ": waiting on the agent backend — " + sanitize(msg.res.Stalled), isErr: true, id: msg.goal}
 			if msg.res.StalledExperiment != "" {
 				// Not the backend either: evidence the goal cannot believe.
 				// More runs would spend substrate time learning the same
 				// thing, so it waits for someone to look at the rig.
-				m.notice = noticeMsg{text: string(msg.goal) + ": stopped making runs — " + sanitize(msg.res.Stalled) +
+				m.notice = noticeMsg{text: m.cardName(msg.goal) + ": stopped making runs — " + sanitize(msg.res.Stalled) +
 					" · tell the goal when the rig is fixed", isErr: true, id: msg.goal}
 			}
 			if msg.res.StalledOn != "" {
@@ -141,7 +141,7 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 				// card and will not retry on its own, because a retry is a
 				// verify session — a note to the goal is what says someone
 				// has been there.
-				m.notice = noticeMsg{text: string(msg.goal) + ": waiting on an environment — " + sanitize(msg.res.Stalled) +
+				m.notice = noticeMsg{text: m.cardName(msg.goal) + ": waiting on an environment — " + sanitize(msg.res.Stalled) +
 					" · tell the goal when it is fixed", isErr: true, id: msg.goal}
 			}
 		}
@@ -154,7 +154,7 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 				" · the lead would propose: "+sanitize(need.Proposal)+" · answer with a note to the goal; everything that does not depend on it keeps running")
 		}
 		if need := msg.res.NeedsSubstrate; need.Waiting() {
-			m.notice = noticeMsg{text: string(msg.goal) + ": out of substrate budget — " + sanitize(need.Reason) +
+			m.notice = noticeMsg{text: m.cardName(msg.goal) + ": out of substrate budget — " + sanitize(need.Reason) +
 				" · raise it with `gummi resume " + string(msg.goal) + " --runs N --minutes M`", isErr: true, id: msg.goal}
 		}
 		for _, st := range msg.res.Start {
@@ -201,7 +201,7 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 	case goalPlanCheckedMsg:
 		m.clearAutopilotAnswering(msg.f.ID)
 		if !msg.approve {
-			m.notice = noticeMsg{text: string(msg.f.ID) + ": the goal's lead sent the plan back"}
+			m.notice = noticeMsg{text: msg.f.Name() + ": the goal's lead sent the plan back"}
 			return m.runStageWithNote(msg.f, "The goal's lead sent this plan back before implementation: "+msg.note), true
 		}
 		m.markAutopilotAnswering(msg.f.ID)
@@ -246,6 +246,7 @@ func (m *Shell) goalCardEvent(ev engine.Event) {
 func (m *Shell) goalAnswerAsk(id domain.FeatureID, ask *engine.Ask) tea.Cmd {
 	m.markAutopilotAnswering(id)
 	eng := m.engine
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		answer, ok, err := eng.GoalAnswer(ctx, id, ask)
@@ -255,7 +256,7 @@ func (m *Shell) goalAnswerAsk(id domain.FeatureID, ask *engine.Ask) tea.Cmd {
 		if err := eng.AnswerAs(ctx, id, answer, state.ActorAutopilot); err != nil {
 			return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: sanitize(err.Error()), isErr: true}, park: "asks: " + ask.Question}
 		}
-		return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: string(id) + ": the goal answered: " + answer}}
+		return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: name + ": the goal answered: " + answer}}
 	}
 }
 
@@ -285,6 +286,7 @@ func (m *Shell) goalPlanCheck(f domain.Feature) tea.Cmd {
 // with rounds left goes back to its cards with the evidence.
 func (m *Shell) goalVerifyNotPassed(id domain.FeatureID, reason string) tea.Cmd {
 	store, eng, rs := m.store, m.engine, m.roundStore
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		f, err := store.GetFeature(ctx, id)
@@ -313,7 +315,7 @@ func (m *Shell) goalVerifyNotPassed(id domain.FeatureID, reason string) tea.Cmd 
 		if err := eng.RunWith(cur, "The goal's verify failed: read the goal doc's Verification plan for the evidence and fix what is not met."); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(id) + ": verify did not pass — back to its cards", reload: true}
+		return noticeMsg{text: name + ": verify did not pass — back to its cards", reload: true}
 	}
 }
 
@@ -366,7 +368,7 @@ func (m *Shell) topUpGoalAndContinue(f domain.Feature, need engine.GoalNeedsBudg
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{
-			text:   fmt.Sprintf("%s topped up to %s — %s carries on", f.ID, domain.FormatDollars(float64(to)), need.Card),
+			text:   fmt.Sprintf("%s topped up to %s — %s carries on", f.Name(), domain.FormatDollars(float64(to)), need.Card),
 			reload: true, clearInbox: f.ID,
 		}
 	}
@@ -459,7 +461,7 @@ func (m *Shell) landGoalAs(f domain.Feature, message, by string) tea.Cmd {
 		}
 		sha, err := eng.LandGoal(context.Background(), f.ID, message, by)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true, reload: true}
+			return noticeMsg{text: sanitize(f.Name() + ": " + err.Error()), isErr: true, reload: true}
 		}
 		where := m.baseBranch(f)
 		// A goal across repositories landed once in each; naming one
@@ -473,7 +475,7 @@ func (m *Shell) landGoalAs(f domain.Feature, message, by string) tea.Cmd {
 			}
 			where = strings.Join(names, " and ")
 		}
-		return noticeMsg{text: string(f.ID) + " landed on " + where + " as " + shortHash(sha) + " → done", reload: true, clearInbox: f.ID}
+		return noticeMsg{text: f.Name() + " landed on " + where + " as " + shortHash(sha) + " → done", reload: true, clearInbox: f.ID}
 	})
 }
 
@@ -495,7 +497,7 @@ func (m *Shell) sendBackGoal(f domain.Feature, note string) tea.Cmd {
 		if err := eng.SendBackGoal(context.Background(), f.ID, note, actor); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		text := string(f.ID) + " sent back to its cards"
+		text := f.Name() + " sent back to its cards"
 		if note != "" {
 			text += " — your line goes to its lead"
 		}
@@ -513,7 +515,7 @@ func (m *Shell) goalNote(f domain.Feature, note string) tea.Cmd {
 		if err := eng.GoalNote(engine.WithActor(context.Background(), actor), f.ID, note); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + ": note added — the lead reads it next", reload: true}
+		return noticeMsg{text: f.Name() + ": note added — the lead reads it next", reload: true}
 	}
 }
 
@@ -521,7 +523,7 @@ func (m *Shell) goalNote(f domain.Feature, note string) tea.Cmd {
 func (m *Shell) confirmStopGoal(f domain.Feature) tea.Cmd {
 	m.Overlay.Push(&confirmDialog{
 		card: f.ID,
-		id:   "confirm-stop-goal", question: "Stop " + string(f.ID) + "?", confirmLabel: "Stop",
+		id:   "confirm-stop-goal", question: "Stop " + f.Name() + "?", confirmLabel: "Stop",
 		detail:    "Nothing new starts. Verified cards land on the goal branch, the rest are dropped, and the goal comes back to you partial.",
 		onConfirm: func() tea.Cmd { return m.stopGoal(f) },
 	})
@@ -536,7 +538,7 @@ func (m *Shell) stopGoal(f domain.Feature) tea.Cmd {
 		if err := eng.StopGoal(engine.WithActor(context.Background(), actor), f.ID); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " is wrapping up", reload: true}
+		return noticeMsg{text: f.Name() + " is wrapping up", reload: true}
 	}
 }
 
@@ -545,7 +547,7 @@ func (m *Shell) stopGoal(f domain.Feature) tea.Cmd {
 func (m *Shell) confirmAbandonGoal(f domain.Feature) tea.Cmd {
 	m.Overlay.Push(&confirmDialog{
 		card: f.ID,
-		id:   "confirm-abandon-goal", question: "Abandon " + string(f.ID) + "?", confirmLabel: "Abandon",
+		id:   "confirm-abandon-goal", question: "Abandon " + f.Name() + "?", confirmLabel: "Abandon",
 		detail:    "Its unfinished cards are dropped and the goal closes without landing anything. Its branch stays until you clean it up.",
 		onConfirm: func() tea.Cmd { return m.abandonGoal(f) },
 	})
@@ -560,7 +562,7 @@ func (m *Shell) abandonGoal(f domain.Feature) tea.Cmd {
 		if _, err := eng.AbandonGoal(context.Background(), f.ID, actor); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " abandoned — its branch is kept", reload: true, clearInbox: f.ID}
+		return noticeMsg{text: f.Name() + " abandoned — its branch is kept", reload: true, clearInbox: f.ID}
 	}
 }
 

@@ -14,7 +14,7 @@ const phone = (info: { project: { name: string } }) => info.project.name === 'ph
 
 async function openPR(page: Page, server: GummiServer, id: string, isPhone: boolean) {
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
   if (isPhone) await page.getByTestId('tab-thread').click();
   await showTab(page, 'pr');
@@ -261,7 +261,7 @@ test.describe('a session with a comment still open on its diff', () => {
     const made = await api('POST', '/api/cards', { kind: 'freeform', description: 'Poke at the rounding', backend: 'headless', model: 'e2e-implementer' });
     const id = String(made.json?.id);
     await page.goto(`${server.url}/#${id}`);
-    await expect(page.getByTestId('card-id')).toHaveText(id);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
     await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
     // the opening turn leaves its edit uncommitted: commit it as the person would
     await workspace.exec('sh', ['-c', 'git add -A && git commit -q -m "Note the rounding"'], { cwd: workspace.worktree(id) });

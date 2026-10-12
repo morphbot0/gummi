@@ -15,7 +15,7 @@ import (
 // they were wrong or should be swept away.
 func (m *Shell) confirmPRUnlink(f domain.Feature) tea.Cmd {
 	if f.PullRequest.Empty() {
-		m.notice = noticeMsg{text: string(f.ID) + " has no linked PR", isErr: true}
+		m.notice = noticeMsg{text: f.Name() + " has no linked PR", isErr: true}
 		return nil
 	}
 	ref := f.PullRequest
@@ -24,7 +24,7 @@ func (m *Shell) confirmPRUnlink(f domain.Feature) tea.Cmd {
 		id:           "confirm-prunlink",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Unlink",
-		question:     "unlink " + string(f.ID) + " from " + ref.Repo + "#" + itoa(ref.Number) + "?",
+		question:     "unlink " + f.Name() + " from " + ref.Repo + "#" + itoa(ref.Number) + "?",
 		detail:       "the card becomes locally landable again — m stops refusing it. Diff comments already pulled from the PR stay put.",
 		webDetail:    "the card becomes locally landable again — landing it on main is no longer refused. Diff comments already pulled from the PR stay put.",
 		onConfirm:    func() tea.Cmd { return m.unlinkPR(f.ID) },
@@ -39,19 +39,20 @@ func (m *Shell) confirmPRUnlink(f domain.Feature) tea.Cmd {
 // store write, like setRepo/setEnvelope — there is no git state to lock
 // against).
 func (m *Shell) unlinkPR(id domain.FeatureID) tea.Cmd {
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(id) + ": " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(name + ": " + err.Error()), isErr: true}
 		}
 		if f.PullRequest.Empty() {
-			return noticeMsg{text: string(id) + " has no linked PR", isErr: true}
+			return noticeMsg{text: name + " has no linked PR", isErr: true}
 		}
 		prev := f.PullRequest
 		if err := m.store.SetPullRequest(ctx, id, domain.PullRequestRef{}); err != nil {
-			return noticeMsg{text: sanitize(string(id) + ": " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(name + ": " + err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(id) + " unlinked from " + prev.Repo + "#" + itoa(prev.Number), reload: true}
+		return noticeMsg{text: name + " unlinked from " + prev.Repo + "#" + itoa(prev.Number), reload: true}
 	}
 }

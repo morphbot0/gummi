@@ -2,7 +2,7 @@
 // you first), or open one of the board's surfaces by name. Also the `?`
 // sheet that lists the keys.
 
-import { h, clear, GLYPH, needsWord } from './dom.js?v=__ASSET_V__'
+import { h, clear, GLYPH, needsWord, ref } from './dom.js?v=__ASSET_V__'
 import { rows } from './store.js?v=__ASSET_V__'
 import { openOverlay, openView, VIEW_LABELS } from './views.js?v=__ASSET_V__'
 
@@ -25,7 +25,7 @@ export function palette (select, extra = []) {
   const list = () => {
     const q = input.value.toLowerCase().trim()
     // the words a card matches on are the rail filter's (rail.js matches)
-    const cards = rows().filter(r => !q || `${r.id} ${r.title} ${r.stage} ${r.goal?.title || ''}`.toLowerCase().includes(q))
+    const cards = rows().filter(r => !q || `${r.id} ${ref(r.id)} ${r.type || ''} ${r.title} ${r.stage} ${r.goal?.title || ''}`.toLowerCase().includes(q))
       .sort((a, b) => (b.status === 'needs') - (a.status === 'needs'))
       .map(r => ({ card: r }))
     // the commands are listed after the cards from the start, so what the
@@ -50,7 +50,7 @@ export function palette (select, extra = []) {
         testid: r ? `palette-row-${r.id}` : `palette-view-${it.cmd}`,
         onclick: () => choose(it)
       }, r
-        ? [h('span', { class: ['g', `st-${r.stage}`], 'aria-hidden': 'true' }, GLYPH[r.stage] || '·'), h('span', { class: 'id' }, r.id), h('span', { class: 't' }, r.title), h('span', { class: 's' }, r.status === 'needs' ? needsWord(r.needs, r.stage) : r.stage)]
+        ? [h('span', { class: ['g', `st-${r.stage}`], 'aria-hidden': 'true' }, GLYPH[r.stage] || '·'), h('span', { class: 'id' }, ref(r.id)), h('span', { class: 't' }, r.title), h('span', { class: 's' }, r.status === 'needs' ? needsWord(r.needs, r.stage) : r.stage)]
         : [h('span', { class: 'g' }, '→'), h('span', { class: 'id' }, 'open'), h('span', { class: 't' }, it.label), h('span', { class: 's' }, '')]))
     })
     res.querySelector('.hi')?.scrollIntoView({ block: 'nearest' })

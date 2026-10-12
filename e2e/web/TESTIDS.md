@@ -51,7 +51,8 @@ request once).
 | `rail-row-repo-<ID>` | a card's repo chip; shown only when the board spans repos and the card is not in the default repo |
 | `rail-cards` | the scrolling list |
 | `rail-group-<status>` | `needs`, `running`, `paused`, `idle`, `todo`, `done` |
-| `rail-row-<ID>` | a card row; `data-status`, `aria-current="true"` when open |
+| `rail-row-<ID>` | a card row; `data-status`, `aria-current="true"` when open. It shows the card's number (`#12`), never its id |
+| `rail-row-type-<ID>` | what kind of card the row is, in a word (Feature, Bug, Research, Goal, Session, Agent) |
 | `rail-more-done`, `rail-empty` | "Show all N" landed ("+N" on the compact rail); no cards / no match |
 | `rail-filtered` | compact rail only: a filter still applies; opens the full rail |
 | `rail-foot`, `rail-new-session`, `rail-new-agent`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new-agent`, behind the button's arrow, the same draft as an agent's, `rail-new` the new-card form) |
@@ -73,7 +74,8 @@ choosing), `resume-picked`, `resume-none` ("Not now").
 
 ## Card head
 
-`card-head`, `card-kind`, `card-id`, `card-title`, `card-stages`,
+`card-head`, `card-kind` (the type word; `data-kind` = `FD` | `BG` | `RS` | `GL` | `FF` | `AG`),
+`card-id` (shows the card's number, `#12`; `data-id` = its id — read the id from there), `card-title`, `card-stages`,
 `stage-<stage>` (a past stage jumps to it in the thread), `card-branch`, `card-scratch` (a research card: scratch tree, no branch), `card-home` (an agent: its home's path),
 `card-spend`, `card-context` (context-window meter, shown once the running
 session reports a limit), `card-error`, `toggle-panel` (`]`), `card-actions` (menu),

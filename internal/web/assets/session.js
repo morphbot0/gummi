@@ -14,7 +14,7 @@
 // session that exists, a pick is the card's "model" action. A card in the
 // workflow shows no picker: its stages take their models from its profile.
 
-import { $, h, clear, append, setVars, isMobile, cr, dollarsInput, parseDollars } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, append, setVars, isMobile, cr, dollarsInput, parseDollars, cardName } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -137,7 +137,7 @@ export async function startSession (text, atts = []) {
   set({ sessionDraft: null })
   await ctx.refreshBoard?.()
   await ctx.select(c.id)
-  toast(`${c.id} started on ${pairLabel(c.session || d)}`)
+  toast(`${cardName(c.id)} started on ${pairLabel(c.session || d)}`)
   return c
 }
 
@@ -472,7 +472,7 @@ async function choose (backend, model) {
   try {
     const c = await post(cardPath(id, 'actions/model'), { backend, model })
     if (c && state.sel === id) set({ card: c })
-    toast(`${id} now runs on ${pairLabel({ backend, model })}`)
+    toast(`${cardName(id)} now runs on ${pairLabel({ backend, model })}`)
     ctx.refresh?.(id)
   } catch (err) {
     const e = err.data || {}
@@ -509,7 +509,7 @@ export async function openWriteSpec (card, a) {
   const budget = h('input', { type: 'text', inputmode: 'decimal', value: form ? dollarsInput(form.envelope || 0) : '', testid: 'spec-budget' })
   const err = h('p', { class: 'spec-err', role: 'alert', testid: 'spec-error', hidden: true })
   const body = h('div', { class: 'mbody spec-body' },
-    h('p', { class: 'spec-about' }, `${card.id} ends here and keeps its branch. A feature continues its work on a branch cut from it: the profile’s architect plans it from this conversation and what the branch already holds, and it lands only once its critique and checks pass.`),
+    h('p', { class: 'spec-about' }, `${cardName(card.id)} ends here and keeps its branch. A feature continues its work on a branch cut from it: the profile’s architect plans it from this conversation and what the branch already holds, and it lands only once its critique and checks pass.`),
     h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Title'), title),
     h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Brief'), brief, note),
     (a.choices || []).length ? h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Profile'), profile, h('span', { class: 'fh' }, 'Every stage takes its agent and model from the profile.')) : null,
@@ -571,7 +571,7 @@ export async function openWriteSpec (card, a) {
       const c = await post(cardPath(card.id, 'actions/writespec'), req)
       await ctx.refreshBoard?.()
       if (c?.id) await ctx.select(c.id)
-      toast(`${card.id} continues as ${c?.id || 'a spec'}`)
+      toast(`${cardName(card.id)} continues as ${c?.id ? cardName(c.id) : 'a spec'}`)
     } catch (e) {
       err.textContent = e.data?.text || e.data?.error || e.message
       err.hidden = false

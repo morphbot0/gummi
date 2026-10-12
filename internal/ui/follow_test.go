@@ -306,7 +306,7 @@ func TestCardLockedRefusesForeignHeldCard(t *testing.T) {
 	if !ok || !n.isErr {
 		t.Fatalf("msg = %#v, want an error notice", msg)
 	}
-	if !strings.Contains(n.text, "FD-300") || !strings.Contains(n.text, "watch") {
+	if !strings.Contains(n.text, "#300") || !strings.Contains(n.text, "watch") {
 		t.Errorf("notice = %q, want it to name the card and offer watching", n.text)
 	}
 }

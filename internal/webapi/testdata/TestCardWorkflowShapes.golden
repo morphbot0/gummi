@@ -10,6 +10,7 @@
     "card": {
       "id": "FD-012",
       "kind": "feature",
+      "type": "Feature",
       "title": "Dark mode",
       "stage": "verify",
       "status": "needs",
@@ -146,6 +147,7 @@
       {
         "id": "FD-013",
         "kind": "feature",
+        "type": "Feature",
         "title": "Row cache",
         "stage": "plan",
         "status": "running",

@@ -282,9 +282,9 @@ func autopilotHeader(f domain.Feature, plan autopilotPlan) string {
 		return "this card is parked at " + string(f.Stage)
 	default:
 		if plan.working {
-			return string(f.ID) + " is already underway"
+			return f.Name() + " is already underway"
 		}
-		return "nothing is running on " + string(f.ID)
+		return "nothing is running on " + f.Name()
 	}
 }
 
@@ -322,9 +322,9 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string, base strin
 		verb = "crossing"
 	}
 	if plan.bucket != "todo" && plan.bucket != "gate" {
-		lead := fmt.Sprintf("setting %s starts nothing — it decides how %s's next gate is handled.", mode, f.ID)
+		lead := fmt.Sprintf("setting %s starts nothing — it decides how %s's next gate is handled.", mode, f.Name())
 		if plan.working {
-			lead = fmt.Sprintf("setting %s doesn't change what %s is doing right now — only how its next gate is handled.", mode, f.ID)
+			lead = fmt.Sprintf("setting %s doesn't change what %s is doing right now — only how its next gate is handled.", mode, f.Name())
 		}
 		return []string{lead, "if it can't finish, it stops and leaves the card in the inbox — and it never lands on " + base + "."}
 	}
@@ -569,6 +569,7 @@ func autopilotSettled(id domain.FeatureID, cmd tea.Cmd) tea.Cmd {
 // starting a stage the card is no longer at would be running something
 // nobody decided on.
 func (m *Shell) autopilotRun(id domain.FeatureID, to domain.Stage) tea.Cmd {
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if m.engine == nil {
 			return noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)"), isErr: true}
@@ -589,7 +590,7 @@ func (m *Shell) autopilotRun(id domain.FeatureID, to domain.Stage) tea.Cmd {
 		if err := m.engine.Run(f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(id) + ": autopilot started " + string(to), reload: true}
+		return noticeMsg{text: name + ": autopilot started " + string(to), reload: true}
 	}
 }
 
@@ -772,10 +773,9 @@ func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 // package leaves (bugingestview.go's "left the issue picker — nothing
 // created" is the same convention).
 func (d *autopilotDialog) cancelNotice() tea.Cmd {
-	id := d.feature.ID
-	text := string(id) + ": cancelled — nothing started"
+	text := d.feature.Name() + ": cancelled — nothing started"
 	if d.mode == domain.GateAttended {
-		text = string(id) + ": cancelled — it stays on autopilot"
+		text = d.feature.Name() + ": cancelled — it stays on autopilot"
 	}
 	return func() tea.Msg {
 		return noticeMsg{text: text}
@@ -804,7 +804,7 @@ func (d *autopilotDialog) View(s *theme.Styles, w, h int) string {
 	width := min(autopilotDialogWidth, max(w-8, 30))
 
 	var b strings.Builder
-	title := "autopilot · " + string(d.feature.ID)
+	title := "autopilot · " + d.feature.Name()
 	if d.feature.Title != "" {
 		title += " · " + d.feature.Title
 	}

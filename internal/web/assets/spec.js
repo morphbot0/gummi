@@ -5,7 +5,7 @@
 // writer (POST …/spec/changes), and the gummi-checks block drawn as a table with each
 // check's last outcome on this branch.
 
-import { h, append, clock, plural, clear } from './dom.js?v=__ASSET_V__'
+import { h, append, clock, plural, clear, cardName } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -64,7 +64,7 @@ function render (pane, entry, ctx) {
       s.draft ? h('span', { class: 'draftflag' }, ' · draft, not on the branch yet') : null),
     h('h1', { testid: 'spec-title' }, s.title || ctx.card?.title || ''),
     markdown(pre.join('\n'), opts),
-    ctx.closed ? h('p', { class: 'ro', testid: 'spec-closed' }, `${ctx.id} ${ctx.card?.landed ? 'has landed' : 'is done'}: its spec reads as it ended, and takes no more notes.`) : null,
+    ctx.closed ? h('p', { class: 'ro', testid: 'spec-closed' }, `${cardName(ctx.id)} ${ctx.card?.landed ? 'has landed' : 'is done'}: its spec reads as it ended, and takes no more notes.`) : null,
     notes.filter(n => !n.anchor).map(n => noteEl(n, ctx)),
     notesIn(notes.filter(n => n.anchor), 1, firstLine - 1, ctx))
   const headings = new Map() // section line -> its h2, for reopening drafts

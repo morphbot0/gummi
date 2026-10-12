@@ -14,7 +14,7 @@
 // With a session draft open (session.js) there is no card yet: the line is
 // the session's first message, and sending it creates the session.
 
-import { h, $, clear } from './dom.js?v=__ASSET_V__'
+import { h, $, clear, cardName } from './dom.js?v=__ASSET_V__'
 import { post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -426,7 +426,7 @@ async function submit ({ asLine = false, confirm = '' } = {}) {
       const word = unknownCommand(text, asked)
       if (!openActions(text)) return
       clearSent(text, body.attachments)
-      if (word) setNote(`/${word} is not a command on ${id} — the card's menu shows what is.`, 'info')
+      if (word) setNote(`/${word} is not a command on ${cardName(id)} — the card's menu shows what is.`, 'info')
       return
     }
     // what was sent leaves the composer; a line typed since stays in it
@@ -447,7 +447,7 @@ async function submit ({ asLine = false, confirm = '' } = {}) {
       setNote('That reads as separate work — it is in the new-card form.', 'info')
       openView('newcard', { text: e.text || text })
     } else if (err.status === 409 && e.error === 'moved') {
-      setNote(`${id} moved since you read it — your line is still here. Read it again, then send it if it still holds.`)
+      setNote(`${cardName(id)} moved since you read it — your line is still here. Read it again, then send it if it still holds.`)
       ctxRef.refresh?.(id)
     } else if (err.status === 409 && e.error === 'confirm' && e.confirm) {
       // the board's own question, answered where decisions' are: its yes

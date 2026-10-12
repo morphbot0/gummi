@@ -91,7 +91,7 @@ func TestEnvelopeDialogOffersResumeOnParkedAutopilotRaise(t *testing.T) {
 	if !d.askResume {
 		t.Fatal("d.askResume = false, want true after raising a parked autopilot card's envelope")
 	}
-	if !strings.Contains(ansi.Strip(d.View(m0Styles(), 60, 20)), "resume FD-047 on autopilot?") {
+	if !strings.Contains(ansi.Strip(d.View(m0Styles(), 60, 20)), "resume #47 on autopilot?") {
 		t.Errorf("resume view = %q, missing the expected question", ansi.Strip(d.View(m0Styles(), 60, 20)))
 	}
 }

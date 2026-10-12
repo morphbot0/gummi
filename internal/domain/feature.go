@@ -244,6 +244,52 @@ func (id FeatureID) Kind() Kind {
 	}
 }
 
+// Num is the sequence number an ID carries, 0 when it carries none. It is
+// the whole of a card's identity to a person: numbers are minted from one
+// counter across kinds, so no two cards share one.
+func (id FeatureID) Num() int {
+	_, digits, ok := strings.Cut(string(id), "-")
+	if !ok {
+		return 0
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
+}
+
+// Ref is how a card is named where a person reads it: its number alone,
+// "#178". What kind of card it is belongs beside its title (TypeName), not
+// in a code in front of its number. An ID with no number reads as itself.
+//
+// Never write a Ref into anything bound for a forge — a commit message, a
+// pull request — where "#178" names somebody else's issue.
+func (id FeatureID) Ref() string {
+	n := id.Num()
+	if n == 0 {
+		return string(id)
+	}
+	return "#" + strconv.Itoa(n)
+}
+
+// ParseRef reads a card's number as a person types it: "178" or "#178".
+// It is the typed half of Ref; a canonical ID still goes through
+// ParseFeatureID.
+func ParseRef(s string) (int, bool) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "#")
+	if s == "" || len(s) > 9 {
+		return 0, false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(s)
+	return n, err == nil && n >= 1
+}
+
 // NewID builds the canonical ID for kind and sequence number n (n >= 1).
 func NewID(kind Kind, n int) (FeatureID, error) {
 	if n < 1 {
@@ -702,6 +748,45 @@ func (f *Feature) IsGoal() bool { return f.kind() == KindGoal }
 // reader asks before assuming a card has a stage to advance, and every
 // artifact reader asks before assuming there is a document.
 func (f *Feature) IsFreeform() bool { return f.kind() == KindFreeform }
+
+// TypeName is what kind of card this is in a person's words, said beside
+// its title on every face: Feature, Bug, Research, Goal, Session or Agent.
+// It is not Kind: a session and an agent are one kind (KindFreeform), told
+// apart by Home, and neither is called "freeform" where a person reads.
+func (f *Feature) TypeName() string {
+	switch f.kind() {
+	case KindBug:
+		return "Bug"
+	case KindResearch:
+		return "Research"
+	case KindGoal:
+		return "Goal"
+	case KindFreeform:
+		if f.Home {
+			return "Agent"
+		}
+		return "Session"
+	}
+	return "Feature"
+}
+
+// nameWidth is how much of a title a sentence about a card carries.
+const nameWidth = 40
+
+// Name is how a sentence names a card where a person reads it: its title
+// in quotes, cut to nameWidth. A person recognises a card by what it is
+// about; its number (Ref) is for typing one and for the card's own head,
+// and is only what Name falls back to for a card with no title.
+func (f *Feature) Name() string {
+	t := strings.Join(strings.Fields(f.Title), " ")
+	if t == "" {
+		return f.ID.Ref()
+	}
+	if r := []rune(t); len(r) > nameWidth {
+		t = strings.TrimRight(string(r[:nameWidth-1]), " ") + "…"
+	}
+	return "“" + t + "”"
+}
 
 // CheckoutName is what a card that holds no branch works in, in the words
 // a sentence about it uses: an agent's home, or the main checkout.

@@ -5,7 +5,7 @@
 // until the work ends, with a clock once it has run a few seconds, and the
 // buttons that would start the same work again are held off meanwhile.
 
-import { h } from './dom.js?v=__ASSET_V__'
+import { h, cardName } from './dom.js?v=__ASSET_V__'
 import { onEvent } from './events.js?v=__ASSET_V__'
 import { toastBox } from './toast.js?v=__ASSET_V__'
 
@@ -90,7 +90,7 @@ function draw (id) {
       h('span', { class: 'spinner sm' }), h('span', { class: 'wl' }), h('span', { class: 'wt', 'aria-hidden': 'true' }))
     box.append(el)
   }
-  const line = `${id}: ${w.text}…`
+  const line = `${cardName(id)}: ${w.text}…`
   if (el.querySelector('.wl').textContent !== line) el.querySelector('.wl').textContent = line
 }
 

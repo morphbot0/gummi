@@ -289,7 +289,7 @@ func (m *Shell) depPickerView(w, h int) string {
 	}
 	s := m.styles
 	var b strings.Builder
-	head := s.Title.Render("dependencies") + " " + s.Base.Render("· "+string(dp.f.ID)) +
+	head := s.Title.Render("dependencies") + " " + s.Base.Render("· "+dp.f.Name()) +
 		"  " + s.Pill.Render(dependencyCount(dp.attachedCount()))
 	b.WriteString("\n" + head + "\n")
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")

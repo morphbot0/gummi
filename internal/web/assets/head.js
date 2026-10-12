@@ -3,7 +3,7 @@
 // in the thread), what it waits on or belongs to, and the spend bar
 // against its envelope. Its branch is said where its changes are (panel.js).
 
-import { $, h, icon, clear, append, kindTag, STAGES, cr, ctxMeter, isMobile } from './dom.js?v=__ASSET_V__'
+import { $, h, icon, clear, append, kindTag, typeName, STAGES, cr, ctxMeter, isMobile, ref, cardName } from './dom.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
@@ -50,7 +50,7 @@ function render () {
   }
   const c = state.card || row(state.sel)
   if (!c) {
-    el.append(h('div', { class: 'head-row' }, h('h1', { testid: 'card-title' }, !state.sel ? 'No card open' : state.gone === state.sel ? `${state.sel} · deleted` : state.sel)))
+    el.append(h('div', { class: 'head-row' }, h('h1', { testid: 'card-title' }, !state.sel ? 'No card open' : state.gone === state.sel ? `${ref(state.sel)} · deleted` : ref(state.sel))))
     return
   }
   const actions = state.card?.actions || []
@@ -64,8 +64,8 @@ function render () {
   menuBtn?.addEventListener('click', () => openActions())
   append(el, [
     h('div', { class: 'head-row' },
-      h('span', { class: ['kind', c.home && 'ag'], testid: 'card-kind' }, kindTag(c)),
-      h('span', { class: 'cid', testid: 'card-id' }, c.id),
+      h('span', { class: ['kind', c.home && 'ag'], testid: 'card-kind', data: { kind: kindTag(c) } }, typeName(c) || kindTag(c)),
+      h('span', { class: 'cid', testid: 'card-id', title: c.id, data: { id: c.id } }, ref(c.id)),
       h('h1', { testid: 'card-title', title: c.title }, c.title),
       h('div', { class: 'head-actions' },
         foldAt(1, commitButton(c, actions)),
@@ -82,9 +82,9 @@ function render () {
       h('span', { class: 'sp' }),
       c.pr ? h('span', { class: 'mono', testid: 'card-pr' }, c.pr) : null,
       c.elsewhere ? h('span', null, 'driven by another gummi') : null,
-      c.waits?.length ? h('span', null, 'waits on ', c.waits.map((w, i) => [i ? ', ' : '', h('button', { class: 'link', type: 'button', onclick: () => ctx.select(w) }, w)])) : null,
+      c.waits?.length ? h('span', null, 'waits on ', c.waits.map((w, i) => [i ? ', ' : '', h('button', { class: 'link', type: 'button', onclick: () => ctx.select(w) }, cardName(w))])) : null,
       c.kind === 'goal' ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: 'Open the goal page: its budget, done-when, cards and log', onclick: () => openView('goal', { id: c.id }) }, 'goal page') : null,
-      c.goal ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: c.goal.title ? `Open the goal: ${c.goal.title}` : 'Open the goal', onclick: () => openView('goal', { id: c.goal.id }) }, 'goal ', h('span', { class: 'mono' }, c.goal.id)) : null,
+      c.goal ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: c.goal.title ? `Open the goal: ${c.goal.title}` : 'Open the goal', onclick: () => openView('goal', { id: c.goal.id }) }, 'goal ', h('span', { class: 'mono' }, cardName(c.goal.id))) : null,
       c.stack ? h('button', { class: ['badge stack', c.stack.stale && 'stale'], type: 'button', testid: 'card-stack', title: `Open the stack ${c.stack.name || c.stack.id}`, onclick: () => openView('stacks', { id: c.stack.id }) }, `stack ${c.stack.pos + 1} of ${c.stack.of}`) : null,
       spend(c),
       ctxMeter(c.context, 'card-context')),

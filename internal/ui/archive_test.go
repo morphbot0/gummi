@@ -114,7 +114,7 @@ func TestDroppedCardGroupsUnderItsGoalThenFolds(t *testing.T) {
 	old.F.LandedSHA = ""
 	m.rows = []featureRow{recent, old}
 
-	if got := m.groupOf(m.rows[0], true); got != "DROPPED BY GL-004" {
+	if got := m.groupOf(m.rows[0], true); got != "DROPPED BY #4" {
 		t.Fatalf("group = %q, want DROPPED BY GL-004", got)
 	}
 	if got := m.groupOf(m.rows[1], true); got != groupArchived {

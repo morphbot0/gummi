@@ -10,7 +10,7 @@ test.use({ seed: { run: async (ws) => { id = await ws.seedVerifyFailed('Add a re
 
 test('the thread shows the stages the card walked and its verify', async ({ pairedPage: page }, info) => {
   await showCard(page, id);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('stage-group-verify').last()).toBeVisible();
   await expect(page.getByTestId('stage-group-plan').first()).not.toHaveAttribute('open', '');
   await expect(page.getByTestId('thread-items').getByTestId('verify').last()).toContainText('failed');

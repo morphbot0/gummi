@@ -93,7 +93,7 @@ func (m *Shell) specChanges(f domain.Feature, doc spec.Doc) (tea.Cmd, noticeMsg,
 	if turn == "" {
 		// every open comment is on a section a later stage writes: it
 		// is that stage's, and its writer's kickoff carries it
-		return nil, noticeMsg{text: fmt.Sprintf("%s: the open comments are on sections a later stage writes — they go to it when it runs", f.ID)}, nil
+		return nil, noticeMsg{text: fmt.Sprintf("%s: the open comments are on sections a later stage writes — they go to it when it runs", f.Name())}, nil
 	}
 	n := len(engine.SpecCommentsAnswered(domain.CardTypeOf(&f), f.Stage, doc))
 	// Every stage is autonomous now; a chat is a session the user opened
@@ -127,7 +127,7 @@ func (m *Shell) commentRewind(f domain.Feature, route engine.CommentRoute) *chan
 			if err := m.engine.Run(nf); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
 			}
-			return noticeMsg{text: fmt.Sprintf("%s: sent back to %s with %s", f.ID, route.Target, route.Why()), reload: true, clearInbox: f.ID}
+			return noticeMsg{text: fmt.Sprintf("%s: sent back to %s with %s", f.Name(), route.Target, route.Why()), reload: true, clearInbox: f.ID}
 		}
 	}}
 }
@@ -185,13 +185,13 @@ func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) te
 				if err := m.engine.Send(ctx, f.ID, turn); err != nil {
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				}
-				return noticeMsg{text: fmt.Sprintf("%s: sent %d review comment(s) to the running %s agent", f.ID, n, f.Stage), reload: true}
+				return noticeMsg{text: fmt.Sprintf("%s: sent %d review comment(s) to the running %s agent", f.Name(), n, f.Stage), reload: true}
 			}
 		}
 		if err := m.engine.RunWith(f, turn); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d review comment(s)", f.ID, f.Stage, n), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d review comment(s)", f.Name(), f.Stage, n), reload: true}
 	}
 }
 
@@ -212,7 +212,7 @@ func heldForWriter(snap engine.Snapshot, f domain.Feature, n int, what string) s
 	default:
 		return ""
 	}
-	return fmt.Sprintf("%s: %s is running — %d %s%s held for the next %s run", f.ID, pass, n, what, plural(n), f.Stage)
+	return fmt.Sprintf("%s: %s is running — %d %s%s held for the next %s run", f.Name(), pass, n, what, plural(n), f.Stage)
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored

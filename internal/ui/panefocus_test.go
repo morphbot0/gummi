@@ -43,7 +43,7 @@ func TestSelectedCardWearsFocusedBand(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("want exactly one banded row on the board, got %d", len(rows))
 	}
-	if !strings.Contains(ansi.Strip(rows[0]), "FD-042") {
+	if !strings.Contains(ansi.Strip(rows[0]), "#42") {
 		t.Fatalf("banded row is not the selected card: %q", ansi.Strip(rows[0]))
 	}
 	if w := ansi.StringWidth(rows[0]); w != 36 {

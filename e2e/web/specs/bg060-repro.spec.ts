@@ -55,7 +55,7 @@ fs.chmodSync(wrapperPath, 0o755);
 
 async function open(page: import('@playwright/test').Page, url: string, id: string) {
   await page.goto(`${url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
 }
 

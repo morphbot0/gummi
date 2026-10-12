@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, ref, test } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import { shot } from '../fixtures/shots';
 
@@ -26,7 +26,7 @@ test('not now leaves the stopped cards parked', async ({ pairedPage: page, serve
   await reopen(page, server);
   const banner = page.getByTestId('resume-banner');
   await expect(banner).toBeVisible();
-  await expect(page.getByTestId('resume-text')).toContainText(id);
+  await expect(page.getByTestId('resume-text')).toContainText(/“.+”/);
   expect((await api('GET', '/api/board')).json.resume.cards.map((c: any) => c.id)).toEqual([id]);
   await shot(page, info, 'resume-offer');
   await page.getByTestId('resume-none').click();
@@ -81,7 +81,7 @@ test('a card started by hand is not called autopilot’s', async ({ pairedPage: 
   await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token });
   await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.status).toBe('running');
   await reopen(page, server);
-  await expect(page.getByTestId('resume-text')).toContainText(c.id);
+  await expect(page.getByTestId('resume-text')).toContainText(/“.+”/);
   await expect(page.getByTestId('resume-text')).toContainText('mid-stage');
   await expect(page.getByTestId('resume-text')).not.toContainText('autopilot');
   await page.getByTestId('resume-none').click();

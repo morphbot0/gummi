@@ -83,11 +83,11 @@ test('paste, review, rename and drop, approve: the cards land on the rail', asyn
   await shot(page, info, 'ingest-done');
 
   // a created card opens from its link, and both are on the rail
-  const ids = (await links.locator('button').allTextContents()).map((t) => t.trim());
+  const ids = await links.locator('button').evaluateAll((bs) => bs.map((b) => (b as HTMLElement).dataset.testid!.replace('ingest-created-', '')));
   const first = ids[0];
   await links.first().locator('button').click();
   await expect(page.getByTestId('view-ingest')).toHaveCount(0);
-  await expect(page.getByTestId('card-id')).toHaveText(first);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', first);
   await expect(page.getByTestId('card-title')).toHaveText('Add a wave helper');
   if (phone) await page.getByTestId('card-back').click();
   for (const id of ids) await expect(page.getByTestId(`rail-row-${id}`)).toBeVisible();

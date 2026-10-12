@@ -16,7 +16,7 @@
 // which answers that question and nothing else. A refusal stays in the
 // dialog, in the board's own words.
 
-import { h, clear, isMobile, dollarsInput, parseDollars } from './dom.js?v=__ASSET_V__'
+import { h, clear, isMobile, dollarsInput, parseDollars, ref, cardName } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { openModal, openView } from './views.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
@@ -73,7 +73,7 @@ export async function runAction (card, a) {
 function dialog (card, a, { ask = null } = {}) {
   const fields = new Map() // need -> { el, value() }
   const body = h('div', { class: 'aform' })
-  const question = h('p', { class: 'aq', testid: 'action-question' }, a.detail ? cap(a.detail) + '.' : `${cap(a.label)} on ${card.id}.`)
+  const question = h('p', { class: 'aq', testid: 'action-question' }, a.detail ? cap(a.detail) + '.' : `${cap(a.label)} on ${cardName(card.id)}.`)
   const error = h('p', { class: 'aerr', testid: 'action-error', role: 'alert', hidden: true })
   // the tokens of the questions the server asked and this dialog showed:
   // clicking yes under one sends it back, with any asked before it
@@ -93,7 +93,7 @@ function dialog (card, a, { ask = null } = {}) {
       // the server's question, verbatim; its token is the only yes
       asked = e.confirm || ''
       question.classList.add('asked')
-      clear(question).append(sentence(e.text) || `${cap(a.label)} ${card.id}?`)
+      clear(question).append(sentence(e.text) || `${cap(a.label)} ${cardName(card.id)}?`)
       go.textContent = `Yes, ${a.label}`
       go.classList.add('danger')
     } else {
@@ -113,7 +113,7 @@ function dialog (card, a, { ask = null } = {}) {
     }
   }
   const m = openModal({
-    title: `${cap(a.label)} · ${card.id}`,
+    title: `${cap(a.label)} · ${cardName(card.id)}`,
     testid: 'action-dialog',
     card: card.id,
     // the head redraws under a dialog: focus goes back to its menu button
@@ -330,12 +330,12 @@ function cardsField (card, a, label, def) {
   const filter = h('input', { class: 'cfilter', testid: 'action-cards-filter', placeholder: 'Filter cards', 'aria-label': 'Filter cards', autocomplete: 'off' })
   const boxes = cands.map(r => {
     const cb = h('input', { type: 'checkbox', value: r.id, checked: set0.has(r.id), testid: `action-card-${r.id}` })
-    return { r, cb, el: h('label', { class: 'cpick' }, cb, h('span', { class: 'id' }, r.id), h('span', { class: 't' }, r.title), h('span', { class: 's' }, r.stage)) }
+    return { r, cb, el: h('label', { class: 'cpick' }, cb, h('span', { class: 'id' }, ref(r.id)), h('span', { class: 't' }, r.title), h('span', { class: 's' }, r.stage)) }
   })
   const list = h('div', { class: 'cpicks', id: 'action-input', testid: 'action-input', role: 'group', 'aria-label': 'Cards' }, boxes.map(b => b.el))
   filter.addEventListener('input', () => {
     const q = filter.value.toLowerCase().trim()
-    for (const b of boxes) b.el.hidden = !!q && !`${b.r.id} ${b.r.title}`.toLowerCase().includes(q)
+    for (const b of boxes) b.el.hidden = !!q && !`${b.r.id} ${ref(b.r.id)} ${b.r.title}`.toLowerCase().includes(q)
   })
   return {
     el: h('div', { class: 'field' }, label, boxes.length > 6 ? filter : null, boxes.length ? list : h('span', { class: 'fh' }, 'No other card to wait for.')),
@@ -355,7 +355,7 @@ async function send (id, a, body) {
   // what the action changed is read again, documents included
   if (res && res.id === state.sel) set({ card: res, cardRev: (state.cardRev || 0) + 1 })
   if (res?.ok && !res.id) {
-    toast(`${cap(a.label)}: ${id} is gone`, { ack: id })
+    toast(`${cap(a.label)}: ${cardName(id)} is gone`, { ack: id })
     // the action removed the card this page has open, and it was this
     // page's own doing: on a phone the card's screen covers the cards, so
     // the page goes back the way the screen's back chevron does. A
@@ -364,7 +364,7 @@ async function send (id, a, body) {
     // cards stay beside the open card.
     if (state.sel === id && isMobile()) set({ view: 'cards' })
   } else {
-    toast(`${cap(a.label)} · ${id}`, { ack: id })
+    toast(`${cap(a.label)} · ${cardName(id)}`, { ack: id })
   }
   return res
 }
@@ -434,7 +434,7 @@ async function requestChanges (id, what, btn, sig) {
 function confirmChanges (id, what, ask, sent) {
   const error = h('p', { class: 'aerr', testid: 'changes-error', role: 'alert', hidden: true })
   openModal({
-    title: `Request changes · ${id}`,
+    title: `Request changes · ${cardName(id)}`,
     testid: 'changes-confirm',
     card: id,
     returnTo: `[data-testid="${what}-request-changes"]`,

@@ -35,7 +35,7 @@ test('a worktree path in a message opens the file, sandboxed', async ({ pairedPa
   ].join('\n'));
 
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   const full = `${files.dir}/mock up/cards.html`;
   const hrefs = await page.evaluate(async ({ files, full }) => {
     const { markdown } = await import('/assets/markdown.js');

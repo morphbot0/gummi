@@ -87,7 +87,7 @@ func TestSquashNoOpAlreadyCollapsed(t *testing.T) {
 	if m.notice.isErr {
 		t.Fatalf("no-op squash surfaced as error: %q", m.notice.text)
 	}
-	want := "FD-001 already collapsed, nothing to do"
+	want := "“Rebase me” already collapsed, nothing to do"
 	if m.notice.text != want {
 		t.Fatalf("notice = %q, want %q", m.notice.text, want)
 	}
@@ -111,7 +111,7 @@ func TestSquashRefusedWhenLanded(t *testing.T) {
 	// twin guard, and landFeature's), where c types into the
 	// composer instead (§2.3), so the wording now names the action
 	// ("clean up") rather than a key that only works on one surface.
-	if !m.notice.isErr || m.notice.text != "FD-001 already landed on main — "+cleanUpNudge {
+	if !m.notice.isErr || m.notice.text != "“Rebase me” already landed on main — "+cleanUpNudge {
 		t.Fatalf("notice = %q (err=%v), want landed guard", m.notice.text, m.notice.isErr)
 	}
 	if m.Overlay.Top() != nil {
@@ -244,7 +244,7 @@ func TestSquashProbeFailureSurfaced(t *testing.T) {
 	}
 
 	m = pressSquash(t, m)
-	want := "FD-001 squash failed: probe failure"
+	want := "“Rebase me” squash failed: probe failure"
 	if !m.notice.isErr || m.notice.text != want {
 		t.Fatalf("notice = %q (err=%v), want %q", m.notice.text, m.notice.isErr, want)
 	}

@@ -67,13 +67,13 @@ func TestBoardFoldsGoalCardsUnderTheirGoal(t *testing.T) {
 		t.Fatalf("an unfolded goal lists its cards right under it: %v", order)
 	}
 	view := ansi.Strip(m.backlogView(120, 30))
-	if !strings.Contains(view, "└ FD-011") || !strings.Contains(view, "└ FD-012") {
+	if !strings.Contains(view, "└ Feature  local cache") || !strings.Contains(view, "└ Feature  offline flag") {
 		t.Fatalf("goal cards render as children:\n%s", view)
 	}
 	if !strings.Contains(view, "1/2 done-when · 1/2 cards · 1240/4000") {
 		t.Fatalf("the goal row carries its progress:\n%s", view)
 	}
-	if !strings.Contains(view, "└ FD-013") || !strings.Contains(view, "⊘ dropped") {
+	if !strings.Contains(view, "└ Feature  offline flag, first try") || !strings.Contains(view, "⊘ dropped") {
 		t.Fatalf("a card the goal dropped stays listed, marked dropped and out of the card count:\n%s", view)
 	}
 	// folding from a child moves the selection to the goal
@@ -179,15 +179,15 @@ func TestGoalPageRendersTheHandOver(t *testing.T) {
 		t.Fatalf("every card is tagged with the line it landed on: %v", cardAt)
 	}
 	for i, at := range cardAt {
-		if !strings.Contains(ansi.Strip(lines[at]), string(gp.report.Cards[i].ID)) {
+		if !strings.Contains(ansi.Strip(lines[at]), gp.report.Cards[i].ID.Ref()) {
 			t.Fatalf("cardAt[%d]=%d points at %q", i, at, ansi.Strip(lines[at]))
 		}
 	}
 	for _, want := range []string{
 		"ready for you", "partial: 1 card(s) dropped", "1 of 2 done-when met",
 		"DW-1 cache exists", "every card serving it was dropped",
-		"FD-011 local cache", "landed as abcdef1", "not needed",
-		"D-1 json by default", "not: table", "rename dir", "BG-020", "run export --offline", "landed FD-011",
+		"#11 local cache", "landed as abcdef1", "not needed",
+		"D-1 json by default", "not: table", "rename dir", "#20", "run export --offline", "landed #11",
 		"masks the exit code", // long evidence wraps rather than clips
 	} {
 		if !strings.Contains(out, want) {
@@ -393,7 +393,7 @@ func TestAGoalsCardIsWatchedNotSteered(t *testing.T) {
 	m := goalBoard()
 	m.sel = 3 // FD-012: implement, inside GL-010, not dropped
 	r, ok := m.selected()
-	if !ok || !r.watchOnly() || r.watchDriver() != "GL-010's lead" {
+	if !ok || !r.watchOnly() || r.watchDriver() != "its goal's lead" {
 		t.Fatalf("a conducted card names its driver: watchOnly=%v driver=%q", r.watchOnly(), r.watchDriver())
 	}
 
@@ -418,7 +418,7 @@ func TestAGoalsCardIsWatchedNotSteered(t *testing.T) {
 	if cmd := m.boardVerb("m"); cmd != nil {
 		t.Error("m on a conducted card must refuse rather than merge")
 	}
-	if !strings.Contains(m.notice.text, "GL-010's lead") || !m.notice.isErr {
+	if !strings.Contains(m.notice.text, "its goal's lead") || !m.notice.isErr {
 		t.Errorf("the refusal names the driver: %q", m.notice.text)
 	}
 
@@ -427,7 +427,7 @@ func TestAGoalsCardIsWatchedNotSteered(t *testing.T) {
 	if cmd := m.submitThreadLine(r, "try the other library"); cmd != nil {
 		t.Error("a line typed into a conducted card must not be delivered")
 	}
-	if !strings.Contains(m.notice.text, "GL-010") {
+	if !strings.Contains(m.notice.text, "“export works offline”") {
 		t.Errorf("the composer's refusal points at the goal: %q", m.notice.text)
 	}
 	if d := m.openDecision(r); d != nil {

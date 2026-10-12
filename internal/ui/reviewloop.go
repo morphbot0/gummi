@@ -401,7 +401,7 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		m.setRound(id, kind, 0)
 		if out.Reason == "critique-changes-cap" {
 			m.raiseEscalation(id, noun+" critique still requesting changes after "+itoa(maxRounds)+" rounds — review it manually")
-			m.notice = noticeMsg{text: string(id) + " " + noun + " critique escalated after " + itoa(maxRounds) + " rounds", isErr: true}
+			m.notice = noticeMsg{text: m.cardName(id) + " " + noun + " critique escalated after " + itoa(maxRounds) + " rounds", isErr: true}
 			return nil
 		}
 		// the verdict gatepolicy could not act on is not always an unclear
@@ -441,6 +441,7 @@ func (m *Shell) critiqueStep(id domain.FeatureID, stage domain.Stage, critique b
 	if stage != domain.StagePlan {
 		rework = verdict.ReworkNote
 	}
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		m.dropSession(id) // the completed session is stale
@@ -456,7 +457,7 @@ func (m *Shell) critiqueStep(id domain.FeatureID, stage domain.Stage, critique b
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: string(id) + ": " + note}
+		return noticeMsg{text: name + ": " + note}
 	}
 }
 
@@ -468,6 +469,7 @@ func (m *Shell) critiqueStep(id domain.FeatureID, stage domain.Stage, critique b
 // job is to draft it; when the run finishes, the ordinary loop resumes
 // (critique, then the judge).
 func (m *Shell) redraftUndrafted(id domain.FeatureID, names []string) tea.Cmd {
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		m.dropSession(id) // the completed critique is stale; the writer starts fresh
@@ -478,7 +480,7 @@ func (m *Shell) redraftUndrafted(id domain.FeatureID, names []string) tea.Cmd {
 		if err := m.engine.RunWith(f, redraftNote(names, id.Kind())); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: string(id) + " — re-running " + string(f.Stage) + " to draft " + strings.Join(names, ", "), clearInbox: id}
+		return noticeMsg{text: name + " — re-running " + string(f.Stage) + " to draft " + strings.Join(names, ", "), clearInbox: id}
 	}
 }
 
@@ -509,6 +511,7 @@ func redraftNote(names []string, kind domain.Kind) string {
 // written before this keep saying "review"; recorded history is not
 // rewritten to match a later correction.
 func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note, actor string) tea.Cmd {
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		m.dropSession(id) // the completed session is stale
@@ -522,7 +525,7 @@ func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note, actor strin
 		if err := m.engine.Run(nf); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: string(id) + ": " + note, reload: true}
+		return noticeMsg{text: name + ": " + note, reload: true}
 	}
 }
 
@@ -536,13 +539,14 @@ func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note, actor strin
 // actor carries the same meaning, and exists for the same reason, as
 // autoStep's above.
 func (m *Shell) autoStepStage(id domain.FeatureID, to domain.Stage, note, actor string) tea.Cmd {
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		m.dropSession(id) // the completed session is stale
 		if _, err := m.store.Transition(ctx, id, to, actor); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: string(id) + ": " + note, reload: true}
+		return noticeMsg{text: name + ": " + note, reload: true}
 	}
 }
 

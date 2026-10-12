@@ -43,7 +43,7 @@ test('a deep link opens the card it names', async ({ pairedPage: page, server },
   test.skip(info.project.name !== 'phone', 'the first screen is a phone question');
   const fresh = await coldOpen(page, `${server.url}/#${ids.gate}`);
   await expect(fresh.locator('#app')).toHaveAttribute('data-view', 'thread');
-  await expect(fresh.getByTestId('card-id')).toHaveText(ids.gate);
+  await expect(fresh.getByTestId('card-id')).toHaveAttribute('data-id', ids.gate);
   await expect(fresh.getByTestId('conversation')).toBeVisible();
   await fresh.close();
 });

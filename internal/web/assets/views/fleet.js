@@ -10,7 +10,7 @@
 // the page, waiting on you is the warning tone (hatched, so it does not
 // rely on hue), and a nominal breakdown (models) is one neutral series.
 
-import { h, append, clear, cr, dur, plural, storage, stageVar } from '../dom.js?v=__ASSET_V__'
+import { h, append, clear, cr, dur, plural, storage, stageVar, ref } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { segmented, errorBox } from './kit.js?v=__ASSET_V__'
 
@@ -232,12 +232,12 @@ registerView('fleet', {
         flags.endings.add(end)
         marks.push(h('span', { class: ['land', end.cls], style: { '--x': x(l.landedAt).toFixed(3) + '%' }, data: { tip: `${end.label}\n${when(l.landedAt)}` } }, end.glyph))
       }
-      const summary = [`${l.id} ${l.title}`, cr(l.credits), l.redo ? `${cr(l.redo)} rework` : null, l.running ? 'running' : null,
+      const summary = [`${ref(l.id)} ${l.title}`, cr(l.credits), l.redo ? `${cr(l.redo)} rework` : null, l.running ? 'running' : null,
         l.openWaitFrom ? `waiting on you since ${when(l.openWaitFrom)}` : null, l.landedAt && end ? `${end.label} ${when(l.landedAt)}` : null,
         tokenTotal(l.tokens) ? tokenText(l.tokens) : null, l.note || null].filter(Boolean).join(', ')
       return h('div', { class: ['lane', l.running && 'running'], testid: `fleet-lane-${l.id}`, tabindex: '0', role: 'group', 'aria-label': summary },
         h('div', { class: 'lab' },
-          h('button', { type: 'button', class: 'id', tabindex: '-1', title: `Open ${l.id}`, onclick: () => { ctx.close(); ctx.select(l.id) } }, l.id),
+          h('button', { type: 'button', class: 'id', tabindex: '-1', title: `Open ${ref(l.id)}`, onclick: () => { ctx.close(); ctx.select(l.id) } }, ref(l.id)),
           h('span', { class: 't', title: l.title }, l.title),
           h('span', { class: 'c', title: [tokenTotal(l.tokens) ? tokenText(l.tokens) : '', l.note || ''].filter(Boolean).join(' · ') || null }, cr(l.credits)),
           l.openWaitFrom ? h('span', { class: 'w' }, `on you since ${when(l.openWaitFrom)}`) : l.running ? h('span', { class: 'r' }, 'running') : null),

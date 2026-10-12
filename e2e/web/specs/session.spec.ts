@@ -37,8 +37,8 @@ test('a session starts from its first message, on the model picked beside Send',
   await shot(page, info, 'session-draft');
   await input.press('Enter');
 
-  await expect(page.getByTestId('card-id')).toHaveText(/^FF-/, { timeout: 20_000 });
-  const id = (await page.getByTestId('card-id').textContent())!;
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /^FF-/, { timeout: 20_000 });
+  const id = (await page.getByTestId('card-id').getAttribute('data-id'))!;
   await expect(page.getByTestId('card-title')).toHaveText('Tidy the readme.');
   // an open session has no stages at all, so it shows no badge for them
   await expect(page.getByTestId('card-stages')).toHaveCount(0);
@@ -93,7 +93,7 @@ test('a session switches its model mid-conversation, and a stage card has no pic
   const made = await api('POST', '/api/cards', { kind: 'freeform', description: 'Poke at the rounding', backend: 'headless', model: 'e2e-implementer' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   // the opening turn runs and ends before the model can change under it
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
   await expect(page.getByTestId('composer-input')).toHaveAttribute('placeholder', /Message headless/);
@@ -110,7 +110,7 @@ test('a session switches its model mid-conversation, and a stage card has no pic
 
   const feature = String((await api('POST', '/api/cards', { kind: 'feature', title: 'Configurable retries' })).json?.id);
   await page.goto(`${server.url}/#${feature}`);
-  await expect(page.getByTestId('card-id')).toHaveText(feature);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', feature);
   await expect(page.getByTestId('model-picker-btn')).toHaveCount(0);
 });
 
@@ -122,7 +122,7 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
   const made = await api('POST', '/api/cards', { kind: 'freeform', description: 'Poke at the rounding', backend: 'headless', model: 'e2e-implementer' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
   // the opening turn leaves its NOTES.md edit uncommitted, and a spec is
   // refused while the session has uncommitted work: commit it as the person
@@ -153,10 +153,10 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
   await shot(page, info, 'session-write-spec');
   await page.getByTestId('spec-start').click();
 
-  await expect(page.getByTestId('card-id')).toHaveText(/^FD-/, { timeout: 30_000 });
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /^FD-/, { timeout: 30_000 });
   await expect(page.getByTestId('card-title')).toHaveText('Sum before rounding');
   await expect(page.getByTestId('stage-plan')).toHaveAttribute('aria-current', 'step', { timeout: 30_000 });
-  const spec = (await page.getByTestId('card-id').textContent())!;
+  const spec = (await page.getByTestId('card-id').getAttribute('data-id'))!;
   const card = (await api('GET', `/api/cards/${spec}`)).json;
   expect(card.profile).toBe('e2e-alt');
   expect(card.envelope).toBe(600);
@@ -205,8 +205,8 @@ test('a draft keeps its budget honest, and its popovers keep working', async ({ 
   const input = page.getByTestId('composer-input');
   await input.fill('Count the helpers.');
   await input.press('Enter');
-  await expect(page.getByTestId('card-id')).toHaveText(/^FF-/, { timeout: 20_000 });
-  const id = (await page.getByTestId('card-id').textContent())!;
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /^FF-/, { timeout: 20_000 });
+  const id = (await page.getByTestId('card-id').getAttribute('data-id'))!;
   expect((await api('GET', `/api/cards/${id}`)).json.envelope).toBe(2000);
   await page.unroute('**/api/form*');
 

@@ -16,7 +16,7 @@ test.describe('back', () => {
     // a fresh tab opened on the board, so its history starts at the board
     const page = await pairedPage.context().newPage();
     await page.goto(`${server.url}/#${a}`);
-    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
     await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
 
     // the documents are not a step of their own: back from them is the cards
@@ -28,7 +28,7 @@ test.describe('back', () => {
     // a card opened from the cards: back returns to them
     await page.getByTestId(`rail-row-${b}`).click();
     await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
     await page.goBack();
     await expect(page.getByTestId('rail')).toBeVisible();
     // the card stays the one that was open, whatever the address bar held before
@@ -60,23 +60,23 @@ test.describe('back', () => {
     test.skip(info.project.name === 'phone', 'the desktop’s overlays');
     const page = await pairedPage.context().newPage();
     await page.goto(`${server.url}/#${a}`);
-    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
 
     // the palette closes on back, and the card is unchanged
     await page.getByTestId('btn-palette').click();
     await expect(page.getByTestId('palette')).toBeVisible();
     await page.goBack();
     await expect(page.getByTestId('palette')).toHaveCount(0);
-    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
     expect(page.url()).toContain(`#${a}`);
 
     // a card picked in the palette stays picked once the palette's own
     // entry has gone
     await page.getByTestId('btn-palette').click();
     await page.getByTestId(`palette-row-${b}`).click();
-    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
     await page.waitForTimeout(600);
-    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
     expect(page.url()).toContain(`#${b}`);
 
     // a dialog closed by its × leaves nothing behind: the next back leaves
@@ -97,21 +97,21 @@ test.describe('back', () => {
     await page.getByTestId('rail-fleet').click();
     await expect(page.getByTestId('view-fleet')).toBeVisible();
     await page.reload();
-    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
     await page.getByTestId('rail-fleet').click();
     await expect(page.getByTestId('view-fleet')).toBeVisible();
     await page.goBack();
     await expect(page.getByTestId('view-fleet')).toHaveCount(0);
-    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
   });
 
   test('a card picked in the palette does not keep the old card’s tab in the address', async ({ pairedPage: page, server }, info) => {
     test.skip(info.project.name === 'phone', 'the desktop’s palette');
     await page.goto(`${server.url}/#${a}/log`);
-    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
     await page.getByTestId('btn-palette').click();
     await page.getByTestId(`palette-row-${b}`).click();
-    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
     await page.waitForTimeout(800);
     expect(page.url()).toContain(`#${b}`);
     expect(page.url()).not.toContain('/log');
@@ -140,7 +140,7 @@ test.describe('back', () => {
     await expect(page).toHaveURL(new RegExp(`#${a}$`));
     await page.reload();
     await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'thread');
-    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
     // back from the reloaded card is the cards, at the first press
     await page.goBack();
     await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
@@ -152,7 +152,7 @@ test.describe('back', () => {
   test('a link followed while a closed layer steps back still opens its card', async ({ pairedPage: page, server }, info) => {
     test.skip(info.project.name === 'phone', 'the desktop palette is the layer');
     await page.goto(`${server.url}/#${a}`);
-    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
     await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
     await page.keyboard.press('Control+k');
     await expect(page.getByTestId('palette')).toBeVisible();
@@ -163,9 +163,9 @@ test.describe('back', () => {
       location.hash = id;
     }, b);
     await expect(page.getByTestId('palette')).toHaveCount(0);
-    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
     await page.waitForTimeout(600);
-    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
     expect(page.url()).toContain(`#${b}`);
   });
 });

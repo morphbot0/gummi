@@ -82,14 +82,14 @@ func (m *Shell) bugFromLine(r featureRow, line string) tea.Cmd {
 	title, _, _ := domain.SplitFreeform(line)
 	detail := "\na new bug card, carrying where it came from.\n\n" +
 		"  " + pad("title") + title + "\n" +
-		"  " + pad("found in") + string(f.ID) + " — " + endingWord(f.Ending(landed)) + "\n" +
+		"  " + pad("found in") + f.Name() + " — " + endingWord(f.Ending(landed)) + "\n" +
 		"  " + pad("carries") + f.ArtifactPath() + " · " + f.BranchName()
 	m.Overlay.Push(&confirmDialog{
 		card:         f.ID,
 		id:           "confirm-bug-from-card",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Open it",
-		question:     "open a bug from " + string(f.ID) + "?",
+		question:     "open a bug from " + f.Name() + "?",
 		detail:       detail,
 		onConfirm:    func() tea.Cmd { return m.mintBugFromCard(f, line, landed) },
 	})

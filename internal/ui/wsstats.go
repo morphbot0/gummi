@@ -666,12 +666,12 @@ func (m *Shell) wsLaneLines(rep *fleetrun.Report, w, budget int) ([]string, wsLe
 			}
 		}
 
-		idW := ansi.StringWidth(string(l.ID))
+		idW := ansi.StringWidth(l.ID.Ref())
 		idStyle := s.CardID
 		if l.Kind == domain.KindResearch {
 			idStyle = s.CardIDResearch
 		}
-		left := idStyle.Render(string(l.ID)) +
+		left := idStyle.Render(l.ID.Ref()) +
 			s.Faint.Render(" "+clipPlain(l.Title, max(wsLabelWidth-idW-2, 0)))
 		// The leading space is the page's left margin, the one every
 		// section title and ledger row on this page already sits behind:
@@ -1075,7 +1075,7 @@ func (m *Shell) wsTopLines(rep *fleetrun.Report, w int) []string {
 	maxCredits := rep.Top[0].Credits
 	for _, l := range rep.Top {
 		bar := wsBar(s, l.Credits, maxCredits, 8)
-		line := "  " + s.CardID.Render(string(l.ID)) + "  " + bar +
+		line := "  " + s.CardID.Render(l.ID.Ref()) + "  " + bar +
 			fmt.Sprintf(" %9s", usd(l.Credits))
 		if l.Note != "" {
 			line += "  " + s.Muted.Render(l.Note)

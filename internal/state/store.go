@@ -1678,6 +1678,39 @@ func (s *Store) GetFeature(ctx context.Context, id domain.FeatureID) (domain.Fea
 	return f, err
 }
 
+// FeatureByNum returns the feature with sequence number n, or ErrNotFound.
+// Numbers are unique across kinds, so a number alone names one card.
+func (s *Store) FeatureByNum(ctx context.Context, n int) (domain.Feature, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+featureCols+` FROM features WHERE num = ?`, n)
+	f, err := scanFeature(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return f, fmt.Errorf("#%d: %w", n, ErrNotFound)
+	}
+	return f, err
+}
+
+// ResolveFeature loads the card a person or an agent named: its canonical
+// id, an external correlation ref persisted at creation, or its number
+// ("178" or "#178") — tried in that order. The ref comes before the number
+// because a ref was the only reading of a bare number before cards were
+// typed by one: a driver that mints with --ref 42 must keep reaching its
+// own card, not card 42. It is the one reading of a typed card name; the
+// CLI and a session's card tools share it.
+func (s *Store) ResolveFeature(ctx context.Context, arg string) (domain.Feature, error) {
+	if id, err := domain.ParseFeatureID(arg); err == nil {
+		return s.GetFeature(ctx, id)
+	}
+	f, err := s.FeatureByExternalRef(ctx, arg)
+	if err == nil || !errors.Is(err, ErrNotFound) {
+		return f, err
+	}
+	if n, ok := domain.ParseRef(arg); ok {
+		return s.FeatureByNum(ctx, n)
+	}
+	return domain.Feature{}, fmt.Errorf("no card %q (not a card's number or id, and no card carries it as an external ref): %w", arg, err)
+}
+
 // FeatureByExternalRef returns the feature carrying the given external
 // reference (e.g. a GitHub issue URL), or ErrNotFound. Bug ingestion uses
 // it to skip sources already imported, so re-ingesting a repo never mints

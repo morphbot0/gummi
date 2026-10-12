@@ -79,7 +79,7 @@ func TestSweepNamesWhatItHoldsBack(t *testing.T) {
 	}
 	d := &closeOutDialog{m: m, phase: phaseSweep, sweep: &plan}
 	got := stripANSI(d.sweepView(m.styles, 80, 24))
-	for _, want := range []string{"FD-002", "340 MB", "held back", "FD-004", "kept"} {
+	for _, want := range []string{"#2", "340 MB", "held back", "#4", "kept"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sweep view is missing %q:\n%s", want, got)
 		}

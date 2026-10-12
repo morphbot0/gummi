@@ -41,7 +41,7 @@ test('list the issues, import two, and they land on the rail', async ({ pairedPa
   await expect(page.getByTestId('bugs-import')).toBeDisabled();
   await shot(page, info, 'bugs-imported');
 
-  const created = (await result.getByTestId('bugs-created').locator('li button').allTextContents()).map((t) => t.trim());
+  const created = await result.getByTestId('bugs-created').locator('li button').evaluateAll((bs) => bs.map((b) => (b as HTMLElement).dataset.testid!.replace('bugs-created-', '')));
   expect(created).toHaveLength(2);
   for (const id of created) expect(id).toMatch(/^BG-\d+$/);
   await page.getByTestId('modal-close').click();

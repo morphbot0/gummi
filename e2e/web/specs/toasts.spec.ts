@@ -11,7 +11,7 @@ test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a notice
 
 test('a notice stands top right, clear of a decision that grows', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name === 'phone', 'the phone docks a folded decision bar');
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await showTab(page, 'diff');
   await page.locator('[data-testid^="diff-line-"]').nth(3).locator('.n').click();
   await page.getByTestId('annotation-input').fill('Name it after what it does');

@@ -103,7 +103,7 @@ func TestThreadDecisionMatchesTheChatPicker(t *testing.T) {
 		t.Fatal("precondition: the ask is pending")
 	}
 	out := ansi.Strip(m.threadView(100, 30))
-	want := pickerView(m0Styles(), "FD-001 asks", ask.Question,
+	want := pickerView(m0Styles(), "“Dark mode” asks", ask.Question,
 		decisions.AskOptions(ask), 0, nil, ask.MultiPick, 100, true)
 	for _, line := range strings.Split(ansi.Strip(want), "\n") {
 		if line == "" {

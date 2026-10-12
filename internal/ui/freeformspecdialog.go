@@ -299,7 +299,7 @@ func (d *freeformSpecDialog) cycleFocus(delta int) {
 func (d *freeformSpecDialog) View(s *theme.Styles, w, h int) string {
 	width, _ := dialogDescSize(w, h, 0)
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("write a spec · "+string(d.f.ID)) + "\n\n")
+	b.WriteString(s.DialogTitle.Render("write a spec · "+d.f.Name()) + "\n\n")
 	if d.drafting {
 		// the fetch is the brief turn on a live session: the dialog says
 		// what is happening rather than opening on an empty field

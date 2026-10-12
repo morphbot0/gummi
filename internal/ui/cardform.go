@@ -859,7 +859,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	// already been created, as a warning about a stack that did not
 	// happen.
 	if c, ok := d.stackCandFor(d.stackOnto); ok && c.Repo != d.formRepo() {
-		d.errText = string(c.ID) + " is in " + stackRepoLabel(c.Repo) + " — a stack is one repository"
+		d.errText = c.ID.Ref() + " is in " + stackRepoLabel(c.Repo) + " — a stack is one repository"
 		d.setFocus(cardStopStack)
 		return false, nil
 	}
@@ -1300,7 +1300,7 @@ func (d *cardForm) runsLine(s *theme.Styles) string {
 func joinIDs(ids []domain.FeatureID) string {
 	parts := make([]string, len(ids))
 	for i, id := range ids {
-		parts[i] = string(id)
+		parts[i] = id.Ref()
 	}
 	return strings.Join(parts, ", ")
 }
@@ -1421,7 +1421,7 @@ func (d *cardForm) afterListRows(s *theme.Styles, width int) []string {
 			meta = c.Repo + " · " + meta
 		}
 		title := ansi.Truncate(c.Title, max(width-cardLabelW-len(c.ID)-len(meta)-14, 8), "…")
-		rows = append(rows, "             "+marker+style.Render(string(c.ID)+"  "+title)+"  "+s.Faint.Render(meta))
+		rows = append(rows, "             "+marker+style.Render(c.ID.Ref()+"  "+title)+"  "+s.Faint.Render(meta))
 	}
 	return rows
 }
@@ -1714,7 +1714,7 @@ func (d *cardForm) stackChoices() []string {
 	out := make([]string, 0, len(vis)+1)
 	out = append(out, "standalone")
 	for _, c := range vis {
-		out = append(out, "on "+string(c.ID))
+		out = append(out, "on "+c.ID.Ref())
 	}
 	return out
 }
@@ -1773,7 +1773,7 @@ func (d *cardForm) forkFrom() string {
 		return ""
 	}
 	if d.stackOnto != "" {
-		return string(d.stackOnto) + "'s branch"
+		return d.stackOnto.Ref() + "'s branch"
 	}
 	if d.stackInto != "" {
 		return "the top of " + string(d.stackInto)
@@ -1788,7 +1788,7 @@ func (d *cardForm) forkFrom() string {
 func (d *cardForm) stackSummary() string {
 	switch {
 	case d.stackOnto != "":
-		return "on top of " + string(d.stackOnto)
+		return "on top of " + d.stackOnto.Ref()
 	case d.stackInto != "":
 		return "into " + string(d.stackInto)
 	}

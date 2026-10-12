@@ -61,7 +61,7 @@ func TestDiscoveryThatLeavesNoChecksIsSaidOnce(t *testing.T) {
 	// a different card's first failure is still said
 	model, _ = m.Update(checksDiscoveredMsg{id: "FD-003", err: &engine.ScribeFailure{Pass: "check discovery", Model: "claude-haiku-4.5", Err: sf.Err}})
 	m = model.(*Shell)
-	if !strings.Contains(m.notice.text, "FD-003") || !strings.Contains(m.notice.text, "profiles.yaml") {
+	if !strings.Contains(m.notice.text, "#3") || !strings.Contains(m.notice.text, "profiles.yaml") {
 		t.Errorf("another card's scribe failure = %q, want it said with the fix", m.notice.text)
 	}
 }

@@ -169,6 +169,7 @@ func (m *Shell) checkSessionPick(backend, model string) string {
 // off the loop: a live backend is stopped first, its worktree left as it is.
 func (m *Shell) switchSessionModel(id domain.FeatureID, backend, model string) tea.Cmd {
 	eng := m.engine
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if err := eng.SwitchSessionModel(context.Background(), id, backend, model); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
@@ -179,7 +180,7 @@ func (m *Shell) switchSessionModel(id domain.FeatureID, backend, model string) t
 		} else {
 			label += " · " + backend
 		}
-		return sessionSwitchedMsg{id: id, text: string(id) + " now runs on " + label}
+		return sessionSwitchedMsg{id: id, text: name + " now runs on " + label}
 	}
 }
 
@@ -187,15 +188,16 @@ func (m *Shell) switchSessionModel(id domain.FeatureID, backend, model string) t
 // the loop. The rows reload so the branch's new head is what the board shows.
 func (m *Shell) commitSession(id domain.FeatureID, message string) tea.Cmd {
 	eng := m.engine
+	name := m.cardName(id)
 	return func() tea.Msg {
 		committed, err := eng.CommitFreeform(context.Background(), id, message)
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 		}
 		if !committed {
-			return noticeMsg{text: string(id) + " has nothing to commit", id: id}
+			return noticeMsg{text: name + " has nothing to commit", id: id}
 		}
-		return noticeMsg{text: string(id) + ": committed", reload: true, id: id}
+		return noticeMsg{text: name + ": committed", reload: true, id: id}
 	}
 }
 
@@ -203,11 +205,12 @@ func (m *Shell) commitSession(id domain.FeatureID, message string) tea.Cmd {
 // page's menu and strip: the same command the composer takes.
 func (m *Shell) objectiveSession(id domain.FeatureID, args string) tea.Cmd {
 	eng := m.engine
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if err := eng.ObjectiveCommand(context.Background(), id, args); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 		}
-		return noticeMsg{text: string(id) + ": objective " + objectiveVerbDone(args), id: id}
+		return noticeMsg{text: name + ": objective " + objectiveVerbDone(args), id: id}
 	}
 }
 
@@ -248,7 +251,7 @@ func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, 
 	eng, pool, actor := m.engine, m.wt, m.humanActor()
 	if f.Home {
 		return func() tea.Msg {
-			return noticeMsg{text: string(f.ID) + " is an agent: its home is no repository a feature's branch could be cut in — start the feature as a card of its own", isErr: true, id: f.ID}
+			return noticeMsg{text: f.Name() + " is an agent: its home is no repository a feature's branch could be cut in — start the feature as a card of its own", isErr: true, id: f.ID}
 		}
 	}
 	return func() tea.Msg {
@@ -260,12 +263,12 @@ func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, 
 			if diffOpen == 1 {
 				them = "it"
 			}
-			return noticeMsg{text: string(f.ID) + " has " + itoa(diffOpen) + " open diff comment" + plural(diffOpen) + " — send or resolve " + them + " before writing a spec from it", isErr: true, id: f.ID}
+			return noticeMsg{text: f.Name() + " has " + itoa(diffOpen) + " open diff comment" + plural(diffOpen) + " — send or resolve " + them + " before writing a spec from it", isErr: true, id: f.ID}
 		}
 		// a turn in flight is still writing into the worktree the next
 		// check reads, and closing the session below would cut it off
 		if ff := eng.Freeform(f.ID); ff != nil && ff.Busy() {
-			return noticeMsg{text: string(f.ID) + " is mid-turn; write the spec once this turn ends", isErr: true, id: f.ID}
+			return noticeMsg{text: f.Name() + " is mid-turn; write the spec once this turn ends", isErr: true, id: f.ID}
 		}
 		// the spec continues from the session's last commit, and nothing
 		// here commits for it: loose work would be left behind
@@ -287,11 +290,11 @@ func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, 
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
 		}
 		if res.Status != engine.StatusAdvanced {
-			return noticeMsg{text: string(f.ID) + " could not be handed off to a spec", isErr: true, id: f.ID}
+			return noticeMsg{text: f.Name() + " could not be handed off to a spec", isErr: true, id: f.ID}
 		}
 		head, err := pool.Head(ctx, &f)
 		if err != nil {
-			return noticeMsg{text: string(f.ID) + " was handed off, but its branch could not be read: " + sanitize(err.Error()), isErr: true, id: f.ID}
+			return noticeMsg{text: f.Name() + " was handed off, but its branch could not be read: " + sanitize(err.Error()), isErr: true, id: f.ID}
 		}
 		spec, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
 			Kind: domain.KindFeature, Description: specBrief(f, title, head, brief),
@@ -299,28 +302,28 @@ func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, 
 			Source: "manual",
 		})
 		if err != nil {
-			return noticeMsg{text: string(f.ID) + " was handed off, but the spec was not created: " + sanitize(err.Error()), isErr: true, id: f.ID}
+			return noticeMsg{text: f.Name() + " was handed off, but the spec was not created: " + sanitize(err.Error()), isErr: true, id: f.ID}
 		}
 		if _, err := pool.CreateFrom(ctx, &spec, head); err != nil {
 			// a spec card whose branch was not cut from the session would
 			// start its plan from the base, as if the work never happened
 			_ = m.store.DeleteFeature(ctx, spec.ID)
-			return noticeMsg{text: string(f.ID) + " was handed off, but the spec's branch could not be cut from " + f.BranchName() + ": " + sanitize(err.Error()), isErr: true, id: f.ID}
+			return noticeMsg{text: f.Name() + " was handed off, but the spec's branch could not be cut from " + f.BranchName() + ": " + sanitize(err.Error()), isErr: true, id: f.ID}
 		}
 		// the session's work now lands through the spec, so the session
 		// must not land it a second way (domain.Feature.MayLandAfterAll)
 		if err := m.store.SetContinuedAs(ctx, f.ID, spec.ID); err != nil {
-			return noticeMsg{text: string(spec.ID) + " was created, but " + string(f.ID) + " could not record it: " + sanitize(err.Error()), isErr: true, id: f.ID}
+			return noticeMsg{text: spec.ID.Ref() + " was created, but " + f.Name() + " could not record it: " + sanitize(err.Error()), isErr: true, id: f.ID}
 		}
 		// into the plan stage, where the architect is what runs: todo runs
 		// no agent, and a spec written from a session has nothing to wait
 		// for in a backlog
 		adv, err := eng.Advance(ctx, spec.ID, actor)
 		if err != nil || adv.Status != engine.StatusAdvanced {
-			eng.NoteClosedFreeform(f.ID, "Continued as the spec "+string(spec.ID)+" ("+spec.Title+").")
+			eng.NoteClosedFreeform(f.ID, "Continued as the spec "+spec.Name()+".")
 			return cardCreatedMsg{f: spec, open: true}
 		}
-		eng.NoteClosedFreeform(f.ID, "Continued as the spec "+string(adv.Feature.ID)+" ("+adv.Feature.Title+"), on its own branch "+adv.Feature.BranchName()+" cut from this one.")
+		eng.NoteClosedFreeform(f.ID, "Continued as the spec "+adv.Feature.Name()+", on its own branch "+adv.Feature.BranchName()+" cut from this one.")
 		return cardCreatedMsg{f: adv.Feature, open: true, run: true}
 	}
 }

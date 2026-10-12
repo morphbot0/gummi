@@ -37,7 +37,7 @@ await "no cards yet"
 
 # create a feature through the real form
 k n; k 'Demo feature'; k Enter
-await "FD-001"
+await "“Demo feature” created"
 [ -f "$dir/.gummi/state/gummi.db" ] || fail "state db missing"
 
 # the card's design draft lives in the workspace, not on a branch, and the
@@ -49,7 +49,7 @@ k Escape; await "Demo feature"
 git -C "$dir" worktree list | grep -q "FD-001" && fail "worktree created before any stage ran"
 
 # delete: confirm dialog -> record and draft gone
-k D; await "delete FD-001"
+k D; await "delete “Demo feature”"
 k y
 await "no cards yet"
 [ ! -f "$draft" ] || fail "draft survived delete"

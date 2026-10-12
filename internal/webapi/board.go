@@ -79,8 +79,12 @@ const (
 
 // Row is one card on the rail.
 type Row struct {
-	ID    string `json:"id"`
-	Kind  string `json:"kind"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// Type is what kind of card this is in a person's words (Feature, Bug,
+	// Research, Goal, Session, Agent): what the page says beside the title.
+	// Kind stays the machine's word — a session and an agent share one.
+	Type  string `json:"type"`
 	Title string `json:"title"`
 	// Stage is the workflow stage (domain.Stage's text).
 	Stage  string    `json:"stage"`

@@ -80,7 +80,7 @@ func (m *Shell) landingRefusal(f domain.Feature) string {
 func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *nextInput) string {
 	if f.HandedOff() {
 		if err := f.MayLandAfterAll(); err != nil {
-			return string(f.ID) + " is " + err.Error()
+			return f.Name() + " is " + err.Error()
 		}
 	}
 	if f.IsFreeform() {
@@ -89,12 +89,12 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 		}
 		if f.MainCheckout {
 			if f.Home {
-				return string(f.ID) + " is an agent — it works in its own home and has nothing to land"
+				return f.Name() + " is an agent — it works in its own home and has nothing to land"
 			}
-			return string(f.ID) + " runs in the main checkout — there is no branch to land; commit your work there yourself, then hand the card off"
+			return f.Name() + " runs in the main checkout — there is no branch to land; commit your work there yourself, then hand the card off"
 		}
 		if m.freeformTurnBusy(r) {
-			return string(f.ID) + ": a turn is in flight — stop it, or let it finish, before landing"
+			return f.Name() + ": a turn is in flight — stop it, or let it finish, before landing"
 		}
 		var held []domain.Feature
 		for _, c := range m.rows {
@@ -103,10 +103,10 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 			}
 		}
 		if open := domain.UnlandedDelegates(held); len(open) > 0 {
-			return string(f.ID) + ": " + domain.ErrUnlandedDelegates.Error() + " (" + joinIDs(open) + ") — land them with card_land first"
+			return f.Name() + ": " + domain.ErrUnlandedDelegates.Error() + " (" + joinIDs(open) + ") — land them with card_land first"
 		}
 		if n := r.OpenDiffComments; n > 0 {
-			return fmt.Sprintf("%s: %d open diff comment%s — resolve %s or send %s back before landing", f.ID, n, plural(n), them(n), them(n))
+			return fmt.Sprintf("%s: %d open diff comment%s — resolve %s or send %s back before landing", f.Name(), n, plural(n), them(n), them(n))
 		}
 		return ""
 	}
@@ -114,7 +114,7 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 	case f.HandedOff():
 		return ""
 	case f.Stage != domain.StageVerify:
-		return string(f.ID) + " is at " + string(f.Stage) + " — it lands from verify, once the branch has been verified"
+		return f.Name() + " is at " + string(f.Stage) + " — it lands from verify, once the branch has been verified"
 	case f.MayLand() == nil:
 		if ok {
 			return staleRefusal(r)
@@ -136,7 +136,7 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 			return ""
 		}
 	}
-	return string(f.ID) + " has not finished a verify pass — run verify first; a failed verify is overruled from its own answer (land anyway)"
+	return f.Name() + " has not finished a verify pass — run verify first; a failed verify is overruled from its own answer (land anyway)"
 }
 
 // staleRefusal is the landing floor's answer for a verified card whose
@@ -154,7 +154,7 @@ func staleRefusal(r featureRow) string {
 // staleSentence says why a verified card does not land on head.
 func staleSentence(f domain.Feature, head string) string {
 	if f.VerifiedRev == "" {
-		return string(f.ID) + ": verified before gummi recorded what it verified — re-verify before landing"
+		return f.Name() + ": verified before gummi recorded what it verified — re-verify before landing"
 	}
 	return fmt.Sprintf("%s: the branch moved since verify passed (verified %s, now %s) — re-verify before landing",
 		f.ID, domain.ShortRev(f.VerifiedRev), domain.ShortRev(head))
@@ -267,14 +267,14 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return mergeReadyMsg{f: f, err: err}
 		} else if landed {
-			return mergeReadyMsg{f: f, err: errors.New(string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
+			return mergeReadyMsg{f: f, err: errors.New(f.Name() + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
 		}
 		// pre-land provenance scan: warn (never block) when branch commits
 		// carry agent attribution — the squash discards their messages, but
 		// the user should know before landing, not after
 		var warn string
 		if leaks, err := m.wt.ProvenanceWarnings(ctx, &f); err == nil && len(leaks) > 0 {
-			warn = string(f.ID) + ": branch commits carry agent attribution — " + strings.Join(leaks, ", ")
+			warn = f.Name() + ": branch commits carry agent attribution — " + strings.Join(leaks, ", ")
 			if f.Offers(domain.LandMerge) {
 				// the method is chosen in the dialog this warning sits beside
 				warn += " (a squash discards those messages; a merge commit keeps them)"
@@ -309,7 +309,7 @@ func (m *Shell) landFeature(f domain.Feature, message string, method domain.Land
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if landed {
-			return noticeMsg{text: string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge, isErr: true}
+			return noticeMsg{text: f.Name() + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge, isErr: true}
 		}
 		// read again here, not only when the dialog opened: a commit made
 		// while the message was being written is work no verify has seen
@@ -330,7 +330,7 @@ func (m *Shell) landFeature(f domain.Feature, message string, method domain.Land
 					files = append(files, sanitize(f))
 				}
 				return landConflictMsg{id: f.ID, files: files, notice: noticeMsg{
-					text:  sanitize(string(f.ID) + ": " + ce.Error() + " — rebase it onto " + m.baseBranch(f) + " to resolve them, then land again"),
+					text:  sanitize(f.Name() + ": " + ce.Error() + " — rebase it onto " + m.baseBranch(f) + " to resolve them, then land again"),
 					isErr: true, id: f.ID,
 				}}
 			}
@@ -348,7 +348,7 @@ func (m *Shell) landFeature(f domain.Feature, message string, method domain.Land
 		// leaving it would badge a landed card as handed off forever.
 		if f.HandedOff() {
 			if err := m.store.ClearHandedOffAt(ctx, f.ID); err != nil {
-				return noticeMsg{text: sanitize(string(f.ID) + " " + landedAs(method, base) + ", but clearing its hand-off mark failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
+				return noticeMsg{text: sanitize(f.Name() + " " + landedAs(method, base) + ", but clearing its hand-off mark failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 		}
 		// a handed-off card is already closed (done): landing it after all
@@ -359,12 +359,12 @@ func (m *Shell) landFeature(f domain.Feature, message string, method domain.Land
 				// is still the state the inbox item was asking about, so it is
 				// cleared here too — leaving it up would keep inviting a
 				// second landing of work already landed.
-				return noticeMsg{text: sanitize(string(f.ID) + " " + landedAs(method, base) + ", but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
+				return noticeMsg{text: sanitize(f.Name() + " " + landedAs(method, base) + ", but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 			m.dropSession(f.ID)
-			return noticeMsg{text: string(f.ID) + " " + landedAs(method, base) + " → done — " + cleanUpNudge, reload: true, clearInbox: f.ID}
+			return noticeMsg{text: f.Name() + " " + landedAs(method, base) + " → done — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 		}
-		return noticeMsg{text: string(f.ID) + " " + landedAs(method, base) + " — " + cleanUpNudge, reload: true, clearInbox: f.ID}
+		return noticeMsg{text: f.Name() + " " + landedAs(method, base) + " — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 	})
 }
 
@@ -481,5 +481,5 @@ type mergeThenDoneMsg struct {
 // looseWorkRefusal is why a freeform card with uncommitted work does not
 // land yet, and the two ways to make it.
 func looseWorkRefusal(f domain.Feature) string {
-	return string(f.ID) + " has uncommitted work in its worktree — commit it with a message of your own first (the commit action, or `gummi commit " + string(f.ID) + " -m <message>`), or discard it"
+	return f.Name() + " has uncommitted work in its worktree — commit it with a message of your own first (the commit action, or `gummi commit " + string(f.ID) + " -m <message>`), or discard it"
 }

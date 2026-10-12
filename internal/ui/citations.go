@@ -216,7 +216,7 @@ func (m *Shell) applyNarration(msg narrationDoneMsg) {
 		// renderer, which runs every frame. A citation that resolves to
 		// nothing is the one failure mode the contract exists to catch,
 		// so it is reported rather than swallowed.
-		m.notice = noticeMsg{text: string(msg.id) + ": dropped a narration claim citing " +
+		m.notice = noticeMsg{text: m.cardName(msg.id) + ": dropped a narration claim citing " +
 			sanitize(msg.rejected.String()) + " — nothing on this card matches it"}
 	}
 }
@@ -383,7 +383,7 @@ func (m *Shell) openAnchor(r featureRow, a anchor) tea.Cmd {
 		return m.openSpec(r.F)
 	case "diff":
 		if !cardHasDiff(r) {
-			m.notice = noticeMsg{text: string(r.F.ID) + ": no diff — " + noDiffReason(r)}
+			m.notice = noticeMsg{text: r.F.Name() + ": no diff — " + noDiffReason(r)}
 			return nil
 		}
 		path, line, ok := cutDiffRef(a.ref)
@@ -409,7 +409,7 @@ func (m *Shell) openAnchor(r featureRow, a anchor) tea.Cmd {
 			// step earlier. Diff citations already refuse to swallow the
 			// key this way (the cardHasDiff branch above); this is that
 			// same refusal for the event kind.
-			m.notice = noticeMsg{text: string(r.F.ID) + ": nothing on this page opens at that citation"}
+			m.notice = noticeMsg{text: r.F.Name() + ": nothing on this page opens at that citation"}
 		}
 		return nil
 	}

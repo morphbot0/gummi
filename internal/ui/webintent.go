@@ -415,7 +415,7 @@ func (b *Bridge) intent(ctx context.Context, id domain.FeatureID, in webInput, w
 		if id != "" {
 			row, ok := m.rowByID(id)
 			if !ok {
-				refusal = refuse(WebNotFound, "no card "+string(id)+" on this board")
+				refusal = refuse(WebNotFound, "no card "+m.cardName(id)+" on this board")
 				return nil
 			}
 			r = row

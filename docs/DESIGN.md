@@ -1502,7 +1502,20 @@ Decided in the design interview (2026-07-03):
 1. **Worktrees are nested** under `.gummi/worktrees/` — fully
    self-contained; `gummi init` writes the needed ignore rules.
 2. **Feature IDs**: `FD-NNN` monotonic counter in `.gummi/seq`,
-   retry-on-conflict.
+   retry-on-conflict. The id is the stored key and the name of a card's
+   worktree; it is not what a person reads. Both faces name a card by
+   its title (`domain.Feature.Name` in a sentence) beside the word for
+   what it is (Feature, Bug, Research, Goal, Session, Agent —
+   `domain.Feature.TypeName`): a person knows a card by what it is about.
+   Its number alone (`#178`, `domain.FeatureID.Ref`) is the handle for
+   typing one — shown on the card's own head and in the tables that key
+   on it, not on a board row or in a notice — and every place a card is
+   typed takes the number as well as the id
+   (`state.Store.ResolveFeature`). The counter is shared across kinds, so
+   a number names one card; an external ref that is itself a number
+   (`--ref 42`) is read first, so a driver keeps reaching its own card. Text bound for a
+   forge — a commit message, a pull request — keeps the full id: there
+   `#178` is somebody else's issue.
 3. **One strict workflow, never configurable.** No workflow YAML, ever —
    and, since the merge (§3), literally one graph for every kind:
    `todo → plan → implement → verify → done`. There are no skip flags and

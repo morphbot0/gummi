@@ -84,7 +84,7 @@ func (m *Shell) attachRaw(f domain.Feature) tea.Cmd {
 	name := argv[0]
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err == nil {
-			return noticeMsg{text: fmt.Sprintf("%s: back from %s", f.ID, name), reload: true}
+			return noticeMsg{text: fmt.Sprintf("%s: back from %s", f.Name(), name), reload: true}
 		}
 		// A NON-ZERO EXIT IS NOT NECESSARILY A FAILURE. Every hosted CLI
 		// here exits non-zero when the person at the keyboard declines
@@ -100,8 +100,8 @@ func (m *Shell) attachRaw(f domain.Feature) tea.Cmd {
 		// catches that, and it IS an error.
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return noticeMsg{text: fmt.Sprintf("%s: %s exited without finishing (status %d)", f.ID, name, exit.ExitCode()), reload: true}
+			return noticeMsg{text: fmt.Sprintf("%s: %s exited without finishing (status %d)", f.Name(), name, exit.ExitCode()), reload: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: could not run %s — %s", f.ID, name, sanitize(err.Error())), isErr: true}
+		return noticeMsg{text: fmt.Sprintf("%s: could not run %s — %s", f.Name(), name, sanitize(err.Error())), isErr: true}
 	})
 }

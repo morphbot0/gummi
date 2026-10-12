@@ -53,13 +53,19 @@ func openDepsEnv() (*depsEnv, error) {
 }
 
 // resolveDepsID resolves a card named by arg to its ID. A canonical
-// work-item id (FD-NNN/BG-NNN) is used directly; anything else is looked
+// work-item id is used directly and a number ("178") names the card that
+// has it; anything else is looked
 // up by title or slug across the whole store, first match in number order
 // (mirroring ingest's deterministic first-occurrence rule — duplicates fall
 // back to the first). Errors when arg names nothing.
 func resolveDepsID(ctx context.Context, store *state.Store, arg string) (domain.FeatureID, error) {
 	if id, err := domain.ParseFeatureID(arg); err == nil {
 		return id, nil
+	}
+	if n, ok := domain.ParseRef(arg); ok {
+		if f, err := store.FeatureByNum(ctx, n); err == nil {
+			return f.ID, nil
+		}
 	}
 	feats, err := store.ListFeatures(ctx)
 	if err != nil {
@@ -70,7 +76,7 @@ func resolveDepsID(ctx context.Context, store *state.Store, arg string) (domain.
 			return f.ID, nil
 		}
 	}
-	return "", fmt.Errorf("no card %q (not an FD-NNN/BG-NNN/RS-NNN/GL-NNN id, and no card carries it as a title or slug)", arg)
+	return "", fmt.Errorf("no card %q (not a card's number or id, and no card carries it as a title or slug)", arg)
 }
 
 // runDepsAdd implements `gummi deps add <dependent> <depends-on>`: record

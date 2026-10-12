@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, test, type Workspace } from '../fixtures/test';
+import { expect, ref, test, type Workspace } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // The stacks view against a real `gummi web`: start a stack from a card,
@@ -55,7 +55,7 @@ test('a stack is started, grown, reordered, trimmed and restacked', async ({ pai
   await box.getByTestId('stack-add-submit').click();
   const shrug = box.getByTestId(`stack-member-${ids.shrug}`);
   await expect(shrug).toHaveAttribute('data-pos', '1');
-  await expect(shrug.getByTestId('member-blocker')).toContainText(`lands after ${ids.wave}`);
+  await expect(shrug.getByTestId('member-blocker')).toContainText(/lands after “.+”/);
   await box.getByTestId('stack-add').click();
   await box.getByTestId('stack-add-card').selectOption(ids.nod);
   await box.getByTestId('stack-add-submit').click();
@@ -69,7 +69,7 @@ test('a stack is started, grown, reordered, trimmed and restacked', async ({ pai
 
   // take it out again, confirmed on the page
   await box.getByTestId(`stack-remove-${ids.nod}`).click();
-  await expect(box.getByTestId('stack-remove-dialog')).toContainText(`Take ${ids.nod} out`);
+  await expect(box.getByTestId('stack-remove-dialog')).toContainText(/Take “.+” out/);
   await box.getByTestId('stack-remove-confirm').click();
   await expect(box.getByTestId(`stack-member-${ids.nod}`)).toHaveCount(0);
   await expect(shrug).toHaveAttribute('data-pos', '1');

@@ -10,7 +10,7 @@ test('a session takes /help, /cost, /compact and /clear on any agent', async ({ 
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Session commands' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   const says = page.getByTestId('composer-says');
   await expect(says).not.toContainText('stop this turn', { timeout: 30_000 });

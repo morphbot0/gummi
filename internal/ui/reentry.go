@@ -127,13 +127,13 @@ func (m *Shell) routeReentry(r featureRow, fallback, note string) tea.Cmd {
 		// "/bounce <reason>" typed at a card already reading, say — and it
 		// says so, because a verb that silently does nothing is the same
 		// complaint one stop further along.
-		m.notice = noticeMsg{text: string(r.F.ID) + ": still reading your line — esc sends it as a plain message instead"}
+		m.notice = noticeMsg{text: r.F.Name() + ": still reading your line — esc sends it as a plain message instead"}
 		return nil
 	}
 	// The composer keeps the line. The chip that may follow is a reading
 	// OF that line, shown beside it; resetting here would show a reading
 	// of nothing.
-	m.notice = noticeMsg{text: string(r.F.ID) + ": reading the card to place your line…"}
+	m.notice = noticeMsg{text: r.F.Name() + ": reading the card to place your line…"}
 	f := r.F
 	_, _, _, forward := stopForward(m.nextInputFor(r))
 	// The pass is visible for as long as it runs: in the chip's slot on
@@ -198,7 +198,7 @@ func (m *Shell) applyReentry(msg reentryClassifiedMsg) tea.Cmd {
 		if errors.Is(msg.err, engine.ErrNoScribe) {
 			why = "no agent to read the card with"
 		}
-		m.notice = noticeMsg{text: string(msg.f.ID) + ": " + why + " — sending it back the usual way"}
+		m.notice = noticeMsg{text: msg.f.Name() + ": " + why + " — sending it back the usual way"}
 		return m.fixedSendBack(r, msg.fallback, msg.note)
 	}
 	in := m.nextInputFor(r)
@@ -214,7 +214,7 @@ func (m *Shell) applyReentry(msg reentryClassifiedMsg) tea.Cmd {
 		if b := blockedGate(in); b != nil {
 			why = b.detail
 		}
-		m.notice = noticeMsg{text: string(r.F.ID) + ": can't go on yet — " + why}
+		m.notice = noticeMsg{text: r.F.Name() + ": can't go on yet — " + why}
 		return nil
 	}
 	if out.Confirm {
@@ -280,15 +280,15 @@ func (m *Shell) performReentry(r featureRow, out reentry.Outcome) tea.Cmd {
 				// the reader moved on while the form was up; putting the
 				// line into another card's composer would be worse than
 				// dropping it, so the notice carries it instead
-				m.notice = noticeMsg{text: string(id) + ": nothing created — your line was \"" + oneLineText(line) + "\""}
+				m.notice = noticeMsg{text: m.cardName(id) + ": nothing created — your line was \"" + oneLineText(line) + "\""}
 				return nil
 			}
 			m.threadInput.SetValue(line)
-			m.notice = noticeMsg{text: string(id) + ": nothing created — your line is back in the composer"}
+			m.notice = noticeMsg{text: m.cardName(id) + ": nothing created — your line is back in the composer"}
 			return nil
 		}
 		m.Overlay.Push(form)
-		m.notice = noticeMsg{text: string(r.F.ID) + ": that reads as separate work — " + string(r.F.ID) + " stays where it is"}
+		m.notice = noticeMsg{text: r.F.Name() + ": that reads as separate work — " + r.F.Name() + " stays where it is"}
 		return nil
 
 	default:
@@ -302,7 +302,7 @@ func (m *Shell) performReentry(r featureRow, out reentry.Outcome) tea.Cmd {
 		// told will read the card's silence as the bounce having
 		// happened.
 		if out.Reason == "unclassified" {
-			m.notice = noticeMsg{text: string(r.F.ID) + ": could not tell what kind of change that is — sent as a message instead, nothing moved"}
+			m.notice = noticeMsg{text: r.F.Name() + ": could not tell what kind of change that is — sent as a message instead, nothing moved"}
 		}
 		return m.sendThreadMessage(r.F, out.Note)
 	}
@@ -321,11 +321,11 @@ func (m *Shell) writeReentryEdit(f domain.Feature, out reentry.Outcome) tea.Cmd 
 		return nil
 	}
 	if m.engine == nil {
-		text := string(f.ID) + ": no engine to record this in the " + artifactNoun(f.Kind) + " — nothing sent back"
+		text := f.Name() + ": no engine to record this in the " + artifactNoun(f.Kind) + " — nothing sent back"
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true, id: f.ID} }
 	}
 	if err := m.engine.ApplyReentryEdit(f, out.Edit); err != nil {
-		text := string(f.ID) + ": " + sanitize(err.Error()) + " — nothing sent back"
+		text := f.Name() + ": " + sanitize(err.Error()) + " — nothing sent back"
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true, id: f.ID} }
 	}
 	return nil
@@ -358,6 +358,7 @@ func (m *Shell) commitRewind(f domain.Feature, out reentry.Outcome) tea.Cmd {
 	store, path, id := m.store, out.Path, f.ID
 	target, edited := out.Target, !out.Edit.Empty()
 	actor := m.humanActor()
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		for _, to := range path {
@@ -365,7 +366,7 @@ func (m *Shell) commitRewind(f domain.Feature, out reentry.Outcome) tea.Cmd {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 			}
 		}
-		text := string(id) + " sent back to " + string(target)
+		text := name + " sent back to " + string(target)
 		if edited {
 			text += " — the miss is now an open comment in the " + artifactNoun(f.Kind)
 		} else {
@@ -446,7 +447,7 @@ func (m *Shell) reentryNotice(f domain.Feature, out reentry.Outcome) {
 	if out.Edit.Empty() {
 		return
 	}
-	m.notice = noticeMsg{text: string(f.ID) + ": recorded under \"" + out.Edit.Section +
+	m.notice = noticeMsg{text: f.Name() + ": recorded under \"" + out.Edit.Section +
 		"\" in the " + artifactNoun(f.Kind) + " — re-running " + string(out.Target)}
 }
 

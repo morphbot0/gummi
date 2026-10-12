@@ -114,7 +114,7 @@ func TestBoardKeyOChangesRepo(t *testing.T) {
 	if m.rows[0].F.Repo != "b" {
 		t.Errorf("repo after o→right→enter = %q, want %q", m.rows[0].F.Repo, "b")
 	}
-	if m.notice.text != "FD-001: repo set to b" {
+	if m.notice.text != "“Dark mode”: repo set to b" {
 		t.Errorf("notice = %q, want success message", m.notice.text)
 	}
 }
@@ -129,7 +129,7 @@ func TestBoardKeyORefusedWithWorktree(t *testing.T) {
 	if m.Overlay.Top() != nil {
 		t.Fatalf("o opened %T for a worktree card; want no overlay", m.Overlay.Top())
 	}
-	if !m.notice.isErr || m.notice.text != "FD-001: repo is fixed once a worktree exists" {
+	if !m.notice.isErr || m.notice.text != "“Dark mode”: repo is fixed once a worktree exists" {
 		t.Errorf("notice = %q isErr=%v, want error about fixed repo", m.notice.text, m.notice.isErr)
 	}
 }

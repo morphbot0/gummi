@@ -280,10 +280,9 @@ func TestPRLinkSaysItIsWaitingOnGitHub(t *testing.T) {
 	if !ok {
 		t.Fatal("no selected card")
 	}
-	id := r.F.ID
 
 	probe := m.openPRLinkDialog(r.F)
-	if pill := m.ghWorkPill(); !strings.Contains(pill, string(id)+": looking for an open PR on this branch") || !m.spinnerActive() {
+	if pill := m.ghWorkPill(); !strings.Contains(pill, r.F.Name()+": looking for an open PR on this branch") || !m.spinnerActive() {
 		t.Fatalf("while the probe is out the bar says %q (spinning %v)", pill, m.spinnerActive())
 	}
 	m = update(m, probe())
@@ -292,7 +291,7 @@ func TestPRLinkSaysItIsWaitingOnGitHub(t *testing.T) {
 	}
 
 	link := m.submitPRLink(r.F, "42")
-	if pill := m.ghWorkPill(); !strings.Contains(pill, string(id)+": reading pull request 42 from GitHub") {
+	if pill := m.ghWorkPill(); !strings.Contains(pill, r.F.Name()+": reading pull request 42 from GitHub") {
 		t.Fatalf("while the link is resolved the bar says %q", pill)
 	}
 	m = update(m, link())

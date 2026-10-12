@@ -45,7 +45,7 @@ func TestCardWorkflowShapes(t *testing.T) {
 	}{
 		Answer: AnswerRequest{Ref: "gate:FD-012:plan", Option: "advance", Against: "gate:FD-012:plan#0de111d3@3f2a1bc", Confirm: "c1a2b3c4d5e6f7a8b9c0d1e2"},
 		Send: SendResponse{Route: RouteMenu, Card: Card{
-			Row: Row{ID: "FD-012", Kind: "feature", Title: "Dark mode", Stage: "verify", Status: StatusNeeds},
+			Row: Row{ID: "FD-012", Kind: "feature", Type: "Feature", Title: "Dark mode", Stage: "verify", Status: StatusNeeds},
 			Decision: &Decision{
 				Ref: "verify:FD-012:verify", Kind: DecisionVerify, Question: "verification stopped here — choose what happens next.",
 				Anchor: AnchorDiff, Against: Against{Token: "verify:FD-012:verify#1a2b3c4d@9f8e7d6", Label: "feat/dark-mode at 9f8e7d6"},
@@ -68,7 +68,7 @@ func TestCardWorkflowShapes(t *testing.T) {
 		Resume:    ResumeRequest{Cards: []string{"FD-004"}},
 		Board: Board{Repo: "gummi", Today: Today{Spent: 41.5}, Viewers: []Viewer{}, Rows: []Row{
 			{
-				ID: "FD-013", Kind: "feature", Title: "Row cache", Stage: "plan", Status: StatusRunning,
+				ID: "FD-013", Kind: "feature", Type: "Feature", Title: "Row cache", Stage: "plan", Status: StatusRunning,
 				Running: &RowRunning{Verb: "planning", Pausing: true}, Stack: &RowStack{ID: "ST-1", Name: "rows", Pos: 1, Of: 2}, Waits: []string{"FD-012"},
 			},
 		}, Resume: &ResumeOffer{Cards: []CardRef{{ID: "FD-004", Title: "Export", Stage: "implement"}}, Since: "2h ago"}},

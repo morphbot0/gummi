@@ -107,7 +107,7 @@ func TestQuitWithGateAttendedLiveSessionKeepsOriginalWording(t *testing.T) {
 	if !ok || d.id != "confirm-quit" {
 		t.Fatalf("top overlay = %v, want the confirm-quit dialog", m.Overlay.Top())
 	}
-	if d.question != "quit with live sessions FD-001 (implement)?" {
+	if d.question != "quit with live sessions “Dark mode” (implement)?" {
 		t.Errorf("question = %q, want the unchanged plain-session wording", d.question)
 	}
 	if d.confirmLabel != "Quit" || d.cancelLabel != "Stay" {

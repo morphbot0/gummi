@@ -9,7 +9,7 @@
 // tracks: writes to the repository's own git config, and nothing more.
 // The view never pushes: a branch with unpushed commits shows the line to run.
 
-import { h, clear, plural, icon, GLYPH, stageVar } from '../dom.js?v=__ASSET_V__'
+import { h, clear, plural, icon, GLYPH, stageVar, ref, cardName } from '../dom.js?v=__ASSET_V__'
 import { registerView, openMenu } from '../views.js?v=__ASSET_V__'
 import { cardPath } from '../api.js?v=__ASSET_V__'
 import { errorBox, confirmStrip, refetcher, field, choose } from './kit.js?v=__ASSET_V__'
@@ -138,7 +138,7 @@ registerView('repos', {
       draw()
       const failed = []
       for (const id of ids) {
-        try { await cleanCard(id) } catch (err) { failed.push(`${id}: ${errText(err)}`) }
+        try { await cleanCard(id) } catch (err) { failed.push(`${cardName(id)}: ${errText(err)}`) }
       }
       v.busy.delete(busyKey)
       if (failed.length) ctx.toast(failed.join(' · '), { err: true })
@@ -263,7 +263,7 @@ registerView('repos', {
         h('div', { class: 'rp-row' },
           h('div', { class: 'rp-main' },
             h('span', { class: 'rp-name mono' }, b.name),
-            c ? h('button', { class: 'link rp-card', type: 'button', testid: `branch-card-${c.id}`, title: c.title, onclick: () => { ctx.close(); ctx.select(c.id) } }, c.id) : null,
+            c ? h('button', { class: 'link rp-card', type: 'button', testid: `branch-card-${c.id}`, title: c.title, onclick: () => { ctx.close(); ctx.select(c.id) } }, ref(c.id)) : null,
             c ? h('span', { class: 'rp-t' }, c.title) : h('span', { class: 'rp-t' }, b.subject || '')),
           h('div', { class: 'rp-marks' }, marks),
           h('div', { class: 'rp-act' }, act)))

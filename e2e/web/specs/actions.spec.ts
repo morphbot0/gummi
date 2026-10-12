@@ -1,4 +1,4 @@
-import { expect, test, type GummiServer } from '../fixtures/test';
+import { expect, ref, test, type GummiServer } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import { shot } from '../fixtures/shots';
 
@@ -8,7 +8,7 @@ import { shot } from '../fixtures/shots';
 
 async function open(page: Page, server: GummiServer, id: string, phone: boolean) {
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
   if (phone) await page.getByTestId('tab-thread').click();
 }
@@ -77,7 +77,7 @@ test.describe('a backlog', () => {
     await menu(page, 'gate');
     // it loosens control: sent bare, the server asks back what autopilot
     // will do with this card, and nothing changes until that is a yes
-    await expect(page.getByTestId('action-question')).toContainText(`Hand ${id} to autopilot?`);
+    await expect(page.getByTestId('action-question')).toContainText(/Hand “.+” to autopilot\?/);
     await expect(page.getByTestId('action-question')).toContainText('never lands on');
     expect(((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeFalsy();
     await shot(page, info, 'action-autopilot');
@@ -93,7 +93,7 @@ test.describe('a backlog', () => {
     page.on('request', (r) => { if (r.url().includes('/actions/delete') && r.method() === 'POST') sent.push(r.postDataJSON() || {}); });
     await menu(page, 'delete');
     // the question is the server's own, whole: sent bare, asked back
-    await expect(page.getByTestId('action-question')).toContainText(`Delete ${id}?`);
+    await expect(page.getByTestId('action-question')).toContainText(/Delete “.+”\?/);
     await expect(page.getByTestId('action-question')).toContainText('removes worktree, branch, and record');
     expect(sent).toHaveLength(1);
     expect(sent[0].confirm).toBeUndefined();
@@ -112,7 +112,7 @@ test.describe('a backlog', () => {
     // where it was open, it is said to be gone; the page does not move
     // itself onto another card (on a phone it is this screen's own delete,
     // so the page is back on the cards already)
-    await expect(page.getByTestId('card-title')).toHaveText(`${id} · deleted`);
+    await expect(page.getByTestId('card-title')).toHaveText(`${ref(id)} · deleted`);
     await expect(page.getByTestId('card-id')).toHaveCount(0);
     await expect(page.getByTestId(`rail-row-${id}`)).toHaveCount(0);
   });
@@ -136,7 +136,7 @@ test.describe('a card in its design stage', () => {
     await page.getByTestId('action-confirm').click();
     await expect(page.getByTestId('action-dialog')).toHaveCount(0);
     // it now waits on both before it may implement
-    await expect(page.getByTestId('card-head')).toContainText(`waits on ${a}, ${b}`);
+    await expect(page.getByTestId('card-head')).toContainText(/waits on “.+”, “.+”/);
     // the picker opens with what is set ticked
     await menu(page, 'deps');
     await expect(page.getByTestId(`action-card-${a}`)).toBeChecked();

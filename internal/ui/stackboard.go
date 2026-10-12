@@ -323,16 +323,17 @@ func (m *Shell) openStackForm() tea.Cmd {
 	switch f.Kind {
 	case domain.KindResearch:
 		return func() tea.Msg {
-			return noticeMsg{text: string(f.ID) + " is a research card — it has no branch to stack on", isErr: true}
+			return noticeMsg{text: f.Name() + " is a research card — it has no branch to stack on", isErr: true}
 		}
 	case domain.KindGoal:
 		return func() tea.Msg {
-			return noticeMsg{text: string(f.ID) + " is a goal — its own cards already share one branch", isErr: true}
+			return noticeMsg{text: f.Name() + " is a goal — its own cards already share one branch", isErr: true}
 		}
 	}
 	if f.GoalID != "" {
+		goal := m.cardName(f.GoalID)
 		return func() tea.Msg {
-			return noticeMsg{text: string(f.ID) + " belongs to " + string(f.GoalID) + " — a goal's cards share its branch rather than stacking", isErr: true}
+			return noticeMsg{text: f.Name() + " belongs to " + goal + " — a goal's cards share its branch rather than stacking", isErr: true}
 		}
 	}
 	form := m.openCardForm(domain.CardType{Kind: domain.KindFeature})

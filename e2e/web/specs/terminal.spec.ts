@@ -34,7 +34,7 @@ test.describe('a board served with --terminal', () => {
     fs.writeFileSync(path.join(dir, 'marker-quokka.txt'), 'here\n');
 
     await page.goto(`${server.url}/#${id}`);
-    await expect(page.getByTestId('card-id')).toHaveText(id);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
     await showTab(page, 'terminal');
     const term = page.getByTestId('terminal');
     await expect(term).toHaveAttribute('data-state', 'open');
@@ -105,11 +105,11 @@ test.describe('a board served with --terminal', () => {
     for (let i = 0; i < 5; i++) cards.push((await sessionCard(api, `Poke around ${i}`)).id);
     for (const id of cards.slice(0, 4)) {
       await page.goto(`${server.url}/#${id}/terminal`);
-      await expect(page.getByTestId('card-id')).toHaveText(id);
+      await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
       await expect(page.getByTestId('terminal')).toHaveAttribute('data-state', 'open');
     }
     await page.goto(`${server.url}/#${cards[4]}/terminal`);
-    await expect(page.getByTestId('card-id')).toHaveText(cards[4]);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', cards[4]);
     await expect(page.getByTestId('terminal-note')).toContainText('too many terminals are open');
 
     // exiting one makes room
@@ -221,7 +221,7 @@ test('a board served without --terminal has no Terminal tab', async ({ pairedPag
   desktopOnly();
   const { id } = await sessionCard(api);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('tab-diff')).toBeVisible();
   await expect(page.getByTestId('tab-terminal')).toHaveCount(0);
 });

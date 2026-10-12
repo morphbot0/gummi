@@ -28,7 +28,7 @@ func adoptDetail(f domain.Feature, back domain.Stage) string {
 	return "\nthe card comes back to the board, with its work kept.\n\n" +
 		"  " + pad("stage") + string(back) + " — where the drop closed it\n" +
 		"  " + pad("branch") + f.BranchName() + " — kept, and moved onto main\n" +
-		"  " + pad("goal") + string(f.GoalID) + " — it stops counting toward it"
+		"  " + pad("goal") + f.GoalID.Ref() + " — it stops counting toward it"
 }
 
 // adoptBackStage is the stage the card will return to, as the confirm
@@ -50,7 +50,7 @@ type stageEdge struct{ from, to domain.Stage }
 // openAdopt raises the confirm for taking a dropped card back.
 func (m *Shell) openAdopt(r featureRow) tea.Cmd {
 	if !r.F.GoalDropped() {
-		m.notice = noticeMsg{text: string(r.F.ID) + " was not dropped — there is nothing to take back", isErr: true}
+		m.notice = noticeMsg{text: r.F.Name() + " was not dropped — there is nothing to take back", isErr: true}
 		return nil
 	}
 	edges := make([]stageEdge, 0, len(r.History))
@@ -63,7 +63,7 @@ func (m *Shell) openAdopt(r featureRow) tea.Cmd {
 		id:           "confirm-adopt",
 		cancelLabel:  "Leave it",
 		confirmLabel: "Adopt",
-		question:     "adopt " + string(f.ID) + "?",
+		question:     "adopt " + f.Name() + "?",
 		detail:       adoptDetail(f, back),
 		onConfirm:    func() tea.Cmd { return m.adoptCard(f) },
 	})
@@ -80,7 +80,7 @@ func (m *Shell) adoptCard(f domain.Feature) tea.Cmd {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{
-			text:   string(f.ID) + " adopted — back on the board at " + string(got.Stage) + ", its work kept",
+			text:   f.Name() + " adopted — back on the board at " + string(got.Stage) + ", its work kept",
 			reload: true,
 		}
 	})

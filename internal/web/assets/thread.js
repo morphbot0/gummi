@@ -10,7 +10,7 @@
 // polite live region, so a screen reader hears new items and not every
 // streamed token.
 
-import { $, h, clear, clock, dur, cr, ROLE, decisionWord, decisionColor, plural } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, clock, dur, cr, ROLE, decisionWord, decisionColor, plural, ref, cardName } from './dom.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { draftHero } from './session.js?v=__ASSET_V__'
@@ -101,7 +101,7 @@ function render () {
   if (!t) { placeholder(box, h('div', { class: 'empty', testid: 'thread-loading' }, h('span', { class: 'spinner' }))); return }
   if (!t.items.length) {
     if (t.gone) {
-      placeholder(box, h('div', { class: 'empty', testid: 'thread-gone' }, h('b', null, `${state.sel} was deleted`),
+      placeholder(box, h('div', { class: 'empty', testid: 'thread-gone' }, h('b', null, `${ref(state.sel)} was deleted`),
         state.draft.trim() ? 'What you were writing is still in the composer. Pick another card from the list.' : 'Pick another card from the list.'))
     } else if (t.unavailable) {
       placeholder(box, h('div', { class: 'empty', testid: 'thread-unavailable' }, h('b', null, 'The thread is not available yet'), 'This board’s server does not serve a card’s conversation yet. The head, the decision and the panel still work.'))
@@ -113,7 +113,7 @@ function render () {
       placeholder(box, null)
     } else {
       const r = state.card || row(state.sel)
-      placeholder(box, h('div', { class: 'empty', testid: 'thread-empty' }, h('b', null, `${state.sel} has not started`),
+      placeholder(box, h('div', { class: 'empty', testid: 'thread-empty' }, h('b', null, `${cardName(state.sel)} has not started`),
         r?.waits?.length ? `It waits on ${r.waits.join(', ')}, which has to land first.` : 'Nothing has happened on this card yet.'))
     }
     return

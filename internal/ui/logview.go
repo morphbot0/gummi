@@ -272,7 +272,7 @@ func (m *Shell) handleLogKey(key string) tea.Cmd {
 func (m *Shell) logRefused() tea.Cmd {
 	why := m.logv.log.Why
 	if why == "" {
-		why = string(m.logv.f.ID) + " has no commits to rewrite"
+		why = m.logv.f.Name() + " has no commits to rewrite"
 	}
 	m.notice = noticeMsg{text: why}
 	return nil
@@ -322,11 +322,11 @@ func (m *Shell) prepareRewrite(f domain.Feature, plan worktree.RewritePlan) tea.
 
 func (m *Shell) logPrepared(msg logPreparedMsg) tea.Cmd { //nolint:unparam // a message handler: every handler returns the follow-up command
 	if msg.err != nil {
-		m.notice = noticeMsg{text: string(msg.f.ID) + " rewrite refused: " + sanitize(msg.err.Error()), isErr: true}
+		m.notice = noticeMsg{text: msg.f.Name() + " rewrite refused: " + sanitize(msg.err.Error()), isErr: true}
 		return nil
 	}
 	if msg.preview.Noop {
-		m.notice = noticeMsg{text: string(msg.f.ID) + ": the draft leaves the branch as it is"}
+		m.notice = noticeMsg{text: msg.f.Name() + ": the draft leaves the branch as it is"}
 		return nil
 	}
 	before := len(m.logv.log.Rows)
@@ -343,7 +343,7 @@ func (m *Shell) logPrepared(msg logPreparedMsg) tea.Cmd { //nolint:unparam // a 
 	m.Overlay.Push(&confirmDialog{
 		card:         f.ID,
 		id:           "confirm-rewrite",
-		question:     "rewrite " + string(f.ID) + "'s history?",
+		question:     "rewrite " + f.Name() + "'s history?",
 		detail:       detail,
 		confirmLabel: label,
 		onConfirm:    func() tea.Cmd { return m.rewriteFeature(f, plan, pushed) },
@@ -361,11 +361,11 @@ func (m *Shell) rewriteFeature(f domain.Feature, plan worktree.RewritePlan, ackn
 		tip, push, err := env.Apply(context.Background(), f, busy, plan, acknowledgePushed)
 		switch {
 		case err != nil:
-			return logRewrittenMsg{f: f, notice: noticeMsg{text: string(f.ID) + " rewrite failed: " + sanitize(err.Error()), isErr: true}}
+			return logRewrittenMsg{f: f, notice: noticeMsg{text: f.Name() + " rewrite failed: " + sanitize(err.Error()), isErr: true}}
 		case tip == "":
-			return logRewrittenMsg{f: f, notice: noticeMsg{text: string(f.ID) + ": nothing to rewrite"}}
+			return logRewrittenMsg{f: f, notice: noticeMsg{text: f.Name() + ": nothing to rewrite"}}
 		}
-		text := string(f.ID) + " history rewritten to " + shortSHA(tip) + " — content unchanged"
+		text := f.Name() + " history rewritten to " + shortSHA(tip) + " — content unchanged"
 		if push != "" {
 			text += "\n  " + push
 		}

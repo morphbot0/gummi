@@ -10,7 +10,7 @@ test.use({ seed: { run: async (ws) => { id = await ws.seedDesignGate('Add a wave
 test('a slash command completes and runs', async ({ pairedPage: page, server, api }, info) => {
   test.setTimeout(120_000);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
 
   const input = page.getByTestId('composer-input');
@@ -66,7 +66,7 @@ test('a slash command completes and runs', async ({ pairedPage: page, server, ap
 test('a slash word naming nothing hands the line to the menu', async ({ pairedPage: page, server }, info) => {
   test.setTimeout(120_000);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
 
   const input = page.getByTestId('composer-input');
@@ -87,7 +87,7 @@ test('typing a slash command under a pinned decision raises no error', async ({ 
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) });
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('decision')).toBeVisible();
   const input = page.getByTestId('composer-input');

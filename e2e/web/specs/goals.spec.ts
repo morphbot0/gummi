@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, test } from '../fixtures/test';
+import { expect, ref, test } from '../fixtures/test';
 import { seedGoalRunning } from '../fixtures/goals';
 import { shot } from '../fixtures/shots';
 
@@ -103,7 +103,7 @@ test.describe('a running goal', () => {
     const id = (await card.getAttribute('data-testid'))!.replace('goal-card-', '');
     await card.click();
     await expect(page.getByTestId('view-goal')).toHaveCount(0);
-    await expect(page.getByTestId('card-id')).toHaveText(id);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
     await page.getByTestId('card-goal').click();
     await expect(page.getByTestId('view-goal').getByTestId('goal-id')).toHaveText(goal);
   });
@@ -156,7 +156,7 @@ test.describe('a running goal', () => {
       route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'the store is locked' }) }));
     await page.getByTestId(`goal-row-${goal}`).click();
     const err = page.getByTestId('goal-error');
-    await expect(err).toContainText(`${goal} did not load`);
+    await expect(err).toContainText(`${ref(goal)} did not load`);
     await expect(err).toContainText('the store is locked');
   });
 
@@ -165,14 +165,14 @@ test.describe('a running goal', () => {
   // yes; the page never confirms ahead of the server's question.
   test('deleting the goal shows the server’s question, cards and all', async ({ pairedPage: page, server, api }, info) => {
     await page.goto(`${server.url}/#${goal}`);
-    await expect(page.getByTestId('card-id')).toHaveText(goal);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', goal);
     if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
     const sent: any[] = [];
     page.on('request', (r) => { if (r.url().includes('/actions/delete') && r.method() === 'POST') sent.push(r.postDataJSON() || {}); });
     await page.getByTestId('card-actions').click();
     await page.getByTestId('action-delete').click();
     const q = page.getByTestId('action-question');
-    await expect(q).toContainText(`Delete ${goal}?`);
+    await expect(q).toContainText(/Delete “.+”\?/);
     await expect(q).toContainText('and the same for its 2 cards');
     expect(sent.length).toBe(1);
     expect(sent[0].confirm).toBeUndefined();
@@ -196,7 +196,7 @@ test.describe('a running goal', () => {
     expect(ask.status).toBe(202);
     const done = await api('POST', `/api/cards/${goal}/actions/delete`, { against: card.decision?.against?.token, confirm: ask.json.confirm });
     expect(done.status).toBe(200);
-    await expect(page.getByTestId('goal-gone')).toContainText(`${goal} was deleted`);
+    await expect(page.getByTestId('goal-gone')).toContainText(`${ref(goal)} was deleted`);
     await page.waitForTimeout(1500);
     expect(failed).toEqual([]);
   });

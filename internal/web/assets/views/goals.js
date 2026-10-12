@@ -5,7 +5,7 @@
 // and the goal's own verbs. Everything shown is the server's: the ledger
 // is engine.GoalReport's budget tree as it is, never recomputed here.
 
-import { h, append, clear, cr, clock, plural, GLYPH, dollarsInput, parseDollars } from '../dom.js?v=__ASSET_V__'
+import { h, append, clear, cr, clock, plural, GLYPH, dollarsInput, parseDollars, ref, cardName } from '../dom.js?v=__ASSET_V__'
 import { registerView, openView } from '../views.js?v=__ASSET_V__'
 import { markdown } from '../markdown.js?v=__ASSET_V__'
 
@@ -118,7 +118,7 @@ function goalRow (g, open) {
   return h('button', { class: ['gl-row', g.status === 'needs' && 'needs'], type: 'button', testid: `goal-row-${g.id}`, data: { state: g.state }, onclick: open },
     h('span', { class: 'gl-row-main' },
       h('span', { class: 'gl-row-top' },
-        h('span', { class: 'gl-id' }, g.id),
+        h('span', { class: 'gl-id' }, ref(g.id)),
         h('span', { class: 'gl-title' }, g.title),
         stateBadge(g.state)),
       h('span', { class: 'gl-row-meta' },
@@ -139,7 +139,7 @@ function goalForm (ctx, goals, done) {
   const profile = h('select', { id: 'goal-profile', testid: 'goal-form-profile' }, h('option', { value: '' }, 'the board’s default'))
   const after = h('select', { id: 'goal-after', testid: 'goal-form-after' },
     h('option', { value: '' }, 'nothing — a goal of its own'),
-    goals.map(g => h('option', { value: g.id }, `${g.id} · ${g.title}`)))
+    goals.map(g => h('option', { value: g.id }, `${cardName(g.id)} · ${g.title}`)))
   const refs = h('textarea', { id: 'goal-refs', testid: 'goal-form-refs', rows: 2, placeholder: 'docs/design.md\nspecs/table.md' })
   const auto = h('input', { id: 'goal-auto', testid: 'goal-form-autopilot', type: 'checkbox' })
   const err = h('div', { class: 'gl-err', testid: 'goal-form-error', role: 'alert', hidden: true })
@@ -221,7 +221,7 @@ registerView('goal', {
         render()
       } catch (err) {
         clear(body)
-        body.append(h('div', { class: 'empty err', testid: 'goal-error' }, h('b', null, `${id} did not load`), errText(err)))
+        body.append(h('div', { class: 'empty err', testid: 'goal-error' }, h('b', null, `${ref(id)} did not load`), errText(err)))
       }
     }
     const reload = debounce(load)
@@ -258,7 +258,7 @@ registerView('goal', {
       ctx.onEvent('board', reload),
       ctx.onEvent('card', (c) => {
         // the goal itself was deleted: there is nothing left to fetch
-        if (c?.id === id && c.gone) { gone = true; clear(body); body.append(h('div', { class: 'empty', testid: 'goal-gone' }, h('b', null, `${id} was deleted`))); return }
+        if (c?.id === id && c.gone) { gone = true; clear(body); body.append(h('div', { class: 'empty', testid: 'goal-gone' }, h('b', null, `${ref(id)} was deleted`))); return }
         if (!gone && (c?.id === id || cardIds.has(c?.id))) reload()
       })
     ]
@@ -290,7 +290,7 @@ function attention (g, r, ctx) {
   if (r.stage === 'plan') {
     lines.push(h('div', { class: 'gl-callout t-plan', testid: 'goal-plan' },
       h('span', null, 'The plan is agreed on the goal’s own card and approved at its gate — the goal runs itself after that.'),
-      h('button', { class: 'btn', type: 'button', testid: 'goal-plan-open', onclick: () => { ctx.select(r.id); ctx.close() } }, `Open ${r.id}`)))
+      h('button', { class: 'btn', type: 'button', testid: 'goal-plan-open', onclick: () => { ctx.select(r.id); ctx.close() } }, `Open ${cardName(r.id)}`)))
   }
   const nb = r.needs_budget || {}
   if (nb.card) lines.push(h('div', { class: 'gl-callout t-warn', testid: 'goal-needs-budget' }, h('b', null, 'Waiting on budget'), ` — ${nb.card} needs ${nb.needs ? cr(nb.needs) : '?'}. ${nb.reason || ''}`))
@@ -540,11 +540,11 @@ function cards (g, r, ctx) {
       ? h('div', { class: 'gl-cards' }, list.map(c => {
         const row = rows.get(c.id)
         const gl = cardGlyph(c.state)
-        return h('button', { class: 'gl-card', type: 'button', testid: `goal-card-${c.id}`, data: { state: c.state || '' }, title: `Open ${c.id} on the board`, onclick: () => open(c.id) },
+        return h('button', { class: 'gl-card', type: 'button', testid: `goal-card-${c.id}`, data: { state: c.state || '' }, title: `Open ${cardName(c.id)} on the board`, onclick: () => open(c.id) },
           h('span', { class: ['gl-mark', `t-${gl.cls}`], 'aria-hidden': 'true' }, gl.g),
           h('span', { class: 'gl-card-main' },
             h('span', { class: 'gl-card-top' },
-              h('span', { class: 'gl-id' }, c.id),
+              h('span', { class: 'gl-id' }, ref(c.id)),
               h('span', { class: 'gl-title' }, c.title),
               h('span', { class: `st-${c.stage}`, 'aria-hidden': 'true' }, h('span', { class: 'gl-stage' }, GLYPH[c.stage] || '·', ' ', c.stage))),
             h('span', { class: 'gl-card-meta' },

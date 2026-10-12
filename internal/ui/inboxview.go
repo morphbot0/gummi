@@ -274,6 +274,15 @@ func (m *Shell) inboxView(w, _ int) string {
 		labelW = max(labelW, ansi.StringWidth(labels[i]))
 	}
 
+	// so is the card: named by its title, cut short, since a queue row has
+	// a question to carry too.
+	nameW := 0
+	names := make([]string, len(items))
+	for i, it := range items {
+		names[i] = ansi.Truncate(m.cardTitle(it.Feature), inboxNameWidth, "…")
+		nameW = max(nameW, ansi.StringWidth(names[i]))
+	}
+
 	for i, it := range items {
 		sel := i == m.inboxSel
 		cursor := "  "
@@ -286,9 +295,9 @@ func (m *Shell) inboxView(w, _ int) string {
 		stage := m.stageOf(it.Feature)
 		label := padRight(labels[i], labelW)
 		ts := it.At.Format("15:04")
-		// The id, label and time are never truncated — only the question
+		// The label and time are never truncated — only the question
 		// gives up width when the row is tight (DESIGN's row-shape rule).
-		prefix := cursor + icon + " " + s.CardID.Render(string(it.Feature)) + "  " + s.Faint.Render(label) + "  "
+		prefix := cursor + icon + " " + s.CardID.Render(padRight(names[i], nameW)) + "  " + s.Faint.Render(label) + "  "
 		prefixW := ansi.StringWidth(prefix)
 		tsW := ansi.StringWidth(ts)
 		text := ansi.Truncate(sanitize(inboxRowText(stage, it.Text)), max(w-prefixW-tsW-1, 6), "…")
@@ -308,3 +317,6 @@ func (m *Shell) inboxView(w, _ int) string {
 	}
 	return b.String()
 }
+
+// inboxNameWidth is how much of a card's title a queue row carries.
+const inboxNameWidth = 24

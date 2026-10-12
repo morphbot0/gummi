@@ -165,16 +165,16 @@ test('the tab a person picked on a card is where its next visit opens', async ({
   await expect(page).toHaveURL(new RegExp(`#${id}/diff$`));
   await showTab(page, 'log');
   await page.getByTestId(`rail-row-${other}`).click();
-  await expect(page.getByTestId('card-id')).toHaveText(other);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', other);
   await page.getByTestId(`rail-row-${id}`).click();
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('tab-log')).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(new RegExp(`#${id}/log$`));
 });
 
 test('a new session’s draft has no documents, and Cancel goes back', async ({ pairedPage: page }) => {
   await page.goto(page.url().replace(/#.*$/, '') + `#${other}`);
-  await expect(page.getByTestId('card-id')).toHaveText(other);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', other);
   await page.getByTestId('rail-new-session').click();
   await expect(page.getByTestId('draft-hero')).toBeVisible();
   await expect(page.getByTestId('tab-diff')).toHaveCount(0);
@@ -183,5 +183,5 @@ test('a new session’s draft has no documents, and Cancel goes back', async ({ 
   await expect(page.getByTestId('surface')).toBeHidden();
   expect(new URL(page.url()).hash).toBe('');
   await page.getByTestId('draft-cancel').click();
-  await expect(page.getByTestId('card-id')).toHaveText(other);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', other);
 });

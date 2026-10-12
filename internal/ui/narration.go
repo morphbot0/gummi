@@ -249,7 +249,7 @@ func endingSentence(in nextInput) string {
 		return s + ". Its branch and worktree are gone."
 	case domain.EndingHandedOff:
 		if in.continuedAs != "" {
-			return "Continued as the spec " + string(in.continuedAs) + when + " — its work lands from there, on a verified branch; " +
+			return "Continued as the spec " + in.name(in.continuedAs) + when + " — its work lands from there, on a verified branch; " +
 				in.keptBranch() + " is kept as it was."
 		}
 		return "Handed off" + when + " — nothing landed, and " + in.keptBranch() +

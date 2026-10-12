@@ -227,7 +227,7 @@ func webPublishAct(s string) (publish.Act, bool) {
 }
 
 // publishResultText is what an act did, in one line for a notice.
-func publishResultText(id domain.FeatureID, r webapi.PublishResult) string {
+func publishResultText(name string, r webapi.PublishResult) string {
 	var parts []string
 	if r.Pushed != "" {
 		parts = append(parts, "pushed "+domain.ShortRev(r.Pushed))
@@ -249,15 +249,15 @@ func publishResultText(id domain.FeatureID, r webapi.PublishResult) string {
 	if r.ToDraft {
 		parts = append(parts, fmt.Sprintf("PR #%d returned to draft", r.Number))
 	}
-	text := string(id) + ": " + strings.Join(parts, " · ")
+	text := name + ": " + strings.Join(parts, " · ")
 	if r.LinkError != "" {
 		text += "\nwarning: " + r.LinkError
 	}
 	return text
 }
 
-func publishErrorText(id domain.FeatureID, e *webapi.PublishError) string {
-	t := string(id) + ": " + e.Text
+func publishErrorText(name string, e *webapi.PublishError) string {
+	t := name + ": " + e.Text
 	if e.Fix != "" {
 		t += " — " + e.Fix
 	}
@@ -292,7 +292,7 @@ func (m *Shell) handlePublishFacts(msg publishFactsMsg) {
 	// the confirm opens on the choice
 	unchosen := msg.facts.Error != nil && msg.facts.Error.Code == string(publish.CodeBaseUnchosen) && len(msg.facts.BaseRepos) > 1
 	if e := msg.facts.Error; e != nil && !unchosen {
-		m.notice = noticeMsg{text: sanitize(publishErrorText(msg.f.ID, e)), isErr: true}
+		m.notice = noticeMsg{text: sanitize(publishErrorText(msg.f.Name(), e)), isErr: true}
 		return
 	}
 	m.notice = noticeMsg{}
@@ -328,9 +328,9 @@ func (m *Shell) handlePublishFacts(msg publishFactsMsg) {
 			defer close(said)
 			res, err := p.run(context.Background(), req)
 			if err != nil {
-				return ghDoneMsg{id: msg.f.ID, inner: noticeMsg{text: sanitize(publishErrorText(msg.f.ID, publishErr(err))), isErr: true, reload: true}}
+				return ghDoneMsg{id: msg.f.ID, inner: noticeMsg{text: sanitize(publishErrorText(msg.f.Name(), publishErr(err))), isErr: true, reload: true}}
 			}
-			text := sanitize(publishResultText(msg.f.ID, res))
+			text := sanitize(publishResultText(msg.f.Name(), res))
 			return ghDoneMsg{id: msg.f.ID, inner: noticeMsg{text: text, web: text, reload: true}}
 		}, nextPublishStep(said))
 	})
@@ -414,7 +414,7 @@ func (m *Shell) ghWorkPill() string {
 		return fmt.Sprintf("%s GitHub · %d cards", m.spinner(), len(m.ghWork))
 	}
 	for id, text := range m.ghWork {
-		return m.spinner() + " " + string(id) + ": " + sanitize(text)
+		return m.spinner() + " " + m.cardName(id) + ": " + sanitize(text)
 	}
 	return ""
 }
@@ -527,7 +527,7 @@ func (d *publishDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 func (d *publishDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	head := map[string]string{"create": "open pull request", "push": "push to GitHub", "ready": "mark PR ready", "draft": "PR back to draft", "update": "update PR"}[d.facts.Act]
-	b.WriteString(s.DialogTitle.Render(head+" · "+string(d.f.ID)) + "\n\n")
+	b.WriteString(s.DialogTitle.Render(head+" · "+d.f.Name()) + "\n\n")
 	if d.facts.Summary != "" {
 		b.WriteString(sanitize(d.facts.Summary) + "\n")
 	}

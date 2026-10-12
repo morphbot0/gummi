@@ -5,7 +5,7 @@
 // must land first, and — after a restack — the replays it made and the
 // `git push --force-with-lease` lines they need. gummi never pushes.
 
-import { h, clear, plural, GLYPH, kindTag } from '../dom.js?v=__ASSET_V__'
+import { h, clear, plural, GLYPH, kindTag, ref, cardName } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 
 // the last restack answer per stack, so a refresh does not drop the push
@@ -143,7 +143,7 @@ function newStackForm (ctx, { done, made }) {
   const pre = cands.some(r => r.id === ctx.state.sel) ? ctx.state.sel : ''
   const card = h('select', { testid: 'stack-form-card', id: 'stack-form-card' },
     h('option', { value: '' }, cands.length ? 'Choose the bottom card…' : 'No card can start a stack'),
-    cands.map(r => h('option', { value: r.id, selected: r.id === pre }, `${r.id} · ${r.title}`)))
+    cands.map(r => h('option', { value: r.id, selected: r.id === pre }, `${r.title}`)))
   const name = h('input', { testid: 'stack-form-name', id: 'stack-form-name', placeholder: 'named after the bottom card' })
   const err = h('div', { class: 'sk-err', role: 'alert', testid: 'stack-form-error', hidden: true })
   const submit = h('button', { class: 'btn pri', type: 'submit', testid: 'stack-form-submit' }, 'Start stack')
@@ -224,10 +224,10 @@ function stackBox (st, ctx, hooks, focused) {
     const cands = stackable(ctx).filter(r => !inStack.has(r.id))
     const card = h('select', { testid: 'stack-add-card' },
       h('option', { value: '' }, cands.length ? 'Choose a card…' : 'No card can join a stack'),
-      cands.map(r => h('option', { value: r.id }, `${r.id} · ${r.title}`)))
+      cands.map(r => h('option', { value: r.id }, `${r.title}`)))
     const pos = h('select', { testid: 'stack-add-pos' },
       h('option', { value: '' }, 'on top'),
-      members.slice(0, -1).map(m => h('option', { value: String(m.pos + 1) }, `above ${m.id}`)),
+      members.slice(0, -1).map(m => h('option', { value: String(m.pos + 1) }, `above ${cardName(m.id)}`)),
       members.length ? h('option', { value: '0' }, 'at the bottom') : null)
     const f = h('form', { class: 'sk-inline', testid: 'stack-add-form' },
       h('label', { class: 'field grow' }, 'Card', card),
@@ -273,7 +273,7 @@ function stackBox (st, ctx, hooks, focused) {
 
   const move = (m, to) => write(() => ctx.api.post(`${path}/move`, { card: m.id, pos: to }))
   const remove = (m) => confirmRow(
-    [`Take ${m.id} out of the stack?`, h('span', { class: 'sk-sub' }, members.some(x => x.pos > m.pos) ? (members.filter(x => x.pos > m.pos).length === 1 ? ' The card above it is replayed onto its new base.' : ' The cards above it are replayed onto their new base.') : (members.some(x => x.pos < m.pos) ? ' Its branch and work stay; it just stops forking from the card below.' : ' Its branch and work stay; it just leaves the stack.'))],
+    [`Take ${cardName(m.id)} out of the stack?`, h('span', { class: 'sk-sub' }, members.some(x => x.pos > m.pos) ? (members.filter(x => x.pos > m.pos).length === 1 ? ' The card above it is replayed onto its new base.' : ' The cards above it are replayed onto their new base.') : (members.some(x => x.pos < m.pos) ? ' Its branch and work stay; it just stops forking from the card below.' : ' Its branch and work stay; it just leaves the stack.'))],
     'Remove', 'stack-remove',
     () => write(() => ctx.api.del(`${path}/cards/${encodeURIComponent(m.id)}`)))
   const del = () => confirmRow(`Delete the empty stack ${st.name || st.id}?`, 'Delete', 'stack-delete', () => write(() => ctx.api.del(path)))
@@ -333,20 +333,20 @@ function memberRow (m, i, members, row, act) {
   },
   h('span', { class: 'sk-node', 'aria-hidden': 'true' }, String(m.pos + 1)),
   h('div', { class: 'sk-body' },
-    h('button', { class: 'sk-open', type: 'button', testid: `stack-open-${m.id}`, title: `Open ${m.id}`, onclick: act.open },
+    h('button', { class: 'sk-open', type: 'button', testid: `stack-open-${m.id}`, title: `Open ${cardName(m.id)}`, onclick: act.open },
       h('span', { class: 'sk-glyph', 'aria-hidden': 'true' }, GLYPH[m.stage] || '·'),
-      h('span', { class: 'sk-id' }, m.id),
+      h('span', { class: 'sk-id' }, ref(m.id)),
       h('span', { class: 'sk-t' }, m.title || m.id)),
     h('div', { class: 'sk-line' },
       m.branch ? h('span', { class: 'mono sk-branch', testid: 'member-branch' }, m.branch) : null,
       h('span', { class: 'sk-stage' }, m.stage),
       below ? h('span', null, 'on ', h('span', { class: 'mono' }, below)) : null,
-      m.blocker ? h('span', { class: 'sk-blocker', testid: 'member-blocker', title: 'Its branch holds the commits of every card beneath it, so it lands after them' }, `lands after ${m.blocker}`) : null,
+      m.blocker ? h('span', { class: 'sk-blocker', testid: 'member-blocker', title: 'Its branch holds the commits of every card beneath it, so it lands after them' }, `lands after ${cardName(m.blocker)}`) : null,
       marks)),
   h('div', { class: 'sk-ctl' },
-    h('button', { class: 'iconbtn', type: 'button', testid: `stack-up-${m.id}`, disabled: !act.up, title: 'Move toward the base', 'aria-label': `Move ${m.id} toward the base`, onclick: act.up }, '↑'),
-    h('button', { class: 'iconbtn', type: 'button', testid: `stack-down-${m.id}`, disabled: !act.down, title: 'Move away from the base', 'aria-label': `Move ${m.id} away from the base`, onclick: act.down }, '↓'),
-    h('button', { class: 'iconbtn sk-rm', type: 'button', testid: `stack-remove-${m.id}`, title: 'Take out of the stack', 'aria-label': `Take ${m.id} out of the stack`, onclick: act.remove }, '×')))
+    h('button', { class: 'iconbtn', type: 'button', testid: `stack-up-${m.id}`, disabled: !act.up, title: 'Move toward the base', 'aria-label': `Move ${cardName(m.id)} toward the base`, onclick: act.up }, '↑'),
+    h('button', { class: 'iconbtn', type: 'button', testid: `stack-down-${m.id}`, disabled: !act.down, title: 'Move away from the base', 'aria-label': `Move ${cardName(m.id)} away from the base`, onclick: act.down }, '↓'),
+    h('button', { class: 'iconbtn sk-rm', type: 'button', testid: `stack-remove-${m.id}`, title: 'Take out of the stack', 'aria-label': `Take ${cardName(m.id)} out of the stack`, onclick: act.remove }, '×')))
 }
 
 // isClosed is a card whose work has left gummi: it holds its place in the chain.

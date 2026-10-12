@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, showTab, test } from '../fixtures/test';
+import { expect, ref, showTab, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // A linked pull request's checks (DESIGN §22.11) against a real `gummi web`
@@ -34,13 +34,13 @@ test('the PR tab sends a failing check and its log to the session', async ({ pai
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Checks' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   const says = page.getByTestId('composer-says');
   await expect(says).not.toContainText('stop this turn', { timeout: 30_000 });
   await ws.linkPR(id);
   await page.reload();
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
 
   await showTab(page, 'pr');
   await expect(page.getByTestId('pr-state')).toContainText('open');
@@ -59,7 +59,7 @@ test('the PR tab sends a failing check and its log to the session', async ({ pai
   // started a second time
   const answer = await ws.holdGh('run', 'view');
   await page.getByTestId('pr-checks-send').click();
-  await expect(page.getByTestId('work-toast')).toContainText(`${id}: reading the PR's failing checks and their logs`, { timeout: 15_000 });
+  await expect(page.getByTestId('work-toast')).toContainText(/“.+”: reading the PR's failing checks and their logs/, { timeout: 15_000 });
   await expect(page.getByTestId('pr-checks-send')).toBeDisabled();
   await expect(page.getByTestId('pr-pull')).toBeDisabled();
   await shot(page, info, 'pr-checks-reading');
@@ -81,7 +81,7 @@ test('a pull request with nothing failing offers no send', async ({ pairedPage: 
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Checks' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
   await ws.linkPR(id);

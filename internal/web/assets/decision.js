@@ -21,7 +21,7 @@
 // Also here: the "also needs you" chip shown after an answer, and the
 // phone's docked decision bar.
 
-import { $, h, clear, decisionWord, decisionColor, needsColor, isMobile, plural } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, decisionWord, decisionColor, needsColor, isMobile, plural, cardName } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
@@ -107,8 +107,8 @@ export function initDecision (c) {
       // nothing is highlighted until they choose again, so enter cannot
       // give an answer they never picked
       set({ picked: [], decConfirm: null, decAll: false, hi: chose || told ? -1 : 0, hiUser: false })
-      if (chose && !told) note(`${state.sel} moved while you were choosing — read it again, then answer.`, { tone: 'warn', testid: 'decision-moved' })
-      else if (wrote && !told) note(`${state.sel} moved while you were writing — read it again; your words are still here.`, { tone: 'warn', testid: 'decision-moved' })
+      if (chose && !told) note(`${cardName(state.sel)} moved while you were choosing — read it again, then answer.`, { tone: 'warn', testid: 'decision-moved' })
+      else if (wrote && !told) note(`${cardName(state.sel)} moved while you were writing — read it again; your words are still here.`, { tone: 'warn', testid: 'decision-moved' })
       // kept across the card's next moves (it may run a while before its
       // next decision), dropped with the card
       held = wrote || (held && sameCard)
@@ -243,7 +243,7 @@ function onOption (i, compact) {
   const chose = state.hi === i && state.hiUser
   set({ hi: i, hiUser: true })
   if (!chose && Date.now() - replacedAt < SETTLE_MS) {
-    note(`${state.sel} has a new decision — read it, then ${compact ? 'tap' : 'press'} “${o.label}” again.`, { tone: 'warn', testid: 'decision-fresh' })
+    note(`${cardName(state.sel)} has a new decision — read it, then ${compact ? 'tap' : 'press'} “${o.label}” again.`, { tone: 'warn', testid: 'decision-fresh' })
     return
   }
   pressed = { busy: true, done: 0 }
@@ -399,7 +399,7 @@ function nextRow () {
 function needsLine (nx) {
   const n = nx.needs || {}
   if (n.kind === 'question' && n.question) return `${n.word || 'question'}: ${n.question.replace(/^asks:\s*/i, '')}`
-  return [n.word, nx.title].filter(Boolean).join(' · ')
+  return n.word || ''
 }
 
 function nextChip (nx) {
@@ -407,7 +407,7 @@ function nextChip (nx) {
     class: 'nextup', type: 'button', testid: 'nextup',
     style: { '--dc': needsColor(nx.needs, nx.stage) },
     onclick: () => ctx.select(nx.id)
-  }, h('span', { class: 'dotc' }), h('span', { class: 'nl' }, h('b', null, nx.id), ` also needs you · ${needsLine(nx)}`),
+  }, h('span', { class: 'dotc' }), h('span', { class: 'nl' }, h('b', null, cardName(nx.id)), ` also needs you${needsLine(nx) ? ' · ' + needsLine(nx) : ''}`),
   h('span', { class: 'go' }, 'Open ', h('kbd', null, 'n')))
 }
 
@@ -511,12 +511,12 @@ export async function answer ({ picked = false } = {}) {
   if (state.conn !== 'live') { toast('Answers wait until the board reconnects'); return }
   if (held && !picked && state.draft.trim()) {
     held = false
-    note(`${state.sel} moved while you were writing — enter again sends your words as “${enterSays(d)}”.`, { tone: 'warn', testid: 'decision-moved' })
+    note(`${cardName(state.sel)} moved while you were writing — enter again sends your words as “${enterSays(d)}”.`, { tone: 'warn', testid: 'decision-moved' })
     return
   }
   held = false
   if (!picked && !state.hiUser && !state.draft.trim() && Date.now() - shownAt < SETTLE_MS) {
-    note(`${state.sel} has a new decision — read it, then press enter again.`, { tone: 'warn', testid: 'decision-fresh' })
+    note(`${cardName(state.sel)} has a new decision — read it, then press enter again.`, { tone: 'warn', testid: 'decision-fresh' })
     return
   }
   let o = chosen(d)
@@ -527,7 +527,7 @@ export async function answer ({ picked = false } = {}) {
     o = d.options[w]
   }
   if (!o) {
-    note(`Nothing is highlighted on ${state.sel}'s decision — ${isMobile() ? 'tap an answer' : 'pick one with ↑↓ or its number, then press enter'}.`, { testid: 'decision-pick' })
+    note(`Nothing is highlighted on ${cardName(state.sel)}'s decision — ${isMobile() ? 'tap an answer' : 'pick one with ↑↓ or its number, then press enter'}.`, { testid: 'decision-pick' })
     return
   }
   if (SURFACES[o.id] && !text) {
@@ -629,7 +629,7 @@ function refused (id, err, body, label, tookWords, danger) {
     case 'moved':
       landing?.close()
       unchoose(id)
-      note(`${id} moved since you read it${e.text ? ` (${e.text.replace(/^the card moved since you read it\s*[—-]\s*/, '')})` : ''}. Read it again, then answer if it still holds.`, { tone: 'warn', testid: 'decision-moved' })
+      note(`${cardName(id)} moved since you read it${e.text ? ` (${e.text.replace(/^the card moved since you read it\s*[—-]\s*/, '')})` : ''}. Read it again, then answer if it still holds.`, { tone: 'warn', testid: 'decision-moved' })
       ctx.refresh(id)
       return
     case 'confirm':
@@ -757,7 +757,7 @@ function openLanding (id, d, o, draft, question = '') {
   // to retry from)
   const dlg = { kept: false }
   const m = openModal({
-    title: `${sentence(o.label)} · ${id}`,
+    title: `${sentence(o.label)} · ${cardName(id)}`,
     testid: 'landing-dialog',
     card: id,
     // the answer that opened it is redrawn while it is up

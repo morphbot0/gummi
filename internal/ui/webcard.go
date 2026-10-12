@@ -403,13 +403,13 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 func writespecDraftable(f domain.Feature, agentWired bool) string {
 	switch {
 	case !f.IsFreeform():
-		return string(f.ID) + " is a " + string(f.Kind) + " card: it runs through its stages"
+		return f.Name() + " is a " + string(f.Kind) + " card: it runs through its stages"
 	case f.Stage != domain.StageOpen:
-		return string(f.ID) + " is closed"
+		return f.Name() + " is closed"
 	case f.Home:
-		return string(f.ID) + " is an agent: it is in no repository, so there is no branch for a spec to continue on"
+		return f.Name() + " is an agent: it is in no repository, so there is no branch for a spec to continue on"
 	case !agentWired:
-		return string(f.ID) + " cannot continue as a spec: this board has no agent to run the handoff brief's turn"
+		return f.Name() + " cannot continue as a spec: this board has no agent to run the handoff brief's turn"
 	}
 	return ""
 }
@@ -721,12 +721,12 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		// The page's picker is the field itself, so it says what the
 		// choice means rather than which dialog it opens.
 		a.Needs = webapi.ActionNeedsCards
-		a.Detail = "choose the cards " + string(r.F.ID) + " waits for — it starts implementing once each of them is done"
+		a.Detail = "choose the cards " + r.F.Name() + " waits for — it starts implementing once each of them is done"
 	case "prlink":
 		// the dialog's field: a URL or a number, or nothing, which finds
 		// the one open pull request for the card's branch
 		a.Needs = webapi.ActionNeedsText
-		a.Detail = "link " + string(r.F.ID) + " to a GitHub pull request by its URL or number — leave it empty to find the open one for " + r.F.BranchName()
+		a.Detail = "link " + r.F.Name() + " to a GitHub pull request by its URL or number — leave it empty to find the open one for " + r.F.BranchName()
 	case "repo":
 		a.Needs = webapi.ActionNeedsRepo
 		a.Default = r.F.Repo
@@ -904,9 +904,9 @@ func (m *Shell) cardSlashCompletions(r featureRow, word string) []webapi.Complet
 func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Route, string) {
 	switch c.route {
 	case lineConsult:
-		return webapi.RouteConsult, "asks " + string(r.F.ID) + "'s consult agent — " + r.watchDriver() + " is driving it, so this never steers"
+		return webapi.RouteConsult, "asks " + r.F.Name() + "'s consult agent — " + r.watchDriver() + " is driving it, so this never steers"
 	case lineConducted:
-		return webapi.RouteBlocked, fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.ID, goalDriver(r.F.GoalID), r.F.GoalID)
+		return webapi.RouteBlocked, fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.Name(), goalDriver(r.F.GoalID), m.cardName(r.F.GoalID))
 	case lineGoalNote:
 		return webapi.RouteGoalNote, "a note for the goal's lead — it reads it next turn"
 	case lineFreeformTurn:

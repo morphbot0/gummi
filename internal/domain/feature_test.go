@@ -548,3 +548,37 @@ func TestSlugVariantLeavesShortSlugsAlone(t *testing.T) {
 		t.Fatalf("SlugVariant(\"tidy\", 2) = %q, %v", got, err)
 	}
 }
+
+// A person reads and types a card by its number alone; what kind of card
+// it is is said in a word, and an agent is not called a session.
+func TestACardIsNamedByItsNumberAndItsType(t *testing.T) {
+	for id, want := range map[FeatureID]string{
+		"FD-042": "#42", "FF-178": "#178", "GL-1204": "#1204", "": "", "main": "main", "FD-000": "FD-000",
+	} {
+		if got := id.Ref(); got != want {
+			t.Errorf("%q.Ref() = %q, want %q", id, got, want)
+		}
+	}
+	for in, want := range map[string]int{"178": 178, "#178": 178, " 042 ": 42} {
+		if n, ok := ParseRef(in); !ok || n != want {
+			t.Errorf("ParseRef(%q) = %d, %v; want %d", in, n, ok, want)
+		}
+	}
+	for _, in := range []string{"", "#", "0", "-1", "FD-042", "12a", "1 2", "99999999999999999999"} {
+		if n, ok := ParseRef(in); ok {
+			t.Errorf("ParseRef(%q) = %d, want it refused", in, n)
+		}
+	}
+	for want, f := range map[string]Feature{
+		"Feature":  {},
+		"Bug":      {Kind: KindBug},
+		"Research": {Kind: KindResearch},
+		"Goal":     {Kind: KindGoal},
+		"Session":  {Kind: KindFreeform},
+		"Agent":    {Kind: KindFreeform, Home: true},
+	} {
+		if got := f.TypeName(); got != want {
+			t.Errorf("TypeName() = %q, want %q", got, want)
+		}
+	}
+}

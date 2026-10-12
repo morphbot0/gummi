@@ -157,7 +157,7 @@ func (m *Shell) watchGoalCard() tea.Cmd {
 		// the board filters cards out (the archive fold, a load that has
 		// not caught up with a card the lead minted a moment ago), and
 		// the page lists them from the goal's own report either way
-		m.notice = noticeMsg{text: string(card.ID) + " is not on the board yet — reload with r", isErr: true}
+		m.notice = noticeMsg{text: card.ID.Ref() + " is not on the board yet — reload with r", isErr: true}
 		return nil
 	}
 	goal := gp.goal
@@ -358,7 +358,7 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) ([]string, []int) {
 		if ci == gp.cursor {
 			cursor = s.SelMarker.Render("▸ ")
 		}
-		add(" " + cursor + glyph + " " + string(c.ID) + " " + clip(c.Title+s.Faint.Render(tail), 12))
+		add(" " + cursor + glyph + " " + c.ID.Ref() + " " + clip(c.Title+s.Faint.Render(tail), 12))
 		switch {
 		case c.Commit != "":
 			add("       " + s.Faint.Render(clip("landed as "+shortHash(c.Commit)+" "+c.Subject, 8)))
@@ -392,14 +392,14 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) ([]string, []int) {
 	if len(r.Declined) > 0 {
 		section("declined findings")
 		for _, d := range r.Declined {
-			wrap(string(d.Card)+" "+d.Finding, 3, plain)
+			wrap(d.Card.Ref()+" "+d.Finding, 3, plain)
 			wrap(d.Detail, 7, s.Faint.Render)
 		}
 	}
 	if len(r.Found) > 0 {
 		section("found along the way")
 		for _, d := range r.Found {
-			wrap(string(d.Card)+" "+d.Detail, 3, plain)
+			wrap(d.Card.Ref()+" "+d.Detail, 3, plain)
 		}
 	}
 	if r.TryIt != "" {
@@ -414,7 +414,7 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) ([]string, []int) {
 		for _, en := range gp.log[start:] {
 			line := en.At.Local().Format("15:04") + " " + en.Action
 			if en.Card != "" {
-				line += " " + string(en.Card)
+				line += " " + en.Card.Ref()
 			}
 			if en.N > 0 {
 				line += " " + en.DecisionRef()
@@ -446,7 +446,7 @@ func (m *Shell) openReverseDecision(f domain.Feature) tea.Cmd {
 			}
 		}
 		if len(decisions) == 0 {
-			return noticeMsg{text: string(f.ID) + " has no decisions for review"}
+			return noticeMsg{text: f.Name() + " has no decisions for review"}
 		}
 		return reverseDialogMsg{f: f, decisions: decisions, eng: eng}
 	}
@@ -493,7 +493,7 @@ func reverseGoalDecision(eng *engine.Engine, f domain.Feature, ref, why, actor s
 		if err := eng.ReverseGoalDecision(engine.WithActor(context.Background(), actor), f.ID, ref, why); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + ": " + ref + " reversed — the goal went back to its cards", reload: true, clearInbox: f.ID}
+		return noticeMsg{text: f.Name() + ": " + ref + " reversed — the goal went back to its cards", reload: true, clearInbox: f.ID}
 	}
 }
 

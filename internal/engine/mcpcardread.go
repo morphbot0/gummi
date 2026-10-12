@@ -32,22 +32,10 @@ func mcpNonce() string {
 }
 
 // resolveFeature resolves a card tool's "id" argument to a stored feature:
-// an FD-/BG-/RS- id first, falling back to an external ref match. Mirrors
-// cmd/gummi/read.go's resolveFeatureID, which this package cannot import
-// (cmd/gummi is package main; internal/driver, which could otherwise share
-// it, already imports internal/engine, so the reverse import would cycle) —
-// replicated here rather than factored out because it is six lines wrapping
-// two Store methods, not a design worth a new shared package for.
+// a number, a canonical id or an external ref, as the store reads a typed
+// card name (ResolveFeature) — the reading cmd/gummi's verbs use too.
 func (e *Engine) resolveFeature(ctx context.Context, idOrRef string) (domain.Feature, error) {
-	store := e.cfg.Store
-	if id, err := domain.ParseFeatureID(idOrRef); err == nil {
-		return store.GetFeature(ctx, id)
-	}
-	f, err := store.FeatureByExternalRef(ctx, idOrRef)
-	if err != nil {
-		return domain.Feature{}, fmt.Errorf("no card %q (not an FD-NNN/BG-NNN/RS-NNN id, and no card carries it as an external ref): %w", idOrRef, err)
-	}
-	return f, nil
+	return e.cfg.Store.ResolveFeature(ctx, idOrRef)
 }
 
 // workspaceBranchState collapses the worktree pool's branch queries into

@@ -32,7 +32,7 @@ async function audit(page: Page, where: string, found: string[]) {
 
 async function open(page: Page, id: string, tab?: string) {
   await page.evaluate(([i, t]) => { location.hash = t ? `${i}/${t}` : i; }, [id, tab ?? '']);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('thread-loading')).toHaveCount(0);
   await expect(page.getByTestId('panel-loading')).toHaveCount(0);
 }

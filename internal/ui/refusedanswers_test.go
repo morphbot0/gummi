@@ -44,8 +44,8 @@ func TestAStackedCardWaitsForTheCardBelowIt(t *testing.T) {
 		stackBlocker: "FD-012",
 	}
 	acts := stageActions(in)
-	if len(acts) == 0 || acts[0].id != "wait" || !strings.Contains(acts[0].label, "lands after FD-012") {
-		t.Fatalf("answers = %v, want a lead row saying it lands after FD-012", answerIDs(acts))
+	if len(acts) == 0 || acts[0].id != "wait" || !strings.Contains(acts[0].label, "lands after #12") {
+		t.Fatalf("answers = %v, want a lead row saying it lands after #12", answerIDs(acts))
 	}
 	for _, a := range acts {
 		if a.id == "advance" {

@@ -36,7 +36,7 @@ func TestWeekGroupsByEndingNotByCount(t *testing.T) {
 		"branches kept, nothing merged",
 		"6 rounds across 4 cards",
 		"still in flight",
-		"costliest", "FD-107",
+		"costliest", "#107",
 		"9f2c1ab4d5e6",
 	} {
 		if !strings.Contains(got, want) {
