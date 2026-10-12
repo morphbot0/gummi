@@ -25,6 +25,10 @@ const GROUP_HINT = {
   held: 'adopted by a card — gummi adds commits and never deletes one',
   unowned: 'no card on this board holds these'
 }
+// CLEAN_ALL_KEY is "Clean up all"'s own busy/ask key, distinct from any
+// repo's (a repo's key is its name, "" for the default) so cleaning
+// across every repository never collides with cleaning one.
+const CLEAN_ALL_KEY = '*clean-all*'
 
 function debounce (fn, ms = 250) {
   let t = 0
@@ -83,9 +87,12 @@ registerView('repos', {
     const count = h('span', { class: 'rp-count', testid: 'repos-count' })
     const rescan = h('button', { class: 'btn', type: 'button', testid: 'repos-rescan', title: 'Read the repositories and their branches again', onclick: () => load() }, 'Rescan')
     const fetchAll = h('button', { class: 'btn', type: 'button', testid: 'repos-fetch-all', onclick: () => write('*', 'fetching…', '/api/repos/fetch', { all: true }) }, 'Fetch all')
+    const cleanAllBtn = h('button', { class: 'btn', type: 'button', testid: 'repos-clean-all', onclick: () => ask({ kind: 'clean-all', ids: allCleanable() }) }, 'Clean up all')
+    const topAsk = h('div', { class: 'rp-top-ask' })
     body.append(
-      h('div', { class: 'rp-bar' }, count, rescan, fetchAll),
+      h('div', { class: 'rp-bar' }, count, rescan, fetchAll, cleanAllBtn),
       h('p', { class: 'rp-lede' }, 'Fetch reads the remotes; fast-forward moves a base up to what was fetched. Remotes, and the remote branch a local one tracks, are edited in the repository’s own git config. Nothing here pushes — a branch with unpushed commits shows the line to run.'),
+      topAsk,
       list)
 
     const load = refetcher(async () => {
@@ -132,8 +139,7 @@ registerView('repos', {
       }
     }
 
-    async function clean (repo, ids) {
-      const busyKey = key(repo)
+    async function cleanIDs (busyKey, ids) {
       v.busy.set(busyKey, 'cleaning up…')
       draw()
       const failed = []
@@ -144,6 +150,19 @@ registerView('repos', {
       if (failed.length) ctx.toast(failed.join(' · '), { err: true })
       else ctx.toast(`cleaned up ${ids.join(', ')}`)
       await load()
+    }
+
+    const clean = (repo, ids) => cleanIDs(key(repo), ids)
+
+    // allCleanable is every landed card's id across every repository, so
+    // "Clean up all" needs no repo picked and matches what each repo's own
+    // button would have done one at a time.
+    function allCleanable () {
+      const ids = new Set()
+      for (const repo of v.data?.repos || []) {
+        for (const b of repo.branches || []) if (b.card?.clean) ids.add(b.card.id)
+      }
+      return [...ids]
     }
 
     const ask = (a) => { v.ask = a; draw() }
@@ -160,6 +179,21 @@ registerView('repos', {
       fetchAll.disabled = v.busy.has('*') || !repos.some(r => r.remote)
       fetchAll.textContent = v.busy.has('*') ? 'Fetching…' : 'Fetch all'
       fetchAll.hidden = repos.length < 2
+      const cleanable = allCleanable()
+      cleanAllBtn.disabled = v.busy.has(CLEAN_ALL_KEY) || !cleanable.length
+      cleanAllBtn.textContent = v.busy.has(CLEAN_ALL_KEY) ? 'Cleaning up…' : `Clean up all (${cleanable.length})`
+      cleanAllBtn.hidden = repos.length < 2 || !cleanable.length
+      clear(topAsk)
+      if (v.ask?.kind === 'clean-all') {
+        topAsk.append(confirmStrip({
+          question: `Clean up ${plural(v.ask.ids.length, 'landed card')} across every repository?`,
+          detail: `Removes each one’s worktree and branch. Their work is on its base; the cards stay on the board.`,
+          yes: 'Clean up',
+          testid: 'repos-clean-all-confirm',
+          onYes: async () => { const ids = v.ask.ids; v.ask = null; await cleanIDs(CLEAN_ALL_KEY, ids) },
+          onNo: unask
+        }))
+      }
       // which repositories a person folded, kept across the redraw
       const folded = new Set([...list.querySelectorAll('details.rp-box:not([open])')].map(d => d.dataset.repo))
       clear(list)

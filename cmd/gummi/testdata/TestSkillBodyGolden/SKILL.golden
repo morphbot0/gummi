@@ -99,6 +99,7 @@ gummi rewrite <id|ref> --plan <file|->
 gummi handoff <id|ref>
 
 gummi clean <id|ref>
+    --all  clean every landed card in the workspace in one pass, instead of naming one
 
 gummi status <id|ref>
     --json   emit machine-readable JSON instead of the text summary

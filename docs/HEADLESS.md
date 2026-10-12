@@ -68,7 +68,7 @@ carry the full id. Two flags still want the id itself: `goal --after` and
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
 | `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch |
 | `gummi handoff <id\|ref>` | close a verified card and keep its branch — nothing lands (a goal not yet ready is abandoned) |
-| `gummi clean <id\|ref>` | remove a landed card's worktree and branch (a goal: its cards' come out with it; an adopted card keeps its branch) |
+| `gummi clean <id\|ref>` \| `gummi clean --all` | remove a landed card's worktree and branch (a goal: its cards' come out with it; an adopted card keeps its branch); `--all` does this for every landed card in one pass instead of naming one |
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link a card to a PR you opened, or read its status and review comments |
 | `gummi push <id>`, `gummi pr create\|update\|ready\|draft <id> [flags]` | a person publishes a card: push its branch, open or update its PR, mark it ready or draft. Prints the facts and commands and asks at the terminal; without one, `--yes=<fingerprint>` of facts already printed. Refused inside a gummi-spawned session (DESIGN §22) |
 | `gummi deps add\|rm <dependent> <depends-on>`, `gummi deps list <id>` | dependency edges between cards |
@@ -272,6 +272,13 @@ and branch and keeps the card as a done entry. It refuses anything that
 has not actually landed — including a handed-off card, where cleaning up
 would delete the branch that was kept on purpose — or that carries
 tracked-dirty rework.
+
+`clean --all` is the headless counterpart of the TUI's close-out sweep
+(`C`): one pass that cleans every done card that has landed, is clean, and
+was not handed off, instead of naming them one at a time. A goal's own
+cards are left to the goal's own clean. It streams the same `cleaned`
+event per card the single-id form does, and exits non-zero only if a card
+it attempted failed.
 
 `status --json` carries these terminal signals separately, and a poller
 must not conflate them:

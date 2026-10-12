@@ -205,6 +205,75 @@ func TestCleanCommandRemovesLanded(t *testing.T) {
 	}
 }
 
+// `clean --all` cleans every landed card in one pass and leaves everything
+// else alone: a second, still-verified card that never landed keeps its
+// worktree and branch untouched.
+func TestCleanAllCleansOnlyLandedCards(t *testing.T) {
+	store, f1 := verifiedCLIRepo(t)
+	if err := runCLI("merge", string(f1.ID), "-m", "feat(export): land headlessly"); err != nil {
+		t.Fatalf("runMerge: %v", err)
+	}
+
+	wt, err := worktree.NewManager(context.Background(), ".", ".", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	id2, _ := domain.NewFeatureID(10)
+	slug2, _ := domain.Slugify("CSV export")
+	f2 := domain.Feature{
+		ID: id2, Num: 10, Kind: domain.KindFeature, Title: "CSV export", Slug: slug2,
+		Stage: domain.StageVerify, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateFeature(context.Background(), &f2); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := wt.Create(context.Background(), &f2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p2, "csv.txt"), []byte("work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, p2, "add", ".")
+	cliGit(t, p2, "commit", "-q", "-m", "csv work")
+	if err := store.SetVerifiedAt(context.Background(), id2, now, cliGit(t, p2, "rev-parse", "HEAD")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("clean", "--all"); err != nil {
+		t.Fatalf("runClean --all: %v", err)
+	}
+
+	if ex, _ := wt.Exists(context.Background(), &f1); ex {
+		t.Error("landed card's worktree still present after clean --all")
+	}
+	if ok, _ := wt.BranchExists(context.Background(), &f1); ok {
+		t.Error("landed card's branch still present after clean --all")
+	}
+	if ex, _ := wt.Exists(context.Background(), &f2); !ex {
+		t.Error("unlanded card's worktree removed by clean --all")
+	}
+	if ok, _ := wt.BranchExists(context.Background(), &f2); !ok {
+		t.Error("unlanded card's branch removed by clean --all")
+	}
+	got2, err := store.GetFeature(context.Background(), id2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2.Stage != domain.StageVerify {
+		t.Fatalf("unlanded card's stage = %s, want verify", got2.Stage)
+	}
+}
+
+// `clean --all` takes no id: naming one alongside the flag is a usage
+// error, not a silent ignore.
+func TestCleanAllRefusesAnID(t *testing.T) {
+	if err := runCLI("clean", "FD-009", "--all"); err == nil {
+		t.Fatal("clean --all with an id accepted")
+	}
+}
+
 // `--no-squash` lands the verified branch as a merge commit whose second
 // parent is the branch tip; without it the landing is one squash commit.
 func TestMergeNoSquashFlag(t *testing.T) {

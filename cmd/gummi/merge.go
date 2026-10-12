@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -51,11 +52,21 @@ func runMerge(fl cliFlags, args []string) error {
 	})
 }
 
-// runClean implements `gummi clean <id|ref>`: the headless cleanup verb. It
-// removes a landed card's worktree and branch (keeping the card record),
-// streaming a `cleaned` NDJSON event and exiting 0 on success. It refuses
-// anything that has not actually landed, or that carries tracked-dirty rework.
-func runClean(args []string) error {
+// runClean implements `gummi clean <id|ref>` and `gummi clean --all`: the
+// headless cleanup verb. A single id removes that landed card's worktree
+// and branch (keeping the card record), streaming a `cleaned` NDJSON event
+// and exiting 0 on success; it refuses anything that has not actually
+// landed, or that carries tracked-dirty rework. --all is the headless
+// counterpart of the TUI's close-out sweep: every done card already
+// landed, clean, not handed off and not a goal's own is cleaned the same
+// way, one `cleaned` (or `error`) event per card, in one pass.
+func runClean(fl cliFlags, args []string) error {
+	if fl.Bool("all") {
+		if len(args) > 0 {
+			return fmt.Errorf("clean --all takes no id")
+		}
+		return runCleanAll()
+	}
 	idArg, err := oneID("clean", args)
 	if err != nil {
 		return err
@@ -73,6 +84,67 @@ func runClean(args []string) error {
 		state.ReapOrphanAgent(ws, f.ID)
 		return d.Clean(ctx, f.ID)
 	})
+}
+
+// runCleanAll implements `gummi clean --all`. It walks every card in the
+// workspace and, for each one that could only succeed — done, landed,
+// clean, not handed off, not a goal or a goal's own card (a goal's clean
+// sweeps its cards itself) — cleans it under its own per-card lock exactly
+// as a single `gummi clean <id>` would. Anything else is left alone rather
+// than reported as a refusal: the set this selects is, barring a race,
+// exactly the set that succeeds, so there is nothing to hold back and
+// explain. A card that still fails (a race, a locked card someone else is
+// driving) is skipped and counted, and the run exits non-zero if any did.
+func runCleanAll() error {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
+		feats, err := store.ListFeatures(ctx)
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		var cleaned, failed int
+		for _, f := range feats {
+			if !cleanAllEligible(ctx, pool, &f) {
+				continue
+			}
+			release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+			if err != nil {
+				failed++
+				continue
+			}
+			state.ReapOrphanAgent(ws, f.ID)
+			out, _ := d.Clean(ctx, f.ID)
+			release()
+			if out.Status == driver.StatusVerified {
+				cleaned++
+			} else {
+				failed++
+			}
+		}
+		if failed > 0 {
+			return driver.Outcome{Status: driver.StatusError}, fmt.Errorf("clean --all: cleaned %d, failed %d", cleaned, failed)
+		}
+		return driver.Outcome{Status: driver.StatusVerified}, nil
+	})
+}
+
+// cleanAllEligible is the set gummi clean --all acts on: a done card whose
+// branch has landed, carries no tracked-dirty rework, was not handed off
+// (its branch was kept on purpose) and is not a goal or one of a goal's own
+// cards (CleanGoalCards is the goal's own sweep, run from the goal's own
+// clean). Every check d.Clean repeats on the card it is actually given;
+// this is what picks which cards are worth giving it.
+func cleanAllEligible(ctx context.Context, pool *worktree.Pool, f *domain.Feature) bool {
+	if f.Stage != domain.StageDone || f.IsGoal() || f.InGoal() || f.HandedOff() {
+		return false
+	}
+	if ok, err := pool.Exists(ctx, f); err != nil || !ok {
+		return false
+	}
+	if landed, err := pool.Landed(ctx, f); err != nil || !landed {
+		return false
+	}
+	dirty, err := pool.TrackedDirty(ctx, f)
+	return err == nil && !dirty
 }
 
 // runHandOff implements `gummi handoff <id|ref>`: the headless counterpart of

@@ -95,11 +95,13 @@ var handoffCmd = &cobra.Command{
 	RunE:  func(_ *cobra.Command, args []string) error { return runHandOff(args) },
 }
 
-// cleanCmd implements `gummi clean <id|ref>`.
+// cleanCmd implements `gummi clean <id|ref>` and `gummi clean --all`.
 var cleanCmd = &cobra.Command{
-	Use:   "clean <id|ref>",
-	Short: "Remove a landed card's worktree and branch",
-	RunE:  func(_ *cobra.Command, args []string) error { return runClean(args) },
+	Use:   "clean <id|ref> | --all",
+	Short: "Remove a landed card's worktree and branch, or every one at once",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runClean(cmdFlags(cmd), args)
+	},
 }
 
 // commitCmd implements `gummi commit <id|ref> -m <message|->`.
@@ -489,6 +491,7 @@ func init() {
 	bindMergeFlags(mergeCmd.Flags())
 	bindSquashFlags(squashCmd.Flags())
 	bindCommitFlags(commitCmd.Flags())
+	bindCleanFlags(cleanCmd.Flags())
 	jsonFlag(logCmd.Flags(), "emit the commits as JSON (the shape the board's web page reads)")
 	bindRewriteFlags(rewriteCmd.Flags())
 	bindStatusFlags(statusCmd.Flags())
@@ -606,6 +609,10 @@ func bindResumeFlags(fs *pflag.FlagSet) {
 // out of the core SKILL.md — an agent shipping one card cannot use any of
 // them — and print them in the goals reference instead.
 var goalResumeFlagNames = []string{"goal-note", "reverse", "wrap-up", "runs", "minutes", "retake"}
+
+func bindCleanFlags(fs *pflag.FlagSet) {
+	fs.Bool("all", false, "clean every landed card in the workspace in one pass, instead of naming one")
+}
 
 func bindMergeFlags(fs *pflag.FlagSet) {
 	fs.StringP("message", "m", "", "landing commit message (required for a squash; - reads from stdin)")
