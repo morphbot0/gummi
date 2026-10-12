@@ -88,8 +88,8 @@ func runClean(fl cliFlags, args []string) error {
 
 // runCleanAll implements `gummi clean --all`. It walks every card in the
 // workspace and, for each one that could only succeed — done, landed,
-// clean, not handed off, not a goal or a goal's own card (a goal's clean
-// sweeps its cards itself) — cleans it under its own per-card lock exactly
+// clean, not a goal or a goal's own card (a goal's clean sweeps its cards
+// itself) — cleans it under its own per-card lock exactly
 // as a single `gummi clean <id>` would. Anything else is left alone rather
 // than reported as a refusal: the set this selects is, barring a race,
 // exactly the set that succeeds, so there is nothing to hold back and
@@ -128,13 +128,16 @@ func runCleanAll() error {
 }
 
 // cleanAllEligible is the set gummi clean --all acts on: a done card whose
-// branch has landed, carries no tracked-dirty rework, was not handed off
-// (its branch was kept on purpose) and is not a goal or one of a goal's own
-// cards (CleanGoalCards is the goal's own sweep, run from the goal's own
-// clean). Every check d.Clean repeats on the card it is actually given;
-// this is what picks which cards are worth giving it.
+// branch has landed, carries no tracked-dirty rework and is not a goal or
+// one of a goal's own cards (CleanGoalCards is the goal's own sweep, run
+// from the goal's own clean). A handed-off card is held only until its
+// branch lands: one whose PR merged and reached the base is the same
+// landed branch as any other, and holding it would leave every card
+// published through a PR standing for good. Every check d.Clean repeats
+// on the card it is actually given; this is what picks which cards are
+// worth giving it.
 func cleanAllEligible(ctx context.Context, pool *worktree.Pool, f *domain.Feature) bool {
-	if f.Stage != domain.StageDone || f.IsGoal() || f.InGoal() || f.HandedOff() {
+	if f.Stage != domain.StageDone || f.IsGoal() || f.InGoal() {
 		return false
 	}
 	if ok, err := pool.Exists(ctx, f); err != nil || !ok {

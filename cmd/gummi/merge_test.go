@@ -266,6 +266,38 @@ func TestCleanAllCleansOnlyLandedCards(t *testing.T) {
 	}
 }
 
+// A handed-off card is held only while its branch is still the one copy
+// of its work: once the branch reached the base by a route gummi did not
+// run (a PR merged on GitHub and pulled down), `clean --all` takes it.
+func TestCleanAllTakesAHandedOffCardOnceItLanded(t *testing.T) {
+	store, f := verifiedCLIRepo(t)
+	if err := runCLI("handoff", string(f.ID)); err != nil {
+		t.Fatalf("runHandOff: %v", err)
+	}
+	wt, err := worktree.NewManager(context.Background(), ".", ".", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("clean", "--all"); err != nil {
+		t.Fatalf("runClean --all: %v", err)
+	}
+	if ok, _ := wt.BranchExists(context.Background(), &f); !ok {
+		t.Fatal("handed-off, unlanded card's branch removed by clean --all")
+	}
+
+	cliGit(t, ".", "merge", "-q", "--no-ff", "-m", "Merge pull request", f.BranchName())
+	if err := runCLI("clean", "--all"); err != nil {
+		t.Fatalf("runClean --all after the merge: %v", err)
+	}
+	if ex, _ := wt.Exists(context.Background(), &f); ex {
+		t.Error("handed-off card's worktree still present after its branch landed")
+	}
+	if ok, _ := wt.BranchExists(context.Background(), &f); ok {
+		t.Error("handed-off card's branch still present after its branch landed")
+	}
+}
+
 // `clean --all` takes no id: naming one alongside the flag is a usage
 // error, not a silent ignore.
 func TestCleanAllRefusesAnID(t *testing.T) {

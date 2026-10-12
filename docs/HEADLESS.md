@@ -274,8 +274,10 @@ would delete the branch that was kept on purpose — or that carries
 tracked-dirty rework.
 
 `clean --all` is the headless counterpart of the TUI's close-out sweep
-(`C`): one pass that cleans every done card that has landed, is clean, and
-was not handed off, instead of naming them one at a time. A goal's own
+(`C`): one pass that cleans every done card that has landed and is clean,
+instead of naming them one at a time. A handed-off card is left alone
+until its branch has reached the base — a PR merged on GitHub and pulled
+down, say — and is cleaned like any other once it has. A goal's own
 cards are left to the goal's own clean. It streams the same `cleaned`
 event per card the single-id form does, and exits non-zero only if a card
 it attempted failed.
