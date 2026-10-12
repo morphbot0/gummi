@@ -22,22 +22,39 @@ func ResolveCollapseBase(ctx context.Context, store *state.Store, mgr *Manager, 
 	// into this card's one commit. A dependency is scheduling, never the
 	// base (DESIGN §18.1), so it does not get a vote here.
 	if f.StackID != "" || f.Base != "" {
-		// the recorded fork point is exactly what a replay of this card
-		// keeps, so it stays right while the base has moved on
-		if fp, err := mgr.ForkPoint(ctx, f); err == nil && fp != "" {
-			if ok, err := gitOK(ctx, mgr.RepoRoot(), "merge-base", "--is-ancestor", fp, f.BranchName()); err == nil && ok {
-				return fp, nil
+		// Two readings, and the one nearer the card's tip is its base. The
+		// recorded fork point is what a replay of this card keeps, and it is
+		// the only right answer once the branch beneath has been rewritten
+		// and this one not yet replayed. The live fork with the base's tip
+		// is the only right answer once this card has been rebased onto a
+		// base that moved on: the recorded point is still in its history
+		// then, with the base's own later commits above it.
+		var fp string
+		if rec, err := mgr.ForkPoint(ctx, f); err == nil && rec != "" {
+			if ok, err := gitOK(ctx, mgr.RepoRoot(), "merge-base", "--is-ancestor", rec, f.BranchName()); err == nil && ok {
+				fp = rec
 			}
 		}
 		tip, err := mgr.BaseHead(ctx, f)
 		if err != nil {
+			if fp != "" {
+				return fp, nil
+			}
 			return "", fmt.Errorf("resolving collapse base for %s: base tip: %w", f.ID, err)
 		}
-		sha, err := runGit(ctx, mgr.RepoRoot(), "merge-base", tip, f.BranchName())
+		live, err := runGit(ctx, mgr.RepoRoot(), "merge-base", tip, f.BranchName())
 		if err != nil {
+			if fp != "" {
+				return fp, nil
+			}
 			return "", fmt.Errorf("resolving collapse base for %s: fork point with its base: %w", f.ID, err)
 		}
-		return sha, nil
+		if fp != "" {
+			if ok, err := gitOK(ctx, mgr.RepoRoot(), "merge-base", "--is-ancestor", fp, live); err != nil || !ok {
+				return fp, nil
+			}
+		}
+		return live, nil
 	}
 	deps, err := store.ListDependencies(ctx, f.ID)
 	if err != nil {

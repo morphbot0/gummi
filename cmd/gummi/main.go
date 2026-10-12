@@ -494,10 +494,18 @@ func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
 // A workspace with no default repository has its named set rescanned
 // (worktree.Pool.SetDiscover): a `discover:` checkout cloned, or a `repos:`
 // entry added, after launch is reachable without a restart.
-func newPool(ctx context.Context, ws, defaultRoot string, named []worktree.NamedRepo, fs worktree.ForkPointStore, exclude bool) (*worktree.Pool, error) {
-	pool, err := worktree.NewPool(ctx, ws, defaultRoot, named, fs, exclude)
-	if err != nil || defaultRoot != "" {
+//
+// Every pool resolves a card's base from the store (engine.BaseLookup), the
+// ones no engine is built over included: `gummi log` and `gummi diff` read
+// a card cut from another branch against that branch, as the board does.
+func newPool(ctx context.Context, ws, defaultRoot string, named []worktree.NamedRepo, store *state.Store, exclude bool) (*worktree.Pool, error) {
+	pool, err := worktree.NewPool(ctx, ws, defaultRoot, named, store, exclude)
+	if err != nil {
 		return pool, err
+	}
+	pool.SetBaseLookup(engine.BaseLookup(store, pool))
+	if defaultRoot != "" {
+		return pool, nil
 	}
 	if err := pool.SetDiscover(func() ([]worktree.NamedRepo, map[string][]string, error) {
 		set, err := loadRepoSet(ws)

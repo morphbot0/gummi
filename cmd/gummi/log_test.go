@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // `gummi log` lists the card's own three commits, and `gummi rewrite`
@@ -111,5 +116,78 @@ func TestRewriteSignsWithoutAPlan(t *testing.T) {
 	out = captureStdout(t, func() { runErr = runCLI("rewrite", string(f.ID), "--sign") })
 	if runErr != nil || !strings.Contains(out, "leaves the branch as it is") {
 		t.Errorf("signing again: %v %q", runErr, out)
+	}
+}
+
+// A card cut from a branch other than the trunk reads against that branch
+// from the command line too: its log and its diff hold its own work and
+// none of the base's.
+func TestLogAndDiffReadAgainstAChosenBase(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	cliGit(t, root, "init", "-q", "-b", "main")
+	cliGit(t, root, "config", "user.name", "t")
+	cliGit(t, root, "config", "user.email", "t@e.invalid")
+	commit := func(dir, name, msg string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(msg+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cliGit(t, dir, "add", ".")
+		cliGit(t, dir, "commit", "-q", "-m", msg)
+	}
+	commit(root, "README.md", "init")
+	cliGit(t, root, "checkout", "-q", "-b", "feat")
+	commit(root, "feat.txt", "base work")
+	cliGit(t, root, "checkout", "-q", "main")
+
+	ws, err := state.Init(root, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := state.OpenStore(ws.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt.SetBaseLookup(func(_ context.Context, f *domain.Feature) (string, error) { return f.Base, nil })
+
+	now := time.Now()
+	id, _ := domain.NewFeatureID(9)
+	slug, _ := domain.Slugify("Based card")
+	f := domain.Feature{
+		ID: id, Num: 9, Kind: domain.KindFeature, Title: "Based card", Slug: slug, Base: "feat",
+		Stage: domain.StageImplement, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	p, err := wt.Create(context.Background(), &f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit(p, "card.txt", "card work")
+
+	var runErr error
+	text := captureStdout(t, func() { runErr = runCLI("log", string(f.ID)) })
+	if runErr != nil {
+		t.Fatalf("log: %v", runErr)
+	}
+	if !strings.Contains(text, "card work") || strings.Contains(text, "base work") {
+		t.Errorf("log = %q, want the card's commit alone", text)
+	}
+	diff := captureStdout(t, func() { runErr = runCLI("diff", string(f.ID)) })
+	if runErr != nil {
+		t.Fatalf("diff: %v", runErr)
+	}
+	if !strings.Contains(diff, "card.txt") || strings.Contains(diff, "feat.txt") {
+		t.Errorf("diff = %q, want the card's file alone", diff)
 	}
 }
