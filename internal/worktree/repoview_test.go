@@ -16,6 +16,8 @@ func withOrigin(t *testing.T, root string) (other string) {
 	}
 	bare := filepath.Join(dir, "origin.git")
 	mustGit(t, dir, "clone", "-q", "--bare", root, bare)
+	// a push must not leave the remote repacking behind it (see gittest)
+	mustGit(t, bare, "config", "maintenance.auto", "false")
 	mustGit(t, root, "remote", "add", "origin", bare)
 	mustGit(t, root, "fetch", "-q", "origin")
 	mustGit(t, root, "branch", "-q", "--set-upstream-to=origin/main", "main")

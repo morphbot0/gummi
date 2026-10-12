@@ -165,6 +165,8 @@ func publishWorkspace(t *testing.T) (m *Shell, fake, bare string) {
 		}
 	}
 	git(fake, "init", "-q", "--bare", bare)
+	// a push must not leave the remote repacking behind it (see gittest)
+	git(bare, "config", "maintenance.auto", "false")
 	git(root, "remote", "add", "origin", "git@github.com:me/widget.git")
 	git(root, "config", "url."+bare+".insteadOf", "git@github.com:me/widget.git")
 	f := &domain.Feature{

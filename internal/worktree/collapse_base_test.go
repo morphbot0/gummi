@@ -294,3 +294,50 @@ func TestResolveCollapseBaseStackedCard(t *testing.T) {
 		t.Errorf("base = %s, want the card below's tip %s", base, belowTip)
 	}
 }
+
+// A card cut from a chosen base and since rebased onto that base's newer
+// tip owns only the commits above it: the fork point recorded at creation
+// is still in its history, but so by now are the base's own later commits.
+func TestResolveCollapseBaseRebasedOnChosenBase(t *testing.T) {
+	root := newRepo(t)
+	mustGit(t, root, "branch", "feat")
+	m := newManager(t, root)
+	store := openTestStore(t)
+	m.SetBaseLookup(func(_ context.Context, f *domain.Feature) (string, error) { return f.Base, nil })
+
+	f := feature(3, "Based card")
+	f.Base = "feat"
+	if err := store.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "card.txt", "card work\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "card work")
+
+	featTree := t.TempDir() + "/feat"
+	mustGit(t, root, "worktree", "add", "-q", featTree, "feat")
+	writeFile(t, featTree, "feat.txt", "base work\n")
+	mustGit(t, featTree, "add", ".")
+	mustGit(t, featTree, "commit", "-q", "-m", "base work")
+	featTip := mustGit(t, root, "rev-parse", "feat")
+	mustGit(t, p, "rebase", "-q", "feat")
+
+	base, err := ResolveCollapseBase(ctx, store, m, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != featTip {
+		t.Errorf("base = %s, want the chosen base's tip %s", base, featTip)
+	}
+	entries, err := m.Log(ctx, f, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Subject != "card work" {
+		t.Errorf("log = %+v, want the card's one commit", entries)
+	}
+}

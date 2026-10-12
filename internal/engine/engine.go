@@ -269,7 +269,11 @@ type Engine struct {
 	// restarting it. Refcounted, not a flag: baseline follows discovery
 	// and a card can be re-entered.
 	oneShots map[domain.FeatureID]int
-	closed   bool
+	// oneShotLogs holds the live file those passes share, one per card;
+	// oneShotLogMu guards it and the file's create and close.
+	oneShotLogMu sync.Mutex
+	oneShotLogs  map[domain.FeatureID]*oneShotLog
+	closed       bool
 
 	// consult holds every card's consult session, keyed by feature:
 	// OpenConsult is idempotent per card for the engine's whole lifetime

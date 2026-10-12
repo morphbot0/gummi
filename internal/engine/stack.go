@@ -26,6 +26,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/stack"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -409,13 +410,28 @@ func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackVie
 // So this reads the store and the filesystem only, and takes its
 // "landed" answer from the card's own record rather than from git.
 func (e *Engine) StackBaseFor(ctx context.Context, f *domain.Feature) (string, error) {
+	return stackBaseFor(ctx, e.cfg.Store, e.pool, f)
+}
+
+// BaseLookup is StackBaseFor for a caller that builds a pool and no
+// engine: the read-only verbs, and the ones that publish. The answer takes
+// only the store and the pool, and a pool left without it resolves every
+// card's base to its checkout's HEAD — which reads a card cut from another
+// branch against the trunk.
+func BaseLookup(store *state.Store, pool *worktree.Pool) worktree.BaseLookup {
+	return func(ctx context.Context, f *domain.Feature) (string, error) {
+		return stackBaseFor(ctx, store, pool, f)
+	}
+}
+
+func stackBaseFor(ctx context.Context, store *state.Store, pool *worktree.Pool, f *domain.Feature) (string, error) {
 	if f == nil {
 		return "", nil
 	}
-	if f.StackID == "" {
+	if f.StackID == "" || store == nil {
 		return f.Base, nil
 	}
-	view, err := e.stackBaseView(ctx, f.StackID)
+	view, err := stackBaseView(ctx, store, pool, f.StackID)
 	if err != nil {
 		// A card pointing at a stack that cannot be read still has its
 		// own base, and behaving as an unstacked card is better than
@@ -437,11 +453,15 @@ func (e *Engine) StackBaseFor(ctx context.Context, f *domain.Feature) (string, e
 // forked from its branch for one more tick — which is correct, because
 // that branch still exists and still carries the work.
 func (e *Engine) stackBaseView(ctx context.Context, id domain.StackID) (stack.View, error) {
-	st, err := e.cfg.Store.GetStack(ctx, id)
+	return stackBaseView(ctx, e.cfg.Store, e.pool, id)
+}
+
+func stackBaseView(ctx context.Context, store *state.Store, pool *worktree.Pool, id domain.StackID) (stack.View, error) {
+	st, err := store.GetStack(ctx, id)
 	if err != nil {
 		return stack.View{}, err
 	}
-	members, err := e.cfg.Store.ListStackCards(ctx, id)
+	members, err := store.ListStackCards(ctx, id)
 	if err != nil {
 		return stack.View{}, err
 	}
@@ -456,11 +476,13 @@ func (e *Engine) stackBaseView(ctx context.Context, id domain.StackID) (stack.Vi
 			Branch: f.BranchName(),
 			Landed: f.LandedSHA != "" || f.Stage == domain.StageDone,
 		}
-		if mgr, merr := e.pool.ManagerFor(ctx, &f); merr == nil {
-			// Exists is a stat, not a git call — no base to resolve, so
-			// no recursion.
-			if ok, eerr := mgr.Exists(ctx, &f); eerr == nil {
-				m.HasTree = ok
+		if pool != nil {
+			if mgr, merr := pool.ManagerFor(ctx, &f); merr == nil {
+				// Exists is a stat, not a git call — no base to resolve, so
+				// no recursion.
+				if ok, eerr := mgr.Exists(ctx, &f); eerr == nil {
+					m.HasTree = ok
+				}
 			}
 		}
 		v.Members = append(v.Members, m)

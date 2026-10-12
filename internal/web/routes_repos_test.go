@@ -146,6 +146,8 @@ func TestReposViewFetchesThenFastForwardsTheBase(t *testing.T) {
 	}
 	bare, other := filepath.Join(dir, "origin.git"), filepath.Join(dir, "other")
 	b.git(dir, "clone", "-q", "--bare", b.root, bare)
+	// a push must not leave the remote repacking behind it (see gittest)
+	b.git(bare, "config", "maintenance.auto", "false")
 	b.git(b.root, "remote", "add", "origin", bare)
 	b.git(b.root, "fetch", "-q", "origin")
 	b.git(b.root, "branch", "-q", "--set-upstream-to=origin/main", "main")
@@ -194,6 +196,8 @@ func TestReposViewManagesRemotesAndUpstreams(t *testing.T) {
 	}
 	bare := filepath.Join(dir, "origin.git")
 	b.git(dir, "clone", "-q", "--bare", b.root, bare)
+	// a push must not leave the remote repacking behind it (see gittest)
+	b.git(bare, "config", "maintenance.auto", "false")
 	post := func(route string, req webapi.RepoRequest) int {
 		return b.call(http.MethodPost, "/api/repos/"+route, req, nil)
 	}

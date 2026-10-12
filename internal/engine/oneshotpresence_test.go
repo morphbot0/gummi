@@ -51,6 +51,13 @@ func TestOneShotPassIsVisibleWhileItRuns(t *testing.T) {
 	if !e.OneShotRunning(f.ID) {
 		t.Error("the first pass ending cleared a second that is still running")
 	}
+	// the two share one live file: the first ending must neither stop it
+	// nor write over what the second has in it.
+	if st, err := livelog.Stat(e.cfg.Workspace.LiveFile(f.ID)); err != nil {
+		t.Errorf("stat live file with a pass still running: %v", err)
+	} else if st.Stopped {
+		t.Error("the first pass ending marked the live file stopped under a second")
+	}
 	end2()
 	if e.OneShotRunning(f.ID) {
 		t.Error("the pass never cleared")
