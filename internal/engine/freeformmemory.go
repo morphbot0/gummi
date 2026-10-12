@@ -122,10 +122,14 @@ func memoryWriteTool() agent.ToolDef {
 
 // freeformMemoryHint is added to the hints of a freeform session offered
 // the memory tools; the "read at the start" half is memoryCard, which
-// inlines what memory already holds.
+// inlines what memory already holds — and the hint says so, because a
+// session told only that it has a memory opens by reading it, paying a
+// tool call for what its own prompt already carries.
 const freeformMemoryHint = `You also have gummi's memory tools, memory_read and memory_write: this
 card's project memory, plain files under .gummi/memory/ — not in your
-worktree, so reach them only through the tools. Session memory —
+worktree, so reach them only through the tools. What memory holds as
+this session starts is already in this prompt, so do not open with a
+memory_read: read a file only where it is shown truncated. Session memory —
 "memory" and "dead-ends" — is this card's own and yours to write: keep
 memory current as you work (the next backend of this conversation starts
 from it, in place of turns it cannot replay), and record a dead end when
@@ -135,6 +139,11 @@ pass folds session memory into it, so if something you learned should
 move up, record it in your own memory and say so in the thread. None of
 it is required — no gate reads it and no section is demanded; this is
 not the spec process the workflow cards run.`
+
+// memoryCardEmpty is the whole memory card while nothing has been
+// written: the answer to the read a fresh session would otherwise make.
+const memoryCardEmpty = "Project memory is empty as this session starts: global memory and this\n" +
+	"card's own memory and dead-ends hold nothing yet, so there is nothing to read.\n"
 
 // memoryPath maps a which argument to its file. ok is false for anything
 // the tools do not serve; the refusal lists the three, which is the
@@ -350,11 +359,12 @@ func ensureMemoryDir(path string) error {
 // oriented without paying a read — the "read at the start" half of the
 // deal, and the reason a respawn or a restart of the board starts where
 // the conversation left off even when the backend cannot replay its own
-// turns. Nothing is inlined for files that are empty or absent, and
-// nothing at all while memory is empty: the tools' hint already teaches
-// the layout, and an empty card is one less paragraph in every prompt.
-// Contents are capped per file with the cap noted, because the card
-// rides every system prompt this session spawns.
+// turns. Nothing is inlined for files that are empty or absent, and an
+// empty memory is still said in a line (memoryCardEmpty): a session that
+// is shown nothing cannot tell an empty memory from one it was not shown,
+// and spends its first tool call finding out. Contents are capped per
+// file with the cap noted, because the card rides every system prompt
+// this session spawns.
 func (e *Engine) memoryCard(id domain.FeatureID) string {
 	w := e.cfg.Workspace
 	if w.Root == "" {
@@ -369,12 +379,13 @@ func (e *Engine) memoryCard(id domain.FeatureID) string {
 	mem, mCut := readMemoryInline(memPath, maxSessionMemoryInline)
 	dead, dCut := readMemoryInline(filepath.Join(w.SessionMemoryDir(id), "dead-ends.md"), maxSessionMemoryInline)
 	if global == "" && mem == "" && dead == "" {
-		return ""
+		return memoryCardEmpty
 	}
 	var b strings.Builder
 	b.WriteString("Project memory: plain files under .gummi/memory/ that you read through\n" +
 		"your memory tools and fill where a file is yours — none of it required, no\n" +
-		"gate reads it.\n")
+		"gate reads it. What follows is all of it as this session starts, whole\n" +
+		"unless marked truncated; a file not shown is empty.\n")
 	if global != "" {
 		fmt.Fprintf(&b, "\nGlobal memory, shared by every freeform session in this workspace:\n\n%s", global)
 		if gCut {
