@@ -598,12 +598,8 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .resizer{position:absolute;left:0;top:0;bottom:0;width:6px;z-index:1;cursor:col-resize;background:var(--bg);border-left:1px solid var(--line);touch-action:none}
 .resizer:hover,.resizer.drag{background:var(--accent-soft)}
 .right{position:relative;display:flex;min-height:0;min-width:0;background:var(--bg)}
-/* each surface has a width of its own until a person drags it (--right-w) */
+/* one width for every surface until a person drags it (--right-w) */
 .right{--surface-w:560px}
-.right[data-surface="spec"],.right[data-surface="memory"]{--surface-w:520px}
-.right[data-surface="changes"]{--surface-w:640px}
-.right[data-surface="run"]{--surface-w:480px}
-.right[data-surface="terminal"]{--surface-w:600px}
 .surface{display:flex;flex-direction:column;min-width:0;min-height:0;padding-left:6px;width:var(--right-w,var(--surface-w));max-width:max(260px,calc(100vw - var(--rail-w) - 444px))}
 /* a surface's one header line: its name, its switch, and the way to close it */
 .sh{display:flex;align-items:center;gap:10px;height:44px;padding:0 8px 0 14px;border-bottom:1px solid var(--line);background:var(--panel);white-space:nowrap;min-width:0;flex-shrink:0}

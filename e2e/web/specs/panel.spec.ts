@@ -172,6 +172,40 @@ test('the tab a person picked on a card is where its next visit opens', async ({
   await expect(page).toHaveURL(new RegExp(`#${id}/log$`));
 });
 
+test('every surface beside the thread opens at one width', async ({ pairedPage: page }) => {
+  await mockCard(page, id);
+  await page.reload();
+  const surface = page.getByTestId('surface');
+  const tabs = ['spec', 'diff', 'log', 'stats'];
+  const widthsOf = async () => {
+    const ws: number[] = [];
+    for (const tab of tabs) {
+      await showTab(page, tab);
+      ws.push(Math.round((await surface.boundingBox())!.width));
+    }
+    return ws;
+  };
+
+  const before = await widthsOf();
+  expect(new Set(before).size).toBe(1);
+
+  // dragging one surface's edge moves every surface's width, not just the open one's
+  const resizer = page.getByTestId('resizer');
+  await resizer.focus();
+  await resizer.press('ArrowRight');
+  await expect.poll(async () => Math.round((await surface.boundingBox())!.width)).toBe(before[0] - 24);
+  const dragged = await widthsOf();
+  expect(new Set(dragged).size).toBe(1);
+  expect(dragged[0]).toBe(before[0] - 24);
+
+  // a double-click on the resizer goes back to the shared default
+  await resizer.dblclick();
+  await expect.poll(async () => Math.round((await surface.boundingBox())!.width)).toBe(before[0]);
+  const reset = await widthsOf();
+  expect(new Set(reset).size).toBe(1);
+  expect(reset[0]).toBe(before[0]);
+});
+
 test('a new session’s draft has no documents, and Cancel goes back', async ({ pairedPage: page }) => {
   await page.goto(page.url().replace(/#.*$/, '') + `#${other}`);
   await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', other);
