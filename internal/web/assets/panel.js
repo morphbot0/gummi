@@ -2,8 +2,8 @@
 // time beside the conversation (never over it) — Memory, Spec, Changes
 // (the diff, the commits and the pull request, behind one switch), Run and
 // Terminal. It starts closed; an icon opens its surface, the open one's
-// icon or `]` closes it, and each surface has a width of its own, which
-// the resizer changes. On a phone the same row leads the card's screen as
+// icon or `]` closes it, and every surface shares one width, which the
+// resizer changes. On a phone the same row leads the card's screen as
 // tabs, with its Thread first. It fetches the open tab for the open card,
 // refetches it when the card changes, and hands each tab module an entry
 // { data, fresh, err } to draw. A route the server does not answer yet shows a quiet "not
@@ -143,12 +143,10 @@ function applyHidden () {
 }
 
 // applyWidth gives the open surface its width: the one a person dragged
-// it to, else the surface's own (app.css).
+// it to, else the shared default (app.css).
 function applyWidth () {
-  const s = surfaceOf(state.tab)
   const right = $('.right')
-  right.dataset.surface = s?.name || ''
-  const saved = s && storage.get(`rightW.${s.name}`, null)
+  const saved = storage.get('rightW', null)
   if (saved) right.style.setProperty('--right-w', saved + 'px')
   else right.style.removeProperty('--right-w')
   syncResizer()
@@ -415,7 +413,7 @@ function initResizer () {
     const rail = $('.rail').getBoundingClientRect().width
     const icons = $('#tabs').getBoundingClientRect().width
     const clamped = Math.round(Math.max(326, Math.min(w, main.width - rail - icons - 400)))
-    storage.set(`rightW.${surfaceOf(state.tab)?.name}`, clamped)
+    storage.set('rightW', clamped)
     applyWidth()
     sync()
   }
@@ -446,5 +444,5 @@ function initResizer () {
     const w = $('#surface').getBoundingClientRect().width
     setW(w + (e.key === 'ArrowLeft' ? 24 : -24))
   })
-  r.addEventListener('dblclick', () => { storage.set(`rightW.${surfaceOf(state.tab)?.name}`, null); applyWidth(); sync() })
+  r.addEventListener('dblclick', () => { storage.set('rightW', null); applyWidth(); sync() })
 }
