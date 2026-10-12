@@ -233,9 +233,6 @@ function renderTabs () {
   const list2 = state.sel ? surfaces() : []
   list2.forEach((s, i) => {
     const on = open && cur === s.name
-    // a phone's row is for what a card is read by: the terminal waits in
-    // the card's menu (head.js), and takes a tab only while it is the one open
-    if (phone && s.name === 'terminal' && !on && state.card?.actions?.length) return
     const es = s.tabs.map(t => cache[t.name])
     // dim once its first tab has loaded with nothing to show, and no
     // other of its tabs loaded with something

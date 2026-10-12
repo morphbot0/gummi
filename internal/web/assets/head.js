@@ -150,10 +150,6 @@ export function openActions (line = '') {
   if (delegateButton(state.card)) {
     items.push({ label: 'Delegate to cards…', testid: 'action-delegate', hint: 'Let this session create workflow cards under a budget', onClick: () => openDelegate(state.card) })
   }
-  // a phone's tab row leaves the terminal to this menu (panel.js)
-  if (isMobile() && state.card?.terminal) {
-    items.push('sep', { label: 'Terminal', icon: 'terminal', testid: 'action-terminal', hint: 'A shell in this card’s worktree', onClick: () => ctx.setTab('terminal') })
-  }
   openMenu(btn, items, { testid: 'card-actions-menu' })
   return true
 }
