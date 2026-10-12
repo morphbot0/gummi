@@ -352,7 +352,7 @@ func (m *Shell) confirmDuplicate() tea.Cmd {
 		id:           "confirm-duplicate",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Duplicate",
-		question:     "duplicate " + string(f.ID) + "?",
+		question:     "duplicate " + f.Name() + "?",
 		detail:       f.Title + " — fresh copy in todo (same skips, profile, budget); this card stays",
 		onConfirm:    func() tea.Cmd { return m.duplicateFeature(f.ID) },
 	})
@@ -403,7 +403,7 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// (bridge.go's emitChanges), and from the page this row is an
 		// answer that would otherwise read as having done something.
 		if r, ok := m.selected(); ok {
-			n := noticeMsg{text: string(r.F.ID) + ": " + a.label + " — " + a.why, id: r.F.ID}
+			n := noticeMsg{text: r.F.Name() + ": " + a.label + " — " + a.why, id: r.F.ID}
 			return func() tea.Msg { return n }
 		}
 		return nil
@@ -413,7 +413,7 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// The failure stays on record; the next run of the stage closes it.
 		if r, ok := m.selected(); ok {
 			m.inbox.remove(r.F.ID)
-			m.notice = noticeMsg{text: string(r.F.ID) + ": left at " + string(r.F.Stage) + " — nothing runs until you start it again", id: r.F.ID}
+			m.notice = noticeMsg{text: r.F.Name() + ": left at " + string(r.F.Stage) + " — nothing runs until you start it again", id: r.F.ID}
 		}
 		return nil
 	case "deps":
@@ -520,7 +520,7 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 	case "prpull":
 		if r, ok := m.selected(); ok {
 			if r.F.PullRequest.Empty() {
-				m.notice = noticeMsg{text: string(r.F.ID) + " has no linked PR", isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + " has no linked PR", isErr: true}
 				return nil
 			}
 			return m.pullPRReview(r.F)
@@ -528,7 +528,7 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 	case "prchecks":
 		if r, ok := m.selected(); ok {
 			if r.F.PullRequest.Empty() {
-				m.notice = noticeMsg{text: string(r.F.ID) + " has no linked PR", isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + " has no linked PR", isErr: true}
 				return nil
 			}
 			return m.sendPRChecks(r.F)

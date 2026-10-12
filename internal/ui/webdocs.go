@@ -564,7 +564,7 @@ func (d *WebDocs) diffLines(ctx context.Context) (lines []string, why string, er
 		return nil, err.Error(), nil
 	}
 	if strings.TrimSpace(raw) == "" {
-		return nil, string(d.f.ID) + " has no change on its branch yet", nil
+		return nil, d.f.Name() + " has no change on its branch yet", nil
 	}
 	return diffannot.Lines(raw), "", nil
 }
@@ -917,7 +917,7 @@ func closedToReview(f domain.Feature, why string) error {
 	if f.Ending(false) == domain.EndingLanded {
 		how = "has landed"
 	}
-	return &conflictError{msg: fmt.Sprintf("%s %s — %s", f.ID, how, why)}
+	return &conflictError{msg: fmt.Sprintf("%s %s — %s", f.Name(), how, why)}
 }
 
 // WebRequestSpecChanges is the spec surface's R: the card's open spec

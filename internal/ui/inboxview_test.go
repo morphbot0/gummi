@@ -93,8 +93,8 @@ func TestInboxViewOldestFirst(t *testing.T) {
 	m.inbox.seed(attnItem{Feature: "FD-049", Kind: attnFailure, Text: "provider rate-limited", At: older})
 	m.setTab(TabInbox)
 	view := ansi.Strip(m.inboxView(120, 34))
-	iOlder := strings.Index(view, "FD-049")
-	iNewer := strings.Index(view, "FD-042")
+	iOlder := strings.Index(view, "auth fix")
+	iNewer := strings.Index(view, "dark mode")
 	if iOlder == -1 || iNewer == -1 || iOlder > iNewer {
 		t.Fatalf("expected the older item (FD-049) before the newer one (FD-042):\n%s", view)
 	}

@@ -58,12 +58,12 @@ func (m *Shell) offerAgentRebase(msg rebaseConflictMsg) {
 	if f.Stage == domain.StageVerify {
 		detail += "; verify re-runs after"
 	}
-	question := "rebase " + string(f.ID) + " onto " + m.baseBranch(f) + " hit conflicts — let the agent resolve them?"
+	question := "rebase " + f.Name() + " onto " + m.baseBranch(f) + " hit conflicts — let the agent resolve them?"
 	switch {
 	case msg.reason != "":
 		// git-derived; sanitize like every other notice
 		detail = sanitize("git stopped: "+msg.reason) + " — " + detail
-		question = "rebase " + string(f.ID) + " onto " + m.baseBranch(f) + " stopped — let the agent sort it out?"
+		question = "rebase " + f.Name() + " onto " + m.baseBranch(f) + " stopped — let the agent sort it out?"
 	case len(files) > 0:
 		detail = sanitize("conflicts: "+strings.Join(files, ", ")) + " — " + detail
 	}
@@ -86,7 +86,7 @@ func (m *Shell) agentRebase(msg rebaseConflictMsg) tea.Cmd {
 			if err := m.engine.RunRebaseStopped(context.Background(), f, files, reason); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
-			return noticeMsg{text: string(f.ID) + ": asked the agent to rebase onto " + m.baseBranch(f)}
+			return noticeMsg{text: f.Name() + ": asked the agent to rebase onto " + m.baseBranch(f)}
 		}
 	}
 	if m.rebaseDirty == nil {
@@ -112,7 +112,7 @@ func (m *Shell) agentRebase(msg rebaseConflictMsg) tea.Cmd {
 		if err := m.engine.RunRebaseStopped(context.Background(), f, files, reason); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + ": agent dispatched to rebase onto " + m.baseBranch(f)}
+		return noticeMsg{text: f.Name() + ": agent dispatched to rebase onto " + m.baseBranch(f)}
 	}
 }
 
@@ -201,7 +201,7 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		} else {
 			m.raiseEscalation(id, text)
 		}
-		m.notice = noticeMsg{text: string(id) + ": " + text, isErr: true, id: id}
+		m.notice = noticeMsg{text: m.cardName(id) + ": " + text, isErr: true, id: id}
 		return m.loadRows
 	}
 	f := msg.f
@@ -211,7 +211,7 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 	// resolution does not go stale under the next rewrite of main.
 	if err := m.wt.ReanchorOnMain(context.Background(), &f); err != nil {
 		return func() tea.Msg {
-			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
+			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.Name(), err)), isErr: true}
 		}
 	}
 	// The hand-off this settlement closes may have interrupted a stage
@@ -253,10 +253,10 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 				if err := m.engine.Run(f); err != nil {
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				}
-				return noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f) + " → re-running " + string(f.Stage), reload: true}
+				return noticeMsg{text: f.Name() + " rebased onto " + m.baseBranch(f) + " → re-running " + string(f.Stage), reload: true}
 			}
 		}
-		m.notice = noticeMsg{text: string(id) + " rebased onto " + m.baseBranch(f)}
+		m.notice = noticeMsg{text: m.cardName(id) + " rebased onto " + m.baseBranch(f)}
 		// the base moved: re-measure what its baseline excused (at
 		// verify, the re-run below does it as the stage starts)
 		return tea.Batch(m.loadRows, m.rebaselineCmd(id))
@@ -266,7 +266,7 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		if err := m.engine.Run(f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f) + " → re-verifying", reload: true}
+		return noticeMsg{text: f.Name() + " rebased onto " + m.baseBranch(f) + " → re-verifying", reload: true}
 	}
 }
 

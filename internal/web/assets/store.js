@@ -4,7 +4,7 @@
 // There is no derived state here: the server's projections are stored as
 // they arrive, and modules render from them.
 
-import { storage } from './dom.js?v=__ASSET_V__'
+import { storage, nameRows } from './dom.js?v=__ASSET_V__'
 
 export const state = {
   session: null, // webapi.Session
@@ -66,6 +66,7 @@ export function emit (key) { set({ [key]: state[key] }) }
 // rows is the board's rows, or none yet.
 export function rows () { return state.board?.rows || [] }
 export function row (id) { return rows().find(r => r.id === id) || null }
+nameRows(row)
 
 // shownTab is the document on screen beside (on a phone, instead of) the
 // thread, or null when none is: what the address names.

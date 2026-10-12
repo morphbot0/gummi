@@ -93,7 +93,7 @@ func TestFormSaysWhichBranchesCanBeAdopted(t *testing.T) {
 	}
 	want := map[string]webapi.AdoptChoice{
 		"main":      {Branch: "main", Why: "the branch it lands on"},
-		"feat/dark": {Branch: "feat/dark", Why: held.ID + " has it", Held: held.ID},
+		"feat/dark": {Branch: "feat/dark", Why: domain.FeatureID(held.ID).Ref() + " has it", Held: held.ID},
 		"feat/wave": {Branch: "feat/wave"},
 		"stale":     {Branch: "stale", Why: "no commits past main"},
 	}

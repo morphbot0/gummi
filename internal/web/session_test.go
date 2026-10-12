@@ -432,7 +432,7 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 	for _, m := range snap.Transcript {
 		said.WriteString(string(m.Author) + ": " + m.Content + "\n")
 	}
-	if !ok || !strings.Contains(said.String(), "Continued as the spec "+spec.ID) {
+	if !ok || !strings.Contains(said.String(), "Continued as the spec “") {
 		t.Errorf("the closed session does not say where its work went:\n%s", said.String())
 	}
 	if !strings.Contains(said.String(), "handoff brief") || !strings.Contains(said.String(), "the flake's cause is still unknown") {

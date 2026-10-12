@@ -20,7 +20,7 @@ test('a freeform card shows its memory documents', async ({ pairedPage: page, se
   fs.writeFileSync(path.join(mem, id, 'dead-ends.md'), 'attempt 1 failed\n');
 
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await showTab(page, 'memory');
   await expect(page.getByTestId('memory')).toContainText('.gummi/memory', { timeout: 30_000 });
 
@@ -54,7 +54,7 @@ test('a freeform card shows its memory documents', async ({ pairedPage: page, se
   // is the one document closed
   await doc('global').locator('summary').click();
   await page.reload();
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await showTab(page, 'memory');
   await expect(page.getByTestId('memory')).toContainText('.gummi/memory', { timeout: 30_000 });
   await expect(doc('global')).not.toHaveAttribute('open', /.*/);
@@ -70,7 +70,7 @@ test('a workflow card shows no memory tab', async ({ pairedPage: page, server, a
   const made = await api('POST', '/api/cards', { kind: 'feature', title: 'Row cache' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('tab-memory')).toHaveCount(0);
   const mem = (await api('GET', `/api/cards/${id}/memory`)).json;
   expect(mem.none).toBe(true);
@@ -83,7 +83,7 @@ test('the memory tab sticks across sessions and reloads', async ({ pairedPage: p
   const a = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'First session' })).json?.id);
   const b = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Second session' })).json?.id);
   await page.goto(`${server.url}/#${a}`);
-  await expect(page.getByTestId('card-id')).toHaveText(a);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', a);
   await showTab(page, 'memory');
   await expect(page).toHaveURL(new RegExp(`#${a}/memory$`));
   if (info.project.name === 'phone') {
@@ -91,11 +91,11 @@ test('the memory tab sticks across sessions and reloads', async ({ pairedPage: p
   } else {
     await page.getByTestId(`rail-row-${b}`).click();
   }
-  await expect(page.getByTestId('card-id')).toHaveText(b);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
   await expect(page.getByTestId('tab-memory')).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(new RegExp(`#${b}/memory$`));
   await page.reload();
-  await expect(page.getByTestId('card-id')).toHaveText(b);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
   await expect(page.getByTestId('tab-memory')).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(new RegExp(`#${b}/memory$`));
 });

@@ -237,7 +237,7 @@ func (m *Shell) webAnswer(r featureRow, od *webOpenDecision, req webapi.AnswerRe
 				// the TUI's enter says "that spends credits — press y";
 				// the page asks the same question, with what the go
 				// does, and sends back the token that answers it
-				q := string(r.F.ID) + ": that spends credits — go?"
+				q := r.F.Name() + ": that spends credits — go?"
 				if detail := strings.TrimSpace(od.api.Options[0].Detail); detail != "" {
 					q += "\n" + detail
 				}
@@ -635,7 +635,7 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		}
 	}
 	if entry == nil {
-		return nil, refuse(WebConflict, id+" is not offered on "+string(r.F.ID)+" right now")
+		return nil, refuse(WebConflict, id+" is not offered on "+r.F.Name()+" right now")
 	}
 	msg := strings.TrimSpace(req.Message)
 	m.clearTransientNotice()
@@ -699,7 +699,7 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		return m.commitSession(r.F.ID, msg), nil
 	case "profile":
 		if !slices.ContainsFunc(entry.Choices, func(c webapi.Choice) bool { return c.Value == req.Profile }) {
-			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(req.Profile)+" is not one "+string(r.F.ID)+" can switch to")
+			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(req.Profile)+" is not one "+r.F.Name()+" can switch to")
 		}
 		return m.confirmCardProfileChange(r.F.ID, req.Profile), nil
 	case "gate":
@@ -756,11 +756,11 @@ func (m *Shell) setDependencies(f domain.Feature, want []domain.FeatureID) tea.C
 			i := slices.IndexFunc(dp.cands, func(c depCandidate) bool { return c.f.ID == id })
 			switch {
 			case i < 0 && dp.removeOnly:
-				return noticeMsg{text: string(f.ID) + ": " + depReasonLate, isErr: true, id: f.ID}
+				return noticeMsg{text: f.Name() + ": " + depReasonLate, isErr: true, id: f.ID}
 			case i < 0:
-				return noticeMsg{text: string(f.ID) + ": no card " + string(id) + " to depend on", isErr: true, id: f.ID}
+				return noticeMsg{text: f.Name() + ": no card " + id.Ref() + " to depend on", isErr: true, id: f.ID}
 			case dp.cands[i].state == candSelf || dp.cands[i].state == candCycle:
-				return noticeMsg{text: string(f.ID) + " → " + string(id) + ": " + dp.cands[i].reason, isErr: true, id: f.ID}
+				return noticeMsg{text: f.Name() + " → " + dp.cands[i].f.Name() + ": " + dp.cands[i].reason, isErr: true, id: f.ID}
 			}
 		}
 		changed := 0
@@ -783,9 +783,9 @@ func (m *Shell) setDependencies(f domain.Feature, want []domain.FeatureID) tea.C
 			}
 		}
 		if changed == 0 {
-			return noticeMsg{text: string(f.ID) + ": dependencies unchanged"}
+			return noticeMsg{text: f.Name() + ": dependencies unchanged"}
 		}
-		return noticeMsg{text: string(f.ID) + ": " + dependencyCount(len(wanted)), reload: true}
+		return noticeMsg{text: f.Name() + ": " + dependencyCount(len(wanted)), reload: true}
 	}
 }
 

@@ -1595,7 +1595,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 		// the same sentence a foreign drive gets, for the driver one
 		// level in: without it a conducted card reads as a chat whose
 		// composer has stopped working for no stated reason.
-		lines = append(lines, "  "+s.Faint.Render("run by "+goalDriver(r.F.GoalID)+" — read-only here · "+string(r.F.GoalID)+" takes your notes"))
+		lines = append(lines, "  "+s.Faint.Render("run by "+goalDriver(r.F.GoalID)+" — read-only here · "+m.cardName(r.F.GoalID)+" takes your notes"))
 		pad(-1)
 	}
 	return lines, anchorAt, evAt

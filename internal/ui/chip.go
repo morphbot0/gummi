@@ -70,7 +70,7 @@ func stopForward(in nextInput) (fwd domain.Stage, rerun bool, blocked, label str
 	case in.stage == domain.StagePlan && len(in.depBlockers) > 0:
 		blocked = waitOnDeps(in).why
 	case in.stage == domain.StageVerify && in.stackBlocker != "":
-		blocked = string(in.stackBlocker) + " has to land first — it sits below this card in its stack"
+		blocked = in.name(in.stackBlocker) + " has to land first — it sits below this card in its stack"
 	}
 	acts := stageActions(in)
 	for _, a := range acts {
@@ -155,13 +155,13 @@ func (m *Shell) readingKey(r featureRow, msg tea.KeyPressMsg) bool {
 	switch msg.String() {
 	case "esc":
 		m.withdrawRead()
-		m.notice = noticeMsg{text: string(r.F.ID) + ": stopped reading — your line is still here"}
+		m.notice = noticeMsg{text: r.F.Name() + ": stopped reading — your line is still here"}
 		return true
 	case "enter":
 		// the line this would send is the line already out being read, so
 		// a second enter can only buy the same answer twice. A reader
 		// pressing it is asking why nothing has happened; say that.
-		m.notice = noticeMsg{text: string(r.F.ID) + ": still reading your line — esc stops it"}
+		m.notice = noticeMsg{text: r.F.Name() + ": still reading your line — esc stops it"}
 		return true
 	case "up", "down", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		// the picker's own keys, with no picker on screen: they do nothing
@@ -231,15 +231,15 @@ func chipAct(f domain.Feature, base string, p *reentryReading) string {
 		return "run " + string(out.Target) + " again with your line."
 	case reentry.Advance:
 		if out.Target == domain.StageDone {
-			return "land on " + base + " — squash-merge the branch and mark " + string(f.ID) + " done."
+			return "land on " + base + " — squash-merge the branch and mark " + f.Name() + " done."
 		}
 		label := p.forward
 		if label == "" {
 			label = "go on"
 		}
-		return label + " — " + string(f.ID) + " moves to " + string(out.Target) + "."
+		return label + " — " + f.Name() + " moves to " + string(out.Target) + "."
 	case reentry.NewCard:
-		return "open a new card seeded with your line — " + string(f.ID) + " stays where it is."
+		return "open a new card seeded with your line — " + f.Name() + " stays where it is."
 	}
 	return ""
 }
@@ -371,8 +371,8 @@ func (m *Shell) chipKey(r featureRow, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return m.takeReading(r), true
 		}
 		m.notice = noticeMsg{
-			text: string(r.F.ID) + ": that spends credits — press y to go, or esc to keep the line here",
-			web:  string(r.F.ID) + ": that spends credits — go, or keep the line here",
+			text: r.F.Name() + ": that spends credits — press y to go, or esc to keep the line here",
+			web:  r.F.Name() + ": that spends credits — go, or keep the line here",
 		}
 		return nil, true
 	case "y":

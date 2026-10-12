@@ -182,7 +182,7 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 			// the bar does not draw the tab for such a card, so the chord
 			// says why rather than mounting a view onto no document — the
 			// same contract the diff and stats chords keep below.
-			m.notice = noticeMsg{text: string(r.F.ID) + ": a freeform card has no document — its thread is the record"}
+			m.notice = noticeMsg{text: r.F.Name() + ": a freeform card has no document — its thread is the record"}
 			return nil, true
 		}
 		m.diff, m.stats, m.logv = nil, nil, nil
@@ -192,7 +192,7 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 			// the bar does not draw the tab for such a card, so the chord
 			// says why rather than doing nothing — a key the help table
 			// lists owes an answer.
-			m.notice = noticeMsg{text: string(r.F.ID) + ": no diff — " + noDiffReason(r)}
+			m.notice = noticeMsg{text: r.F.Name() + ": no diff — " + noDiffReason(r)}
 			return nil, true
 		}
 		m.spec, m.stats, m.logv = nil, nil, nil
@@ -201,7 +201,7 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 		if !statsHasRecord(r) {
 			// same contract as the diff tab: a chord the help table lists
 			// answers, even when the surface it names has nothing on it.
-			m.notice = noticeMsg{text: string(r.F.ID) + ": nothing has run on this card yet"}
+			m.notice = noticeMsg{text: r.F.Name() + ": nothing has run on this card yet"}
 			return nil, true
 		}
 		m.spec, m.diff, m.logv = nil, nil, nil
@@ -210,7 +210,7 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 		if !logHasBranch(r) {
 			// the same contract as the diff chord: a key the help table
 			// lists answers, even for a card with no branch to read
-			m.notice = noticeMsg{text: string(r.F.ID) + ": no log — " + noLogReason(r)}
+			m.notice = noticeMsg{text: r.F.Name() + ": no log — " + noLogReason(r)}
 			return nil, true
 		}
 		m.spec, m.diff, m.stats = nil, nil, nil

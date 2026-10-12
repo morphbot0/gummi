@@ -9,7 +9,7 @@ import { shot } from '../fixtures/shots';
 
 async function open(page: Page, server: GummiServer, id: string, phone: boolean) {
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
   if (phone) await page.getByTestId('tab-thread').click();
 }

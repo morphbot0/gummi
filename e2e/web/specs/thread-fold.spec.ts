@@ -15,7 +15,7 @@ test.describe('the fold a person set on a thread row survives redraws', () => {
     const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[fold] Keep the row open' })).json;
     const card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
     await page.goto(`${server.url}/#${c.id}`);
-    await expect(page.getByTestId('card-id')).toHaveText(c.id);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', c.id);
     await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token });
 
     // the plan stage's first activity row draws open with its read call
@@ -49,7 +49,7 @@ test.describe('the fold a person set on a thread row survives redraws', () => {
     const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Fold the checklist' });
     const id = String(made.json?.id);
     await page.goto(`${server.url}/#${id}`);
-    await expect(page.getByTestId('card-id')).toHaveText(id);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
     await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
 
     // the checklist is pinned open while anything is left; folding it is
@@ -80,7 +80,7 @@ test.describe('the fold a person set on a thread row survives redraws', () => {
     const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Complete the checklist' });
     const id = String(made.json?.id);
     await page.goto(`${server.url}/#${id}`);
-    await expect(page.getByTestId('card-id')).toHaveText(id);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
     await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
 
     const tasks = page.getByTestId('tasks');
@@ -110,7 +110,7 @@ test.describe('a stage divider remembers its person per card', () => {
   test('a past stage stays open for the card it was opened on', async ({ pairedPage: page, server }, info) => {
     test.skip(info.project.name !== 'desktop', 'the fold memory is page state; one viewport is enough');
     await page.goto(`${server.url}/#${one}`);
-    await expect(page.getByTestId('card-id')).toHaveText(one);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', one);
     // a settled stage folds its divider when nobody has touched it (the
     // stage and its critique pass each draw a divider; the first is the one
     // the work ran in)
@@ -124,13 +124,13 @@ test.describe('a stage divider remembers its person per card', () => {
 
     // the same-keyed divider on the other card does not inherit the fold
     await page.getByTestId(`rail-row-${two}`).click();
-    await expect(page.getByTestId('card-id')).toHaveText(two);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', two);
     await expect(page.getByTestId('stage-group-implement').first()).not.toHaveAttribute('open', '');
 
     // and the first card's divider still remembers, across the full rebuild
     // the card switch caused
     await page.getByTestId(`rail-row-${one}`).click();
-    await expect(page.getByTestId('card-id')).toHaveText(one);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', one);
     await expect(page.getByTestId('stage-group-implement').first()).toHaveAttribute('open', '');
   });
 });

@@ -69,7 +69,7 @@ func (m *Shell) prepareHandOff(f domain.Feature) tea.Cmd {
 			if err != nil {
 				return handOffReadyMsg{err: err}
 			} else if landed {
-				return handOffReadyMsg{err: errors.New(string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
+				return handOffReadyMsg{err: errors.New(f.Name() + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
 			}
 		}
 		deps, err := m.store.ListDependents(ctx, f.ID)
@@ -167,11 +167,11 @@ func (m *Shell) handOffFeature(f domain.Feature) tea.Cmd {
 				return m.advanceOutcome(f.ID, actor, res, err)
 			}
 			m.dropSession(f.ID)
-			done := string(f.ID) + " → done · " + f.BranchName() + " is yours — nothing landed on " + m.baseBranch(f)
+			done := f.Name() + " → done · " + f.BranchName() + " is yours — nothing landed on " + m.baseBranch(f)
 			if f.MainCheckout {
-				done = string(f.ID) + " → done — its work stays loose in the main checkout, yours to commit"
+				done = f.Name() + " → done — its work stays loose in the main checkout, yours to commit"
 				if f.Home {
-					done = string(f.ID) + " → done — its home is kept, with everything in it"
+					done = f.Name() + " → done — its home is kept, with everything in it"
 				}
 			}
 			return noticeMsg{

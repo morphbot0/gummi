@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, ref, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // A card deleted while someone has it open — from another device, or by
@@ -15,7 +15,7 @@ test.use({ seed: { run: async (ws) => {
 
 test('a card deleted elsewhere stays gone where it was open', async ({ pairedPage: page, server, api }, info) => {
   await page.goto(`${server.url}/#${doomed}`);
-  await expect(page.getByTestId('card-id')).toHaveText(doomed);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', doomed);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await page.getByTestId('composer-input').fill('half a thought about the helper');
 
@@ -24,7 +24,7 @@ test('a card deleted elsewhere stays gone where it was open', async ({ pairedPag
   await api('POST', `/api/cards/${doomed}/actions/delete`, { confirm: q.json.confirm });
   await expect.poll(async () => (await api('GET', `/api/cards/${doomed}`)).status).toBe(404);
 
-  await expect(page.getByTestId('thread-gone')).toContainText(`${doomed} was deleted`);
+  await expect(page.getByTestId('thread-gone')).toContainText(`${ref(doomed)} was deleted`);
   await expect(page.getByTestId('card-title')).toContainText('deleted');
   await expect(page.getByTestId('composer-input')).toHaveValue('half a thought about the helper');
   await expect(page.getByTestId('decision')).toHaveCount(0);
@@ -45,11 +45,11 @@ test('a card deleted elsewhere stays gone where it was open', async ({ pairedPag
 
 test('deleting the open card from its own screen goes back to the cards', async ({ pairedPage: page, server, api }, info) => {
   await page.goto(`${server.url}/#${doomed}`);
-  await expect(page.getByTestId('card-id')).toHaveText(doomed);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', doomed);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await page.getByTestId('card-actions').click();
   await page.getByTestId('action-delete').click();
-  await expect(page.getByTestId('action-question')).toContainText(`Delete ${doomed}?`);
+  await expect(page.getByTestId('action-question')).toContainText(/Delete “.+”\?/);
   await page.getByTestId('action-confirm').click();
   await expect.poll(async () => (await api('GET', `/api/cards/${doomed}`)).status).toBe(404);
   if (info.project.name === 'phone') {
@@ -67,12 +67,12 @@ test('deleting the open card from its own screen goes back to the cards', async 
 test('a card dialog closes when another card is opened', async ({ pairedPage: page, server }, info) => {
   test.skip(info.project.name === 'phone', 'the phone reaches the menu through its own panel');
   await page.goto(`${server.url}/#${verified}`);
-  await expect(page.getByTestId('card-id')).toHaveText(verified);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', verified);
   await page.getByTestId('card-actions').click();
   await page.getByTestId('action-merge').click();
   await expect(page.getByTestId('action-dialog')).toBeVisible();
   await page.evaluate((id) => { location.hash = '#' + id; }, doomed);
-  await expect(page.getByTestId('card-id')).toHaveText(doomed);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', doomed);
   await expect(page.getByTestId('action-dialog')).toHaveCount(0);
 });
 
@@ -82,13 +82,13 @@ test('a card dialog closes when another card is opened', async ({ pairedPage: pa
 // still names its card.
 test('a hash naming no card keeps the open card and says so', async ({ pairedPage: page, server }) => {
   await page.goto(`${server.url}/#${verified}`);
-  await expect(page.getByTestId('card-id')).toHaveText(verified);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', verified);
   await page.evaluate(() => { location.hash = '#nope'; });
   await expect(page.getByTestId('toast').filter({ hasText: 'nope is not on this board' })).toBeVisible();
-  await expect(page.getByTestId('card-id')).toHaveText(verified);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', verified);
   await expect(page.getByTestId('thread-unavailable')).toHaveCount(0);
   expect(page.url()).toContain(`#${verified}`);
   await page.evaluate((id) => { location.hash = '#' + id.toLowerCase(); }, doomed);
-  await expect(page.getByTestId('card-id')).toHaveText(doomed);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', doomed);
   await expect(page).toHaveURL(new RegExp(`#${doomed}`));
 });

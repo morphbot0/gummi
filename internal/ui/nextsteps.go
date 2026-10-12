@@ -27,6 +27,14 @@ import (
 // current accelerator; id is the stable semantic identity carried into
 // decision answers, so two options that happen to share a key do not
 // become the same choice.
+// name is how a sentence built from in names another card.
+func (in nextInput) name(id domain.FeatureID) string {
+	if in.names == nil {
+		return id.Ref()
+	}
+	return in.names(id)
+}
+
 type nextAction struct {
 	id     string // stable option id, matching cardAction.id
 	key    string // the key to press, as shown in the status bar
@@ -287,6 +295,9 @@ type nextInput struct {
 	// stackBlocker is the unlanded card below this one in its stack,
 	// which has to land first (stack.LandBlocker).
 	stackBlocker domain.FeatureID
+	// names says another card's name in a sentence (Shell.cardName). Nil
+	// in a test scaffold, where name falls back to the card's number.
+	names func(domain.FeatureID) string
 	// landConflicts are the files the last landing attempt conflicted
 	// in; non-nil once a landing hit conflicts, until a rebase clears it.
 	landConflicts []string
@@ -547,6 +558,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		endedAt:          doneAt(r.History),
 		depBlockers:      r.DepBlockers,
 		stackBlocker:     m.stackLandBlocker(r.F.ID),
+		names:            m.cardName,
 		landConflicts:    m.landConflicts[r.F.ID],
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
@@ -1498,8 +1510,8 @@ func stageAnswers(in nextInput) []nextAction {
 			// the landing would be refused (merge.go): this card's branch
 			// carries the unlanded card below it, so it lands after that
 			// one does — said on the row that would have been the landing
-			gate = nextStep("wait", "", "lands after "+string(in.stackBlocker),
-				"it sits on "+string(in.stackBlocker)+" in its stack — "+string(in.stackBlocker)+
+			gate = nextStep("wait", "", "lands after "+in.name(in.stackBlocker),
+				"it sits on "+in.name(in.stackBlocker)+" in its stack — "+in.name(in.stackBlocker)+
 					" lands first, or its commits would ride in under this card")
 		}
 		acts := []nextAction{gate, keep, sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it")}

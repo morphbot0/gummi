@@ -191,6 +191,17 @@ still work — the board just stays static. Key env vars are tabled in
   its own (`Feature.Home`, DESIGN §19.3d): in no repository, a
   main-checkout card whose checkout is `.gummi/homes/<card>`
   (`worktree/home.go`), budgeted like any card and never landed.
+- **A person reads a card as its title and its type, not its id.** The
+  id (`FF-178`) stays the stored key, the worktree's name and the machine
+  contract (NDJSON, `--json`, the web API). Where a sentence names a
+  card, say `f.Name()` (its title, quoted and cut short; `Shell.cardName`
+  from an id alone, `cardName` on the page) and `f.TypeName()` (Session,
+  Agent, Feature …). The number, `id.Ref()` (`#178`), is the handle for
+  typing a card: it belongs on the card's own head, not on a board row or
+  in a notice. Where one is typed, read it through
+  `Store.ResolveFeature`, which takes `178`, `#178` or the id. Never put a `Ref` in a commit message or
+  anything else bound for GitHub — `#178` is an issue there — or in a
+  printed shell command, where `#` starts a comment.
 - **The spec is the context carrier**, not chat transcripts. Keep token
   windows small: pass specs between stages, not conversation history.
 - **gummi's job ends at a verified branch — and a person may publish it.**

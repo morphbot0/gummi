@@ -329,7 +329,7 @@ func (m *Shell) useInForm() tea.Cmd {
 	}
 	p := bv.props[i]
 	if id, ok := bv.isOnBoard(p); ok {
-		m.notice = noticeMsg{text: fmt.Sprintf("%s is already on the board as %s", p.ExternalRef, id), isErr: true}
+		m.notice = noticeMsg{text: fmt.Sprintf("%s is already on the board as %s", p.ExternalRef, m.cardName(id)), isErr: true}
 		return nil
 	}
 	d := m.pendingCard
@@ -458,7 +458,7 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 		num := meta.Render(fmt.Sprintf("%*d.", numW, i+1))
 		line := marker + num + " " + style.Render(ansi.Truncate(p.Title, max(w-numW-6, 8), "…"))
 		if taken {
-			line += "  " + meta.Render("on board · "+string(onBoard))
+			line += "  " + meta.Render("on board · "+m.cardName(onBoard))
 		} else if tag := bugProposalTags(p); tag != "" {
 			line += "  " + meta.Render(tag)
 		}

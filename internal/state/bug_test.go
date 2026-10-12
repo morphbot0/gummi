@@ -102,3 +102,38 @@ func TestStoreRoundTripsRepo(t *testing.T) {
 		t.Errorf("repo = %q, want empty default", got2.Repo)
 	}
 }
+
+// A card is named by its number alone, with or without the "#" a person
+// reads it with; its canonical id and an external ref still resolve, and a
+// ref that happens to be a number keeps naming its own card when another
+// card has that number.
+func TestResolveFeatureReadsANumberAnIDOrARef(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+
+	b := bug(7, "Login loops", "42")
+	if err := s.CreateFeature(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range []string{"7", "#7", " 7 ", "007", string(b.ID), "42"} {
+		got, err := s.ResolveFeature(ctx, arg)
+		if err != nil || got.ID != b.ID {
+			t.Errorf("ResolveFeature(%q) = %s, %v; want %s", arg, got.ID, err, b.ID)
+		}
+	}
+	for _, arg := range []string{"8", "#8", "FD-007", "", "#", "seven"} {
+		if _, err := s.ResolveFeature(ctx, arg); !errors.Is(err, ErrNotFound) {
+			t.Errorf("ResolveFeature(%q) err = %v, want ErrNotFound", arg, err)
+		}
+	}
+
+	other := bug(42, "Other", "")
+	if err := s.CreateFeature(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	for arg, want := range map[string]domain.FeatureID{"42": b.ID, "#42": other.ID, string(other.ID): other.ID} {
+		if got, err := s.ResolveFeature(ctx, arg); err != nil || got.ID != want {
+			t.Errorf("ResolveFeature(%q) = %s, %v; want %s", arg, got.ID, err, want)
+		}
+	}
+}

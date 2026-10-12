@@ -39,22 +39,22 @@ func (m *Shell) readPRChecks(f domain.Feature) tea.Cmd {
 		// stale-row safety, as pullPRReview: the row may predate an unlink
 		cur, err := m.store.GetFeature(ctx, f.ID)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(f.Name() + ": " + err.Error()), isErr: true}
 		}
 		f = cur
 		if f.PullRequest.Empty() {
-			return noticeMsg{text: string(f.ID) + " has no linked PR", isErr: true}
+			return noticeMsg{text: f.Name() + " has no linked PR", isErr: true}
 		}
 		if m.fetchPRChecks == nil {
 			return noticeMsg{text: "sending failing checks is unavailable — no PR backend wired", isErr: true}
 		}
 		checks, err := m.fetchPRChecks(ctx, f.PullRequest)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": reading the PR's checks: " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(f.Name() + ": reading the PR's checks: " + err.Error()), isErr: true}
 		}
 		n := len(checks.Failing())
 		if n == 0 {
-			text := fmt.Sprintf("%s: no failing checks on %s#%d", f.ID, f.PullRequest.Repo, f.PullRequest.Number)
+			text := fmt.Sprintf("%s: no failing checks on %s#%d", f.Name(), f.PullRequest.Repo, f.PullRequest.Number)
 			if p := checks.Count(pr.CheckPending); p > 0 {
 				text += fmt.Sprintf(" (%d still running)", p)
 			}
@@ -77,7 +77,7 @@ func (m *Shell) deliverPRChecks(msg prChecksReadyMsg) tea.Cmd {
 	f, turn := msg.f, msg.turn
 	what := fmt.Sprintf("%d failing check%s", msg.n, plural(msg.n))
 	if m.engine == nil && f.Stage != domain.StageVerify {
-		text := string(f.ID) + ": no agent engine to hand the failing checks to"
+		text := f.Name() + ": no agent engine to hand the failing checks to"
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 	}
 	if f.IsFreeform() {
@@ -90,7 +90,7 @@ func (m *Shell) deliverPRChecks(msg prChecksReadyMsg) tea.Cmd {
 			if err := ff.Send(ctx, turn); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
-			return noticeMsg{text: fmt.Sprintf("%s: sent %s to its session", f.ID, what), reload: true}
+			return noticeMsg{text: fmt.Sprintf("%s: sent %s to its session", f.Name(), what), reload: true}
 		}
 	}
 	running := false
@@ -105,7 +105,7 @@ func (m *Shell) deliverPRChecks(msg prChecksReadyMsg) tea.Cmd {
 			case snap.Rebase:
 				pass = "a rebase"
 			}
-			text := fmt.Sprintf("%s: %s is running — send the failing checks again when it has finished", f.ID, pass)
+			text := fmt.Sprintf("%s: %s is running — send the failing checks again when it has finished", f.Name(), pass)
 			return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 		}
 	}
@@ -116,7 +116,7 @@ func (m *Shell) deliverPRChecks(msg prChecksReadyMsg) tea.Cmd {
 				if err := m.engine.Send(context.Background(), f.ID, turn); err != nil {
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				}
-				return noticeMsg{text: fmt.Sprintf("%s: sent %s to the running implement agent", f.ID, what), reload: true}
+				return noticeMsg{text: fmt.Sprintf("%s: sent %s to the running implement agent", f.Name(), what), reload: true}
 			}
 		}
 		m.dropSession(f.ID)
@@ -124,12 +124,12 @@ func (m *Shell) deliverPRChecks(msg prChecksReadyMsg) tea.Cmd {
 			if err := m.engine.RunWith(f, turn); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
-			return noticeMsg{text: fmt.Sprintf("%s: re-running implement with %s", f.ID, what), reload: true}
+			return noticeMsg{text: fmt.Sprintf("%s: re-running implement with %s", f.Name(), what), reload: true}
 		}
 	case domain.StageVerify:
 		return m.bounceStage(f.ID, turn)
 	}
-	text := fmt.Sprintf("%s is in %s — failing checks go to a session, or to a card in implement or verify", f.ID, f.Stage)
+	text := fmt.Sprintf("%s is in %s — failing checks go to a session, or to a card in implement or verify", f.Name(), f.Stage)
 	return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 }
 

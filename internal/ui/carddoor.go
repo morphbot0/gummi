@@ -174,7 +174,7 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 	if !msg.f.Home {
 		m.lastRepo = msg.f.Repo
 	}
-	text := fmt.Sprintf("%s created", msg.f.ID)
+	text := fmt.Sprintf("%s created", msg.f.Name())
 	if msg.warn != "" {
 		text += " — dependency not recorded: " + msg.warn
 	}

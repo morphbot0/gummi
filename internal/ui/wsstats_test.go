@@ -101,7 +101,7 @@ func TestTheStatsTabDrawsTheTimeline(t *testing.T) {
 
 	for _, want := range []string{
 		"THE TIMELINE", "WHERE IT WENT", "THE CLOCK", "TOP CARDS",
-		"FD-001", "FD-002", "$0.42", "parked on you since 12:00",
+		"#1", "#2", "$0.42", "parked on you since 12:00",
 		"█", "✔", "all-time", "2 cards",
 	} {
 		if !strings.Contains(out, want) {

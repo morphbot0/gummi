@@ -18,7 +18,7 @@ func TestGoalShape(t *testing.T) {
 		Done   Outcome           `json:"done"`
 	}{
 		List: Goals{Goals: []GoalSummary{{
-			Row:   Row{ID: "GL-001", Kind: "goal", Title: "Stable board", Stage: "implement", Status: StatusRunning, Spend: 410, Envelope: 3000},
+			Row:   Row{ID: "GL-001", Kind: "goal", Type: "Goal", Title: "Stable board", Stage: "implement", Status: StatusRunning, Spend: 410, Envelope: 3000},
 			State: "running", Met: 1, DoneWhen: 3, Landed: 2, Cards: 4, Spent: 410,
 		}}},
 		Page: Goal{
@@ -29,7 +29,7 @@ func TestGoalShape(t *testing.T) {
 				Cards:    []engine.GoalReportCard{{ID: "FD-004", Kind: "feature", Title: "Loader", State: "landed", Stage: "done", Envelope: 600, Spent: 212}},
 			},
 			State: "running",
-			Cards: []Row{{ID: "FD-004", Kind: "feature", Title: "Loader", Stage: "done", Status: StatusDone, Goal: &RowGoal{ID: "GL-001", Title: "Stable board"}}},
+			Cards: []Row{{ID: "FD-004", Kind: "feature", Type: "Feature", Title: "Loader", Stage: "done", Status: StatusDone, Goal: &RowGoal{ID: "GL-001", Title: "Stable board"}}},
 			Log:   []GoalLogEntry{{Seq: 7, At: at, Action: "decision", Ref: "D-1", Detail: "cache the rows", By: "lead"}},
 			Notebook: GoalNotebook{
 				References: []GoalReference{{Name: "prd.md"}},
@@ -158,7 +158,7 @@ func TestSessionModelsShape(t *testing.T) {
 			Recent: []SessionModel{{Backend: "codex", Model: "gpt-5"}},
 		},
 		Card: Card{
-			Row:     Row{ID: "FF-003", Kind: "freeform", Title: "Tidy the help text", Stage: "open", Status: StatusRunning, Spend: 12, Envelope: 150},
+			Row:     Row{ID: "FF-003", Kind: "freeform", Type: "Session", Title: "Tidy the help text", Stage: "open", Status: StatusRunning, Spend: 12, Envelope: 150},
 			Branch:  "ff/003-tidy-the-help-text",
 			Actions: []Action{{ID: "model", Label: "model", Needs: ActionNeedsModel, Default: "codex gpt-5"}},
 			Session: &SessionModel{Backend: "codex", Model: "gpt-5"},

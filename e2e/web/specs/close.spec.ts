@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, ref, test } from '../fixtures/test';
 
 let id = '';
 test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a parting helper'); } } });
@@ -8,7 +8,7 @@ test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a partin
 test('/close from the composer hands the card off after a yes', async ({ pairedPage: page, server, api }, info) => {
   test.setTimeout(120_000);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
 
   const input = page.getByTestId('composer-input');
@@ -18,7 +18,7 @@ test('/close from the composer hands the card off after a yes', async ({ pairedP
 
   const confirm = page.getByTestId('decision-confirm');
   await expect(confirm).toBeVisible();
-  await expect(confirm).toContainText(`Hand off ${id}`);
+  await expect(confirm).toContainText(/Hand off “.+”/);
   expect((await api('GET', `/api/cards/${id}`)).json.stage).not.toBe('done');
 
   await page.getByTestId('decision-confirm-yes').click();

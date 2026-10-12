@@ -424,9 +424,9 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		// then offers whatever is still open. Phrasing it as a question
 		// ("what now?") would invite a decision the card no longer has.
 		if in.continuedAs != "" {
-			return string(r.F.ID) + " is closed — continued as " + string(in.continuedAs) + "."
+			return r.F.Name() + " is closed — continued as " + in.name(in.continuedAs) + "."
 		}
-		return string(r.F.ID) + " is closed — " + endingWord(in.ending) + "."
+		return r.F.Name() + " is closed — " + endingWord(in.ending) + "."
 	case decisionBudget:
 		return string(r.F.Stage) + " ran out of budget."
 	case decisionVerify:
@@ -693,7 +693,7 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	// standing claim on screen that no answer was ever coming to honour.
 	autopilots := m.autopilotAnswering[r.F.ID]
 	if d.ask != nil {
-		title = string(r.F.ID) + " asks"
+		title = r.F.Name() + " asks"
 		if m.threadFreeForm || m.proseAnswersAsk() {
 			// armed, or simply typed into: either way the composer below
 			// is the answer channel — say so on the pinned control, the
@@ -954,7 +954,7 @@ func (m *Shell) proseAnswersAsk() bool {
 func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 	sess := liveSessionFor(m.engine, r)
 	if sess == nil {
-		m.notice = noticeMsg{text: string(r.F.ID) + ": no live session to answer — attach first (enter)"}
+		m.notice = noticeMsg{text: r.F.Name() + ": no live session to answer — attach first (enter)"}
 		return nil
 	}
 	m.threadInput.Reset()

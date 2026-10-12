@@ -9,7 +9,7 @@ test('a session thread has bubbles, reply footers, step rows and changed files',
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Shape of the thread' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
 

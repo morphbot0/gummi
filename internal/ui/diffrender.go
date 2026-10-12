@@ -240,7 +240,7 @@ func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea
 			if err := ff.Send(ctx, turn); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
-			return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to its session", f.ID, n, plural(n)), reload: true}
+			return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to its session", f.Name(), n, plural(n)), reload: true}
 		}, noticeMsg{}, nil
 	}
 	// the diff's comments route with the artifact's: a design note left
@@ -276,13 +276,13 @@ func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea
 				if err := m.engine.Send(ctx, f.ID, turn); err != nil {
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				}
-				return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to the running %s agent", f.ID, n, plural(n), f.Stage), reload: true}
+				return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to the running %s agent", f.Name(), n, plural(n), f.Stage), reload: true}
 			}
 		}
 		m.dropSession(f.ID)
 		if err := m.engine.Run(f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d diff comment%s", f.ID, f.Stage, n, plural(n)), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d diff comment%s", f.Name(), f.Stage, n, plural(n)), reload: true}
 	}, noticeMsg{}, nil
 }

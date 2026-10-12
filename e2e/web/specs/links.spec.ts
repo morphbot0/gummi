@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, showTab, test, type GummiServer } from '../fixtures/test';
+import { expect, ref, showTab, test, type GummiServer } from '../fixtures/test';
 import { seedGoalAtPlan } from '../fixtures/goals';
 import { shot } from '../fixtures/shots';
 
@@ -9,7 +9,7 @@ import { shot } from '../fixtures/shots';
 
 async function open(page: Page, server: GummiServer, id: string, phone: boolean) {
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
   if (phone) await page.getByTestId('tab-thread').click();
 }
@@ -75,7 +75,7 @@ test.describe('a verified card', () => {
     // the board is waiting on
     const answer = await workspace.holdGh('pr', 'view');
     await page.getByTestId('action-confirm').click();
-    await expect(page.getByTestId('work-toast')).toContainText(`${id}: reading pull request 7 from GitHub`, { timeout: 15_000 });
+    await expect(page.getByTestId('work-toast')).toContainText(/“.+”: reading pull request 7 from GitHub/, { timeout: 15_000 });
     await shot(page, info, 'pr-link-reading');
     await answer();
     await expect(dialog).toHaveCount(0, { timeout: 30_000 });

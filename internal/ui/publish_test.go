@@ -261,7 +261,7 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	cmd := m.openPublish(r, publish.ActCreate, "")
 	// the read is GitHub's to answer: the status bar spins on it until
 	// the confirm opens
-	if pill := m.ghWorkPill(); !strings.Contains(pill, "FD-001: reading where the branch goes") || !m.spinnerActive() {
+	if pill := m.ghWorkPill(); !strings.Contains(pill, "“Dark mode”: reading where the branch goes") || !m.spinnerActive() {
 		t.Fatalf("while the facts are read the bar says %q (spinning %v)", pill, m.spinnerActive())
 	}
 	m = update(m, cmd())
@@ -274,7 +274,7 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	}
 	view := d.View(m0Styles(), 100, 40)
 	// the card is mid-implement: the draft is the floor's, not a choice
-	for _, want := range []string{"open pull request · FD-001", "and open a draft", "- feat: a dark palette", "[x] open as draft", "Dark mode"} {
+	for _, want := range []string{"open pull request · “Dark mode”", "and open a draft", "- feat: a dark palette", "[x] open as draft", "Dark mode"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("the confirm does not show %q:\n%s", want, view)
 		}
@@ -304,7 +304,7 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	if m.Overlay.HasDialogs() {
 		t.Fatal("the confirm stayed open after enter")
 	}
-	if m.notice.isErr || !strings.Contains(m.notice.text, "opened PR #512 (draft) https://github.com/me/widget/pull/512") || !strings.Contains(m.notice.text, "FD-001: pushed ") {
+	if m.notice.isErr || !strings.Contains(m.notice.text, "opened PR #512 (draft) https://github.com/me/widget/pull/512") || !strings.Contains(m.notice.text, "“Dark mode”: pushed ") {
 		t.Fatalf("notice = %+v", m.notice)
 	}
 	if len(m.ghWork) != 0 {
@@ -342,7 +342,7 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = update(m, m.openPublish(r, publish.ActReady, "")())
-	if m.Overlay.HasDialogs() || !m.notice.isErr || !strings.Contains(m.notice.text, "FD-001: ") || !strings.Contains(m.notice.text, "verif") {
+	if m.Overlay.HasDialogs() || !m.notice.isErr || !strings.Contains(m.notice.text, "“Dark mode”: ") || !strings.Contains(m.notice.text, "verif") {
 		t.Fatalf("ready on an unverified card: dialogs %v, notice %+v", m.Overlay.HasDialogs(), m.notice)
 	}
 	// nothing new to push either
@@ -396,19 +396,19 @@ func TestTheBoardSaysWhatAFailedPublishAlreadyDid(t *testing.T) {
 
 func TestPublishNoticesReadTheSameForEveryAct(t *testing.T) {
 	for want, r := range map[string]webapi.PublishResult{
-		"FD-001: pushed abc1234":                                        {Act: "push", Pushed: "abc1234"},
-		"FD-001: pushed abc1234 · PR #7 returned to draft":              {Act: "push", Pushed: "abc1234", Number: 7, ToDraft: true},
-		"FD-001: opened PR #7 (ready) https://x/7":                      {Act: "create", Number: 7, URL: "https://x/7"},
-		"FD-001: pushed abc1234 · updated PR #7":                        {Act: "update", Pushed: "abc1234", Number: 7},
-		"FD-001: PR #7 is ready for review":                             {Act: "ready", Number: 7},
-		"FD-001: PR #7 is a draft again":                                {Act: "draft", Number: 7},
-		"FD-001: opened PR #7 (draft) https://x/7\nwarning: not linked": {Act: "create", Number: 7, URL: "https://x/7", Draft: true, LinkError: "not linked"},
+		"“Dark mode”: pushed abc1234":                                        {Act: "push", Pushed: "abc1234"},
+		"“Dark mode”: pushed abc1234 · PR #7 returned to draft":              {Act: "push", Pushed: "abc1234", Number: 7, ToDraft: true},
+		"“Dark mode”: opened PR #7 (ready) https://x/7":                      {Act: "create", Number: 7, URL: "https://x/7"},
+		"“Dark mode”: pushed abc1234 · updated PR #7":                        {Act: "update", Pushed: "abc1234", Number: 7},
+		"“Dark mode”: PR #7 is ready for review":                             {Act: "ready", Number: 7},
+		"“Dark mode”: PR #7 is a draft again":                                {Act: "draft", Number: 7},
+		"“Dark mode”: opened PR #7 (draft) https://x/7\nwarning: not linked": {Act: "create", Number: 7, URL: "https://x/7", Draft: true, LinkError: "not linked"},
 	} {
-		if got := publishResultText("FD-001", r); got != want {
+		if got := publishResultText("“Dark mode”", r); got != want {
 			t.Errorf("%+v reads %q, want %q", r, got, want)
 		}
 	}
-	if got := publishErrorText("FD-001", &webapi.PublishError{Text: "uncommitted work", Fix: "commit it"}); got != "FD-001: uncommitted work — commit it" {
+	if got := publishErrorText("“Dark mode”", &webapi.PublishError{Text: "uncommitted work", Fix: "commit it"}); got != "“Dark mode”: uncommitted work — commit it" {
 		t.Errorf("an error reads %q", got)
 	}
 	if _, ok := webPublishAct("merge"); ok {
@@ -427,7 +427,7 @@ func TestTheBarNamesThePublishStepInFlight(t *testing.T) {
 	if cmd := m.handlePublishStep(step); cmd == nil {
 		t.Fatal("the next step is not waited for")
 	}
-	if pill := m.ghWorkPill(); !strings.Contains(pill, "FD-001: Push 0123abc to me/widget (2/3)") {
+	if pill := m.ghWorkPill(); !strings.Contains(pill, "“Dark mode”: Push 0123abc to me/widget (2/3)") {
 		t.Fatalf("the bar says %q", pill)
 	}
 

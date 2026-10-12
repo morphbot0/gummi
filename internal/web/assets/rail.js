@@ -4,7 +4,7 @@
 // shows), a compact form below 1280px or on `[`, and the foot that opens
 // the board's other surfaces (new session, new card, fleet stats, More).
 
-import { $, h, icon, clear, kindTag, repoSlot, needsWord, STAGES, cr, isMobile, storage } from './dom.js?v=__ASSET_V__'
+import { $, h, icon, clear, kindTag, typeName, repoSlot, needsWord, STAGES, cr, isMobile, storage, ref } from './dom.js?v=__ASSET_V__'
 import { on, set, state, rows } from './store.js?v=__ASSET_V__'
 import { openView, openMenu, retickMenu } from './views.js?v=__ASSET_V__'
 import { openPush } from './push.js?v=__ASSET_V__'
@@ -116,7 +116,7 @@ function matches (r, repo) {
   if (repo !== 'all' && (r.home || (r.repo || '') !== repo)) return false
   if (!state.filter) return true
   const group = GROUPS.find(g => g[0] === r.status)?.[1] || ''
-  return `${r.id} ${r.title} ${r.stage} ${word(r)} ${group} ${KINDS[kindTag(r)] || ''} ${r.repo || ''} ${r.pr || ''} ${r.stack?.name || ''} ${r.goal?.title || ''}`.toLowerCase().includes(state.filter)
+  return `${r.id} ${ref(r.id)} ${typeName(r)} ${r.title} ${r.stage} ${word(r)} ${group} ${KINDS[kindTag(r)] || ''} ${r.repo || ''} ${r.pr || ''} ${r.stack?.name || ''} ${r.goal?.title || ''}`.toLowerCase().includes(state.filter)
 }
 
 // visibleIds is the rail's rows in on-screen order: what j and k walk.
@@ -309,12 +309,13 @@ function rowEl (r, wide) {
   const staged = STAGES.includes(r.stage) && r.stage !== 'todo' && r.stage !== 'done' && (show.includes('stage') || !w)
   const sep = () => h('i', { 'aria-hidden': 'true' }, '·')
   const bits = [
+    typeName(r) ? h('span', { class: 'type', testid: `rail-row-type-${r.id}` }, typeName(r)) : null,
     wide && r.repo ? h('span', { class: 'repo', style: { '--rc': `var(--r${repoSlot(r.repo)})` }, title: `repository ${r.repo}`, testid: `rail-row-repo-${r.id}` }, r.repo) : null,
     w ? h('span', { class: ['word', `q-${q}`, r.status === 'running' && 'shimmer'], testid: `rail-row-word-${r.id}` }, w) : null,
     staged ? h('span', { class: 'stage' }, r.stage) : null,
     r.severity && r.status === 'todo' ? h('span', null, r.severity) : null,
     r.objective ? h('span', { class: ['badge obj', `obj-${r.objective}`], title: `objective ${r.objective}`, testid: `rail-row-objective-${r.id}` }, `◆ ${r.objective}`) : null,
-    r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.join(', ')}`) : null,
+    r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.map(ref).join(', ')}`) : null,
     r.stack && show.includes('stack') ? h('span', { class: ['stackpos', r.stack.stale && 'stale'], title: r.stack.stale ? `${r.stack.name} — its base has moved` : r.stack.name }, `stack ${r.stack.pos + 1}/${r.stack.of}`) : null,
     r.elsewhere ? h('span', { class: 'else', title: 'Another gummi is driving this card' }, 'elsewhere') : null
   ].filter(Boolean)
@@ -332,7 +333,6 @@ function rowEl (r, wide) {
   },
   h('span', { class: ['dot', `q-${q}`, r.home && 'home'], 'aria-hidden': 'true' }, q === 'done' ? '✔' : ''),
   h('span', { class: 't' }, r.title),
-  h('span', { class: 'id' }, r.id),
   h('span', { class: 'meta' }, h('span', { class: 'l' }, bits.flatMap((b, i) => i ? [sep(), b] : [b])), money))
 }
 
@@ -365,15 +365,15 @@ function showHover (id) {
   const card = h('div', { class: 'rowcard', id: 'rowcard', testid: 'rail-row-card', 'aria-hidden': 'true' },
     h('b', null, r.title),
     h('dl', null,
-      fact('Card', `${r.id} · ${(KINDS[kindTag(r)] || r.kind || '').toLowerCase()}`),
+      fact('Card', `${typeName(r) || KINDS[kindTag(r)] || r.kind || ''} ${ref(r.id)}`),
       fact('Status', [word(r), STAGES.includes(r.stage) ? r.stage : ''].filter(Boolean).join(' · ')),
       fact('Asks', r.needs?.question),
       fact('Doing', r.running?.why),
       fact('Repository', r.repo),
       fact('Home', r.home),
       fact('Stack', r.stack ? `${r.stack.name || 'stack'} · ${r.stack.pos + 1} of ${r.stack.of}${r.stack.stale ? ' · base moved' : ''}` : ''),
-      fact('Goal', r.goal ? `${r.goal.id}${r.goal.title ? ' · ' + r.goal.title : ''}` : ''),
-      fact('Waits on', r.waits?.join(', ')),
+      fact('Goal', r.goal ? `${ref(r.goal.id)}${r.goal.title ? ' · ' + r.goal.title : ''}` : ''),
+      fact('Waits on', r.waits?.map(ref).join(', ')),
       fact('Pull request', r.pr),
       fact('Profile', r.profile),
       fact('Budget', `${cr(r.spend)} of ${r.envelope ? cr(r.envelope) : 'no cap'}`)),

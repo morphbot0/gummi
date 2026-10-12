@@ -678,6 +678,7 @@ func (m *Shell) requireRepo(name string) error {
 // when it enters design (spec.EnsureDraft). The shared slug is safe:
 // branch, worktree, and artifact paths are all keyed by ID.
 func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		src, err := m.store.GetFeature(ctx, id)
@@ -709,7 +710,7 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s created — fresh copy of %s", newID, id), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s created — fresh copy of %s", newID.Ref(), name), reload: true}
 	}
 }
 
@@ -832,7 +833,7 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 	// drop the run it is in the middle of. The menu does not offer it
 	// (cardActionsFor), and g says why rather than doing it.
 	if r, ok := m.rowByID(id); ok && actor != state.ActorAutopilot && !r.F.IsFreeform() && m.nextInputFor(r).agentAtWork() {
-		why := string(id) + ": its " + string(r.F.Stage) + " agent is still at work — let it finish, or pause it, before moving the card on"
+		why := m.cardName(id) + ": its " + string(r.F.Stage) + " agent is still at work — let it finish, or pause it, before moving the card on"
 		return func() tea.Msg { return noticeMsg{text: why, isErr: true, id: id} }
 	}
 	return func() tea.Msg {
@@ -888,7 +889,7 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 	}
 	switch res.Status {
 	case engine.StatusNoop:
-		return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", id), clearInbox: id}
+		return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", m.cardName(id)), clearInbox: id}
 	case engine.StatusBlockedQuestions:
 		// unresolved user %% annotations block every human gate — g
 		// re-gates only once they resolve (DESIGN §6.1).
@@ -896,26 +897,26 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 		if res.Feature.Kind == domain.KindBug {
 			surface = "report"
 		}
-		head := fmt.Sprintf("%s: %d open comment%s %s approval", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
+		head := fmt.Sprintf("%s: %d open comment%s %s approval", m.cardName(id), res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
 		return blockedMsgWeb(actor, id,
 			head+" — x resolves one, R sends them back to the agent (in the "+surface+" view)",
 			head+" — resolve each one in the "+surface+", or send them back to the agent")
 	case engine.StatusBlockedDiff:
-		head := fmt.Sprintf("%s: %d open diff comment%s %s approval", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
+		head := fmt.Sprintf("%s: %d open diff comment%s %s approval", m.cardName(id), res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
 		return blockedMsgWeb(actor, id,
 			head+" — x resolves one, R sends them back to the agent",
 			head+" — resolve each one on the diff, or send them back to the agent")
 	case engine.StatusBlockedOmission:
 		return blockedMsg(actor, id, res.Reason)
 	case engine.StatusBlockedUndrafted:
-		text := fmt.Sprintf("%s: %s wrote nothing in %s — the gate stays shut until the section is drafted", id, res.From, strings.Join(res.Undrafted, ", "))
+		text := fmt.Sprintf("%s: %s wrote nothing in %s — the gate stays shut until the section is drafted", m.cardName(id), res.From, strings.Join(res.Undrafted, ", "))
 		return blockedMsg(actor, id, text)
 	case engine.StatusBlockedDependency:
 		names := make([]string, 0, len(res.BlockingDeps))
 		for _, d := range res.BlockingDeps {
 			names = append(names, d.String())
 		}
-		text := fmt.Sprintf("%s: %s %s — land it before this card can start coding", id, unmetDependencyClause, strings.Join(names, ", "))
+		text := fmt.Sprintf("%s: %s %s — land it before this card can start coding", m.cardName(id), unmetDependencyClause, strings.Join(names, ", "))
 		return blockedMsg(actor, id, text)
 	case engine.StatusBlockedDocument:
 		// the deterministic citation/coverage floor (internal/verifydoc)
@@ -935,7 +936,7 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 	// StatusAdvanced: show the transition notice, then kick off the
 	// background one-shot passes — check discovery whenever a fresh
 	// worktree was created (both kinds).
-	note := fmt.Sprintf("%s → %s", id, res.To) + res.EstimateNotice()
+	note := fmt.Sprintf("%s → %s", m.cardName(id), res.To) + res.EstimateNotice()
 	discover := res.EnteredWorktree
 	continueTo := domain.Stage("")
 	// A person's crossing on a card they handed to autopilot continues the
@@ -1075,7 +1076,7 @@ func (m *Shell) warnScribeFailure(id domain.FeatureID, err error) {
 	m.scribeWarned[id] = true
 	// not isErr, for the reason the no-checks notice is not: the pass
 	// that failed rides in the wake of a crossing that succeeded
-	m.notice = noticeMsg{id: id, aside: true, text: sanitize(string(id) + ": " + sf.Error() +
+	m.notice = noticeMsg{id: id, aside: true, text: sanitize(m.cardName(id) + ": " + sf.Error() +
 		" — check discovery and landing drafts are skipped until it works; fix the scribe's model in .gummi/profiles.yaml")}
 }
 
@@ -1130,6 +1131,7 @@ func (m *Shell) rebaselineCmd(id domain.FeatureID) tea.Cmd {
 		return nil
 	}
 	eng := m.engine
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
@@ -1139,12 +1141,12 @@ func (m *Shell) rebaselineCmd(id domain.FeatureID) tea.Cmd {
 		before, _ := m.store.CheckBaseline(ctx, id)
 		res, err := eng.RebaselineIfBaseMoved(ctx, f)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(id) + ": the excused checks could not be re-measured on the new base — " + err.Error())}
+			return noticeMsg{text: sanitize(name + ": the excused checks could not be re-measured on the new base — " + err.Error())}
 		}
 		if !res.Moved {
 			return nil
 		}
-		return noticeMsg{text: sanitize(string(id) + ": " + engine.RebaselineSentence(res, before)), reload: true}
+		return noticeMsg{text: sanitize(name + ": " + engine.RebaselineSentence(res, before)), reload: true}
 	}
 }
 
@@ -1177,7 +1179,7 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 			if err := m.wt.AssertNoForkDrift(ctx, &f); err != nil {
 				autostash = true
 			} else {
-				return noticeMsg{text: string(f.ID) + ": worktree has uncommitted changes — commit them before rebasing", isErr: true}
+				return noticeMsg{text: f.Name() + ": worktree has uncommitted changes — commit them before rebasing", isErr: true}
 			}
 		}
 		rebase := m.wt.RebaseOnMain
@@ -1196,7 +1198,7 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 				}
 				// ce carries git-derived file names; sanitize like every
 				// other notice before it reaches the terminal.
-				return noticeMsg{text: sanitize(string(f.ID) + ": " + ce.Error() + " — resolve on the branch, then retry"), isErr: true}
+				return noticeMsg{text: sanitize(f.Name() + ": " + ce.Error() + " — resolve on the branch, then retry"), isErr: true}
 			}
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
@@ -1204,14 +1206,14 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 		// drifted feature is cleared in the same gesture and a fresh one does
 		// not go stale on the next innocent rewrite of main.
 		if err := m.wt.ReanchorOnMain(ctx, &f); err != nil {
-			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
+			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.Name(), err)), isErr: true}
 		}
 		// the branch moved under everyone reading the card: its thread
 		// says so, and who moved it
 		m.logRebase(f.ID, state.RebasePayload{Onto: onto, By: by})
 		return rebasedMsg{
 			id: f.ID, cleared: drifted != nil,
-			notice: noticeMsg{text: string(f.ID) + " rebased onto " + onto, reload: true},
+			notice: noticeMsg{text: f.Name() + " rebased onto " + onto, reload: true},
 		}
 	})
 }
@@ -1228,7 +1230,7 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if !landed {
-			return noticeMsg{text: string(f.ID) + " hasn't landed on " + m.baseBranch(f) + " yet — nothing to clean up", isErr: true}
+			return noticeMsg{text: f.Name() + " hasn't landed on " + m.baseBranch(f) + " yet — nothing to clean up", isErr: true}
 		}
 		m.dropSession(f.ID)
 		// what a goal's sweep took with it, for the closing notice; the
@@ -1246,7 +1248,7 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 			if dirty, err := m.wt.TrackedDirty(ctx, &f); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			} else if dirty {
-				return noticeMsg{text: string(f.ID) + " has uncommitted changes on its branch — commit or discard them before cleanup", isErr: true}
+				return noticeMsg{text: f.Name() + " has uncommitted changes on its branch — commit or discard them before cleanup", isErr: true}
 			}
 			// A goal's cards resolve to a manager rooted at THIS tree, so
 			// they come out before it does: after this remove their
@@ -1283,7 +1285,7 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 		}
-		text := string(f.ID) + " cleaned up — worktree and merged branch removed"
+		text := f.Name() + " cleaned up — worktree and merged branch removed"
 		if n := len(cards.Took); n > 0 {
 			text += ", with " + itoa(n) + " of its card" + plural(n)
 		}
@@ -1426,7 +1428,7 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 	if f.Stage == domain.StagePlan {
 		it, ok := m.inbox.get(id)
 		if !ok || it.Kind != attnGate || !it.Escalated {
-			text := fmt.Sprintf("%s plan has no escalated gate to bounce", id)
+			text := fmt.Sprintf("%s plan has no escalated gate to bounce", m.cardName(id))
 			return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 		}
 		if err := rounds.Reset(ctx, m.roundStore, id, domain.RoundKindPlan); err != nil {
@@ -1438,11 +1440,12 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 		if note != "" {
 			kickoff += "\n\n" + note
 		}
+		name := m.cardName(id)
 		return func() tea.Msg {
 			if err := m.engine.RunWith(f, kickoff); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
-			text := fmt.Sprintf("%s sent back for another plan round", id)
+			text := fmt.Sprintf("%s sent back for another plan round", name)
 			if note != "" {
 				text += " — your line rides the kickoff"
 			}
@@ -1454,7 +1457,7 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 	// escalated-plan branch above re-runs in place and is not an edge.
 	back, ok := workflow.RerunTarget(f.Stage)
 	if !ok {
-		text := fmt.Sprintf("%s is in %s — only plan/implement/verify can bounce back", id, f.Stage)
+		text := fmt.Sprintf("%s is in %s — only plan/implement/verify can bounce back", m.cardName(id), f.Stage)
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 	}
 	if note != "" {
@@ -1465,11 +1468,12 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 	}
 	m.dropSession(id)
 	actor := m.humanActor()
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if _, err := m.store.Transition(ctx, id, back, actor); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		text := fmt.Sprintf("%s bounced back to %s", id, back)
+		text := fmt.Sprintf("%s bounced back to %s", name, back)
 		if note != "" {
 			text += " — your line rides the next run's kickoff"
 		}
@@ -1564,7 +1568,7 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		if err := m.deleteCard(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		text := fmt.Sprintf("%s deleted", id)
+		text := fmt.Sprintf("%s deleted", f.Name())
 		if n := len(cards); n > 0 {
 			ids := make([]domain.FeatureID, 0, n)
 			for _, c := range cards {
@@ -1615,7 +1619,7 @@ func (m *Shell) dependentsOutside(ctx context.Context, f domain.Feature, cards [
 		}
 		for _, d := range deps {
 			if !inSet[d] {
-				return &noticeMsg{text: fmt.Sprintf("%s depends on %s — remove that dependency first", d, id), isErr: true}
+				return &noticeMsg{text: fmt.Sprintf("%s depends on %s — remove that dependency first", m.cardName(d), m.cardName(id)), isErr: true}
 			}
 		}
 	}

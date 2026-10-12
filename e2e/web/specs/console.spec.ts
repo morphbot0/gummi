@@ -1,4 +1,4 @@
-import { expect, test, type GummiServer } from '../fixtures/test';
+import { expect, ref, test, type GummiServer } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 
 // A question the board stops at — a landing message to read, a yes to give
@@ -25,7 +25,7 @@ function watch(page: Page) {
 
 async function open(page: Page, server: GummiServer, id: string) {
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
 }
 
@@ -79,7 +79,7 @@ test.describe('two verified cards and a backlog', () => {
     await open(page, server, backlog[0]);
     await page.getByTestId('card-actions').click();
     await page.getByTestId('action-delete').click();
-    await expect(page.getByTestId('action-question')).toContainText(`Delete ${backlog[0]}?`);
+    await expect(page.getByTestId('action-question')).toContainText(/Delete “.+”\?/);
     await page.getByTestId('action-confirm').click();
     await expect.poll(async () => (await api('GET', `/api/cards/${backlog[0]}`)).status).toBe(404);
     expect(failed, 'failed loads logged to the console').toEqual([]);

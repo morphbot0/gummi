@@ -63,6 +63,7 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 	row := webapi.Row{
 		ID:        string(f.ID),
 		Kind:      string(webKind(f)),
+		Type:      f.TypeName(),
 		Title:     f.Title,
 		Stage:     string(f.Stage),
 		Spend:     f.Spend.Credits,

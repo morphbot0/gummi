@@ -96,7 +96,7 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
   // a lane's id opens the card
   await page.getByTestId(`fleet-lane-${ids.gate}`).locator('.id').click();
   await expect(page.getByTestId('view-fleet')).toHaveCount(0);
-  await expect(page.getByTestId('card-id')).toHaveText(ids.gate);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.gate);
   expect(errors).toEqual([]);
 });
 

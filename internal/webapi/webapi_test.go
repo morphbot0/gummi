@@ -31,19 +31,19 @@ func TestBoardShape(t *testing.T) {
 		Viewers: []Viewer{{Person: "Simon", Device: "iPhone · Safari", DeviceID: "a1b2c3d4", Since: at}},
 		Rows: []Row{
 			{
-				ID: "FD-012", Kind: "feature", Title: "Dark mode", Stage: "plan", Status: StatusNeeds,
+				ID: "FD-012", Kind: "feature", Type: "Feature", Title: "Dark mode", Stage: "plan", Status: StatusNeeds,
 				Needs: &RowNeeds{Kind: NeedsGate, Color: "warn", Question: "Approve the design?"},
 				Spend: 12.3, Envelope: 2000, Profile: "balanced",
 				Stack: &RowStack{ID: "ST-1", Name: "theme", Pos: 0, Of: 2},
 			},
 			{
-				ID: "BG-003", Kind: "bug", Title: "Crash on empty board", Stage: "implement", Status: StatusRunning,
+				ID: "BG-003", Kind: "bug", Type: "Bug", Title: "Crash on empty board", Stage: "implement", Status: StatusRunning,
 				Running: &RowRunning{Verb: "editing board.go", Autopilot: true},
 				Spend:   3, Envelope: 500, Severity: "high", Autopilot: true,
 				Goal: &RowGoal{ID: "GL-001", Title: "Stable board"}, Waits: []string{"FD-010"},
 			},
-			{ID: "FD-001", Kind: "feature", Title: "Landed thing", Stage: "done", Status: StatusDone, Landed: true, PR: "#12 merged"},
-			{ID: "FF-020", Kind: "freeform", Title: "Watch the nightly CI", Stage: "open", Status: StatusIdle, Home: ".gummi/homes/FF-020"},
+			{ID: "FD-001", Kind: "feature", Type: "Feature", Title: "Landed thing", Stage: "done", Status: StatusDone, Landed: true, PR: "#12 merged"},
+			{ID: "FF-020", Kind: "freeform", Type: "Agent", Title: "Watch the nightly CI", Stage: "open", Status: StatusIdle, Home: ".gummi/homes/FF-020"},
 		},
 		Resume:  &ResumeOffer{Cards: []CardRef{{ID: "FD-012", Title: "Dark mode", Stage: "plan"}}, Since: "3m ago", At: at},
 		EventID: "1760000000000042",
@@ -52,7 +52,7 @@ func TestBoardShape(t *testing.T) {
 
 func TestCardShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, Card{
-		Row:    Row{ID: "FD-012", Kind: "feature", Title: "Dark mode", Stage: "plan", Status: StatusNeeds, Spend: 12.3, Envelope: 2000},
+		Row:    Row{ID: "FD-012", Kind: "feature", Type: "Feature", Title: "Dark mode", Stage: "plan", Status: StatusNeeds, Spend: 12.3, Envelope: 2000},
 		Branch: "fd-012-dark-mode", Base: "main",
 		Decision: &Decision{
 			Ref: "d-41", Kind: DecisionGate, Question: "Approve the design?", Anchor: AnchorSpec,

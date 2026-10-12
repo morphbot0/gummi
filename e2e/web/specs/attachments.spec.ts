@@ -52,7 +52,7 @@ test('the composer hides its attach control on the headless backend, and a threa
   const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the attachments' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (phone(info)) await page.getByTestId('tab-thread').click();
 
   // every profile this harness configures runs the headless backend, which

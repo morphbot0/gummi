@@ -20,7 +20,7 @@ const inside = (page: Page, tid: string) => page.evaluate((t) => {
 
 async function open(page: Page, server: { url: string }) {
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
 }
 

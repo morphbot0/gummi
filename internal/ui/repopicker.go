@@ -76,7 +76,7 @@ func (d *repoPickerDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 func (d *repoPickerDialog) View(s *theme.Styles, w, h int) string {
 	width, _ := dialogDescSize(w, h, 0)
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("repo · "+string(d.feature.ID)) + "\n\n")
+	b.WriteString(s.DialogTitle.Render("repo · "+d.feature.Name()) + "\n\n")
 	// an empty repo here is an unset one, not a default: this dialog only
 	// opens in a workspace whose repos are all named.
 	now := d.feature.Repo

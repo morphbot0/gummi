@@ -47,7 +47,7 @@ func TestBoardGAtTheDesignGateAsksFirst(t *testing.T) {
 		t.Fatal("g crossed the gate before the confirmation was answered")
 	}
 	// it names the card and the edge it is about to cross
-	if !strings.Contains(d.question, "FD-001") {
+	if !strings.Contains(d.question, "“Dark mode”") {
 		t.Errorf("question = %q, does not name the card", d.question)
 	}
 	if !strings.Contains(d.question, "plan → implement") {

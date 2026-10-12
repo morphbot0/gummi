@@ -55,7 +55,7 @@ class Look {
 
   async open(id: string, tab?: string) {
     await this.page.evaluate(([i, t]) => { location.hash = t ? `${i}/${t}` : i; }, [id, tab ?? '']);
-    await expect(this.page.getByTestId('card-id')).toHaveText(id);
+    await expect(this.page.getByTestId('card-id')).toHaveAttribute('data-id', id);
     // back on the cards with the hash unchanged, the card is opened as a
     // person would: from its row
     if (this.phone && !(await this.page.getByTestId('card-back').isVisible())) await this.page.getByTestId(`rail-row-${id}`).click();

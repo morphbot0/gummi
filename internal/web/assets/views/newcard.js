@@ -7,7 +7,7 @@
 // refusal comes back as a sentence, shown beside the field it is about.
 // "Create & autopilot" is that form's second button.
 
-import { h, clear, dollarsInput, parseDollars } from '../dom.js?v=__ASSET_V__'
+import { h, clear, dollarsInput, parseDollars, ref, cardName } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { hush } from '../toast.js?v=__ASSET_V__'
 
@@ -168,7 +168,7 @@ registerView('newcard', {
         side.push(field('adopt', 'Adopt a branch', el.adopt, 'Work on a branch gummi did not cut. It is added to, never rebased or deleted.'))
       }
       if (STACKS.has(st.kind) && f.stackable?.length) {
-        el.stack = h('select', { testid: 'newcard-stack' }, h('option', { value: '' }, 'no stack'), f.stackable.map(c => h('option', { value: c.id, selected: c.id === st.stack }, `${c.id} · ${c.title}`)))
+        el.stack = h('select', { testid: 'newcard-stack' }, h('option', { value: '' }, 'no stack'), f.stackable.map(c => h('option', { value: c.id, selected: c.id === st.stack }, `${c.title}`)))
         side.push(field('stack', 'Stack onto', el.stack, 'Fork from that card’s branch. It never waits for it.'))
       }
       // a stacked card forks from the card below it, whatever base is
@@ -211,7 +211,7 @@ registerView('newcard', {
         el.after = f.dependable.map(c => ({ c, cb: h('input', { type: 'checkbox', value: c.id, checked: picked.has(c.id), testid: `newcard-after-${c.id}` }) }))
         side.push(h('div', { class: 'field', data: { f: 'after' } }, h('span', { class: 'fl' }, 'Waits for'),
           h('div', { class: 'cpicks', role: 'group', 'aria-label': 'Waits for', testid: 'newcard-after' },
-            el.after.map(({ c, cb }) => h('label', { class: 'cpick' }, cb, h('span', { class: 'id' }, c.id), h('span', { class: 't' }, c.title), h('span', { class: 's' }, c.stage)))),
+            el.after.map(({ c, cb }) => h('label', { class: 'cpick' }, cb, h('span', { class: 'id' }, ref(c.id)), h('span', { class: 't' }, c.title), h('span', { class: 's' }, c.stage)))),
           h('span', { class: 'fh' }, 'It is planned at once; its design is approved only once each ticked card is done.'), errEl('after')))
       } else {
         el.after = null
@@ -321,7 +321,7 @@ registerView('newcard', {
       try {
         const card = await ctx.api.post('/api/cards', req)
         ctx.close()
-        ctx.toast(`Created ${card.id}${autopilot ? ' on autopilot' : ''}`)
+        ctx.toast(`Created ${cardName(card.id)}${autopilot ? ' on autopilot' : ''}`)
         await ctx.refreshBoard?.()
         ctx.select(card.id)
       } catch (err) {

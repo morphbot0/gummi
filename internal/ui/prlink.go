@@ -36,9 +36,9 @@ const noPRFoundMarker = "found no open PR"
 // webPRResolveText is a failed PR lookup in the web face's words: no
 // `--auto` the page never typed, and gh's own error (a GraphQL message,
 // most often) cut to its first line, after what it means.
-func webPRResolveText(id domain.FeatureID, spec string, err error) string {
+func webPRResolveText(name, spec string, err error) string {
 	if strings.Contains(err.Error(), noPRFoundMarker) {
-		return string(id) + ": no open pull request has this card's branch as its head — give the PR's URL or number instead"
+		return name + ": no open pull request has this card's branch as its head — give the PR's URL or number instead"
 	}
 	why, _, _ := strings.Cut(err.Error(), "\n")
 	why = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(why), "GraphQL:"))
@@ -46,7 +46,7 @@ func webPRResolveText(id domain.FeatureID, spec string, err error) string {
 	if spec != "" {
 		what = "pull request " + spec
 	}
-	return sanitize(string(id) + ": could not link " + what + " — GitHub answered: " + why)
+	return sanitize(name + ": could not link " + what + " — GitHub answered: " + why)
 }
 
 // openPRLinkDialog runs the pre-fill probe off the render loop (the shape
@@ -90,7 +90,7 @@ func (m *Shell) probePRLink(f domain.Feature) tea.Cmd {
 // remains the fallback rather than a dead end.
 func (m *Shell) handlePRLinkProbe(msg prLinkProbeMsg) {
 	if msg.err != nil {
-		m.notice = noticeMsg{text: sanitize(string(msg.f.ID) + ": checking for an open PR: " + msg.err.Error()), isErr: true}
+		m.notice = noticeMsg{text: sanitize(msg.f.Name() + ": checking for an open PR: " + msg.err.Error()), isErr: true}
 	} else {
 		m.notice = noticeMsg{}
 	}
@@ -195,7 +195,7 @@ func (d *prLinkDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 // View implements overlay.Dialog.
 func (d *prLinkDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("link PR · "+string(d.feature.ID)) + "\n\n")
+	b.WriteString(s.DialogTitle.Render("link PR · "+d.feature.Name()) + "\n\n")
 	b.WriteString(d.input.View() + "\n")
 	if d.hint != "" {
 		b.WriteString(s.Faint.Render(d.hint) + "\n")
@@ -231,7 +231,7 @@ func (m *Shell) linkPR(f domain.Feature, spec string) tea.Cmd {
 		}
 		cur, err := m.store.GetFeature(ctx, f.ID)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(f.Name() + ": " + err.Error()), isErr: true}
 		}
 		if !cur.PullRequest.Empty() {
 			return noticeMsg{text: fmt.Sprintf("%s is already linked to %s#%d (%s); unlink it first",
@@ -239,19 +239,19 @@ func (m *Shell) linkPR(f domain.Feature, spec string) tea.Cmd {
 		}
 		mgr, err := m.wt.ManagerFor(ctx, &f)
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(f.Name() + ": " + err.Error()), isErr: true}
 		}
 		ref, err := m.resolvePR(ctx, spec, mgr.RepoRoot(), f.BranchName())
 		if err != nil {
 			return noticeMsg{
-				text: sanitize(string(f.ID) + ": resolving PR: " + err.Error()), isErr: true,
-				web: webPRResolveText(f.ID, spec, err),
+				text: sanitize(f.Name() + ": resolving PR: " + err.Error()), isErr: true,
+				web: webPRResolveText(f.Name(), spec, err),
 			}
 		}
 		if err := m.store.SetPullRequest(ctx, f.ID, ref); err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true}
+			return noticeMsg{text: sanitize(f.Name() + ": " + err.Error()), isErr: true}
 		}
-		text := fmt.Sprintf("%s linked to %s#%d", f.ID, ref.Repo, ref.Number)
+		text := fmt.Sprintf("%s linked to %s#%d", f.Name(), ref.Repo, ref.Number)
 		web := text
 		if m.prSquashMergeAllowed != nil {
 			// non-blocking caution, the same repo-can't-squash-merge warning

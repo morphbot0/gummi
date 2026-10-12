@@ -698,7 +698,7 @@ func (m *Shell) routeThreadLine(r featureRow, text string, decide func() *thread
 		// The line is kept, not discarded: it stays in the composer so it
 		// can be retyped where it lands, which is the goal's own thread.
 		m.notice = noticeMsg{
-			text:  fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.ID, goalDriver(r.F.GoalID), r.F.GoalID),
+			text:  fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.Name(), goalDriver(r.F.GoalID), m.cardName(r.F.GoalID)),
 			isErr: true,
 			id:    r.F.ID,
 		}
@@ -1100,6 +1100,7 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 	eng := m.engine
 	id := f.ID
 	ctx := engine.WithActor(context.Background(), m.lineActor())
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if eng.Get(id) != sess {
 			return noticeMsg{text: "session is no longer active", isErr: true}
@@ -1107,7 +1108,7 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 		if err := eng.SendTurn(ctx, id, text, images); err != nil {
 			if errors.Is(err, agent.ErrBusy) {
 				return noticeMsg{
-					text:    string(id) + ": the agent is still mid-turn — your line is back in the composer, send it when the turn ends",
+					text:    name + ": the agent is still mid-turn — your line is back in the composer, send it when the turn ends",
 					restore: text,
 				}
 			}
@@ -1236,7 +1237,7 @@ func (m *Shell) rewindFreeform(r featureRow) {
 	m.rewound[r.F.ID] = text
 	m.threadInput.SetValue(text)
 	m.threadInput.CursorEnd()
-	m.notice = noticeMsg{text: string(r.F.ID) + ": rewound to before your last message — edit and send it, or alt+z to go further back. The branch keeps its commits.", id: r.F.ID}
+	m.notice = noticeMsg{text: r.F.Name() + ": rewound to before your last message — edit and send it, or alt+z to go further back. The branch keeps its commits.", id: r.F.ID}
 }
 
 // unqueueFreeform takes the newest line still waiting for a freeform
@@ -1277,11 +1278,12 @@ func (m *Shell) interruptFreeform(f domain.Feature) (tea.Cmd, bool) {
 		return nil, false
 	}
 	eng, id := m.engine, f.ID
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if err := eng.InterruptFreeform(context.Background(), id); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 		}
-		return noticeMsg{text: string(id) + ": stopped mid-turn — whatever it had written is committed", id: id, reload: true}
+		return noticeMsg{text: name + ": stopped mid-turn — whatever it had written is committed", id: id, reload: true}
 	}, true
 }
 

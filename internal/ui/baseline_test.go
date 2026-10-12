@@ -57,7 +57,7 @@ func TestBaselineNoticeNamesTheOptOutOn127(t *testing.T) {
 		Name: "check-devctl-syntax", Cmd: "bash -n bin/devctl",
 		Status: verify.StatusFail, ExitCode: 127,
 	}
-	got := baselineNotice(id, []verify.Result{notFound})
+	got := baselineNotice(string(id), []verify.Result{notFound})
 	if !got.isErr {
 		t.Error("a failing baseline check must render as an error notice")
 	}
@@ -73,7 +73,7 @@ func TestBaselineNoticeNamesTheOptOutOn127(t *testing.T) {
 	// still the thing to fix, and baseline: false is not the answer.
 	ranAndFailed := notFound
 	ranAndFailed.ExitCode = 2
-	got = baselineNotice(id, []verify.Result{ranAndFailed})
+	got = baselineNotice(string(id), []verify.Result{ranAndFailed})
 	if !strings.Contains(got.text, "pre-existing failure or wrong command") {
 		t.Errorf("exit-2 notice = %q, want the fix-the-block reason", got.text)
 	}
@@ -84,7 +84,7 @@ func TestBaselineNoticeNamesTheOptOutOn127(t *testing.T) {
 	// All-green stays quiet. "check(s) ... pass" used to render literally
 	// as "all 1 repo check(s) pass" on a single-check repo (round 2 UX
 	// drive, §6) — the noun and its verb now both agree with the count.
-	got = baselineNotice(id, []verify.Result{{Name: "build", OK: true, Status: verify.StatusPass}})
+	got = baselineNotice(string(id), []verify.Result{{Name: "build", OK: true, Status: verify.StatusPass}})
 	if got.isErr || !strings.Contains(got.text, "all 1 repo check passes") {
 		t.Errorf("all-pass notice = %q (isErr=%v), want the quiet summary", got.text, got.isErr)
 	}

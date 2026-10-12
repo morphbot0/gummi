@@ -50,7 +50,7 @@ func (m *Shell) prepareSquash(f domain.Feature) tea.Cmd {
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return squashReadyMsg{f: f, err: err}
 		} else if landed {
-			return squashReadyMsg{f: f, err: squashNoticeErr{text: string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge}}
+			return squashReadyMsg{f: f, err: squashNoticeErr{text: f.Name() + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge}}
 		}
 		openThreads, prURL, err := m.probeOpenReviewThreads(ctx, f)
 		if err != nil {
@@ -67,32 +67,32 @@ func (m *Shell) collapseFeature(f domain.Feature, message string) tea.Cmd {
 	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
-			return noticeMsg{text: string(f.ID) + " squash failed: " + err.Error(), isErr: true}
+			return noticeMsg{text: f.Name() + " squash failed: " + err.Error(), isErr: true}
 		} else if landed {
-			return noticeMsg{text: string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge, isErr: true}
+			return noticeMsg{text: f.Name() + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge, isErr: true}
 		}
 		mgr, err := m.wt.ManagerFor(ctx, &f)
 		if err != nil {
-			return noticeMsg{text: string(f.ID) + " squash failed: " + err.Error(), isErr: true}
+			return noticeMsg{text: f.Name() + " squash failed: " + err.Error(), isErr: true}
 		}
 		base, err := worktree.ResolveCollapseBase(ctx, m.store, mgr, &f)
 		if err != nil {
-			return noticeMsg{text: string(f.ID) + " squash failed: " + err.Error(), isErr: true}
+			return noticeMsg{text: f.Name() + " squash failed: " + err.Error(), isErr: true}
 		}
 		if _, err := m.wt.Head(ctx, &f); err != nil {
-			return noticeMsg{text: string(f.ID) + " squash failed: " + err.Error(), isErr: true}
+			return noticeMsg{text: f.Name() + " squash failed: " + err.Error(), isErr: true}
 		}
 		sha, err := m.wt.Collapse(ctx, &f, message, base)
 		if err != nil {
-			return noticeMsg{text: string(f.ID) + " squash failed: " + err.Error(), isErr: true}
+			return noticeMsg{text: f.Name() + " squash failed: " + err.Error(), isErr: true}
 		}
 		if sha == "" {
-			return noticeMsg{text: string(f.ID) + " already collapsed, nothing to do"}
+			return noticeMsg{text: f.Name() + " already collapsed, nothing to do"}
 		}
 		// the push names the remote and branch the card tracks, when it
 		// tracks one, as a replay's does — and says so when there is no
 		// remote to push to (engine.PushCommandFor)
 		push := engine.PushCommandFor(ctx, mgr, &f)
-		return noticeMsg{text: string(f.ID) + " squashed to " + sha + "\n  " + push, reload: true}
+		return noticeMsg{text: f.Name() + " squashed to " + sha + "\n  " + push, reload: true}
 	})
 }

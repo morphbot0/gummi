@@ -33,7 +33,7 @@ func TestTheStackRowOffersTheBoardsCards(t *testing.T) {
 		stackCandAt("FD-002", "", time.Minute),
 	}, nil)
 
-	if got := d.stackChoices(); len(got) != 3 || got[0] != "standalone" || got[1] != "on FD-002" {
+	if got := d.stackChoices(); len(got) != 3 || got[0] != "standalone" || got[1] != "on #2" {
 		t.Fatalf("choices = %v, want standalone then the most recent card", got)
 	}
 	d.HandleKey(keyRight)
@@ -43,7 +43,7 @@ func TestTheStackRowOffersTheBoardsCards(t *testing.T) {
 	if d.stackLabel != "FD-002 title" {
 		t.Errorf("label = %q, want the candidate's title", d.stackLabel)
 	}
-	if got := d.forkFrom(); got != "FD-002's branch" {
+	if got := d.forkFrom(); got != "#2's branch" {
 		t.Errorf("becomes readout = %q, want the card's branch", got)
 	}
 	d.HandleKey(keyRight)
@@ -84,7 +84,7 @@ func TestTheStackRowCarriesAnOfferTheBoardDoesNotHave(t *testing.T) {
 	d := stackDoor(t, domain.CardType{Kind: domain.KindFeature}, nil, nil)
 	d.stackOn("FD-404", "vanished", "")
 
-	if got := d.stackChoices(); len(got) != 2 || got[1] != "on FD-404" {
+	if got := d.stackChoices(); len(got) != 2 || got[1] != "on #404" {
 		t.Fatalf("choices = %v, want the offer carried", got)
 	}
 	if d.stackIdx() != 1 {
@@ -108,7 +108,7 @@ func TestTheStackRowIsOneRepository(t *testing.T) {
 	}, []string{"api", "web"})
 	d.repo.selectName("api")
 
-	if got := d.stackChoices(); len(got) != 2 || got[1] != "on FD-001" {
+	if got := d.stackChoices(); len(got) != 2 || got[1] != "on #1" {
 		t.Fatalf("choices = %v, want only the chosen repo's card", got)
 	}
 	d.HandleKey(keyRight)
@@ -178,7 +178,7 @@ func TestStackCandsAreTheCardsWithABranch(t *testing.T) {
 	}
 	// and the row puts the most recently touched of them first.
 	d := stackDoor(t, domain.CardType{Kind: domain.KindFeature}, cands, nil)
-	if choices := d.stackChoices(); len(choices) != 3 || choices[1] != "on BG-001" {
+	if choices := d.stackChoices(); len(choices) != 3 || choices[1] != "on #1" {
 		t.Errorf("choices = %v, want the most recently touched card first", choices)
 	}
 }

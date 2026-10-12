@@ -151,7 +151,7 @@ func TestDeletingAGoalIsRefusedWhileAnOutsiderDependsOnACard(t *testing.T) {
 	if !ok || !msg.isErr {
 		t.Fatalf("delete should refuse: %#v", msg)
 	}
-	if !strings.Contains(msg.text, "FD-001 depends on FD-010") {
+	if !strings.Contains(msg.text, "“Dark mode” depends on ") {
 		t.Errorf("the notice names the pair to break: %q", msg.text)
 	}
 	for _, f := range append([]domain.Feature{goal}, cards...) {

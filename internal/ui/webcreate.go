@@ -183,7 +183,7 @@ func webAdoptable(ctx context.Context, pool *worktree.Pool, store *state.Store, 
 		c := webapi.AdoptChoice{Branch: b}
 		switch owner, held := owners[b]; {
 		case held:
-			c.Why, c.Held = string(owner)+" has it", string(owner)
+			c.Why, c.Held = owner.Ref()+" has it", string(owner)
 		case b == base:
 			c.Why = "the branch it lands on"
 		default:
@@ -305,7 +305,7 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	for _, dep := range req.DependsOn {
 		id := domain.FeatureID(strings.TrimSpace(dep))
 		if !slices.ContainsFunc(d.afterCands, func(c afterCand) bool { return c.ID == id }) {
-			return string(id) + " cannot be waited on — it is done, or not on this board"
+			return m.cardName(id) + " cannot be waited on — it is done, or not on this board"
 		}
 		if !slices.Contains(d.after, id) {
 			d.after = append(d.after, id)
@@ -327,7 +327,7 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 		id := domain.FeatureID(req.StackOn)
 		i := slices.IndexFunc(d.stackVisible(), func(c stackCand) bool { return c.ID == id })
 		if !d.asksStack() || i < 0 {
-			return string(id) + " is not a card this one can stack on"
+			return m.cardName(id) + " is not a card this one can stack on"
 		}
 		c := d.stackVisible()[i]
 		d.stackOnto, d.stackLabel = c.ID, c.Title

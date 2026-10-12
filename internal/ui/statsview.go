@@ -142,7 +142,7 @@ func statsLines(s *theme.Styles, r cardrun.Run, w int) []string {
 	add := func(line string) { out = append(out, line) }
 	clip := func(text string) string { return ansi.Truncate(text, max(w-1, 10), "…") }
 
-	add(" " + s.CardTitle.Render(clip(string(r.ID)+"  "+r.Title)))
+	add(" " + s.CardTitle.Render(clip(r.ID.Ref()+"  "+r.Title)))
 	head := string(r.Stage)
 	if len(r.Sessions) > 0 {
 		head += fmt.Sprintf(" · %d session%s", len(r.Sessions), plural(len(r.Sessions)))

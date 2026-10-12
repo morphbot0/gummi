@@ -385,7 +385,7 @@ func (m *Shell) startDecomposeReRun(f domain.Feature) tea.Cmd {
 	}
 	eng := m.engine
 	m.ingestRun = newIngestRunView(string(f.ID))
-	m.notice = noticeMsg{text: "re-running decompose for " + string(f.ID) + "…"}
+	m.notice = noticeMsg{text: "re-running decompose for " + f.Name() + "…"}
 	return func() tea.Msg {
 		res, err := eng.DecomposeForCard(context.Background(), f.ID, "")
 		if err != nil {

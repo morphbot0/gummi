@@ -1,4 +1,4 @@
-import { expect, pair, showTab, test, type GummiServer } from '../fixtures/test';
+import { expect, ref, pair, showTab, test, type GummiServer } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +15,7 @@ const isPhone = (info: { project: { name: string } }) => info.project.name === '
 
 async function open(page: Page, server: GummiServer, id: string) {
   await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
 }
 
@@ -360,11 +360,11 @@ test.describe('two cards at their design gates', () => {
     await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
     const chip = (isPhone(info) ? page.getByTestId('mobile-decision') : page.getByTestId('nextup-slot')).getByTestId('nextup');
     await expect(chip).toBeVisible();
-    await expect(chip).toContainText(`${b} also needs you · design gate · Add a nod helper`);
+    await expect(chip).toContainText('“Add a nod helper” also needs you · design gate');
     await expect(chip).not.toContainText('--until');
     await shot(page, info, 'nextup');
     await chip.click();
-    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
   });
 });
 
@@ -700,7 +700,7 @@ test.describe('a verified card', () => {
     const confirm = page.getByTestId('decision-confirm');
     await expect(confirm).toBeVisible();
     // the board's question, with its lines kept as the board wrote them
-    await expect(page.getByTestId('decision-confirm-question')).toContainText(`Hand off ${id}`);
+    await expect(page.getByTestId('decision-confirm-question')).toContainText(/Hand off “.+”/);
     await expect(page.getByTestId('decision-confirm-question')).toHaveCSS('white-space', 'pre-line');
     await expect(confirm).toBeFocused();
     await shot(page, info, 'handoff-confirm');

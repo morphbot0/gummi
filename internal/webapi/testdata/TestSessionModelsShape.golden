@@ -33,6 +33,7 @@
   "card": {
     "id": "FF-003",
     "kind": "freeform",
+    "type": "Session",
     "title": "Tidy the help text",
     "stage": "open",
     "status": "running",

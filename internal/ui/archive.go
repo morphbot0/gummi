@@ -74,7 +74,7 @@ func (m *Shell) groupOf(r featureRow, splitDone bool) boardGroup {
 		// the window passes, because letting it go is what doing nothing
 		// means.
 		if r.F.GoalID != "" {
-			return boardGroup("DROPPED BY " + string(r.F.GoalID))
+			return boardGroup("DROPPED BY " + m.cardName(r.F.GoalID))
 		}
 		return "DROPPED"
 	}

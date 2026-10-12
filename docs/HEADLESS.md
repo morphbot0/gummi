@@ -44,6 +44,11 @@ Other `run` flags:
 | `--stage-timeout <dur>` | per-stage inactivity timeout, 0 disables |
 | `--verbose` | add per-tool-call lines to the stream |
 
+Wherever a verb takes a card as `<id>`, its number alone works too:
+`gummi status 42` is `gummi status FD-042`. The stream and `--json` always
+carry the full id. Two flags still want the id itself: `goal --after` and
+`schedule --heartbeat`.
+
 ## Verbs
 
 | command | purpose |

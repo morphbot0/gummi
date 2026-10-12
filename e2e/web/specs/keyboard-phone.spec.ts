@@ -14,7 +14,7 @@ test.describe('typing on a phone', () => {
   test('the composer and Send stay on screen above the keyboard', async ({ pairedPage: page, server }, info) => {
     test.skip(info.project.name !== 'phone', 'the typing layout is the phone’s');
     await page.goto(`${server.url}/#${id}`);
-    await expect(page.getByTestId('card-id')).toHaveText(id);
+    await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
     await expect(page.getByTestId('decision')).toBeVisible();
     const full = page.viewportSize()!;
 

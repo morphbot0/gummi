@@ -904,7 +904,7 @@ func (m *Shell) cardLocked(id domain.FeatureID, fn func() tea.Msg) tea.Cmd {
 // itself.
 func cardLockedNotice(id domain.FeatureID, err error) string {
 	if errors.Is(err, state.ErrLocked) {
-		return fmt.Sprintf("%s is being driven by another gummi process — press enter to watch it, or wait for it to finish", id)
+		return fmt.Sprintf("%s is being driven by another gummi process — press enter to watch it, or wait for it to finish", id.Ref())
 	}
 	return sanitize(err.Error())
 }
@@ -1008,7 +1008,7 @@ func (m *Shell) AddAttentionNotifier(n AttentionNotifier) {
 // alert signals a needs-you transition to the bell and to every attached
 // notifier.
 func (m *Shell) alert(id domain.FeatureID, text string) {
-	m.notifier.Alert(string(id) + ": " + text)
+	m.notifier.Alert(m.cardName(id) + ": " + text)
 	for _, n := range m.attention {
 		n.NeedsYou(id, text)
 	}
@@ -1446,6 +1446,29 @@ func (m *Shell) stageOf(id domain.FeatureID) domain.Stage {
 	return ""
 }
 
+// cardName names a card in a sentence a person reads, from its id alone:
+// the title the board holds for it (domain.Feature.Name), or its number
+// when the board has no such row — a card deleted or not yet loaded.
+func (m *Shell) cardName(id domain.FeatureID) string {
+	for i := range m.rows {
+		if m.rows[i].F.ID == id {
+			return m.rows[i].F.Name()
+		}
+	}
+	return id.Ref()
+}
+
+// cardTitle is the card's bare title for a column that names it — no
+// quotes, uncut — or its number when the board has no such row.
+func (m *Shell) cardTitle(id domain.FeatureID) string {
+	for i := range m.rows {
+		if t := strings.Join(strings.Fields(m.rows[i].F.Title), " "); m.rows[i].F.ID == id && t != "" {
+			return sanitize(t)
+		}
+	}
+	return id.Ref()
+}
+
 // storedFeature reads the card as the store holds it now. The board's
 // rows are a snapshot refreshed by an asynchronous reload, and the
 // commands that move a card (a hand-over, a crossing, a rewind) start its
@@ -1537,6 +1560,7 @@ type autopilotAnsweredMsg struct {
 // that same id, closing it exactly as a human's answer would.
 func (m *Shell) autopilotAnswerAsk(id domain.FeatureID, rec, question string) tea.Cmd {
 	m.markAutopilotAnswering(id)
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if err := m.engine.AnswerAs(context.Background(), id, rec, state.ActorAutopilot); err != nil {
 			// the agent is still blocked on the question, so the card has
@@ -1547,7 +1571,7 @@ func (m *Shell) autopilotAnswerAsk(id domain.FeatureID, rec, question string) te
 				park:   question,
 			}
 		}
-		return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: string(id) + ": auto-answered: " + rec}}
+		return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: name + ": auto-answered: " + rec}}
 	}
 }
 
@@ -1815,12 +1839,12 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// not lost work.
 			m.raiseAttention(ev.Feature, attnBudget, budgetAttentionText(ev.Stage, true))
 			if !crossCard {
-				m.notice = noticeMsg{text: string(ev.Feature) + ": " + string(ev.Stage) + " reached its budget (work committed)"}
+				m.notice = noticeMsg{text: m.cardName(ev.Feature) + ": " + string(ev.Stage) + " reached its budget (work committed)"}
 			}
 		} else {
 			m.raiseAttention(ev.Feature, attnBudget, budgetAttentionText(ev.Stage, false))
 			if !crossCard {
-				m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true, id: ev.Feature}
+				m.notice = noticeMsg{text: m.cardName(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true, id: ev.Feature}
 			}
 		}
 		// The park's own numbers: the engine suppresses the trailing idle
@@ -2263,7 +2287,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case squashReadyMsg:
 		m.squashPrep = false
 		if msg.err != nil {
-			text := string(msg.f.ID) + " squash failed: " + msg.err.Error()
+			text := msg.f.Name() + " squash failed: " + msg.err.Error()
 			var ne squashNoticeErr
 			if errors.As(msg.err, &ne) {
 				// landed guard carries its own ID-prefixed notice; emit it
@@ -2283,7 +2307,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Overlay.Push(&confirmDialog{
 				card:     f.ID,
 				id:       "confirm-squash",
-				question: "squash " + string(f.ID) + "?",
+				question: "squash " + f.Name() + "?",
 				detail:   detail,
 				onConfirm: func() tea.Cmd {
 					return func() tea.Msg { return squashOpenDialogMsg{f: f} }
@@ -2476,7 +2500,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			id:           "confirm-handoff",
 			cancelLabel:  "Cancel",
 			confirmLabel: "Hand off",
-			question:     "hand off " + string(f.ID) + "?",
+			question:     "hand off " + f.Name() + "?",
 			detail:       handOffDetail(f, m.baseBranch(f), msg.dependents, msg.drift),
 			onConfirm:    func() tea.Cmd { return m.handOffFeature(f) },
 		})
@@ -2493,11 +2517,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// removal lived on this path rather than on the landing. It is
 		// cleared on the merge's own success now (landFeature).
 		if m.mergePrep[msg.f.ID] {
-			m.notice = noticeMsg{text: "already preparing " + string(msg.f.ID) + "'s merge — wait for it", isErr: true}
+			m.notice = noticeMsg{text: "already preparing " + msg.f.Name() + "'s merge — wait for it", isErr: true}
 			return m, nil
 		}
 		m.markMergePrep(msg.f.ID)
-		m.notice = noticeMsg{text: string(msg.f.ID) + ": landing on main…"}
+		m.notice = noticeMsg{text: msg.f.Name() + ": landing on main…"}
 		return m, m.prepareMerge(msg.f, true)
 
 	case rebaseConflictMsg:
@@ -2587,13 +2611,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.baselining, msg.id)
 		switch {
 		case msg.err != nil:
-			m.notice = noticeMsg{text: string(msg.id) + ": gummi-checks baseline failed — " + sanitize(msg.err.Error()), isErr: true, aside: true}
+			m.notice = noticeMsg{text: m.cardName(msg.id) + ": gummi-checks baseline failed — " + sanitize(msg.err.Error()), isErr: true, aside: true}
 		case len(msg.results) > 0:
 			// the results live in the store (BaselineFails via loadRows), not
 			// in m.checks — that map is manual verify runs, and a baseline
 			// bleeding into it would mislabel the dashboard and the
 			// failed-check guidance at verify.
-			m.notice = baselineNotice(msg.id, msg.results)
+			m.notice = baselineNotice(m.cardName(msg.id), msg.results)
 			// the baseline follows an approval that already crossed
 			m.notice.aside = true
 		}
@@ -2679,7 +2703,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.empty {
-			m.notice = noticeMsg{text: string(msg.f.ID) + ": no changes in the worktree yet"}
+			m.notice = noticeMsg{text: msg.f.Name() + ": no changes in the worktree yet"}
 			return m, nil
 		}
 		dv := newDiffView(msg.f, msg.diff, msg.anns)
@@ -2722,7 +2746,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.notice = noticeMsg{
-			text:  string(msg.feature) + " verify: " + strconv.Itoa(passed) + "/" + strconv.Itoa(len(msg.results)) + " passed",
+			text:  m.cardName(msg.feature) + " verify: " + strconv.Itoa(passed) + "/" + strconv.Itoa(len(msg.results)) + " passed",
 			isErr: passed != len(msg.results),
 			id:    msg.feature,
 			aside: true,
@@ -2754,7 +2778,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// every `## Slices` row is already settled (or there were none) —
 			// mirrors the headless auto-trigger's zero-slice no-op instead of
 			// opening a review surface with nothing to approve.
-			m.notice = noticeMsg{text: string(msg.decomposeFor) + ": nothing unsettled to decompose"}
+			m.notice = noticeMsg{text: m.cardName(msg.decomposeFor) + ": nothing unsettled to decompose"}
 			return m, nil
 		}
 		if msg.decomposeFor != "" {
@@ -3074,7 +3098,7 @@ func (m *Shell) liveAutopilotSplit() (autopilot, plain []string) {
 			continue
 		}
 		if s.Feature.GateMode() == domain.GateAttended {
-			plain = append(plain, fmt.Sprintf("%s (%s)", id, s.Feature.Stage))
+			plain = append(plain, fmt.Sprintf("%s (%s)", m.cardName(id), s.Feature.Stage))
 			continue
 		}
 		autopilot = append(autopilot, string(id))
@@ -3113,7 +3137,7 @@ func (m *Shell) resumeAfterTopUp(id domain.FeatureID) tea.Cmd {
 	}
 	return tea.Batch(
 		m.resumeCard(f),
-		func() tea.Msg { return noticeMsg{text: string(id) + ": budget raised — resuming", reload: true} },
+		func() tea.Msg { return noticeMsg{text: m.cardName(id) + ": budget raised — resuming", reload: true} },
 	)
 }
 
@@ -3394,7 +3418,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 	// and the lead of the goal a card belongs to (featureRow.watchOnly).
 	if r, ok := m.selected(); ok && r.watchOnly() && foreignBlockedKeys[key] {
 		m.notice = noticeMsg{
-			text:  fmt.Sprintf("%s is driven by %s — read-only here (enter watches it)", r.F.ID, r.watchDriver()),
+			text:  fmt.Sprintf("%s is driven by %s — read-only here (enter watches it)", r.F.Name(), r.watchDriver()),
 			isErr: true,
 			id:    r.F.ID,
 		}
@@ -3453,7 +3477,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			if !goal.IsGoal() {
 				i := m.rowIndex(r.F.GoalID)
 				if i < 0 {
-					m.notice = noticeMsg{text: string(r.F.ID) + " is not in a goal — nothing to open", isErr: true, id: r.F.ID}
+					m.notice = noticeMsg{text: r.F.Name() + " is not in a goal — nothing to open", isErr: true, id: r.F.ID}
 					return nil
 				}
 				goal = m.rows[i].F
@@ -3473,7 +3497,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				// key is filtered out of this card's bindings, so nothing
 				// advertises it here — but the handler still answers, the way
 				// every other withheld key on this board does.
-				m.notice = noticeMsg{text: string(r.F.ID) + ": a freeform card has no document — its thread is the record", id: r.F.ID}
+				m.notice = noticeMsg{text: r.F.Name() + ": a freeform card has no document — its thread is the record", id: r.F.ID}
 				return nil
 			}
 			return m.openSpec(r.F)
@@ -3508,7 +3532,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			// disagreeing about when that card stops.
 			if r.watchOnly() {
 				m.notice = noticeMsg{
-					text:  fmt.Sprintf("%s is driven by %s — read-only here (enter watches it)", r.F.ID, r.watchDriver()),
+					text:  fmt.Sprintf("%s is driven by %s — read-only here (enter watches it)", r.F.Name(), r.watchDriver()),
 					isErr: true,
 				}
 				return nil
@@ -3640,11 +3664,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				// A goal's home repo is derived from its cards at its plan
 				// gate, not chosen: retargeting it here would be moving the
 				// branch its cards fork from out from under them.
-				m.notice = noticeMsg{text: string(r.F.ID) + ": a goal's repository follows its cards — set each card's `repo:` in the goal doc", isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + ": a goal's repository follows its cards — set each card's `repo:` in the goal doc", isErr: true}
 				return nil
 			}
 			if r.HasWorktree {
-				m.notice = noticeMsg{text: string(r.F.ID) + ": repo is fixed once a worktree exists", isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + ": repo is fixed once a worktree exists", isErr: true}
 				return nil
 			}
 			if len(m.repoNames) == 0 {
@@ -3682,15 +3706,15 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			// offered — and names the card that has no use for it
 			// elsewhere, the way every other withheld key here does.
 			if !r.F.IsFreeform() {
-				m.notice = noticeMsg{text: string(r.F.ID) + ": only a session continues as a spec — this card runs through its stages", isErr: true, id: r.F.ID}
+				m.notice = noticeMsg{text: r.F.Name() + ": only a session continues as a spec — this card runs through its stages", isErr: true, id: r.F.ID}
 				return nil
 			}
 			if r.F.Stage != domain.StageOpen {
-				m.notice = noticeMsg{text: string(r.F.ID) + " is closed: a session continues as a spec only while it is open", isErr: true, id: r.F.ID}
+				m.notice = noticeMsg{text: r.F.Name() + " is closed: a session continues as a spec only while it is open", isErr: true, id: r.F.ID}
 				return nil
 			}
 			if r.F.Home {
-				m.notice = noticeMsg{text: string(r.F.ID) + " is an agent: it is in no repository, so there is no branch for a spec to continue on", isErr: true, id: r.F.ID}
+				m.notice = noticeMsg{text: r.F.Name() + " is an agent: it is in no repository, so there is no branch for a spec to continue on", isErr: true, id: r.F.ID}
 				return nil
 			}
 			if m.engine == nil {
@@ -3718,7 +3742,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			// a stage, because it has none: only the person can say when its
 			// work is finished, and saying so IS the ending (DESIGN §19).
 			if r.F.Stage != domain.StageVerify && !r.F.IsFreeform() {
-				m.notice = noticeMsg{text: string(r.F.ID) + ": hand-off ends a verified card — this one is at " + string(r.F.Stage), isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + ": hand-off ends a verified card — this one is at " + string(r.F.Stage), isErr: true}
 				return nil
 			}
 			return m.prepareHandOff(r.F)
@@ -3730,15 +3754,15 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			if r.Landed {
-				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — " + cleanUpNudge, isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + " already landed on main — " + cleanUpNudge, isErr: true}
 				return nil
 			}
 			if m.mergePrep[r.F.ID] {
-				m.notice = noticeMsg{text: "already preparing " + string(r.F.ID) + "'s merge — wait for it", isErr: true}
+				m.notice = noticeMsg{text: "already preparing " + r.F.Name() + "'s merge — wait for it", isErr: true}
 				return nil
 			}
 			m.markMergePrep(r.F.ID)
-			m.notice = noticeMsg{text: string(r.F.ID) + ": preparing merge…"}
+			m.notice = noticeMsg{text: r.F.Name() + ": preparing merge…"}
 			// m and the verify gate land the same branch the same way, so
 			// they must leave the card in the same state: a card AT verify
 			// goes to done with the landing. Derived from the stage rather
@@ -3761,15 +3785,15 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			if r.Landed {
-				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — " + cleanUpNudge, isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + " already landed on main — " + cleanUpNudge, isErr: true}
 				return nil
 			}
 			if m.squashPrep {
-				m.notice = noticeMsg{text: string(r.F.ID) + " already preparing a squash — wait for it", isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + " already preparing a squash — wait for it", isErr: true}
 				return nil
 			}
 			m.squashPrep = true
-			m.notice = noticeMsg{text: string(r.F.ID) + ": preparing squash…"}
+			m.notice = noticeMsg{text: r.F.Name() + ": preparing squash…"}
 			return m.prepareSquash(r.F)
 		}
 	case "c":
@@ -3784,10 +3808,10 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				// coming, the branch was kept on purpose, and cleaning up
 				// would delete the one thing the reader chose to keep.
 				if r.F.HandedOff() {
-					m.notice = noticeMsg{text: string(r.F.ID) + " was handed off, not landed — cleaning up would delete " + r.F.BranchName(), isErr: true}
+					m.notice = noticeMsg{text: r.F.Name() + " was handed off, not landed — cleaning up would delete " + r.F.BranchName(), isErr: true}
 					return nil
 				}
-				m.notice = noticeMsg{text: string(r.F.ID) + " hasn't landed on " + r.baseBranch() + " yet", isErr: true}
+				m.notice = noticeMsg{text: r.F.Name() + " hasn't landed on " + r.baseBranch() + " yet", isErr: true}
 				return nil
 			}
 			f := r.F
@@ -3796,7 +3820,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				id:           "confirm-cleanup",
 				cancelLabel:  "Keep",
 				confirmLabel: "Clean up",
-				question:     "clean up " + string(f.ID) + "?",
+				question:     "clean up " + f.Name() + "?",
 				detail:       "removes the worktree (incl. untracked files) and merged branch — keeps the record",
 				onConfirm:    func() tea.Cmd { return m.cleanupLanded(f) },
 			})
@@ -3820,7 +3844,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				id:           "confirm-delete",
 				cancelLabel:  "Keep",
 				confirmLabel: "Delete",
-				question:     "delete " + string(f.ID) + "?",
+				question:     "delete " + f.Name() + "?",
 				detail:       detail,
 				onConfirm:    func() tea.Cmd { return m.deleteFeature(f.ID) },
 			})
@@ -4199,7 +4223,7 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 		return nil
 	}
 	if !autonomousStage(f.Stage) {
-		m.notice = noticeMsg{text: string(f.ID) + " is in " + string(f.Stage) + " — nothing to run", isErr: true}
+		m.notice = noticeMsg{text: f.Name() + " is in " + string(f.Stage) + " — nothing to run", isErr: true}
 		return nil
 	}
 	return m.runStage(f)
@@ -4238,7 +4262,7 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 		// to. Say so rather than dereferencing nothing: this is now
 		// reachable from the work stage's own gate, where "send it back
 		// with changes" re-runs the stage.
-		m.notice = noticeMsg{text: string(f.ID) + ": " + m.noAgent(" — nothing to re-run the stage with"), isErr: true}
+		m.notice = noticeMsg{text: f.Name() + ": " + m.noAgent(" — nothing to re-run the stage with"), isErr: true}
 		return nil
 	}
 	// entering the plan stage hydrates the loop's round counter from the
@@ -4320,7 +4344,7 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 					if err := m.engine.RunCritique(f, ""); err != nil {
 						return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true}
 					}
-					return noticeMsg{text: string(f.ID) + " resuming " + string(f.Stage) + " critique (output already written)", clearInbox: f.ID}
+					return noticeMsg{text: f.Name() + " resuming " + string(f.Stage) + " critique (output already written)", clearInbox: f.ID}
 				}
 			}
 		}
@@ -4349,7 +4373,7 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 			// already under way that ended in between); a request that
 			// started nothing says so rather than leaving the card idle
 			// under an answer that looked taken.
-			return noticeMsg{text: string(f.ID) + ": " + string(f.Stage) + " did not start — try again", isErr: true, id: f.ID}
+			return noticeMsg{text: f.Name() + ": " + string(f.Stage) + " did not start — try again", isErr: true, id: f.ID}
 		}
 		// no bare "queued" text: the ⬤ running pill
 		// (runCounts) already says it, computed live from engine state on
@@ -4357,7 +4381,7 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 		// notice did once the run left the queue. A note riding the
 		// kickoff still gets its own line — nothing else says that.
 		if note != "" {
-			return noticeMsg{text: string(f.ID) + " — your line rides the kickoff", clearInbox: f.ID}
+			return noticeMsg{text: f.Name() + " — your line rides the kickoff", clearInbox: f.ID}
 		}
 		return noticeMsg{clearInbox: f.ID}
 	}
@@ -4421,7 +4445,7 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		if it, ok := m.inbox.get(f.ID); ok && it.Kind == attnQuestion {
 			clear = f.ID
 		}
-		return pausedMsg{id: id, inner: noticeMsg{text: string(f.ID) + " paused", clearInbox: clear}}
+		return pausedMsg{id: id, inner: noticeMsg{text: f.Name() + " paused", clearInbox: clear}}
 	}
 }
 
@@ -4457,7 +4481,7 @@ func (m *Shell) parkVerb() tea.Cmd {
 	if s := m.sessionFor(r.F.ID); s != nil && !s.Interactive {
 		return m.pauseRun(r.F)
 	}
-	m.notice = noticeMsg{text: string(r.F.ID) + ": nothing running to park"}
+	m.notice = noticeMsg{text: r.F.Name() + ": nothing running to park"}
 	return nil
 }
 
@@ -4570,6 +4594,7 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
+	name := m.cardName(id)
 	return func() tea.Msg {
 		ctx := context.Background()
 		if err := m.engine.TopUp(ctx, id); err != nil {
@@ -4577,7 +4602,7 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 		}
 		f, err := m.store.GetFeature(ctx, id)
 		if err != nil {
-			return noticeMsg{text: string(id) + " topped up — resuming", reload: true}
+			return noticeMsg{text: name + " topped up — resuming", reload: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s topped up — budget raised to %s, resuming",
 			id, domain.FormatDollars(float64(f.Budget.Envelope))), reload: true}
@@ -4588,6 +4613,7 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 // command backing the o repo picker; the board reloads on success so the
 // repo badge re-renders immediately.
 func (m *Shell) setRepo(id domain.FeatureID, repo string) tea.Cmd {
+	name := m.cardName(id)
 	return func() tea.Msg {
 		updated, err := m.engine.SetRepo(context.Background(), id, repo)
 		if err != nil {
@@ -4597,7 +4623,7 @@ func (m *Shell) setRepo(id domain.FeatureID, repo string) tea.Cmd {
 		if label == "" {
 			label = "default"
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: repo set to %s", id, label), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s: repo set to %s", name, label), reload: true}
 	}
 }
 
@@ -4611,6 +4637,7 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 		return nil
 	}
 	actor := m.humanActor()
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if id.Kind() == domain.KindGoal {
 			// a goal's budget is its ceiling: only raised, and the goal is
@@ -4618,15 +4645,15 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 			if err := m.engine.RaiseGoalBudget(engine.WithActor(context.Background(), actor), id, to); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
-			return noticeMsg{text: fmt.Sprintf("%s: goal budget raised to %s", id, domain.FormatDollars(float64(to))), reload: true}
+			return noticeMsg{text: fmt.Sprintf("%s: goal budget raised to %s", name, domain.FormatDollars(float64(to))), reload: true}
 		}
 		if err := m.engine.RaiseEnvelope(context.Background(), id, to); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if to == 0 {
-			return noticeMsg{text: string(id) + ": budget removed — spend is uncapped", reload: true}
+			return noticeMsg{text: name + ": budget removed — spend is uncapped", reload: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: budget set to %s (applies from the next agent session)", id, domain.FormatDollars(float64(to))), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s: budget set to %s (applies from the next agent session)", name, domain.FormatDollars(float64(to))), reload: true}
 	}
 }
 
@@ -4662,15 +4689,16 @@ func budgetAttentionText(stage domain.Stage, committed bool) string {
 // stage, so — unlike deleteFeature/cleanupLanded — it carries no card
 // lock, the same call shape as setRepo and setEnvelope above.
 func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
+	name := m.cardName(id)
 	return func() tea.Msg {
 		if err := m.store.SetGateApproval(context.Background(), id, mode); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		// The confirmation reads back in the words the choice was made in.
 		// Two modes, so two sentences — no table to look them up in.
-		text := fmt.Sprintf("%s: attended — every gate stops for you", id)
+		text := fmt.Sprintf("%s: attended — every gate stops for you", name)
 		if autopilotModeFor(mode) == domain.GateAutopilot {
-			text = fmt.Sprintf("%s: autopilot — it runs to a verified branch on its own", id)
+			text = fmt.Sprintf("%s: autopilot — it runs to a verified branch on its own", name)
 		}
 		return noticeMsg{text: text, reload: true}
 	}

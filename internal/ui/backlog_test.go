@@ -257,7 +257,7 @@ func TestBacklogScrollsToTheSelection(t *testing.T) {
 	m.syncActionFocus()
 
 	view := ansi.Strip(m.View().Content)
-	if !strings.Contains(view, "FD-040") {
+	if !strings.Contains(view, "card 40") {
 		t.Errorf("the selected card scrolled off the backlog:\n%s", view)
 	}
 	if !strings.Contains(view, "more") {

@@ -695,7 +695,7 @@ func closedRefusal(r featureRow, what string) *noticeMsg {
 	if r.Landed {
 		how = "has landed on " + r.baseBranch()
 	}
-	return &noticeMsg{text: string(r.F.ID) + " " + how + " — " + what, isErr: true, id: r.F.ID}
+	return &noticeMsg{text: r.F.Name() + " " + how + " — " + what, isErr: true, id: r.F.ID}
 }
 
 // verifyRefusal says why the checks cannot usefully run on r, or nil when
@@ -715,7 +715,7 @@ func verifyRefusal(r featureRow) *noticeMsg {
 		return nil
 	}
 	return &noticeMsg{
-		text:  string(r.F.ID) + " is at " + string(r.F.Stage) + " — nothing has been built to verify yet; the checks run from " + string(domain.StageImplement) + " on",
+		text:  r.F.Name() + " is at " + string(r.F.Stage) + " — nothing has been built to verify yet; the checks run from " + string(domain.StageImplement) + " on",
 		isErr: true, id: r.F.ID,
 	}
 }

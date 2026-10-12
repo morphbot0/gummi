@@ -148,6 +148,17 @@ func (m *Shell) spansRepos() bool {
 	return false
 }
 
+// A board row leads with what kind of card it is, padded so titles line
+// up down the lane: typeNameWidth holds the widest domain.Feature.TypeName
+// ("Research"). The card's number is not on the row — a person finds a
+// card by its title, and reads its number off the card's own head.
+const typeNameWidth = 8
+
+// cardLead is that lead as plain text: "Feature ".
+func cardLead(f domain.Feature) string {
+	return fmt.Sprintf("%-*s", typeNameWidth, f.TypeName())
+}
+
 // cardLine renders one feature card row, truncated to w. A selected row
 // is painted as a full-width band (theme.Band) rather than marked by the
 // ▸ alone: paneFocused picks the bright band or the quiet one.
@@ -204,17 +215,19 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		cursor = s.SelMarkerDim.Render("▸")
 	}
 	num := faint.Render(shortcutLabel(shortcut))
-	// a bug's ID reads in a warm tint so bugs stand out among features in
-	// the shared board (the BG- prefix already distinguishes them).
-	id := s.CardID.Render(string(r.F.ID))
+	// a row leads with what kind of card it is, in
+	// the kind's tint: a bug reads warm so bugs stand out among features in
+	// the shared board.
+	tint := s.CardID
 	switch r.F.Kind {
 	case domain.KindBug:
-		id = s.Warning.Render(string(r.F.ID))
+		tint = s.Warning
 	case domain.KindResearch:
-		id = s.CardIDResearch.Render(string(r.F.ID))
+		tint = s.CardIDResearch
 	case domain.KindGoal:
-		id = s.Info.Render(string(r.F.ID))
+		tint = s.Info
 	}
+	id := tint.Render(cardLead(r.F))
 	if m.isFoldedChild(m.rowIndex(r.F.ID)) {
 		id = faint.Render("└") + " " + id
 	}
@@ -252,9 +265,9 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if sev := r.F.Severity; sev != "" {
 		badge += " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
 	}
-	// the two research modes share the RS prefix and the RS tint, so the
-	// id alone cannot tell a diagnosis from a survey. The survey badges
-	// nothing — it is the default the prefix already means — and the
+	// the two research modes share one type name and one tint, so the
+	// row's lead cannot tell a diagnosis from a survey. The survey badges
+	// nothing — it is the default the word already means — and the
 	// diagnosis says so, the same way severity badges only the bugs that
 	// carry one.
 	if r.F.IsDiagnosis() {

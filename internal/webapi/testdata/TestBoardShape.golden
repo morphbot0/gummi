@@ -21,6 +21,7 @@
     {
       "id": "FD-012",
       "kind": "feature",
+      "type": "Feature",
       "title": "Dark mode",
       "stage": "plan",
       "status": "needs",
@@ -42,6 +43,7 @@
     {
       "id": "BG-003",
       "kind": "bug",
+      "type": "Bug",
       "title": "Crash on empty board",
       "stage": "implement",
       "status": "running",
@@ -64,6 +66,7 @@
     {
       "id": "FD-001",
       "kind": "feature",
+      "type": "Feature",
       "title": "Landed thing",
       "stage": "done",
       "status": "done",
@@ -75,6 +78,7 @@
     {
       "id": "FF-020",
       "kind": "freeform",
+      "type": "Agent",
       "title": "Watch the nightly CI",
       "stage": "open",
       "status": "idle",

@@ -61,7 +61,7 @@ func TestMenuVerifyResultReachesThePage(t *testing.T) {
 		{Name: "test", Cmd: "go test ./...", OK: false},
 	}})
 	log.waitFor(t, "toast", func(c webapi.Change) bool {
-		return c.Kind == webapi.ChangeToast && c.ID == "FD-001" && c.Text == "FD-001 verify: 1/2 passed" && c.Err
+		return c.Kind == webapi.ChangeToast && c.ID == "FD-001" && c.Text == "“a” verify: 1/2 passed" && c.Err
 	})
 	log.waitFor(t, "card", func(c webapi.Change) bool { return c.Kind == webapi.ChangeCard && c.ID == "FD-001" })
 	if !m.notice.aside {

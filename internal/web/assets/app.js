@@ -3,7 +3,7 @@
 // the modules together, loads the rows and the card the address names, and
 // opens the event stream that keeps them current.
 
-import { $, isMobile } from './dom.js?v=__ASSET_V__'
+import { $, isMobile, ref } from './dom.js?v=__ASSET_V__'
 import { get, post, setUnauthorizedHandler, setReadHandlers } from './api.js?v=__ASSET_V__'
 import { set, state, rows, on, shownTab } from './store.js?v=__ASSET_V__'
 import { connect, close as closeEvents } from './events.js?v=__ASSET_V__'
@@ -187,7 +187,7 @@ async function startBoard () {
     if (state.board && !rows().some(r => r.id === id)) {
       await loadBoard()
       if (!rows().some(r => r.id === id)) {
-        toast(`${id} is not on this board`)
+        toast(`${ref(id)} is not on this board`)
         restoreHash()
         return
       }
@@ -205,7 +205,7 @@ async function startBoard () {
   if (route.tab) set({ tab: route.tab })
   const first = (route.id && rows().some(r => r.id === route.id) && route.id) ||
     rows().find(r => r.status === 'needs')?.id || rows()[0]?.id
-  if (route.id && first !== route.id) toast(`${route.id} is not on this board`)
+  if (route.id && first !== route.id) toast(`${ref(route.id)} is not on this board`)
   const tab = route.id === first ? route.tab : null
   // a phone opens on the cards; only a route that names the card actually
   // shown (a deep link) moves to its screen — a plain open, and a deep

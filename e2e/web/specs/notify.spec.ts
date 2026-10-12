@@ -167,5 +167,5 @@ test('tapping a notification focuses the board and opens the card', async ({ pai
   // the page's half: told by its worker, it opens the card
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
   await page.evaluate((url) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'gummi:open', url } })), `/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
 });

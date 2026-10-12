@@ -52,7 +52,7 @@ test('the rail shows the seeded cards and a card opens with its head', async ({ 
   await expect(page.getByTestId('rail-group-needs')).toBeVisible();
   await page.getByTestId(`rail-row-${ids.bug}`).click();
   await expect(page.getByTestId('card-title')).toHaveText('Greet panics on an empty name');
-  await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
   await expect(page).toHaveURL(new RegExp(`#${ids.bug}`));
   await expect(page.getByTestId('thread')).toBeVisible();
   await shot(page, info, 'board');
@@ -66,7 +66,7 @@ test('the rail shows the seeded cards and a card opens with its head', async ({ 
 
 test('a deep link opens the card and the tab it names', async ({ pairedPage: page, server }) => {
   await page.goto(`${server.url}/#${ids.bug}/stats`);
-  await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
   await expect(page.getByTestId('tab-stats')).toHaveAttribute('aria-selected', 'true');
 });
 
@@ -136,13 +136,13 @@ test('the phone opens on the cards, and a card opens from them with its screen n
   await page.getByTestId(`rail-row-${ids.bug}`).click();
   await expect(page.getByTestId('conversation')).toBeVisible();
   await expect(page.getByTestId('rail')).toBeHidden();
-  await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
   await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
   await showTab(page, 'diff');
   await expect(page.getByTestId('panel')).toBeVisible();
   await expect(page.getByTestId('rail')).toBeHidden();
   // the documents say whose they are
-  await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
   await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'false');
   await shot(page, info, 'panel');
@@ -179,7 +179,7 @@ test('j and k walk the rail, ? lists the keys, ⌘K jumps', async ({ pairedPage:
   await expect(page.getByTestId('palette')).toBeVisible();
   await page.getByTestId('palette-input').fill(ids.bug);
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
 });
 
 test('a surface that is not built yet says so', async ({ pairedPage: page }) => {

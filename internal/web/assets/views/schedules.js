@@ -10,7 +10,7 @@
 // no cron of its own), the backend and model come from the session
 // picker's catalog, and the timezone is a shortlist plus free text.
 
-import { h, clear, plural, cr, dollarsInput, parseDollars } from '../dom.js?v=__ASSET_V__'
+import { h, clear, plural, cr, dollarsInput, parseDollars, cardName } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { errorBox, confirmStrip, field, segmented, choose } from './kit.js?v=__ASSET_V__'
 
@@ -229,7 +229,7 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
       sc.timezone ? h('span', { class: 'sch-meta' }, sc.timezone) : null,
       sc.envelope ? h('span', { class: 'sch-meta' }, `${cr(sc.envelope)} per card`) : null,
       sc.lastCard ? h('span', { class: 'sch-meta' }, `last card ${sc.lastCard}`) : null,
-      sc.orphanCard ? h('span', { class: 'sch-meta warn', testid: `schedule-${sc.id}-orphan` }, `retrying ${sc.orphanCard}`) : null),
+      sc.orphanCard ? h('span', { class: 'sch-meta warn', testid: `schedule-${sc.id}-orphan` }, `retrying ${cardName(sc.orphanCard)}`) : null),
     sc.lastDetail ? h('p', { class: 'sch-detail' }, sc.lastDetail) : null,
     h('div', { class: 'sch-actions' },
       h('button', {

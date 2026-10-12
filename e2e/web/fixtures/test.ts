@@ -150,6 +150,13 @@ export const test = base.extend<Fixtures>({
   },
 });
 
+// ref is a card as the page names it: its number alone ("#178"). The page
+// keeps the card's id on the head's card-id element, as data-id.
+export function ref(id: string): string {
+  const m = /^(?:FD|BG|RS|GL|FF)-0*(\d+)$/.exec(id);
+  return m ? `#${m[1]}` : id;
+}
+
 /**
  * Open card `id` the way a person would on a phone: a phone's board opens
  * on its cards list (and comes back to it on reload), so the card is
@@ -162,7 +169,7 @@ export async function showCard(page: Page, id: string): Promise<void> {
   // card by then, and the cards list is only showing when it has not
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
   if ((await page.getByTestId('app').getAttribute('data-view')) === 'cards') await page.getByTestId(`rail-row-${id}`).click();
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
 }
 
 // showTab brings one of a card's documents on screen, whatever shows now.

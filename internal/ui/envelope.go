@@ -206,14 +206,14 @@ func (d *envelopeDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 func (d *envelopeDialog) View(s *theme.Styles, w, h int) string {
 	if d.askResume {
 		var b strings.Builder
-		b.WriteString(s.DialogTitle.Render("budget · "+string(d.feature.ID)) + "\n\n")
-		b.WriteString(fmt.Sprintf("raised to %s — resume %s on autopilot?", domain.FormatDollars(float64(d.resumeTo)), d.feature.ID) + "\n")
+		b.WriteString(s.DialogTitle.Render("budget · "+d.feature.Name()) + "\n\n")
+		b.WriteString(fmt.Sprintf("raised to %s — resume %s on autopilot?", domain.FormatDollars(float64(d.resumeTo)), d.feature.Name()) + "\n")
 		b.WriteString("\n" + d.resumeButtons.View(s, true) + "\n")
 		b.WriteString("\n" + s.Faint.Render("y/enter resume · n/esc not now"))
 		return s.DialogFrame.Render(b.String())
 	}
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("budget · "+string(d.feature.ID)) + "\n\n")
+	b.WriteString(s.DialogTitle.Render("budget · "+d.feature.Name()) + "\n\n")
 	spent := d.feature.Spend.CreditEquivalent()
 	now := "uncapped"
 	if d.feature.Budget.Envelope > 0 {

@@ -249,16 +249,16 @@ func (d *weekDialog) View(s *theme.Styles, _, _ int) string {
 	}
 	if rep.Costliest.ID != "" {
 		fmt.Fprintf(&b, "   %s  %s\n", s.CardTitle.Render(pad("costliest")),
-			s.Faint.Render(string(rep.Costliest.ID)+" · "+money(rep.Costliest.Spend)))
+			s.Faint.Render(rep.Costliest.ID.Ref()+" · "+money(rep.Costliest.Spend)))
 	}
 	if rep.Cheapest.ID != "" && rep.Cheapest.ID != rep.Costliest.ID {
 		fmt.Fprintf(&b, "   %s  %s\n", s.CardTitle.Render(pad("cheapest")),
-			s.Faint.Render(string(rep.Cheapest.ID)+" · "+money(rep.Cheapest.Spend)))
+			s.Faint.Render(rep.Cheapest.ID.Ref()+" · "+money(rep.Cheapest.Spend)))
 	}
 
 	b.WriteString("\n")
 	for _, c := range rep.Cards {
-		line := "   " + s.CardID.Render(string(c.ID)) + "  " + s.Base.Render(c.Title)
+		line := "   " + s.CardID.Render(c.ID.Ref()) + "  " + s.Base.Render(c.Title)
 		tail := endingWord(c.Ending)
 		if c.Commit != "" {
 			tail += " · " + shortSHA(c.Commit)

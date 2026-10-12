@@ -6,7 +6,7 @@
 // parked where it stopped. Nothing restarts without that answer
 // (POST /api/board/resume).
 
-import { $, h, clear, plural } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, plural, ref, cardName } from './dom.js?v=__ASSET_V__'
 import { post } from './api.js?v=__ASSET_V__'
 import { on, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -43,11 +43,11 @@ function render () {
   const picks = cards.map(c => ({
     c,
     cb: h('input', {
-      type: 'checkbox', checked: !unticked.has(c.id), testid: `resume-card-${c.id}`, 'aria-label': `Resume ${c.id}`,
+      type: 'checkbox', checked: !unticked.has(c.id), testid: `resume-card-${c.id}`, 'aria-label': `Resume ${cardName(c.id)}`,
       onchange: (e) => { if (e.target.checked) unticked.delete(c.id); else unticked.add(c.id) }
     })
   }))
-  const names = cards.map((c, i) => [i ? ', ' : '', h('button', { class: 'link mono', type: 'button', title: c.title, onclick: () => selectCard(c.id) }, c.id)])
+  const names = cards.map((c, i) => [i ? ', ' : '', h('button', { class: 'link mono', type: 'button', title: c.title, onclick: () => selectCard(c.id) }, cardName(c.id))])
   box.append(h('section', { class: ['resume-banner', choosing && 'open'], testid: 'resume-banner', role: 'region', 'aria-label': 'Resume stopped cards' },
     h('div', { class: 'rb-row' },
       h('span', { class: 'rb-dot', 'aria-hidden': 'true' }),
@@ -60,7 +60,7 @@ function render () {
         h('button', { class: 'btn', type: 'button', testid: 'resume-none', disabled: busy, onclick: () => answer({ none: true }) }, 'Not now'))),
     choosing
       ? h('div', { class: 'rb-pick' },
-        picks.map(({ c, cb }) => h('label', { class: 'cpick' }, cb, h('span', { class: 'id' }, c.id), h('span', { class: 't' }, c.title), h('span', { class: 's' }, ''))),
+        picks.map(({ c, cb }) => h('label', { class: 'cpick' }, cb, h('span', { class: 'id' }, ref(c.id)), h('span', { class: 't' }, c.title), h('span', { class: 's' }, ''))),
         h('div', { class: 'rb-pick-go' }, h('button', {
           class: 'btn pri', type: 'button', testid: 'resume-picked', disabled: busy,
           onclick: () => {

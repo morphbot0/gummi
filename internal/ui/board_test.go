@@ -150,14 +150,14 @@ func TestBoardRepoChip(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
 	m = model.(*Shell)
 	content := ansi.Strip(m.View().Content)
-	chipped := boardLine(t, content, "FD-051")
-	if !strings.Contains(chipped, "FD-051 ") || !strings.Contains(chipped, " lxd ") {
-		t.Fatalf("a named-repo card should carry its repo chip after its id:\n%s", chipped)
+	chipped := boardLine(t, content, "rate limits")
+	if !strings.Contains(chipped, " lxd ") {
+		t.Fatalf("a named-repo card should carry its repo chip:\n%s", chipped)
 	}
 	if strings.Index(chipped, " lxd ") > strings.Index(chipped, "rate limits") {
 		t.Errorf("the repo chip should sit before the title, in its fixed column:\n%s", chipped)
 	}
-	plain := boardLine(t, content, "FD-052")
+	plain := boardLine(t, content, "plain feature")
 	if strings.Contains(plain, "lxd") {
 		t.Errorf("a default-repo card should carry no repo chip:\n%s", plain)
 	}

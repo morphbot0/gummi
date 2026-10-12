@@ -15,10 +15,10 @@ test('an agent starts in a home of its own and has no branch surfaces', async ({
   const input = page.getByTestId('composer-input');
   await input.fill('Watch the nightly CI.');
   await input.press('Enter');
-  await expect(page.getByTestId('card-id')).toHaveText(/^FF-/, { timeout: 20_000 });
-  const id = await page.getByTestId('card-id').innerText();
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /^FF-/, { timeout: 20_000 });
+  const id = (await page.getByTestId('card-id').getAttribute('data-id'))!;
 
-  await expect(page.getByTestId('card-kind')).toHaveText('AG');
+  await expect(page.getByTestId('card-kind')).toHaveText('Agent');
   await expect(page.getByTestId('card-home')).toHaveText(`⌂.gummi/homes/${id}`);
   await expect(page.getByTestId('rail-group-agents').getByTestId(`rail-row-${id}`)).toBeVisible();
 

@@ -113,9 +113,9 @@ func noWorktreeYet(f domain.Feature) string {
 	// Promising one "when you approve" sent its reader back to a card
 	// whose document was approved long ago.
 	if f.Kind == domain.KindResearch {
-		return string(f.ID) + " is research and carries no branch — its work is the document"
+		return f.Name() + " is research and carries no branch — its work is the document"
 	}
-	return string(f.ID) + " has no worktree yet (created when you approve the " + artifactNoun(f.Kind) + ")"
+	return f.Name() + " has no worktree yet (created when you approve the " + artifactNoun(f.Kind) + ")"
 }
 
 // branchVerbRefusal is the single answer to "why can this card not do
@@ -133,7 +133,7 @@ func noWorktreeYet(f domain.Feature) string {
 // were already giving one line further down.
 func branchVerbRefusal(r featureRow, verb string) *noticeMsg {
 	if r.F.Kind == domain.KindResearch {
-		return &noticeMsg{text: string(r.F.ID) + ": no " + verb + " — research cards carry no branch"}
+		return &noticeMsg{text: r.F.Name() + ": no " + verb + " — research cards carry no branch"}
 	}
 	// A main-checkout session holds no branch and no worktree by mint
 	// (DESIGN §19) — but the work it keeps is loose in the checkout, so
@@ -146,9 +146,9 @@ func branchVerbRefusal(r featureRow, verb string) *noticeMsg {
 		case "diff", "hand-off":
 			return nil
 		case "attach":
-			return &noticeMsg{text: string(r.F.ID) + ": no attach — it runs in the main checkout, with no worktree to attach into", isErr: true}
+			return &noticeMsg{text: r.F.Name() + ": no attach — it runs in the main checkout, with no worktree to attach into", isErr: true}
 		}
-		return &noticeMsg{text: string(r.F.ID) + ": no " + verb + " — it runs in the main checkout and holds no branch", isErr: true}
+		return &noticeMsg{text: r.F.Name() + ": no " + verb + " — it runs in the main checkout and holds no branch", isErr: true}
 	}
 	if !r.HasWorktree {
 		return &noticeMsg{text: noWorktreeYet(r.F), isErr: true}
@@ -180,6 +180,7 @@ func (m *Shell) execChecks(f domain.Feature, workDir string, checks []domain.Che
 // card's lock while the checks run in the worktree, like execChecks.
 func (m *Shell) reverify(id domain.FeatureID) tea.Cmd {
 	actor := m.humanActor()
+	name := m.cardName(id)
 	return m.cardLocked(id, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
 		defer cancel()
@@ -190,13 +191,13 @@ func (m *Shell) reverify(id domain.FeatureID) tea.Cmd {
 			}
 			switch rv.Status {
 			case engine.ReverifyFinalized:
-				return noticeMsg{text: string(id) + ": re-verified — the checks pass on " + domain.ShortRev(rv.Feature.VerifiedRev) + ", and it can land", id: id, reload: true}
+				return noticeMsg{text: name + ": re-verified — the checks pass on " + domain.ShortRev(rv.Feature.VerifiedRev) + ", and it can land", id: id, reload: true}
 			case engine.ReverifyFailed:
-				return noticeMsg{text: string(id) + ": re-verify failed — " + strings.Join(rv.Failed, ", ") + " fail on the branch as it stands; send it back to fix them", isErr: true, id: id, reload: true}
+				return noticeMsg{text: name + ": re-verify failed — " + strings.Join(rv.Failed, ", ") + " fail on the branch as it stands; send it back to fix them", isErr: true, id: id, reload: true}
 			case engine.ReverifyBlocked:
-				return noticeMsg{text: string(id) + ": the checks pass, but the gate is held: " + describeReverifyBlock(rv.Advance), isErr: true, id: id, reload: true}
+				return noticeMsg{text: name + ": the checks pass, but the gate is held: " + describeReverifyBlock(rv.Advance), isErr: true, id: id, reload: true}
 			}
-			return noticeMsg{text: string(id) + ": " + sanitize(rv.Reason), isErr: true, id: id, reload: true}
+			return noticeMsg{text: name + ": " + sanitize(rv.Reason), isErr: true, id: id, reload: true}
 		})
 	})
 }
@@ -243,7 +244,7 @@ func (d *verifyDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 
 func (d *verifyDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("verify "+string(d.feature)) + "\n")
+	b.WriteString(s.DialogTitle.Render("verify "+d.feature.Ref()) + "\n")
 	b.WriteString(s.Warning.Render("these commands run in the feature's worktree") + "\n\n")
 	width := max(min(w-10, 72), 24)
 	for _, ch := range d.checks {
@@ -268,7 +269,7 @@ func (d *verifyDialog) View(s *theme.Styles, w, h int) string {
 func (m *Shell) runDocVerify(f domain.Feature) tea.Cmd {
 	path := m.artifactFile(&f)
 	if path == "" {
-		m.notice = noticeMsg{text: string(f.ID) + ": no doc yet — verifydoc runs on the artifact"}
+		m.notice = noticeMsg{text: f.Name() + ": no doc yet — verifydoc runs on the artifact"}
 		return nil
 	}
 	raw, err := os.ReadFile(path)
@@ -278,7 +279,7 @@ func (m *Shell) runDocVerify(f domain.Feature) tea.Cmd {
 	}
 	mgr, err := m.wt.ManagerFor(context.Background(), &f)
 	if err != nil {
-		m.notice = noticeMsg{text: string(f.ID) + ": repo unresolved — " + err.Error(), isErr: true}
+		m.notice = noticeMsg{text: f.Name() + ": repo unresolved — " + err.Error(), isErr: true}
 		return nil
 	}
 	artifact := string(raw)
@@ -286,7 +287,7 @@ func (m *Shell) runDocVerify(f domain.Feature) tea.Cmd {
 	files := readCitedFiles(mgr.RepoRoot(), verifydoc.CitedPaths(artifact, layout))
 	report := verifydoc.Check(artifact, files, layout)
 	if report.Pass() {
-		m.notice = noticeMsg{text: string(f.ID) + ": document verify — clean"}
+		m.notice = noticeMsg{text: f.Name() + ": document verify — clean"}
 		return nil
 	}
 	m.Overlay.Push(newDocVerifyDialog(f, report))
@@ -381,7 +382,7 @@ func (d *docVerifyDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 
 func (d *docVerifyDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("verify "+string(d.feature)) + "\n\n")
+	b.WriteString(s.DialogTitle.Render("verify "+d.feature.Ref()) + "\n\n")
 	if len(d.report.Citations) > 0 {
 		b.WriteString(s.Warning.Render("broken citations") + "\n")
 		for _, c := range d.report.Citations {
@@ -412,7 +413,7 @@ func (d *docVerifyDialog) View(s *theme.Styles, w, h int) string {
 // fix, and a failure here is a bad command, pre-existing breakage, or a
 // check aimed at something the feature has yet to build, never the
 // feature's fault.
-func baselineNotice(id domain.FeatureID, results []verify.Result) noticeMsg {
+func baselineNotice(name string, results []verify.Result) noticeMsg {
 	for _, r := range results {
 		if r.OK {
 			continue
@@ -441,7 +442,7 @@ func baselineNotice(id domain.FeatureID, results []verify.Result) noticeMsg {
 		}
 		return noticeMsg{isErr: true, text: fmt.Sprintf(
 			"%s: baseline — check '%s' %s; %s",
-			id, sanitize(r.Name), reason, fix)}
+			name, sanitize(r.Name), reason, fix)}
 	}
 	// "check(s) ... pass" never agreed: a single-check repo read "all 1
 	// repo check(s) pass on the fresh branch" verbatim on screen. Both the
@@ -453,7 +454,7 @@ func baselineNotice(id domain.FeatureID, results []verify.Result) noticeMsg {
 		verb = "passes"
 	}
 	n := len(results)
-	return noticeMsg{text: fmt.Sprintf("%s: baseline — all %d repo check%s %s on the fresh branch", id, n, plural(n), verb)}
+	return noticeMsg{text: fmt.Sprintf("%s: baseline — all %d repo check%s %s on the fresh branch", name, n, plural(n), verb)}
 }
 
 // verifySummary renders the last verify results for the dashboard.

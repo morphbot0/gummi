@@ -270,12 +270,17 @@ func TestNextInputForAssembly(t *testing.T) {
 		// the landing floor is read at assembly as well (landingRefusal),
 		// so the menu lists a landing only where one goes through: this
 		// card never finished a verify pass
-		landRefused: "FD-001 has not finished a verify pass — run verify first; a failed verify is overruled from its own answer (land anyway)",
+		landRefused: "#1 has not finished a verify pass — run verify first; a failed verify is overruled from its own answer (land anyway)",
 		// a plain card may keep its commits as a merge commit instead
 		mergeChoice: true,
 	}
 	// undrafted is a slice (one blocker per blank section), so the struct
 	// no longer compares with ==; DeepEqual keeps the assembly pinned.
+	// names is the board's lookup, a func: present, and not comparable.
+	if in.names == nil {
+		t.Error("nextInputFor left the card-name lookup unset")
+	}
+	in.names = nil
 	if !reflect.DeepEqual(in, want) {
 		t.Errorf("nextInputFor = %+v, want %+v", in, want)
 	}
