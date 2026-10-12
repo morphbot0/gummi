@@ -127,6 +127,9 @@ type Driver struct {
 	// engine.Events() directly.
 	events <-chan engine.Event
 	hub    *eventHub
+	// ownsHub marks the driver that started hub, as against a goal card's
+	// driver that was handed it: only the owner stops it.
+	ownsHub bool
 }
 
 // roundKey is the fast-path round-counter map's key: one entry per
@@ -998,6 +1001,7 @@ func (d *Driver) OpenReviewThreads(ctx context.Context, id domain.FeatureID) (co
 // under --gate-approval=auto, so one call streams the whole tail and
 // returns only at done or an escalation.
 func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error) {
+	defer d.releaseHub()
 	tookOver := false
 	for {
 		if err := ctx.Err(); err != nil {

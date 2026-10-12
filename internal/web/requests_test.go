@@ -105,7 +105,9 @@ func TestIngestAcceptsAnUploadedFile(t *testing.T) {
 	}
 	var run webapi.IngestRun
 	b.must(http.StatusOK, http.MethodGet, "/api/ingest/1", nil, &run)
-	if !strings.HasSuffix(run.Source, "/.gummi/ingest/rows.md") {
+	// a pass still running names the saved file in full; one that has
+	// reached its review names it from the workspace root
+	if !strings.HasSuffix(run.Source, ".gummi/ingest/rows.md") {
 		t.Fatalf("run = %+v, want the upload saved under its own name", run)
 	}
 }

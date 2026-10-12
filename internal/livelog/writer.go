@@ -80,7 +80,11 @@ func Create(path string, hdr Record) (*Writer, error) {
 	if hdr.PID == 0 {
 		hdr.PID = os.Getpid()
 	}
-	go w.run(f, hdr)
+	// The header lands before Create returns: it carries the pid a reader
+	// judges the session's liveness by, and a file that exists without it
+	// reads as a session whose process is gone.
+	w.write(f, hdr)
+	go w.run(f)
 	return w, nil
 }
 
@@ -133,7 +137,7 @@ func (w *Writer) Close() {
 // run owns the file for the writer's lifetime: it is the only goroutine
 // that touches it, so records serialize with no cross-line interleave and
 // no lock is held across a syscall.
-func (w *Writer) run(f *os.File, hdr Record) {
+func (w *Writer) run(f *os.File) {
 	defer close(w.done)
 	defer f.Close()
 
@@ -147,8 +151,6 @@ func (w *Writer) run(f *os.File, hdr Record) {
 		w.write(f, Record{Kind: KindDelta, Text: pending.String()})
 		pending.Reset()
 	}
-
-	w.write(f, hdr)
 
 	tick := time.NewTicker(flushInterval)
 	defer tick.Stop()

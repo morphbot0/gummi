@@ -36,6 +36,7 @@ type eventHub struct {
 	mu     sync.Mutex
 	boxes  map[domain.FeatureID]*mailbox
 	closed bool
+	stop   chan struct{}
 }
 
 type mailbox struct {
@@ -93,14 +94,23 @@ func (m *mailbox) pump() {
 }
 
 func startEventHub(src <-chan engine.Event) *eventHub {
-	h := &eventHub{boxes: map[domain.FeatureID]*mailbox{}}
+	h := &eventHub{boxes: map[domain.FeatureID]*mailbox{}, stop: make(chan struct{})}
 	go func() {
-		for ev := range src {
-			h.mu.Lock()
-			box := h.boxes[ev.Feature]
-			h.mu.Unlock()
-			if box != nil {
-				box.push(ev)
+	read:
+		for {
+			select {
+			case ev, ok := <-src:
+				if !ok {
+					break read
+				}
+				h.mu.Lock()
+				box := h.boxes[ev.Feature]
+				h.mu.Unlock()
+				if box != nil {
+					box.push(ev)
+				}
+			case <-h.stop:
+				break read
 			}
 		}
 		h.mu.Lock()
@@ -142,8 +152,21 @@ func (d *Driver) ensureHub(id domain.FeatureID) *eventHub {
 	if d.hub == nil {
 		d.hub = startEventHub(d.eng.Events())
 		d.events = d.hub.subscribe(id)
+		d.ownsHub = true
 	}
 	return d.hub
+}
+
+// releaseHub hands the engine's event stream back when the drive that
+// started the hub ends. A hub left reading takes events from whichever
+// driver reads that engine next, and a drive that never sees its stage
+// settle waits out the whole stage timeout.
+func (d *Driver) releaseHub() {
+	if !d.ownsHub {
+		return
+	}
+	close(d.hub.stop)
+	d.hub, d.events, d.ownsHub = nil, nil, false
 }
 
 // --- the conducted implement stage -------------------------------------------
