@@ -3767,7 +3767,10 @@ the tier beneath the branch and beside the conversation, and the one
 thing a respawned backend starts from beyond whatever replay or resume
 §19.3a can hand it. Each spawn inlines what memory holds into the system
 hints, capped per file, and the session carries two tools, `memory_read`
-and `memory_write`, to read the lot and fill the card's own.
+and `memory_write`, to read the lot and fill the card's own. The inline
+is the read: an empty memory is said in a line rather than left out, and
+the hint tells the session not to open with a `memory_read` — one shown
+nothing cannot tell empty from unshown, and spends a tool call to learn it.
 
 - **Global memory** (`global.md`) is shared by every freeform session in
   the workspace — the durable facts they should all start with. It is

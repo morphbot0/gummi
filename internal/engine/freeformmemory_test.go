@@ -243,9 +243,10 @@ func TestMemoryCardInlineIsCapped(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 	f := freeformCard(3, "bounded")
 
-	// nothing written yet: no card at all
-	if got := e.memoryCard(f.ID); got != "" {
-		t.Errorf("memory card with nothing written = %q, want none", got)
+	// nothing written yet: the card says so in a line, so the session
+	// does not spend a read finding out
+	if got := e.memoryCard(f.ID); got != memoryCardEmpty {
+		t.Errorf("memory card with nothing written = %q, want the empty line", got)
 	}
 
 	// a memory far past its inline budget is cut, with the tail gone
@@ -259,6 +260,10 @@ func TestMemoryCardInlineIsCapped(t *testing.T) {
 	}
 	if !strings.Contains(card, "(truncated — read the rest with memory_read)") {
 		t.Errorf("the truncation is silent:\n%s", card)
+	}
+	// dead-ends is still unwritten, and the card says what that means
+	if !strings.Contains(card, "a file not shown is empty") {
+		t.Errorf("the card leaves an unshown file ambiguous:\n%s", card)
 	}
 
 	// a memory inside the budget rides whole
@@ -440,8 +445,8 @@ func TestMemoryMigratesTheFormerPlanName(t *testing.T) {
 	if _, err := os.Stat(ws.SessionMemoryFile(f3.ID)); !os.IsNotExist(err) {
 		t.Errorf("an absent memory.md was fabricated (stat err %v)", err)
 	}
-	if card := e.memoryCard(f3.ID); card != "" {
-		t.Errorf("spawn hint with nothing written = %q, want none", card)
+	if card := e.memoryCard(f3.ID); card != memoryCardEmpty {
+		t.Errorf("spawn hint with nothing written = %q, want the empty line", card)
 	}
 }
 
