@@ -225,6 +225,8 @@ func newWorld(t *testing.T) *world {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	w.write("repo.json", `{"nameWithOwner":"me/widget","viewerPermission":"WRITE","isFork":true,"parent":{"name":"widget","owner":{"login":"acme"}}}`)
 	w.run(tmp, "git", "init", "-q", "--bare", w.bare)
+	// a push must not leave the remote repacking behind it (see gittest)
+	w.run(w.bare, "git", "config", "maintenance.auto", "false")
 	w.run(tmp, "git", "init", "-q", "-b", "main", w.dir)
 	w.git("config", "user.email", "t@example.com")
 	w.git("config", "user.name", "T")

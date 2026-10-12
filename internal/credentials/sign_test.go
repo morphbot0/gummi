@@ -37,6 +37,9 @@ func signingRepo(t *testing.T, s Store) (repo, allowed string) {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	repo = t.TempDir()
 	git(t, repo, "init", "-q")
+	// no commit may leave git tidying the repository behind it (see gittest);
+	// these tests count git's environment entries, so it is set here instead
+	git(t, repo, "config", "maintenance.auto", "false")
 	git(t, repo, "config", "user.name", "Ada Lovelace")
 	git(t, repo, "config", "user.email", "ada@example.com")
 	allowed = filepath.Join(t.TempDir(), "allowed")

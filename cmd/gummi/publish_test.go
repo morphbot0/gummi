@@ -51,6 +51,8 @@ func publishFixture(t *testing.T) (bare, fake string) {
 		return strings.TrimSpace(string(out))
 	}
 	git(fake, "init", "-q", "--bare", bare)
+	// a push must not leave the remote repacking behind it (see gittest)
+	git(bare, "config", "maintenance.auto", "false")
 	git(root, "remote", "add", "origin", "git@github.com:me/widget.git")
 	git(root, "config", "url."+bare+".insteadOf", "git@github.com:me/widget.git")
 	f := domain.Feature{
@@ -419,6 +421,8 @@ func TestPushRemoteIsRememberedOnlyOnceTheActRan(t *testing.T) {
 	}
 	forkBare := filepath.Join(fake, "fork.git")
 	git("init", "-q", "--bare", forkBare)
+	// a push must not leave the remote repacking behind it (see gittest)
+	git("--git-dir", forkBare, "config", "maintenance.auto", "false")
 	git("remote", "add", "fork", "git@github.com:me/fork.git")
 	git("config", "url."+forkBare+".insteadOf", "git@github.com:me/fork.git")
 	const key = "branch.gummi/FD-002-add-a-thing.pushRemote"

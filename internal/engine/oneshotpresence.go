@@ -39,23 +39,10 @@ func (e *Engine) beginOneShot(f domain.Feature, role string) func() { //nolint:u
 	e.oneShots[f.ID]++
 	e.mu.Unlock()
 
-	var w *livelog.Writer
-	if e.cfg.Workspace.Root != "" {
-		if lw, err := livelog.Create(e.cfg.Workspace.LiveFile(f.ID), livelog.Record{
-			Feature: string(f.ID),
-			Stage:   string(f.Stage),
-			Role:    role,
-		}); err == nil {
-			w = lw
-		}
-	}
+	bound := e.bindOneShotLog(f, role)
 	return func() {
-		if w != nil {
-			// the terminal record, as a session writes on its way out: a
-			// file closed without one reads as a live run whose process
-			// merely went quiet.
-			w.Emit(livelog.Record{Kind: livelog.KindStopped})
-			w.Close()
+		if bound {
+			e.releaseOneShotLog(f.ID)
 		}
 		e.mu.Lock()
 		if n := e.oneShots[f.ID]; n <= 1 {
@@ -65,6 +52,66 @@ func (e *Engine) beginOneShot(f domain.Feature, role string) func() { //nolint:u
 		}
 		e.mu.Unlock()
 	}
+}
+
+// oneShotLog is the live file the one-shot passes running on one card
+// share, and how many of them hold it.
+type oneShotLog struct {
+	w *livelog.Writer
+	n int
+}
+
+// bindOneShotLog binds f's live file for one pass and reports whether it
+// did. Nested passes share the first one's writer: a second writer on the
+// same path would truncate the file under the first and then write at an
+// offset of its own, so the first pass's terminal record could land in
+// the middle of the header and leave a file nothing can read.
+func (e *Engine) bindOneShotLog(f domain.Feature, role string) bool {
+	if e.cfg.Workspace.Root == "" {
+		return false
+	}
+	e.oneShotLogMu.Lock()
+	defer e.oneShotLogMu.Unlock()
+	l := e.oneShotLogs[f.ID]
+	if l == nil {
+		w, err := livelog.Create(e.cfg.Workspace.LiveFile(f.ID), livelog.Record{
+			Feature: string(f.ID),
+			Stage:   string(f.Stage),
+			Role:    role,
+		})
+		if err != nil {
+			return false
+		}
+		if e.oneShotLogs == nil {
+			e.oneShotLogs = map[domain.FeatureID]*oneShotLog{}
+		}
+		l = &oneShotLog{w: w}
+		e.oneShotLogs[f.ID] = l
+	}
+	l.n++
+	return true
+}
+
+// releaseOneShotLog gives up one pass's hold on id's live file and, when
+// it was the last, writes the terminal record and closes the file. The
+// lock is held across the close so a pass that begins meanwhile cannot
+// truncate a file whose last record is still being written.
+func (e *Engine) releaseOneShotLog(id domain.FeatureID) {
+	e.oneShotLogMu.Lock()
+	defer e.oneShotLogMu.Unlock()
+	l := e.oneShotLogs[id]
+	if l == nil {
+		return
+	}
+	if l.n--; l.n > 0 {
+		return
+	}
+	delete(e.oneShotLogs, id)
+	// the terminal record, as a session writes on its way out: a file
+	// closed without one reads as a live run whose process merely went
+	// quiet.
+	l.w.Emit(livelog.Record{Kind: livelog.KindStopped})
+	l.w.Close()
 }
 
 // OneShotRunning reports whether a session-less pass is running for id in

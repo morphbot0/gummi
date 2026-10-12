@@ -51,6 +51,8 @@ func publishBoard(t *testing.T) (b *docsBoard, fake, bare string) {
 	})
 	b = newDocsBoard(t, agent.NewFake("ok"))
 	gitIn(t, tmp, "init", "-q", "--bare", bare)
+	// a push must not leave the remote repacking behind it (see gittest)
+	gitIn(t, bare, "config", "maintenance.auto", "false")
 	gitIn(t, b.root, "remote", "add", "origin", "git@github.com:me/widget.git")
 	gitIn(t, b.root, "config", "url."+bare+".insteadOf", "git@github.com:me/widget.git")
 	gitIn(t, b.root, "push", "-q", "origin", "main")
