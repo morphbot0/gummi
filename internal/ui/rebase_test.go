@@ -397,7 +397,7 @@ func TestAgentRebaseReRunsTheInterruptedStage(t *testing.T) {
 		t.Fatalf("hand-off did not dispatch: notice = %q", m.notice.text)
 	}
 	settleCard(t, eng, "FD-001")
-	m = drainEngineLoop(t, m)
+	m = drainQuietEngineLoop(t, m)
 
 	if n := rebases.Load(); n != 1 {
 		t.Fatalf("rebase sessions = %d, want 1", n)
