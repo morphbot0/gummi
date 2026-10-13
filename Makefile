@@ -55,5 +55,5 @@ build-snap: clean
 try-snap: build-snap
 	set -e; \
 	snapfile=$$(ls results/gummi-agent_*.snap | head -n1); \
-	sudo snap install --dangerous --classic "$$snapfile"; \
+	sudo snap install --dangerous "$$snapfile"; \
 	snap run gummi version

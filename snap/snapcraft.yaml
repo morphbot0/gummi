@@ -5,7 +5,7 @@ description: |
   Gummi is a terminal-first CLI/TUI for code review and issue workflows.
   This snap packages the gummi single-binary built from ./cmd/gummi.
 base: core24
-confinement: classic
+confinement: strict
 license: MIT
 adopt-info: metadata
 apps:
