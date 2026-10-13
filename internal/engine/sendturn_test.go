@@ -73,10 +73,17 @@ func TestSendTurnDeliversImages(t *testing.T) {
 		t.Errorf("image media type = %q, want image/png", last.Images[0].MediaType)
 	}
 
-	got := s.Snapshot().Transcript
-	lastMsg := got[len(got)-1]
-	if len(lastMsg.Images) != 1 || lastMsg.Images[0].ID != ref.ID {
-		t.Fatalf("transcript's user message Images = %+v, want %+v", lastMsg.Images, ref)
+	// The fake replies on its own goroutine, so its answer may already
+	// follow the user's message: find that message rather than take the
+	// last one.
+	var sent []AttachmentRef
+	for _, m := range s.Snapshot().Transcript {
+		if len(m.Images) > 0 {
+			sent = m.Images
+		}
+	}
+	if len(sent) != 1 || sent[0].ID != ref.ID {
+		t.Fatalf("transcript's user message Images = %+v, want %+v", sent, ref)
 	}
 }
 

@@ -25,6 +25,19 @@ func lockingEngine(t *testing.T, ag agent.Agent) (*Engine, state.Workspace) {
 	return e, ws
 }
 
+// heldFake is a fake whose turn stays open until the test ends, so a run
+// started on it is still running whenever the test comes to look. One
+// that answers at once has finished its stage by then on a slow machine.
+func heldFake(t *testing.T) *agent.Fake {
+	t.Helper()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	return &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+}
+
 // foreignHold stands in for another gummi process: the flock a headless
 // run/resume/merge takes around its command.
 func foreignHold(t *testing.T, ws state.Workspace, id domain.FeatureID) func() {
@@ -101,7 +114,7 @@ func TestDrivingHoldsTheCardLock(t *testing.T) {
 // Pausing hands the card back: parking a run in the board so it can be
 // resumed headlessly is a normal workflow, not a lock to fight.
 func TestPauseReleasesTheCardLock(t *testing.T) {
-	e, ws := lockingEngine(t, agent.NewFake("hi"))
+	e, ws := lockingEngine(t, heldFake(t))
 	f := feature(1, "parked", domain.StageImplement)
 	withWorktree(t, e.cfg.Worktrees, f)
 
@@ -123,7 +136,7 @@ func TestPauseReleasesTheCardLock(t *testing.T) {
 // without ever letting the card lock go: a headless drive must not be
 // able to slip in through the gap between the two sessions.
 func TestReplacingASessionKeepsTheCardLock(t *testing.T) {
-	e, ws := lockingEngine(t, agent.NewFake("hi"))
+	e, ws := lockingEngine(t, heldFake(t))
 	f := feature(1, "restarted", domain.StageImplement)
 	withWorktree(t, e.cfg.Worktrees, f)
 

@@ -60,8 +60,10 @@ func TestCardSpentTracksTheStoreRow(t *testing.T) {
 // showing it, so the seed has to happen on that path too.
 func TestCardSpentSeededForInteractiveChat(t *testing.T) {
 	ws, store, wt := newRepo(t)
+	// held: an opening turn that answers at once adds its own credit
+	// before the seed is read
 	e := New(Config{
-		Agents: singleAgent(agent.NewFake("hello")), Store: store, Worktrees: wt,
+		Agents: singleAgent(heldFake(t)), Store: store, Worktrees: wt,
 		Workspace: ws, Model: "m", Persist: true,
 	})
 	t.Cleanup(func() { e.Close() })

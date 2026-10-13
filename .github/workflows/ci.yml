@@ -51,8 +51,21 @@ jobs:
       # from here, and the parts' `source: .` stays inside the directory the
       # LXD build environment mounts.
       - uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
+        id: build
         with:
           path: .
+
+      # Only a push to main publishes: pull requests (forks especially) get
+      # no secrets and must not release. Needs a SNAPCRAFT_STORE_CREDENTIALS repository
+      # secret from `snapcraft export-login --snaps gummi-agent
+      # --channels edge --acls package_access,package_push,package_update,package_release`.
+      - uses: canonical/action-publish@214b86e5ca036ead1668c79afb81e550e6c54d40 # v1.2.0
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: edge
 
   race-coverage:
     runs-on: ubuntu-latest

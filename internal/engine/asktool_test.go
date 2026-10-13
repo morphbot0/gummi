@@ -1433,6 +1433,11 @@ func TestAnswerAbandonedResolverMustNotReturnNilSilently(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The kickoff turn has to end first: one that ends with the
+		// question already open cuts it loose from its call, and the
+		// answer then goes out as a turn.
+		waitFor(t, e, EventStarted)
+		waitFor(t, e, EventIdle)
 		s.setPendingAsk(&Ask{
 			CallID:   "mcp-1",
 			Question: "Persist where?",
@@ -1465,7 +1470,10 @@ func TestAnswerAbandonedResolverMustNotReturnNilSilently(t *testing.T) {
 		// a live waiter whose buffer is already full forces the drop arm
 		run(t, func(s *Session) {
 			s.markResolverWaiting("mcp-1")
-			s.resolvers["mcp-1"] <- "stale" // fill the capacity-1 buffer
+			s.mu.Lock()
+			waiter := s.resolvers["mcp-1"]
+			s.mu.Unlock()
+			waiter <- "stale" // fill the capacity-1 buffer
 		})
 	})
 }

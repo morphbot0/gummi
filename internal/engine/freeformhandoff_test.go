@@ -944,7 +944,13 @@ func TestSendQueuedRecordsALineTheSendRefuses(t *testing.T) {
 		sentMu.Lock()
 		sent = append(sent, msg)
 		sentMu.Unlock()
-		return []agent.Event{{Kind: agent.EventMessage, Text: "looking at it"}, {Kind: agent.EventIdle}}
+		// the context report trails the idle so the test can tell the
+		// turn's end has been handled in full, its queue drain included
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "looking at it"},
+			{Kind: agent.EventIdle},
+			{Kind: agent.EventContext, Context: agent.Context{Tokens: 1}},
+		}
 	}}
 	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
@@ -958,6 +964,14 @@ func TestSendQueuedRecordsALineTheSendRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFreeformIdle(t, ff)
+	// A drain still to come would take the line queued below and send it
+	// as an ordinary turn.
+	for deadline := time.Now().Add(testWaitTimeout); ff.Snapshot().Context.Tokens == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("the first turn's end was never handled")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	// the brief is drafting: a line sent now is queued behind it
 	ff.setBriefing(true)
