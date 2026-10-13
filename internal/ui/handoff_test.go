@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/worktree"
@@ -82,7 +85,7 @@ func TestFailedVerifyOffersNoEnding(t *testing.T) {
 // the branch is the whole reason anyone reaches for this.
 func TestHandOffDetailNamesWhatIsKept(t *testing.T) {
 	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
-	d := handOffDetail(f, "main", nil, nil)
+	d := handOffDetail(f, "main", nil, nil, false)
 	for _, want := range []string{f.BranchName(), f.WorktreePath(), "kept", "nothing lands"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("confirm detail does not mention %q:\n%s", want, d)
@@ -98,13 +101,39 @@ func TestHandOffDetailNamesWhatIsKept(t *testing.T) {
 // branch that does not contain this work.
 func TestHandOffDetailNamesDependents(t *testing.T) {
 	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
-	one := handOffDetail(f, "main", []domain.FeatureID{"BG-051"}, nil)
+	one := handOffDetail(f, "main", []domain.FeatureID{"BG-051"}, nil, false)
 	if !strings.Contains(one, "BG-051 depends on this and will start from main") {
 		t.Errorf("single dependent not named in the singular:\n%s", one)
 	}
-	two := handOffDetail(f, "main", []domain.FeatureID{"BG-051", "FD-060"}, nil)
+	two := handOffDetail(f, "main", []domain.FeatureID{"BG-051", "FD-060"}, nil, false)
 	if !strings.Contains(two, "BG-051, FD-060 depend on this") {
 		t.Errorf("two dependents not named in the plural:\n%s", two)
+	}
+}
+
+// A branch a remote already holds goes with the card, and the confirm
+// says so in the same two lines that otherwise say "kept".
+func TestHandOffDetailNamesWhatIsRemoved(t *testing.T) {
+	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
+	d := handOffDetail(f, "main", nil, nil, true)
+	if strings.Contains(d, "kept") || strings.Count(d, "removed") != 2 {
+		t.Errorf("confirm detail does not say the branch and worktree are removed:\n%s", d)
+	}
+}
+
+// The confirm's option is the person's way to keep them: b flips it, the
+// box shows which way it stands, and a confirm without one ignores b.
+func TestConfirmOptionTogglesOnB(t *testing.T) {
+	d := &confirmDialog{question: "hand off?", option: keepBranchOption, onConfirm: func() tea.Cmd { return nil }}
+	if done, _ := d.HandleKey(tea.KeyPressMsg{Code: 'b', Text: "b"}); done || !d.optionOn {
+		t.Fatalf("b: done=%v optionOn=%v, want the option on and the dialog open", done, d.optionOn)
+	}
+	if v := ansi.Strip(d.View(theme.New(theme.GummiDark()), 80, 24)); !strings.Contains(v, "[x] "+keepBranchOption) {
+		t.Errorf("view does not show the option on:\n%s", v)
+	}
+	plain := &confirmDialog{question: "delete?", onConfirm: func() tea.Cmd { return nil }}
+	if plain.HandleKey(tea.KeyPressMsg{Code: 'b', Text: "b"}); plain.optionOn {
+		t.Error("b turned on an option the confirm does not carry")
 	}
 }
 
@@ -118,8 +147,8 @@ func TestHandOffDetailNamesDrift(t *testing.T) {
 		FeatureID: f.ID, Branch: f.BranchName(),
 		Recorded: "a8854cb68f693f0043cdb12564bdfdd85ae63df2", MainHead: "3fed2f2", Base: "add-improvements-v2",
 	}
-	d := handOffDetail(f, "add-improvements-v2", nil, drift)
-	for _, want := range []string{"add-improvements-v2 moved", "a8854cb", "kept as is", "rebase it yourself"} {
+	d := handOffDetail(f, "add-improvements-v2", nil, drift, false)
+	for _, want := range []string{"add-improvements-v2 moved", "a8854cb", "nothing here rebases", "rebase it yourself"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("confirm detail does not say %q:\n%s", want, d)
 		}
@@ -127,7 +156,7 @@ func TestHandOffDetailNamesDrift(t *testing.T) {
 	if strings.Contains(d, drift.Recorded) {
 		t.Errorf("a forty-character sha in a confirm sentence:\n%s", d)
 	}
-	if plain := handOffDetail(f, "main", nil, nil); strings.Contains(plain, "moved") {
+	if plain := handOffDetail(f, "main", nil, nil, false); strings.Contains(plain, "moved") {
 		t.Errorf("an undrifted card was told its base moved:\n%s", plain)
 	}
 }

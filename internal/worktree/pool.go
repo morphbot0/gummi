@@ -588,6 +588,52 @@ func (p *Pool) Spent(ctx context.Context, f *domain.Feature) (bool, error) {
 	return wt.Spent(ctx, f)
 }
 
+// Cleanable reports whether a closed card still holds something a clean
+// would remove: a worktree, or a branch whose work exists elsewhere. It
+// leaves out a goal and a goal's own cards (a goal's clean sweeps its
+// cards itself), a main-checkout card, which has neither, and anything
+// holding uncommitted work. A branch that is the only copy of its work
+// (Manager.Spent) does not make a card cleanable on its own: a clean
+// would keep it, and a card with nothing else left is already tidy. A
+// read that fails answers no — this picks which cards are worth handing
+// to a clean, and the clean repeats every check on the card it is given.
+func (p *Pool) Cleanable(ctx context.Context, f *domain.Feature) bool {
+	if f.Stage != domain.StageDone || f.IsGoal() || f.InGoal() || f.MainCheckout {
+		return false
+	}
+	spent, err := p.Spent(ctx, f)
+	if err != nil {
+		return false
+	}
+	if ok, err := p.Exists(ctx, f); err != nil {
+		return false
+	} else if !ok {
+		branch, err := p.BranchExists(ctx, f)
+		return err == nil && branch && spent && !f.Adopted()
+	}
+	loose := p.TrackedDirty
+	if !spent {
+		loose = p.Dirty
+	}
+	dirty, err := loose(ctx, f)
+	return err == nil && !dirty
+}
+
+// GoesWithClose reports whether closing a card takes its worktree and
+// branch with it, where the person did not ask to keep them. A branch is
+// a piece of work at a point in time and a closed card has no further use
+// for one — unless it is the only copy of that work, in which case the
+// card is left exactly as the closing found it, worktree included: it is
+// what the person pushes, or lands after all. A stacked card stays too:
+// other branches fork from its own.
+func (p *Pool) GoesWithClose(ctx context.Context, f *domain.Feature) bool {
+	if f.Stacked() || !p.Cleanable(ctx, f) {
+		return false
+	}
+	spent, err := p.Spent(ctx, f)
+	return err == nil && spent
+}
+
 func (p *Pool) DeleteClosedBranch(ctx context.Context, f *domain.Feature) error {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {

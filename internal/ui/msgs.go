@@ -1226,116 +1226,143 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 // re-checks at run time so a stale board row can't trigger a cleanup of
 // unmerged work (DESIGN §9 M4, §10 landed-branch detection).
 func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
-	return m.cardLocked(f.ID, func() tea.Msg {
-		ctx := context.Background()
-		closed := f.Stage == domain.StageDone
-		hasBranch, err := m.wt.BranchExists(ctx, &f)
-		if err != nil {
+	return m.cardLocked(f.ID, func() tea.Msg { return m.tidy(context.Background(), f) })
+}
+
+// tidy is cleanupLanded's act, for a caller that already holds the card's
+// lock: the clean-up itself, and a closing that takes the card's worktree
+// and branch with it (closeOut).
+func (m *Shell) tidy(ctx context.Context, f domain.Feature) noticeMsg {
+	closed := f.Stage == domain.StageDone
+	hasBranch, err := m.wt.BranchExists(ctx, &f)
+	if err != nil {
+		return noticeMsg{text: sanitize(err.Error()), isErr: true}
+	}
+	var landed bool
+	if hasBranch || !closed {
+		landed, err = m.wt.Landed(ctx, &f)
+	}
+	// fork drift is a refusal for an open card; a closed one is read
+	// by Spent, which does not need the base to still carry the landing
+	var drift *worktree.ForkDriftError
+	if err != nil && (!closed || !errors.As(err, &drift)) {
+		return noticeMsg{text: sanitize(err.Error()), isErr: true}
+	}
+	if !landed && !closed {
+		return noticeMsg{text: f.Name() + " hasn't landed on " + m.baseBranch(f) + " yet — nothing to clean up", isErr: true}
+	}
+	spent := landed
+	if !landed {
+		if spent, err = m.wt.Spent(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		var landed bool
-		if hasBranch || !closed {
-			landed, err = m.wt.Landed(ctx, &f)
-		}
-		// fork drift is a refusal for an open card; a closed one is read
-		// by Spent, which does not need the base to still carry the landing
-		var drift *worktree.ForkDriftError
-		if err != nil && (!closed || !errors.As(err, &drift)) {
+	}
+	m.dropSession(f.ID)
+	// what a goal's sweep took with it, for the closing notice; the
+	// zero value for every other kind.
+	var cards engine.GoalCardCleanup
+	if ok, err := m.wt.Exists(ctx, &f); err != nil {
+		return noticeMsg{text: sanitize(err.Error()), isErr: true}
+	} else if ok {
+		// A "landed" branch can still be topologically indistinguishable
+		// from a fresh one that merely fell behind an advancing main, and
+		// a bounced-back feature may hold uncommitted rework the merged
+		// history doesn't contain. Refuse the force-remove when tracked
+		// files are modified — that's real work not in main — so cleanup
+		// only ever discards untracked build artifacts.
+		if dirty, err := m.wt.TrackedDirty(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		} else if dirty {
+			return noticeMsg{text: f.Name() + " has uncommitted changes on its branch — commit or discard them before cleanup", isErr: true}
 		}
-		if !landed && !closed {
-			return noticeMsg{text: f.Name() + " hasn't landed on " + m.baseBranch(f) + " yet — nothing to clean up", isErr: true}
-		}
-		spent := landed
-		if !landed {
-			if spent, err = m.wt.Spent(ctx, &f); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-		}
-		m.dropSession(f.ID)
-		// what a goal's sweep took with it, for the closing notice; the
-		// zero value for every other kind.
-		var cards engine.GoalCardCleanup
-		if ok, err := m.wt.Exists(ctx, &f); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		} else if ok {
-			// A "landed" branch can still be topologically indistinguishable
-			// from a fresh one that merely fell behind an advancing main, and
-			// a bounced-back feature may hold uncommitted rework the merged
-			// history doesn't contain. Refuse the force-remove when tracked
-			// files are modified — that's real work not in main — so cleanup
-			// only ever discards untracked build artifacts.
-			if dirty, err := m.wt.TrackedDirty(ctx, &f); err != nil {
+		// where the branch is the only copy of the work, so is a file
+		// the worktree holds that no commit does — untracked included
+		if !spent {
+			if dirty, err := m.wt.Dirty(ctx, &f); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			} else if dirty {
-				return noticeMsg{text: f.Name() + " has uncommitted changes on its branch — commit or discard them before cleanup", isErr: true}
-			}
-			// where the branch is the only copy of the work, so is a file
-			// the worktree holds that no commit does — untracked included
-			if !spent {
-				if dirty, err := m.wt.Dirty(ctx, &f); err != nil {
-					return noticeMsg{text: sanitize(err.Error()), isErr: true}
-				} else if dirty {
-					return noticeMsg{text: f.Name() + " was neither landed nor pushed and its worktree holds uncommitted work — commit or discard it before cleanup", isErr: true}
-				}
-			}
-			// A goal's cards resolve to a manager rooted at THIS tree, so
-			// they come out before it does: after this remove their
-			// checkouts are unreachable and their branches read as
-			// unlanded for good (Engine.CleanGoalCards). While the goal
-			// ran, its landed cards did not offer the verb themselves
-			// (featureRow.conducted) — this is where it went.
-			if f.IsGoal() && m.engine != nil {
-				if swept, cerr := m.engine.CleanGoalCards(ctx, f.ID); cerr == nil {
-					cards = swept
-				}
-			}
-			// force: only disposable untracked artifacts remain now, and a
-			// non-force remove would abort on them. The confirm dialog spells
-			// this out.
-			if err := m.wt.Remove(ctx, &f, true); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+				return noticeMsg{text: f.Name() + " was neither landed nor pushed and its worktree holds uncommitted work — commit or discard it before cleanup", isErr: true}
 			}
 		}
-		// A research card runs in a scratch tree rather than a branch
-		// worktree. Disposable by construction, and absent is success, so
-		// this runs unconditionally for every kind.
-		if err := m.wt.RemoveScratch(ctx, &f); err != nil {
+		// A goal's cards resolve to a manager rooted at THIS tree, so
+		// they come out before it does: after this remove their
+		// checkouts are unreachable and their branches read as
+		// unlanded for good (Engine.CleanGoalCards). While the goal
+		// ran, its landed cards did not offer the verb themselves
+		// (featureRow.conducted) — this is where it went.
+		if f.IsGoal() && m.engine != nil {
+			if swept, cerr := m.engine.CleanGoalCards(ctx, f.ID); cerr == nil {
+				cards = swept
+			}
+		}
+		// force: only disposable untracked artifacts remain now, and a
+		// non-force remove would abort on them. The confirm dialog spells
+		// this out.
+		if err := m.wt.Remove(ctx, &f, true); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		// An adopted branch was never gummi's to delete, and a branch that
-		// is the only copy of its work is the one thing here that could be
-		// lost: both stay, and the notice says which.
-		kept := f.Adopted() || !spent
-		if hasBranch && !kept {
-			// git's own merged-check (-d) still backstops regular merges;
-			// for a squash merge, whose commits aren't ancestors of main,
-			// the delete re-verifies with the merge-tree content check —
-			// stronger than the ancestor test — before forcing. A closed
-			// card's delete re-reads Spent instead.
-			del := m.wt.DeleteLandedBranch
-			if !landed {
-				del = m.wt.DeleteClosedBranch
-			}
-			if err := del(ctx, &f); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
+	}
+	// A research card runs in a scratch tree rather than a branch
+	// worktree. Disposable by construction, and absent is success, so
+	// this runs unconditionally for every kind.
+	if err := m.wt.RemoveScratch(ctx, &f); err != nil {
+		return noticeMsg{text: sanitize(err.Error()), isErr: true}
+	}
+	// An adopted branch was never gummi's to delete, and a branch that
+	// is the only copy of its work is the one thing here that could be
+	// lost: both stay, and the notice says which.
+	kept := f.Adopted() || !spent
+	if hasBranch && !kept {
+		// git's own merged-check (-d) still backstops regular merges;
+		// for a squash merge, whose commits aren't ancestors of main,
+		// the delete re-verifies with the merge-tree content check —
+		// stronger than the ancestor test — before forcing. A closed
+		// card's delete re-reads Spent instead.
+		del := m.wt.DeleteLandedBranch
+		if !landed {
+			del = m.wt.DeleteClosedBranch
 		}
-		text := f.Name() + " cleaned up — worktree and merged branch removed"
-		switch {
-		case !spent:
-			text = f.Name() + " cleaned up — worktree removed · " + f.BranchName() + " kept, it is the only copy of its work"
-		case !landed:
-			text = f.Name() + " cleaned up — worktree and branch removed"
+		if err := del(ctx, &f); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		if n := len(cards.Took); n > 0 {
-			text += ", with " + itoa(n) + " of its card" + plural(n)
-		}
-		if n := len(cards.Left); n > 0 {
-			text += " · " + idList(cards.Left) + " kept — work no merge has"
-		}
-		return noticeMsg{text: text, reload: true}
-	})
+	}
+	text := f.Name() + " cleaned up — worktree and merged branch removed"
+	switch {
+	case !spent:
+		text = f.Name() + " cleaned up — worktree removed · " + f.BranchName() + " kept, it is the only copy of its work"
+	case !landed:
+		text = f.Name() + " cleaned up — worktree and branch removed"
+	}
+	if n := len(cards.Took); n > 0 {
+		text += ", with " + itoa(n) + " of its card" + plural(n)
+	}
+	if n := len(cards.Left); n > 0 {
+		text += " · " + idList(cards.Left) + " kept — work no merge has"
+	}
+	return noticeMsg{text: text, reload: true}
+}
+
+// closeOut is what closing a card does next, under the lock the closing
+// holds: it takes the card's worktree and branch with it, unless the
+// person asked to keep them or the card is one a closing leaves standing
+// (worktree.Pool.GoesWithClose). It answers the words the closing's notice
+// ends on, and "" where everything is left as it was — the closing is what
+// was asked for, and a clean-up that failed is said without undoing it.
+func (m *Shell) closeOut(ctx context.Context, id domain.FeatureID, keep bool) string {
+	f, err := m.store.GetFeature(ctx, id)
+	if err != nil || !m.wt.GoesWithClose(ctx, &f) {
+		return ""
+	}
+	if keep {
+		return "worktree and branch kept"
+	}
+	if n := m.tidy(ctx, f); n.isErr {
+		return "its worktree and branch are still here: " + n.text
+	}
+	if f.Adopted() {
+		return "worktree removed"
+	}
+	return "worktree and branch removed"
 }
 
 // idList spells a handful of card ids for one notice.

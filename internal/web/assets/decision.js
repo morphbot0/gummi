@@ -26,7 +26,7 @@ import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
-import { runAction, messageHint, draftAffordance, landMethodControl, landMessageBox } from './actions.js?v=__ASSET_V__'
+import { runAction, messageHint, draftAffordance, landMethodControl, landMessageBox, keepBranchControl } from './actions.js?v=__ASSET_V__'
 
 let ctx = {}
 let answering = false
@@ -276,6 +276,7 @@ function confirmEl (compact) {
   const tid = compact ? 'mdec-confirm' : 'decision-confirm'
   return h('div', { class: 'dconfirm', testid: tid, role: 'alertdialog', 'aria-label': 'Confirm', 'aria-describedby': `${tid}-q`, tabindex: '-1' },
     h('div', { class: 'cq', id: `${tid}-q`, testid: `${tid}-question` }, c.question),
+    c.keep?.el,
     h('div', { class: 'cb' },
       h('button', { class: 'btn', type: 'button', testid: `${tid}-no`, onclick: () => set({ decConfirm: null }) }, 'Cancel'),
       h('button', { class: ['btn', 'pri', c.danger && 'danger'], type: 'button', testid: `${tid}-yes`, disabled: answering, onclick: () => { const go = c.go; set({ decConfirm: null }); go() } }, c.yes || 'Yes, go ahead')))
@@ -636,7 +637,12 @@ function refused (id, err, body, label, tookWords, danger) {
       landing?.close()
       landingDismissed = false // the close was the flow's, not the person's
       // the server's question, verbatim; the yes sent back is its token
-      set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: `Yes, ${label}`, danger, go: () => send(id, { ...body, confirm: [body.confirm, e.confirm].filter(Boolean).join(' ') }, label, tookWords, danger) } })
+      // a confirmation that offers to keep the branch carries the choice
+      // beside its yes, and the yes sends it
+      {
+        const keep = e.option === 'keepBranch' ? keepBranchControl() : null
+        set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: `Yes, ${label}`, danger, keep, go: () => send(id, { ...body, ...(keep?.value() ? { keepBranch: true } : {}), confirm: [body.confirm, e.confirm].filter(Boolean).join(' ') }, label, tookWords, danger) } })
+      }
       reveal = true
       return
     case 'needs':
@@ -751,6 +757,8 @@ function openLanding (id, d, o, draft, question = '') {
     })
     landMessageBox(control, input, hint)
   }
+  // a goal's landing sweeps its own cards and keeps its own rules
+  const keep = state.card?.kind === 'goal' ? null : keepBranchControl()
   const err = h('p', { class: 'aerr', testid: 'landing-error', role: 'alert', hidden: true })
   // kept: the last reply was routed into the dialog rather than past it,
   // so the send that is out must not close it (a draft to read, a failure
@@ -763,7 +771,7 @@ function openLanding (id, d, o, draft, question = '') {
     // the answer that opened it is redrawn while it is up
     returnTo: `[data-testid$="-option-${CSS.escape(o.id)}"]`,
     onClose: () => { dlg.left = true; landing = null; landingDismissed = true },
-    body: [q, h('label', { class: 'field' }, control?.el, input, hint), err],
+    body: [q, h('label', { class: 'field' }, control?.el, input, hint), keep?.el, err],
     actions: [
       { label: 'Cancel', testid: 'landing-cancel' },
       {
@@ -779,6 +787,7 @@ function openLanding (id, d, o, draft, question = '') {
           const b = { ref: d.ref, option: o.id, against: d.against?.token || '' }
           if (words) b.words = words
           if (control) b.method = control.value()
+          if (keep?.value()) b.keepBranch = true
           dlg.kept = false
           go.disabled = true
           // sent bare, a squash waits on its drafting pass again: the

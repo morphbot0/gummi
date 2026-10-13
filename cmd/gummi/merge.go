@@ -89,7 +89,7 @@ func runClean(fl cliFlags, args []string) error {
 }
 
 // runCleanAll implements `gummi clean --all`. It walks every card in the
-// workspace and, for each one that could only succeed (cleanAllEligible),
+// workspace and, for each one that could only succeed (worktree.Pool.Cleanable),
 // cleans it under its own per-card lock exactly as a single
 // `gummi clean <id>` would. Anything else is left alone rather
 // than reported as a refusal: the set this selects is, barring a race,
@@ -104,7 +104,7 @@ func runCleanAll() error {
 		}
 		var cleaned, failed int
 		for _, f := range feats {
-			if !cleanAllEligible(ctx, pool, &f) {
+			if !pool.Cleanable(ctx, &f) {
 				continue
 			}
 			release, err := state.AcquireLock(ws.CardLockFile(f.ID))
@@ -126,38 +126,6 @@ func runCleanAll() error {
 		}
 		return driver.Outcome{Status: driver.StatusVerified}, nil
 	})
-}
-
-// cleanAllEligible is the set gummi clean --all acts on, and the set a
-// closing takes with it: a closed card that still holds a worktree or a
-// branch Clean would remove. It leaves out a goal and a goal's own cards
-// (CleanGoalCards is the goal's own sweep, run from the goal's own clean),
-// a main-checkout card, which has neither, and anything holding
-// uncommitted work. A branch that is the only copy of its work
-// (worktree.Manager.Spent) does not make a card eligible on its own:
-// Clean would keep it, and a card with nothing else left is already tidy.
-// Every check d.Clean repeats on the card it is actually given; this is
-// what picks which cards are worth giving it.
-func cleanAllEligible(ctx context.Context, pool *worktree.Pool, f *domain.Feature) bool {
-	if f.Stage != domain.StageDone || f.IsGoal() || f.InGoal() || f.MainCheckout {
-		return false
-	}
-	spent, err := pool.Spent(ctx, f)
-	if err != nil {
-		return false
-	}
-	if ok, err := pool.Exists(ctx, f); err != nil {
-		return false
-	} else if !ok {
-		branch, err := pool.BranchExists(ctx, f)
-		return err == nil && branch && spent && !f.Adopted()
-	}
-	loose := pool.TrackedDirty
-	if !spent {
-		loose = pool.Dirty
-	}
-	dirty, err := loose(ctx, f)
-	return err == nil && !dirty
 }
 
 // runHandOff implements `gummi handoff <id|ref>`: the headless counterpart of
@@ -202,12 +170,7 @@ func closeOut(ctx context.Context, d *driver.Driver, store *state.Store, pool *w
 		return out, err
 	}
 	f, ferr := store.GetFeature(ctx, id)
-	if ferr != nil || f.Stacked() || !cleanAllEligible(ctx, pool, &f) {
-		return out, err
-	}
-	// The only copy of the work is left exactly as the closing found it,
-	// worktree included: it is what the person pushes, or lands after all.
-	if spent, serr := pool.Spent(ctx, &f); serr != nil || !spent {
+	if ferr != nil || !pool.GoesWithClose(ctx, &f) {
 		return out, err
 	}
 	_, _ = d.Clean(ctx, id)

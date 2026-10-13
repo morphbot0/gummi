@@ -61,6 +61,24 @@ func TestWebLandingWithMergeMethod(t *testing.T) {
 	}
 }
 
+// TestWebLandingKeepsTheBranchWhenAsked: a landing from the page takes the
+// card's branch with it, and one that asks to keep it leaves it standing.
+func TestWebLandingKeepsTheBranchWhenAsked(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		m, _, _ := mergeFixture(t)
+		b := bridgeOver(t, m)
+		ctx := context.Background()
+		req := webapi.ActionRequest{Message: "FD-001: rebase me", KeepBranch: keep, Against: pinnedAgainst(t, b)}
+		if _, err := b.Action(ctx, "FD-001", "merge", req, "Simon"); err != nil {
+			t.Fatalf("merge action (keep=%v): %v", keep, err)
+		}
+		f, _ := m.store.GetFeature(ctx, "FD-001")
+		if ok, err := m.wt.BranchExists(ctx, &f); err != nil || ok != keep {
+			t.Errorf("keep=%v: branch exists = %v, %v", keep, ok, err)
+		}
+	}
+}
+
 // TestWebAnswerAdvanceWithMergeMethod: the verify decision's advance option
 // offers the choice, and an answer that picks merge with the message the
 // person read lands the branch as a merge commit on the base.

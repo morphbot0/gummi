@@ -292,7 +292,8 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 // board row (or a dialog left open across an outside merge) can't land
 // the work twice. With thenDone set (the card was at verify) a landed
 // merge also moves the feature to Done — the user's "this is done"
-// decision and the landing are one action.
+// decision and the landing are one action, and a card it closes takes its
+// worktree and branch with it unless keep says to leave them (closeOut).
 //
 // Every success return clears the card's needs-attention entry
 // (noticeMsg.clearInbox). That removal used to sit in the gate path's own
@@ -302,7 +303,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 // than on the keypress, is also what keeps the decision open when the
 // merge is refused or conflicts — the thing still has not been attended
 // to — and leaves no second place for a future caller to forget.
-func (m *Shell) landFeature(f domain.Feature, message string, method domain.LandMethod, thenDone bool) tea.Cmd {
+func (m *Shell) landFeature(f domain.Feature, message string, method domain.LandMethod, thenDone, keep bool) tea.Cmd {
 	actor := m.humanActor()
 	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
@@ -362,10 +363,20 @@ func (m *Shell) landFeature(f domain.Feature, message string, method domain.Land
 				return noticeMsg{text: sanitize(f.Name() + " " + landedAs(method, base) + ", but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 			m.dropSession(f.ID)
-			return noticeMsg{text: f.Name() + " " + landedAs(method, base) + " → done — " + cleanUpNudge, reload: true, clearInbox: f.ID}
+			return noticeMsg{text: f.Name() + " " + landedAs(method, base) + " → done" + m.afterClose(ctx, f.ID, keep), reload: true, clearInbox: f.ID}
 		}
-		return noticeMsg{text: f.Name() + " " + landedAs(method, base) + " — " + cleanUpNudge, reload: true, clearInbox: f.ID}
+		return noticeMsg{text: f.Name() + " " + landedAs(method, base) + m.afterClose(ctx, f.ID, keep), reload: true, clearInbox: f.ID}
 	})
+}
+
+// afterClose ends a landing's notice: what closing the card did with its
+// worktree and branch, or the nudge toward cleaning up where the landing
+// left them standing (a card still open, a stack, uncommitted work).
+func (m *Shell) afterClose(ctx context.Context, id domain.FeatureID, keep bool) string {
+	if took := m.closeOut(ctx, id, keep); took != "" {
+		return " · " + took
+	}
+	return " — " + cleanUpNudge
 }
 
 // landedAs names how a landing reached base, for a notice: a squash is one

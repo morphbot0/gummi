@@ -57,6 +57,9 @@ type WebError struct {
 	// Confirm is a "confirm"'s token: the yes to the question in Text,
 	// and to nothing else (webConfirmToken).
 	Confirm string
+	// Option names the choice a "confirm" carries beside its yes
+	// (webapi.Error.Option).
+	Option string
 	// Draft is the landing message a landing stopped to have read, on a
 	// "needs" message; nil when the stop is not a landing's.
 	Draft *string

@@ -36,7 +36,7 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		if we.Reason != "" {
 			// a refusal the page answers specially: the word, and the
 			// sentence (or the line handed back) beside it
-			body = webapi.Error{Error: we.Reason, Text: we.Text, By: we.By, Receipt: we.Receipt, Needs: webapi.ActionNeeds(we.Needs), Draft: we.Draft, Confirm: we.Confirm}
+			body = webapi.Error{Error: we.Reason, Text: we.Text, By: we.By, Receipt: we.Receipt, Needs: webapi.ActionNeeds(we.Needs), Draft: we.Draft, Confirm: we.Confirm, Option: we.Option}
 		}
 		writeJSON(w, status, body)
 		return

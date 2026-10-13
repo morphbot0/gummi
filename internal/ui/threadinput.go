@@ -837,7 +837,7 @@ var verbActionIDs = map[string]string{
 	// never in the answer set and always degrades to the menu, where the
 	// merge row answers to "land" by name.
 	"land": "merge",
-	// close is hand-off: close the card and keep its branch. It maps to the
+	// close is hand-off: close the card without landing it. It maps to the
 	// handoff id, and unlike land it IS in the answer set wherever it is
 	// legal: hand-off is offered at exactly one stage, the one where the
 	// row is on screen, so "/close" fires from the same place the reader is

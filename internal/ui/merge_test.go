@@ -198,17 +198,54 @@ func TestSquashMergeFlow(t *testing.T) {
 	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
 	}
+	if got := gitOut(t, root, "log", "-1", "--format=%B"); got != message {
+		t.Errorf("main HEAD message = %q, want %q", got, message)
+	}
+	// the landing closed the card, and the closing took its worktree and
+	// branch with it
+	if !strings.Contains(m.notice.text, "worktree and branch removed") {
+		t.Errorf("merge notice = %q, want it to say the worktree and branch went", m.notice.text)
+	}
+	ctx := context.Background()
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	if ok, _ := m.wt.BranchExists(ctx, &f); ok {
+		t.Error("the landed branch survived the closing")
+	}
+	if ok, _ := m.wt.Exists(ctx, &f); ok {
+		t.Error("the landed card's worktree survived the closing")
+	}
+}
+
+// TestLandingKeepsTheBranchWhenAsked: the dialog's keep field leaves the
+// worktree and branch standing, and the row then cleans up via c — the
+// squash-merged branch is not an ancestor of main, so this exercises the
+// content-checked delete.
+func TestLandingKeepsTheBranchWhenAsked(t *testing.T) {
+	m, _, _ := mergeFixture(t)
+	m = pressMerge(t, m)
+	d, ok := m.Overlay.Top().(*commitMsgDialog)
+	if !ok {
+		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
+	}
+	if !d.closes {
+		t.Fatal("a landing that closes the card does not offer to keep its branch")
+	}
+	typeMessage(t, m, "FD-001: rebase me")
+	// tab from the message reaches the keep field; enter turns it
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !d.keepBranch {
+		t.Fatal("enter on the keep field did not turn it to kept")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.notice.isErr || !strings.Contains(m.notice.text, "worktree and branch kept") {
+		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
 	ctx := context.Background()
 	f, _ := m.store.GetFeature(ctx, "FD-001")
 	if landed, err := m.wt.Landed(ctx, &f); !landed || err != nil {
 		t.Errorf("Landed after merge = %v, %v; want true", landed, err)
 	}
-	if got := gitOut(t, root, "log", "-1", "--format=%B"); got != message {
-		t.Errorf("main HEAD message = %q, want %q", got, message)
-	}
-
-	// the landed row now cleans up via c — the squash-merged branch is not
-	// an ancestor of main, so this exercises the content-checked delete
 	m = pump(t, m, m.loadRows)
 	m.sel = 0
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
@@ -621,8 +658,8 @@ func TestMergeLandingKeepsHistory(t *testing.T) {
 	if f.Stage != domain.StageDone {
 		t.Errorf("stage after merge landing = %s, want done", f.Stage)
 	}
-	if landed, err := m.wt.Landed(ctx, &f); !landed || err != nil {
-		t.Errorf("Landed after merge landing = %v, %v; want true", landed, err)
+	if ok, err := m.wt.BranchExists(ctx, &f); ok || err != nil {
+		t.Errorf("branch after merge landing = %v, %v; want it gone with the card", ok, err)
 	}
 }
 

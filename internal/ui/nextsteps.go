@@ -1145,7 +1145,7 @@ func stageAnswers(in nextInput) []nextAction {
 			nextStep("merge", "m", "land it on "+in.landBase(),
 				landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — uncommitted work has to be committed first, with your own message; "+msgNote),
 			nextStep("handoff", "h", "hand off",
-				"close the card and keep the branch exactly as it is"),
+				"close the card without landing — a branch nothing else holds is kept"),
 		}
 		if in.agentWired {
 			// the third ending, beside the two the branch already has: the

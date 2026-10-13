@@ -49,6 +49,13 @@ type commitMsgDialog struct {
 	// which a goal's card and a squash in place never do.
 	method  domain.LandMethod
 	methods []domain.LandMethod
+	// closes: this landing closes the card, and a closed card's worktree
+	// and branch go with it. The dialog then carries the choice to keep
+	// them (keepBranch), as a field after the message; a landing that
+	// leaves the card open, or a squash in place, takes nothing and shows
+	// no such field.
+	closes     bool
+	keepBranch bool
 	// draft yields the landing message under a caller-provided context (so
 	// esc cancels it); a nil backend or any failure returns an empty draft.
 	// fresh asks for a newly composed one: false accepts the pre-drafted
@@ -159,6 +166,9 @@ func (d *commitMsgDialog) tabStops() []int {
 	}
 	if d.method != domain.LandMerge {
 		stops = append(stops, commitFieldText)
+	}
+	if d.closes {
+		stops = append(stops, commitFieldKeep)
 	}
 	return append(stops, commitFieldButtons)
 }
@@ -332,6 +342,7 @@ const (
 	commitFieldText = iota
 	commitFieldButtons
 	commitFieldMethod
+	commitFieldKeep
 )
 
 // merge validates and fires onSubmit — the same path ctrl+s and the
@@ -400,6 +411,12 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		switch key.String() {
 		case "left", "h", "right", "l", "enter":
 			return false, d.toggleMethod()
+		}
+		return false, nil
+	case commitFieldKeep:
+		switch key.String() {
+		case "left", "h", "right", "l", "enter", "space":
+			d.keepBranch = !d.keepBranch
 		}
 		return false, nil
 	case commitFieldButtons:
@@ -540,6 +557,9 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 			b.WriteString("\n" + s.Error.Render(d.reason))
 		}
 	}
+	if d.closes {
+		b.WriteString("\n\n" + d.keepRow(s))
+	}
 	b.WriteString("\n\n" + d.buttons.View(s, d.focus == commitFieldButtons) + "\n")
 	verb := "merge"
 	if d.inPlace {
@@ -551,6 +571,21 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString("\n" + s.Faint.Render(hint+" · esc cancel"))
 	return s.DialogFrame.Render(b.String())
+}
+
+// keepRow is what becomes of the card's worktree and branch once it has
+// landed, shown as a cycling field like the method's: removed unless the
+// person turns it to kept.
+func (d *commitMsgDialog) keepRow(s *theme.Styles) string {
+	name := "removed once landed"
+	if d.keepBranch {
+		name = "kept"
+	}
+	value := "‹ " + name + " ›"
+	if d.focus == commitFieldKeep {
+		value = s.ButtonFocus.Render(value)
+	}
+	return s.Subtle.Render("Worktree and branch: ") + value
 }
 
 // methodRow is the landing method, shown as a cycling field: ←/→ (or

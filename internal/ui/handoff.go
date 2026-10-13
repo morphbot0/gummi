@@ -38,7 +38,11 @@ type handOffReadyMsg struct {
 	f          domain.Feature
 	dependents []domain.FeatureID
 	drift      *worktree.ForkDriftError
-	err        error
+	// goes: closing this card will take its branch and worktree with it,
+	// because the branch's work is held somewhere else too. The confirm
+	// says so and offers to keep them.
+	goes bool
+	err  error
 }
 
 // prepareHandOff checks the hand-off preconditions off the render loop
@@ -76,7 +80,11 @@ func (m *Shell) prepareHandOff(f domain.Feature) tea.Cmd {
 		if err != nil {
 			return handOffReadyMsg{err: err}
 		}
-		return handOffReadyMsg{f: f, dependents: deps, drift: drift}
+		// read as the card will stand once closed: the rule is about a
+		// closed card, and this one is a confirm away from being one
+		closed := f
+		closed.Stage = domain.StageDone
+		return handOffReadyMsg{f: f, dependents: deps, drift: drift, goes: m.wt.GoesWithClose(ctx, &closed)}
 	}
 }
 
@@ -84,10 +92,11 @@ func (m *Shell) prepareHandOff(f domain.Feature) tea.Cmd {
 // the consequences that are invisible from the board — the dependents
 // this frees, and a base that moved out from under the branch.
 //
-// The branch and worktree lines are the point of the verb — a reader is
-// choosing this precisely because they want those two things kept — so
-// they are stated rather than implied by the absence of a warning.
-func handOffDetail(f domain.Feature, base string, dependents []domain.FeatureID, drift *worktree.ForkDriftError) string {
+// The branch and worktree lines say what becomes of the two things a
+// reader is about to go and use, so they are stated rather than implied
+// by the absence of a warning: kept where the branch is the only copy of
+// its work, removed (goes) where a remote already holds it.
+func handOffDetail(f domain.Feature, base string, dependents []domain.FeatureID, drift *worktree.ForkDriftError, goes bool) string {
 	// leading blank line: confirmDialog sets its question and detail on
 	// consecutive lines, which is right for the one-liners every other
 	// caller passes and runs a three-row table straight into the title.
@@ -103,6 +112,10 @@ func handOffDetail(f domain.Feature, base string, dependents []domain.FeatureID,
 			b.WriteString("  " + pad("checkout") + "the session's loose work in the main checkout — kept\n")
 			b.WriteString("  " + pad(base) + "unchanged")
 		}
+	} else if goes {
+		b.WriteString("  " + pad("branch") + f.BranchName() + " — removed here, its work is held elsewhere\n")
+		b.WriteString("  " + pad("worktree") + f.WorktreePath() + " — removed\n")
+		b.WriteString("  " + pad(base) + "unchanged")
 	} else {
 		b.WriteString("  " + pad("branch") + f.BranchName() + " — kept\n")
 		b.WriteString("  " + pad("worktree") + f.WorktreePath() + " — kept\n")
@@ -125,7 +138,7 @@ func handOffDetail(f domain.Feature, base string, dependents []domain.FeatureID,
 		// reader needs is the fact, in one line, before they push a
 		// branch that no longer applies cleanly to where it came from.
 		b.WriteString("\n\n" + base + " moved since this branch forked (" + short(drift.Recorded) +
-			" is no longer in its history) — the branch is kept as is, so rebase it yourself if it should sit on " + base + ".")
+			" is no longer in its history) — nothing here rebases the branch, so rebase it yourself if it should sit on " + base + ".")
 	}
 	return b.String()
 }
@@ -157,12 +170,15 @@ func pad(label string) string {
 // waiving the landing never waived the floor. Only the success sentence
 // differs, and it differs because the outcome does — nothing reached the
 // base branch, and a reader who is about to go push something needs the
-// branch name in front of them.
-func (m *Shell) handOffFeature(f domain.Feature) tea.Cmd {
+// branch name in front of them. A branch whose work is held elsewhere goes
+// with the card, and its worktree too, unless keep says to leave them
+// (closeOut).
+func (m *Shell) handOffFeature(f domain.Feature, keep bool) tea.Cmd {
 	actor := m.humanActor()
 	return m.cardLocked(f.ID, func() tea.Msg {
 		return m.withEngine(func(eng *engine.Engine) tea.Msg {
-			res, err := eng.HandOff(context.Background(), f.ID, actor)
+			ctx := context.Background()
+			res, err := eng.HandOff(ctx, f.ID, actor)
 			if err != nil || res.Status != engine.StatusAdvanced {
 				return m.advanceOutcome(f.ID, actor, res, err)
 			}
@@ -173,6 +189,10 @@ func (m *Shell) handOffFeature(f domain.Feature) tea.Cmd {
 				if f.Home {
 					done = f.Name() + " → done — its home is kept, with everything in it"
 				}
+			}
+			// kept by choice reads as it always did: the branch is theirs
+			if took := m.closeOut(ctx, f.ID, keep); took != "" && !keep {
+				done = f.Name() + " → done — nothing landed on " + m.baseBranch(f) + " · " + took
 			}
 			return noticeMsg{
 				text:       done,

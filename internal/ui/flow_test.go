@@ -195,9 +195,13 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	if m.rows[0].F.Stage != domain.StageDone {
 		t.Fatalf("stage after merge = %s, want done (notice %q)", m.rows[0].F.Stage, m.notice.text)
 	}
+	// the closing took the card's worktree and branch with it
 	f := m.rows[0].F
-	if landed, err := m.wt.Landed(context.Background(), &f); !landed || err != nil {
-		t.Errorf("Landed after done = %v, %v; want true", landed, err)
+	if ok, err := m.wt.BranchExists(context.Background(), &f); ok || err != nil {
+		t.Errorf("branch after done = %v, %v; want it gone with the card", ok, err)
+	}
+	if ok, err := m.wt.Exists(context.Background(), &f); ok || err != nil {
+		t.Errorf("worktree after done = %v, %v; want it gone with the card", ok, err)
 	}
 	// g on done is a no-op with a notice
 	m = pressAdvance(t, m)

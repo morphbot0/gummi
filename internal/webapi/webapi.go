@@ -110,6 +110,11 @@ func (c Change) Key() string {
 	}
 }
 
+// OptionKeepBranch is the Error.Option of a confirmation whose act closes
+// a card and would take its worktree and branch with it: the request that
+// says yes may set KeepBranch to leave them standing.
+const OptionKeepBranch = "keepBranch"
+
 // Error is every non-2xx body — a sentence for a person, and the fields a
 // specific refusal carries — and the body of a question (StatusQuestion,
 // IsQuestion), which is not an error but says what it asks the same way.
@@ -137,6 +142,10 @@ type Error struct {
 	// sent again with this token in its Confirm is that question's yes,
 	// and nothing else's (AnswerRequest.Confirm).
 	Confirm string `json:"confirm,omitempty"`
+	// Option names a choice a "confirm" question carries beside its yes,
+	// which the request that answers it may set: OptionKeepBranch, where
+	// the act would take the card's worktree and branch with it.
+	Option string `json:"option,omitempty"`
 	// Draft is the landing message a landing stopped to have read (a
 	// "needs" with needs "message"): the page shows it, editable, and sends
 	// the landing again with the words the person approved.
