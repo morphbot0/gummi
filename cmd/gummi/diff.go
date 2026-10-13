@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/morphis/gummi/internal/state"
@@ -25,6 +26,14 @@ func runDiff(args []string) error {
 		out, err := wt.Diff(ctx, &f)
 		if err != nil {
 			return err
+		}
+		// a drifted card still has a diff — its own work since its fork —
+		// and stderr says that is what this is, so the patch on stdout
+		// stays a patch
+		if !f.MainCheckout {
+			if drift, _ := wt.Drift(ctx, &f); drift != nil {
+				fmt.Fprintln(os.Stderr, clean("gummi: "+drift.DiffNote()))
+			}
 		}
 		_, err = os.Stdout.WriteString(out)
 		return err

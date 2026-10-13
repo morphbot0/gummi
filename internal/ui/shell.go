@@ -2703,10 +2703,15 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.empty {
-			m.notice = noticeMsg{text: msg.f.Name() + ": no changes in the worktree yet"}
+			text := msg.f.Name() + ": no changes in the worktree yet"
+			if msg.drift != "" {
+				text += " — " + msg.drift + " (r on the board, /rebase on the card)"
+			}
+			m.notice = noticeMsg{text: text}
 			return m, nil
 		}
 		dv := newDiffView(msg.f, msg.diff, msg.anns)
+		dv.drift = msg.drift
 		if !m.diffJump.empty() {
 			// the same rule the artifact's citation follows: the reader
 			// asked for a hunk, so land on it and forget where the

@@ -1796,6 +1796,31 @@ func (e *ForkDriftError) Error() string {
 		e.FeatureID, e.Branch, e.Recorded, e.base(), e.base(), e.MainHead, e.base(), forkDriftRemedy(e.base()))
 }
 
+// DiffNote is what a surface showing a drifted card's diff says above it:
+// why the card is adrift, what the diff being read is measured from, and
+// what clears it. The diff is the card's own work since its fork
+// (diffBase), which is what a rebase replays — the note is there so the
+// range is not mistaken for the card against its base as the base now
+// stands. It names no key or button: each face adds its own handle on the
+// rebase.
+func (e *ForkDriftError) DiffNote() string {
+	fork := e.Recorded
+	if len(fork) > 7 {
+		fork = fork[:7]
+	}
+	own := "this is the card's own work since it forked (" + fork + ")"
+	switch {
+	case e.MissingBase != "":
+		return fmt.Sprintf("%s, the branch this card was cut from, no longer exists, so it is read against %s; %s. Rebase to replay it onto %s, or bring the branch back: git branch %s %s",
+			e.MissingBase, e.base(), own, e.base(), e.MissingBase, e.Recorded)
+	case e.ForkedFrom != "":
+		return fmt.Sprintf("this card forked from %s, which has not landed on %s; %s. Rebase to move it onto %s, or land %s first",
+			e.ForkedFrom, e.base(), own, e.base(), e.ForkedFrom)
+	}
+	return fmt.Sprintf("%s no longer carries the commit this card forked from; %s. Rebase to replay it onto %s",
+		e.base(), own, e.base())
+}
+
 // AssertNoForkDrift refuses a diff-based operation when the feature's
 // recorded fork point is no longer an ancestor of main's current HEAD —
 // main was rewound backward past where the branch forked, so the live
@@ -2026,7 +2051,9 @@ func (m *Manager) assertNoForkDriftAgainstBase(ctx context.Context, f *domain.Fe
 // Diff returns the unified diff of the feature branch against the point
 // it forked from main: the merge base to the worktree (so both committed
 // branch work and uncommitted edits show, without main's later commits
-// appearing as spurious reversals). Empty when nothing changed.
+// appearing as spurious reversals). Empty when nothing changed. A drifted
+// card still has one — its own work since its recorded fork (diffBase);
+// Drift is how a caller learns to say that it is reading one.
 //
 // Untracked files the repository does not ignore show as additions too
 // (withUntracked): they are uncommitted edits like any other, and the
@@ -2270,8 +2297,16 @@ func (m *Manager) DiffBase(ctx context.Context, f *domain.Feature) (string, erro
 }
 
 // diffBase resolves the worktree path and the base SHA the diff family
-// shares, refusing on fork drift first: main rewound past the recorded
-// fork makes every range below name work the feature never did.
+// shares: the live merge-base of the card's branch and its base.
+//
+// A drifted card is read from its recorded fork instead (driftedDiffBase).
+// The live merge-base is the one thing drift makes wrong — a base rewound
+// past the fork slides it back, and every range below would name work the
+// card never did — but the diff itself is still a question with an answer,
+// and the person deciding what to do about the drift is the reader who
+// most needs it. Reading is all this lets through: a stage, a checkpoint
+// and a landing each refuse a drifted card on their own
+// (AssertNoForkDrift), so nothing runs or lands on this range.
 //
 // A main-checkout freeform card has neither a worktree nor a branch (its
 // mint refused both), so its diff family reads the managed checkout
@@ -2293,6 +2328,12 @@ func (m *Manager) diffBase(ctx context.Context, f *domain.Feature) (wtPath, base
 		return "", "", err
 	}
 	if err := m.AssertNoForkDrift(ctx, f); err != nil {
+		var drift *ForkDriftError
+		if errors.As(err, &drift) {
+			if base, ok := m.driftedDiffBase(ctx, p, "HEAD", drift); ok {
+				return p, base, nil
+			}
+		}
 		return "", "", err
 	}
 	mainHead, err := m.BaseHead(ctx, f)
@@ -2307,6 +2348,27 @@ func (m *Manager) diffBase(ctx context.Context, f *domain.Feature) (wtPath, base
 		return "", "", err
 	}
 	return p, base, nil
+}
+
+// driftedDiffBase is where a drifted card's own work starts, tip being
+// the card's branch as dir names it: the recorded fork, while the branch still carries it — the
+// same commit a rebase of the card replays from (rebaseTarget), so the
+// diff a person reads is the range the rebase will move. A branch someone
+// rebased by hand no longer carries it; what it shares with the base as
+// the base now stands is then the best reading left. False when the two
+// share nothing and the fork is gone, which leaves the drift to say so.
+func (m *Manager) driftedDiffBase(ctx context.Context, dir, tip string, drift *ForkDriftError) (string, bool) {
+	if ok, _ := gitOK(ctx, dir, "merge-base", "--is-ancestor", drift.Recorded, tip); ok {
+		return drift.Recorded, true
+	}
+	if drift.MainHead == "" {
+		return "", false
+	}
+	base, err := runGit(ctx, dir, "merge-base", drift.MainHead, tip)
+	if err != nil || strings.TrimSpace(base) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(base), true
 }
 
 // rebaseInProgress reports whether wt has rebase state on disk.

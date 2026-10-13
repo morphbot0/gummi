@@ -597,3 +597,38 @@ func TestABaseDeletedAndRecreatedIsARewrite(t *testing.T) {
 		t.Fatalf("branch = %q", got)
 	}
 }
+
+// The note a diff surface puts above a drifted card's diff says which of
+// the three things happened, what the diff is measured from, and what
+// clears it — in a sentence short enough to sit above a diff, with no
+// board key in it for a face that has none.
+func TestDiffNoteSaysWhatTheDiffIsMeasuredFrom(t *testing.T) {
+	const fork = "048fb6261f6678b0a19fbb884adf904b980b99ed"
+	for name, tc := range map[string]struct {
+		drift ForkDriftError
+		want  []string
+	}{
+		"rewritten": {
+			ForkDriftError{Recorded: fork, Base: "main"},
+			[]string{"main no longer carries the commit this card forked from", "own work since it forked (048fb62)", "replay it onto main"},
+		},
+		"unlanded": {
+			ForkDriftError{Recorded: fork, Base: "main", ForkedFrom: "goal/ship-it"},
+			[]string{"forked from goal/ship-it, which has not landed on main", "land goal/ship-it first"},
+		},
+		"gone": {
+			ForkDriftError{Recorded: fork, Base: "main", MissingBase: "simon/dev"},
+			[]string{"simon/dev, the branch this card was cut from, no longer exists", "git branch simon/dev " + fork},
+		},
+	} {
+		note := tc.drift.DiffNote()
+		for _, want := range tc.want {
+			if !strings.Contains(note, want) {
+				t.Errorf("%s: note %q is missing %q", name, note, want)
+			}
+		}
+		if strings.Contains(note, "press r") {
+			t.Errorf("%s: note %q names a board key", name, note)
+		}
+	}
+}

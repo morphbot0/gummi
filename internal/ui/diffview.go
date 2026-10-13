@@ -28,6 +28,7 @@ type diffView struct {
 	f       domain.Feature
 	lines   []string                // the unified diff, split
 	anns    []domain.DiffAnnotation // this feature's annotations
+	drift   string                  // set when the card is drifted: what the diff is measured from, and the remedy
 	located map[int][]int           // diff line index → annotation indices anchored there
 	orphans []int                   // annotation indices whose anchor no longer matches
 	cursor  int                     // 1-based diff line
@@ -40,6 +41,9 @@ type diffLoadedMsg struct {
 	anns  []domain.DiffAnnotation
 	err   error
 	empty bool
+	// drift is the card's fork drift, when it has one: the diff is then
+	// its own work since its recorded fork (ForkDriftError.DiffNote)
+	drift string
 }
 
 // openDiff loads the feature's worktree diff and its stored annotations.
@@ -59,14 +63,20 @@ func (m *Shell) openDiff(f domain.Feature) tea.Cmd {
 		if err != nil {
 			return diffLoadedMsg{err: err}
 		}
+		var drift string
+		if !f.MainCheckout {
+			if d, _ := m.wt.Drift(ctx, &f); d != nil {
+				drift = sanitize(d.DiffNote())
+			}
+		}
 		if strings.TrimSpace(diff) == "" {
-			return diffLoadedMsg{f: f, empty: true}
+			return diffLoadedMsg{f: f, empty: true, drift: drift}
 		}
 		anns, err := m.store.ListDiffAnnotations(ctx, f.ID)
 		if err != nil {
 			return diffLoadedMsg{err: err}
 		}
-		return diffLoadedMsg{f: f, diff: diff, anns: anns}
+		return diffLoadedMsg{f: f, diff: diff, anns: anns, drift: drift}
 	}
 }
 

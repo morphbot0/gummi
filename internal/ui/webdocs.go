@@ -583,6 +583,15 @@ func (d *WebDocs) Diff(ctx context.Context, since string) (webapi.Diff, error) {
 		out.Rev, _ = d.pool.Head(ctx, &d.f)
 		out.BaseRev, _ = d.pool.DiffBase(ctx, &d.f)
 	}
+	if !d.f.MainCheckout {
+		// asked of an empty diff too: a drifted card with nothing of its
+		// own yet is still one whose next turn will be refused
+		if ok, _ := d.pool.Exists(ctx, &d.f); ok {
+			if drift, _ := d.pool.Drift(ctx, &d.f); drift != nil {
+				out.Drift = sanitize(drift.DiffNote())
+			}
+		}
+	}
 	var fresh map[string]map[int]bool
 	if since != "" && lines != nil {
 		raw, err := d.pool.DiffSince(ctx, &d.f, since)

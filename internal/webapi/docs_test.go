@@ -49,6 +49,7 @@ func TestSpecShape(t *testing.T) {
 func TestDiffShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, Diff{
 		Base: "main", BaseRev: "1111111", Rev: "2222222", Since: "1111111",
+		Drift: "main no longer carries the commit this card forked from; this is the card's own work since it forked (1111111). Rebase to replay it onto main",
 		Files: []DiffFile{
 			{Path: "main.go", Status: "modified", Add: 1, Del: 1, Since: true, Hunks: []Hunk{{
 				Header: "@@ -1,3 +1,3 @@",
