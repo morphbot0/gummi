@@ -696,3 +696,48 @@ func TestStackRestacksAfterMergeLanding(t *testing.T) {
 		t.Fatalf("B carries %d commits above main, want its own 1", n)
 	}
 }
+
+// Between the card below landing and the tick that replays the card above,
+// the upper card is drifted: its fork is the lower card's old tip, which a
+// squash never puts on main. It must not be told to land a card that just
+// landed, and a rebase asked for in that window replays its own commit
+// only — not the landed card's commits onto their own squash.
+func TestACardAboveALandedOneIsNotToldToLandIt(t *testing.T) {
+	f := newStackFixture(t)
+	ctx := context.Background()
+	a := f.card(1, "parser", "chain", 0)
+	b := f.card(2, "eval", "chain", 1)
+	f.cut(a, "a.txt", "a\n")
+	f.cut(b, "b.txt", "b\n")
+	mgr, err := f.pool.ManagerFor(ctx, &a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, merr := mgr.SquashMerge(ctx, &a, "A: landed"); merr != nil {
+		t.Fatalf("landing A: %v", merr)
+	}
+	b, err = f.store.GetFeature(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := mgr.Drift(ctx, &b)
+	if err != nil || d == nil {
+		t.Fatalf("Drift = %v, %v; want B drifted until it is replayed", d, err)
+	}
+	if d.ForkedFrom != "" {
+		t.Fatalf("B is told to land %s, which has landed: %q", d.ForkedFrom, d.Error())
+	}
+	cmd, err := mgr.RebaseCommand(ctx, &b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cmd, "--onto") {
+		t.Fatalf("RebaseCommand = %q, want B's own commit replayed from its fork", cmd)
+	}
+	if _, err := f.eng.StackTick(ctx, b.StackID); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := mgr.Drift(ctx, &b); err != nil || d != nil {
+		t.Fatalf("still drifted after the replay: %v, %v", d, err)
+	}
+}

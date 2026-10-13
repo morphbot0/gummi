@@ -329,6 +329,9 @@ type nextInput struct {
 	// branch the card really forked from, when that is the cause.
 	drifted         bool
 	driftForkedFrom string
+	// driftMissingBase names the base the card was cut from when the
+	// repository no longer has that branch.
+	driftMissingBase string
 }
 
 // closed reports whether the card has ended — landed, or at done by any
@@ -570,7 +573,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	in.agentWired = m.engine != nil
 	in.cutByQuit = m.quitCut[r.F.ID]
 	if r.Drift != nil {
-		in.drifted, in.driftForkedFrom = true, r.Drift.ForkedFrom
+		in.drifted, in.driftForkedFrom, in.driftMissingBase = true, r.Drift.ForkedFrom, r.Drift.MissingBase
 	}
 	in.cardOpen = m.cardOpen
 	if r.F.IsFreeform() && m.engine != nil {
@@ -977,6 +980,10 @@ func driftActions(in nextInput, acts []nextAction) []nextAction {
 	if in.driftForkedFrom != "" {
 		why = "this card forked from " + in.driftForkedFrom + ", which has not landed on " + in.landBase() +
 			" — nothing runs until it is rebased onto " + in.landBase() + " (or " + in.driftForkedFrom + " lands)"
+	}
+	if in.driftMissingBase != "" {
+		why = "this card was cut from " + in.driftMissingBase + ", which no longer exists, so it is read against " + in.landBase() +
+			" — nothing runs until this card's own commits are replayed onto it (or " + in.driftMissingBase + " is brought back)"
 	}
 	out := []nextAction{nextStep("rebase", "r", "rebase onto "+in.landBase(), why)}
 	for _, a := range acts {

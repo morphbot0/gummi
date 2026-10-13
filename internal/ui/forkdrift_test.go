@@ -284,3 +284,16 @@ func TestADriftedConflictGoesToTheAgentWithItsUncommittedWork(t *testing.T) {
 		t.Errorf("answers = %v, want try again first", got)
 	}
 }
+
+// A card whose base branch is gone is told that, not that its base was
+// rewritten.
+func TestADriftedRowNamesTheBaseThatIsGone(t *testing.T) {
+	in := nextInput{
+		stage: domain.StageImplement, kind: domain.KindFeature, attn: attnFailure,
+		drifted: true, driftMissingBase: "simon/dev", hasWorktree: true,
+	}
+	acts := stageActions(in)
+	if acts[0].id != "rebase" || !strings.Contains(acts[0].why, "simon/dev, which no longer exists") {
+		t.Fatalf("lead = %+v", acts[0])
+	}
+}

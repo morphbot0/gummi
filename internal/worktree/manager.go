@@ -129,20 +129,33 @@ func (m *Manager) SetMergeHook(h MergeHook) { m.mergeHook = h }
 // gummi cannot resolve is a reason to behave as it did before bases
 // existed, never a reason to refuse an operation git itself would accept.
 func (m *Manager) baseRev(ctx context.Context, f *domain.Feature) string {
-	if m.baseLookup == nil || f == nil {
-		return "HEAD"
-	}
-	base, err := m.baseLookup(ctx, f)
-	if err != nil || strings.TrimSpace(base) == "" {
-		return "HEAD"
-	}
-	// The branch must actually exist here, or every merge-base against it
-	// fails and the card looks drifted when it is merely pointed at a
-	// branch this checkout has not got.
-	if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+base); err != nil {
+	base, ok := m.namedBase(ctx, f)
+	if !ok {
 		return "HEAD"
 	}
 	return base
+}
+
+// namedBase is the branch f names as its base and whether this repository
+// still has it. A card that names none reports "", false.
+//
+// The branch must actually exist here, or every merge-base against it
+// fails and the card looks drifted when it is merely pointed at a branch
+// this checkout has not got. baseRev reads such a card against the
+// checkout's HEAD; the drift check is the one reader that also wants the
+// name, to say that the base is gone rather than that the trunk moved.
+func (m *Manager) namedBase(ctx context.Context, f *domain.Feature) (string, bool) {
+	if m.baseLookup == nil || f == nil {
+		return "", false
+	}
+	base, err := m.baseLookup(ctx, f)
+	if err != nil || strings.TrimSpace(base) == "" {
+		return "", false
+	}
+	if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+base); err != nil {
+		return base, false
+	}
+	return base, true
 }
 
 // BaseRevFor reports the revision f forks from, as baseRev resolves it.
@@ -1749,6 +1762,11 @@ type ForkDriftError struct {
 	// and a `master` repo has never been called main, so the sentence
 	// names it rather than assuming. Empty reads as DefaultBaseBranchName.
 	Base string
+	// MissingBase is the branch the card names as its base when this
+	// repository no longer has it — deleted, or renamed. The card is then
+	// read against Base, the branch the checkout has out, which never
+	// carried its fork: nothing was rewritten, the base went away.
+	MissingBase string
 }
 
 // base is the branch name the message uses for the card's base.
@@ -1760,6 +1778,12 @@ func (e *ForkDriftError) base() string {
 }
 
 func (e *ForkDriftError) Error() string {
+	if e.MissingBase != "" {
+		// The sha is the one thing a reader needs to undo this: a branch of
+		// that name at the fork is a base the card is not drifted from.
+		return fmt.Sprintf("%s (%s): fork drift — this card was cut from %s, which no longer exists in this repository, so it is read against %s, and its recorded fork %s is not in %s's history. Bring %s back (git branch %s %s), or press r on the board (or answer rebase on the card) to replay this card's own commits onto %s and re-anchor it there",
+			e.FeatureID, e.Branch, e.MissingBase, e.base(), e.Recorded, e.base(), e.MissingBase, e.MissingBase, e.Recorded, e.base())
+	}
 	if e.ForkedFrom != "" {
 		// A card adopted out of a goal is the common way to get here: it
 		// forked from the goal branch, whose commits main has never seen.
@@ -1863,13 +1887,21 @@ func (m *Manager) driftFrom(ctx context.Context, f *domain.Feature, recorded str
 		baseName = m.BaseBranch(ctx)
 	}
 	drift := &ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(), Recorded: recorded, MainHead: mainHead, Base: baseName}
+	// The card names a base this repository no longer has, so it is being
+	// read against the checkout's HEAD instead. Nothing it forked from is
+	// left to land, and whatever else still carries the fork is a sibling
+	// cut from the same base.
+	if named, ok := m.namedBase(ctx, f); named != "" && !ok {
+		drift.MissingBase = named
+		return drift, nil
+	}
 	// The base once carried the fork and no longer does: it was
 	// rewritten under the card. Any other branch still carrying the old
 	// commit is a sibling cut from the same old base, not a branch this
 	// card forked from, so naming it would send the reader off to land
 	// the wrong thing.
 	if !m.baseOnceCarried(ctx, baseName, recorded) {
-		drift.ForkedFrom = m.branchCarrying(ctx, recorded, f.BranchName())
+		drift.ForkedFrom = m.branchForkedFrom(ctx, recorded, f.BranchName(), baseName)
 	}
 	return drift, nil
 }
@@ -1902,28 +1934,74 @@ func (m *Manager) baseOnceCarried(ctx context.Context, base, sha string) bool {
 	return false
 }
 
-// branchCarrying names a local branch that still has sha in its history,
-// other than the card's own — the branch the card actually forked from.
+// branchForkedFrom names the local branch the card was cut from, when it
+// is not the base the card is read against: a branch that had sha as its
+// own tip at some point, other than by being created there.
 //
-// Drift has two causes and the message owes a reader the right one. Main
-// being rewritten is the one the remedy was written for; the other is the
-// base moving out from under a card, which is what a card adopted out of
-// a goal always looks like: its fork is a commit on the goal branch, and
-// main has never seen it. Best effort — a name makes the sentence
-// specific, and its absence only falls back to the original wording.
-func (m *Manager) branchCarrying(ctx context.Context, sha, own string) string {
+// Drift has two causes and the message owes a reader the right one. The
+// base being rewritten is the one the remedy was written for; the other is
+// the base moving out from under a card, which is what a card adopted out
+// of a goal always looks like: its fork is a commit on the goal branch, and
+// main has never seen it.
+//
+// Carrying the commit is not evidence of the second. Every branch cut from
+// the old base carries it — a sibling card, a backup someone took before
+// squashing the trunk — and naming one of those told the reader to land a
+// branch the card never forked from, and made the rebase replay the old
+// base's whole history onto its replacement. A branch the card forked from
+// stood ON the commit, which its reflog remembers; a branch merely cut at
+// that commit remembers it only as where it was created. Best effort — a
+// name makes the sentence specific, and its absence falls back to replaying
+// the card's own commits, which is right whenever the base was replaced.
+//
+// A branch whose work has since landed on the base is not named either:
+// the card did fork from it, and there is nothing left of it to land.
+func (m *Manager) branchForkedFrom(ctx context.Context, sha, own, base string) string {
 	out, err := runGit(ctx, m.repo, "branch", "--contains", sha, "--format=%(refname:short)")
 	if err != nil {
 		return ""
 	}
 	for _, line := range strings.Split(out, "\n") {
 		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "* "))
-		if name == "" || name == own {
+		if name == "" || name == own || name == base {
 			continue
 		}
-		return name
+		if m.stoodOn(ctx, name, sha) && !m.nothingToLand(ctx, name, base) {
+			return name
+		}
 	}
 	return ""
+}
+
+// nothingToLand reports whether merging branch into base would change
+// nothing: everything branch holds is in base already, by whatever route —
+// the card beneath a stacked one, just squash-landed. "Land it first" is
+// then advice nobody can follow, and its commits are no longer a
+// foundation the card has to carry. False on any doubt, a conflict
+// included.
+func (m *Manager) nothingToLand(ctx context.Context, branch, base string) bool {
+	merged, err := runGit(ctx, m.repo, "merge-tree", "--write-tree", base, branch)
+	if err != nil {
+		return false
+	}
+	tree, err := runGit(ctx, m.repo, "rev-parse", base+"^{tree}")
+	return err == nil && strings.TrimSpace(merged) == strings.TrimSpace(tree)
+}
+
+// stoodOn reports whether branch had sha as its tip at some point its
+// reflog still remembers, not counting the entry that created it.
+func (m *Manager) stoodOn(ctx context.Context, branch, sha string) bool {
+	out, err := runGit(ctx, m.repo, "log", "-g", "--format=%H %gs", "-n", strconv.Itoa(maxReflogProbe), "refs/heads/"+branch, "--")
+	if err != nil {
+		return false
+	}
+	for _, entry := range strings.Split(out, "\n") {
+		tip, how, _ := strings.Cut(strings.TrimSpace(entry), " ")
+		if tip == sha && !strings.HasPrefix(how, "branch: Created from") {
+			return true
+		}
+	}
+	return false
 }
 
 // assertNoForkDriftAgainstBase is AssertNoForkDrift with the live
