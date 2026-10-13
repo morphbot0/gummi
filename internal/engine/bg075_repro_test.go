@@ -89,16 +89,20 @@ func TestBG075RebaseHandOffRunsWhileAStageIsRunning(t *testing.T) {
 // that swallows the dispatch.
 func TestBG075RebaseHandOffRunsOnceTheSessionIsNotRunning(t *testing.T) {
 	var rebased atomic.Bool
+	releaseCh := make(chan struct{})
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		if strings.Contains(msg, "Rebase this branch onto") {
 			rebased.Store(true)
 			return []agent.Event{{Kind: agent.EventMessage, Text: "Rebased."}, {Kind: agent.EventIdle}}
 		}
+		// hold the stage turn until the test ends: one that answers at
+		// once has finished its stage before the pause can find it running
+		<-releaseCh
 		return []agent.Event{{Kind: agent.EventMessage, Text: "working"}, {Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
+	t.Cleanup(func() { close(releaseCh); e.Close() })
 
 	f := feature(1, "one", domain.StageImplement)
 	withWorktree(t, wt, f)

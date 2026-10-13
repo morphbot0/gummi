@@ -562,10 +562,14 @@ func TestAFreeformSessionIsNotToldTheWorkflowGovernsIt(t *testing.T) {
 // never arrives for a turn the backend abandoned. The pty drive found the
 // stop unreachable at all; this pins both halves of it.
 func TestInterruptingAFreeformTurnLeavesWhatItWroteUncommitted(t *testing.T) {
-	var interrupted atomic.Bool
+	var interrupted, wrote atomic.Bool
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
-		if err := os.WriteFile(filepath.Join(opts.WorkDir, "half.txt"), []byte("half\n"), 0o600); err != nil {
-			t.Error(err)
+		// Only the turn that gets stopped writes: the closing turn's
+		// responder may run after the test has ended and its tree is gone.
+		if wrote.CompareAndSwap(false, true) {
+			if err := os.WriteFile(filepath.Join(opts.WorkDir, "half.txt"), []byte("half\n"), 0o600); err != nil {
+				t.Error(err)
+			}
 		}
 		// No idle: the turn is still in flight when the reader stops it.
 		return []agent.Event{{Kind: agent.EventTextDelta, Text: "working"}}

@@ -85,6 +85,11 @@ type ConsultSession struct {
 
 	idleMu    sync.Mutex
 	idleTimer *time.Timer
+
+	// recMu orders the card's record of a turn: a question is recorded
+	// only once its send has succeeded, and without this a quick reply
+	// was written to the log ahead of the question it answers.
+	recMu sync.Mutex
 }
 
 // OpenConsult starts (or reuses) the card's consult session. The first
@@ -358,6 +363,8 @@ func (c *ConsultSession) SendTurn(ctx context.Context, msg string, images []Atta
 	sess.setBusy(true)
 	c.armIdleTimer()
 	c.engine.send(Event{Feature: c.id, Kind: EventUpdated})
+	c.recMu.Lock()
+	defer c.recMu.Unlock()
 	var sendErr error
 	if len(images) > 0 {
 		sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: msg, Images: c.engine.turnImages(images)})
@@ -565,7 +572,9 @@ func (e *Engine) handleConsult(c *ConsultSession, sess *Session, ev agent.Event)
 		// the message as the transcript settled it: a completion may carry
 		// no text of its own and only close what the deltas streamed
 		if tr := sess.Snapshot().Transcript; len(tr) > 0 && tr[len(tr)-1].Author == AuthorAssistant {
+			c.recMu.Lock()
 			e.recordConsult(c.id, AuthorAssistant, tr[len(tr)-1].Content, "")
+			c.recMu.Unlock()
 		}
 	case agent.EventToolCall:
 		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
