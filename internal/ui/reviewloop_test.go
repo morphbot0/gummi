@@ -582,18 +582,32 @@ func TestPlanCritiqueUnclearVerdictEscalates(t *testing.T) {
 
 // drainEngineLoop pumps engine events AND the review-loop commands they
 // produce until the loop settles (no active session, no pending events).
+//
+// A quiet stretch alone does not mean settled: on a loaded machine a turn
+// can run longer than the idle window between two events, and returning
+// then leaves the card a stage short of where the test asserts it. So a
+// quiet stretch ends the drain only while no session is mid-turn.
 func drainEngineLoop(t *testing.T, m *Shell) *Shell {
 	t.Helper()
-	for i := 0; i < 60; i++ {
-		select {
-		case ev := <-m.engine.Events():
-			cmd := m.handleEngineEvent(ev)
-			m = pump(t, m, cmd) // run any auto-step (transition + run)
-		case <-time.After(80 * time.Millisecond):
-			return m
+	return drain(t, m, func(*Shell) bool { return false }, true)
+}
+
+// drainQuietEngineLoop is drainEngineLoop for a test that leaves a session
+// mid-turn on purpose — a turn that never ends, an ask nobody has answered
+// yet. There a quiet stretch is all the settling the engine will do.
+func drainQuietEngineLoop(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	return drain(t, m, func(*Shell) bool { return false }, false)
+}
+
+// engineBusy reports whether any of the engine's sessions is mid-turn.
+func engineBusy(eng *engine.Engine) bool {
+	for _, s := range eng.Sessions() {
+		if s.Busy() {
+			return true
 		}
 	}
-	return m
+	return false
 }
 
 // failRoundStore fails reads, writes, or both on the keyed rounds seam —
@@ -630,16 +644,30 @@ func (f *failRoundStore) ClearRounds(context.Context, domain.FeatureID, domain.R
 // of drainEngineLoop that lets a test stop at an intermediate verdict.
 func drainUntil(t *testing.T, m *Shell, pred func(*Shell) bool) *Shell {
 	t.Helper()
-	for i := 0; i < 60; i++ {
+	return drain(t, m, pred, true)
+}
+
+// drain is the loop under drainEngineLoop, drainQuietEngineLoop and
+// drainUntil. waitBusy keeps it draining through a quiet stretch while a
+// session is still mid-turn.
+func drain(t *testing.T, m *Shell, pred func(*Shell) bool, waitBusy bool) *Shell {
+	t.Helper()
+	deadline := time.After(testWaitTimeout)
+	for i := 0; i < 60; {
 		if pred(m) {
 			return m
 		}
 		select {
 		case ev := <-m.engine.Events():
+			i++
 			cmd := m.handleEngineEvent(ev)
-			m = pump(t, m, cmd)
+			m = pump(t, m, cmd) // run any auto-step (transition + run)
 		case <-time.After(80 * time.Millisecond):
-			return m
+			if !waitBusy || !engineBusy(m.engine) {
+				return m
+			}
+		case <-deadline:
+			t.Fatal("engine loop did not settle")
 		}
 	}
 	return m

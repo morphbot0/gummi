@@ -46,6 +46,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The snap's version is derived from git: it needs tags and history.
+          fetch-depth: 0
 
       # The project root is the repo root: snapcraft reads snap/snapcraft.yaml
       # from here, and the parts' `source: .` stays inside the directory the

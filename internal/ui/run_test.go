@@ -468,7 +468,7 @@ func TestCardBusyPlanCritique(t *testing.T) {
 	m = advanceTo(t, m, domain.StagePlan)
 	m = openAndAttach(t, m) // run the architect's write leg
 	settleChat(t, eng)
-	m = drainEngineLoop(t, m) // auto-launches the critique session
+	m = drainQuietEngineLoop(t, m) // auto-launches the critique session
 	waitForBusy(t, eng)
 
 	r := m.rows[0]

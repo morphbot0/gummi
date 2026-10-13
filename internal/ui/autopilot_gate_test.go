@@ -99,7 +99,7 @@ func TestAutopilotFullAutoAnswersOwnQuestion(t *testing.T) {
 		case <-deadline:
 			t.Fatal("autopilot did not answer the live ask")
 		default:
-			m = drainEngineLoop(t, m)
+			m = drainQuietEngineLoop(t, m)
 		}
 	}
 
