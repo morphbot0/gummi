@@ -38,7 +38,7 @@ func runMerge(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
@@ -48,18 +48,20 @@ func runMerge(fl cliFlags, args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
-		return d.Merge(ctx, f.ID, message, method)
+		out, err := d.Merge(ctx, f.ID, message, method)
+		return closeOut(ctx, d, store, pool, f.ID, fl.Bool("keep-branch"), out, err)
 	})
 }
 
 // runClean implements `gummi clean <id|ref>` and `gummi clean --all`: the
-// headless cleanup verb. A single id removes that landed card's worktree
-// and branch (keeping the card record), streaming a `cleaned` NDJSON event
-// and exiting 0 on success; it refuses anything that has not actually
-// landed, or that carries tracked-dirty rework. --all is the headless
-// counterpart of the TUI's close-out sweep: every done card already
-// landed, clean, not handed off and not a goal's own is cleaned the same
-// way, one `cleaned` (or `error`) event per card, in one pass.
+// headless cleanup verb. A single id removes that card's worktree and
+// branch (keeping the card record), streaming a `cleaned` NDJSON event
+// and exiting 0 on success; it takes a card whose branch landed or that
+// is closed, keeps a closed card's branch when it is the only copy of its
+// work, and refuses anything carrying uncommitted work. --all is the
+// headless counterpart of the TUI's close-out sweep: every closed card
+// that is not a goal's own is cleaned the same way, one `cleaned` (or
+// `error`) event per card, in one pass.
 func runClean(fl cliFlags, args []string) error {
 	if fl.Bool("all") {
 		if len(args) > 0 {
@@ -87,10 +89,9 @@ func runClean(fl cliFlags, args []string) error {
 }
 
 // runCleanAll implements `gummi clean --all`. It walks every card in the
-// workspace and, for each one that could only succeed — done, landed,
-// clean, not a goal or a goal's own card (a goal's clean sweeps its cards
-// itself) — cleans it under its own per-card lock exactly
-// as a single `gummi clean <id>` would. Anything else is left alone rather
+// workspace and, for each one that could only succeed (cleanAllEligible),
+// cleans it under its own per-card lock exactly as a single
+// `gummi clean <id>` would. Anything else is left alone rather
 // than reported as a refusal: the set this selects is, barring a race,
 // exactly the set that succeeds, so there is nothing to hold back and
 // explain. A card that still fails (a race, a locked card someone else is
@@ -127,26 +128,35 @@ func runCleanAll() error {
 	})
 }
 
-// cleanAllEligible is the set gummi clean --all acts on: a done card whose
-// branch has landed, carries no tracked-dirty rework and is not a goal or
-// one of a goal's own cards (CleanGoalCards is the goal's own sweep, run
-// from the goal's own clean). A handed-off card is held only until its
-// branch lands: one whose PR merged and reached the base is the same
-// landed branch as any other, and holding it would leave every card
-// published through a PR standing for good. Every check d.Clean repeats
-// on the card it is actually given; this is what picks which cards are
-// worth giving it.
+// cleanAllEligible is the set gummi clean --all acts on, and the set a
+// closing takes with it: a closed card that still holds a worktree or a
+// branch Clean would remove. It leaves out a goal and a goal's own cards
+// (CleanGoalCards is the goal's own sweep, run from the goal's own clean),
+// a main-checkout card, which has neither, and anything holding
+// uncommitted work. A branch that is the only copy of its work
+// (worktree.Manager.Spent) does not make a card eligible on its own:
+// Clean would keep it, and a card with nothing else left is already tidy.
+// Every check d.Clean repeats on the card it is actually given; this is
+// what picks which cards are worth giving it.
 func cleanAllEligible(ctx context.Context, pool *worktree.Pool, f *domain.Feature) bool {
-	if f.Stage != domain.StageDone || f.IsGoal() || f.InGoal() {
+	if f.Stage != domain.StageDone || f.IsGoal() || f.InGoal() || f.MainCheckout {
 		return false
 	}
-	if ok, err := pool.Exists(ctx, f); err != nil || !ok {
+	spent, err := pool.Spent(ctx, f)
+	if err != nil {
 		return false
 	}
-	if landed, err := pool.Landed(ctx, f); err != nil || !landed {
+	if ok, err := pool.Exists(ctx, f); err != nil {
 		return false
+	} else if !ok {
+		branch, err := pool.BranchExists(ctx, f)
+		return err == nil && branch && spent && !f.Adopted()
 	}
-	dirty, err := pool.TrackedDirty(ctx, f)
+	loose := pool.TrackedDirty
+	if !spent {
+		loose = pool.Dirty
+	}
+	dirty, err := loose(ctx, f)
 	return err == nil && !dirty
 }
 
@@ -156,12 +166,12 @@ func cleanAllEligible(ctx context.Context, pool *worktree.Pool, f *domain.Featur
 // whatever happens to the branch next. It refuses anything that is not at a
 // verified branch, and every gate floor that holds a landing holds a hand-off
 // too: waiving the merge never waived the quality bar.
-func runHandOff(args []string) error {
+func runHandOff(fl cliFlags, args []string) error {
 	idArg, err := oneID("handoff", args)
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
@@ -171,8 +181,37 @@ func runHandOff(args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
-		return d.HandOff(ctx, f.ID)
+		out, err := d.HandOff(ctx, f.ID)
+		return closeOut(ctx, d, store, pool, f.ID, fl.Bool("keep-branch"), out, err)
 	})
+}
+
+// closeOut is what closing a card does next: it takes the card's worktree
+// and branch with it. A branch is a piece of work at a point in time, and
+// a closed card has no further use for one, so keeping it is the choice a
+// person makes (--keep-branch) rather than what happens when they make
+// none. A card whose branch is the only copy of its work — handed off,
+// never landed, never pushed — is left as it stands.
+//
+// The closing is what the command was asked for and its outcome is what
+// is returned: a card closeOut leaves standing (uncommitted work, a stack
+// other branches fork from, a goal's own sweep) is still closed, and
+// `gummi clean` is there for it afterwards.
+func closeOut(ctx context.Context, d *driver.Driver, store *state.Store, pool *worktree.Pool, id domain.FeatureID, keep bool, out driver.Outcome, err error) (driver.Outcome, error) {
+	if err != nil || out.Status != driver.StatusVerified || keep {
+		return out, err
+	}
+	f, ferr := store.GetFeature(ctx, id)
+	if ferr != nil || f.Stacked() || !cleanAllEligible(ctx, pool, &f) {
+		return out, err
+	}
+	// The only copy of the work is left exactly as the closing found it,
+	// worktree included: it is what the person pushes, or lands after all.
+	if spent, serr := pool.Spent(ctx, &f); serr != nil || !spent {
+		return out, err
+	}
+	_, _ = d.Clean(ctx, id)
+	return out, err
 }
 
 // withLandingWorkspace wires the workspace, store, worktree manager, and a

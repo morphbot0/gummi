@@ -186,7 +186,7 @@ registerView('repos', {
       clear(topAsk)
       if (v.ask?.kind === 'clean-all') {
         topAsk.append(confirmStrip({
-          question: `Clean up ${plural(v.ask.ids.length, 'landed card')} across every repository?`,
+          question: `Clean up ${plural(v.ask.ids.length, 'closed card')} across every repository?`,
           detail: `Removes each one’s worktree and branch. Their work is on its base; the cards stay on the board.`,
           yes: 'Clean up',
           testid: 'repos-clean-all-confirm',
@@ -238,7 +238,7 @@ registerView('repos', {
           ? h('button', { class: 'btn pri', type: 'button', testid: `repo-ff-${k}`, disabled: !!busy || repo.dirty, title: repo.dirty ? 'commit or stash the main checkout’s changes first' : `move ${base.name} up to ${base.upstream}`, onclick: () => write(k, 'fast-forwarding…', '/api/repos/fastforward', { repo: repo.name }) }, `Fast-forward ${base.name} ↓${base.behind}`)
           : null,
         cleanable.length
-          ? h('button', { class: 'btn', type: 'button', testid: `repo-clean-${k}`, disabled: !!busy, onclick: () => ask({ kind: 'clean', repo: k, ids: cleanable }) }, `Clean up ${plural(cleanable.length, 'landed card')}`)
+          ? h('button', { class: 'btn', type: 'button', testid: `repo-clean-${k}`, disabled: !!busy, onclick: () => ask({ kind: 'clean', repo: k, ids: cleanable }) }, `Clean up ${plural(cleanable.length, 'closed card')}`)
           : null)
       const box = h('details', { class: 'rp-box', open, data: { repo: k }, testid: `repo-${k}` }, head,
         h('div', { class: 'rp-body' },
@@ -250,7 +250,7 @@ registerView('repos', {
       if (v.ask?.kind === 'clean' && v.ask.repo === k) {
         const ids = v.ask.ids
         bodyEl.append(confirmStrip({
-          question: `Clean up ${plural(ids.length, 'landed card')}?`,
+          question: `Clean up ${plural(ids.length, 'closed card')}?`,
           detail: `Removes the worktree and the branch of ${ids.join(', ')}. Their work is on the base; the cards stay on the board.`,
           yes: 'Clean up',
           testid: 'repo-clean-confirm',
@@ -290,7 +290,7 @@ registerView('repos', {
       ]
       const act = rowMenu('branch', b.name, [
         repo.remote && { label: b.upstream ? 'Change upstream…' : 'Set upstream…', hint: 'which remote branch it tracks', testid: `branch-upstream-${b.name}`, onClick: () => ask({ kind: 'upstream', repo: k, branch: b.name }) },
-        c?.clean && { label: 'Clean up…', hint: 'remove the landed card’s worktree and branch', testid: `branch-clean-${c.id}`, onClick: () => ask({ kind: 'clean', repo: k, ids: [c.id] }) },
+        c?.clean && { label: 'Clean up…', hint: 'remove the closed card’s worktree, and its branch unless it is the only copy of the work', testid: `branch-clean-${c.id}`, onClick: () => ask({ kind: 'clean', repo: k, ids: [c.id] }) },
         b.delete && { label: 'Delete…', danger: true, testid: `branch-delete-${b.name}`, onClick: () => ask({ kind: 'delete', repo: k, branch: b.name }) }
       ], { busy: v.busy.has(k), testid: `branch-menu-${b.name}` })
       const li = h('li', { class: ['rp-branch', b.group], testid: `branch-${b.name}`, data: { group: b.group } },

@@ -57,6 +57,23 @@ type sweptMsg struct {
 	failed  []string
 }
 
+// cleanable reports whether clean-up has something to take from this
+// card: a branch that landed, or a closed card still holding a worktree.
+// Closing a card is the person saying they are done with its branch, so
+// nothing more is asked of it — what clean-up leaves standing (a branch
+// that is the only copy of its work) it decides when it runs.
+func (r featureRow) cleanable() bool {
+	return r.Landed || (r.HasWorktree && r.F.Stage == domain.StageDone && !r.F.MainCheckout)
+}
+
+// cleanHelp is the sentence the clean-up action carries for this card.
+func (r featureRow) cleanHelp() string {
+	if r.Landed {
+		return "branch landed on " + r.baseBranch() + " — remove the worktree and branch"
+	}
+	return "closed — remove the worktree, and the branch unless it is the only copy of its work"
+}
+
 // planSweep measures what a sweep would do. It runs off the render loop —
 // it walks each worktree on disk and asks git about each branch — and is
 // called once per sweep, on arrival at the phase that shows it.
@@ -64,13 +81,9 @@ func (m *Shell) planSweep(ctx context.Context, rows []featureRow) sweepPlan {
 	var plan sweepPlan
 	for _, r := range rows {
 		f := r.F
-		switch {
-		case r.F.HandedOff() && r.HasWorktree:
-			// the branch was kept on purpose; cleaning it up would delete
-			// the one thing the reader chose to keep
-			plan.Held = append(plan.Held, sweepHold{ID: f.ID, Why: "handed off — kept, you asked for it"})
-			continue
-		case !r.Landed:
+		// a closed card goes whether or not its branch landed: the clean
+		// itself keeps a branch that is the only copy of its work
+		if !r.cleanable() {
 			continue
 		}
 		if dirty, err := m.wt.TrackedDirty(ctx, &f); err != nil {

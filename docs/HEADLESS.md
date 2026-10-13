@@ -64,11 +64,11 @@ carry the full id. Two flags still want the id itself: `goal --after` and
 | `gummi spec <id\|ref>` | the current spec or report markdown |
 | `gummi diff <id\|ref>` | the worktree diff against main |
 | `gummi verify <id\|ref>` | re-run the checks on a verified branch and finalize its card |
-| `gummi merge <id\|ref> -m <message\|-> [--no-squash]` | land a verified branch as one squash commit, or with `--no-squash` as a merge commit keeping its commits, where `-m` is optional and git's own merge message is used (a goal: one merge commit, `-m` optional, no `--no-squash`) |
+| `gummi merge <id\|ref> -m <message\|-> [--no-squash] [--keep-branch]` | land a verified branch as one squash commit, or with `--no-squash` as a merge commit keeping its commits, where `-m` is optional and git's own merge message is used (a goal: one merge commit, `-m` optional, no `--no-squash`) |
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
 | `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch |
-| `gummi handoff <id\|ref>` | close a verified card and keep its branch — nothing lands (a goal not yet ready is abandoned) |
-| `gummi clean <id\|ref>` \| `gummi clean --all` | remove a landed card's worktree and branch (a goal: its cards' come out with it; an adopted card keeps its branch); `--all` does this for every landed card in one pass instead of naming one |
+| `gummi handoff <id\|ref> [--keep-branch]` | close a verified card without landing it; its branch is kept while it is the only copy of the work (a goal not yet ready is abandoned) |
+| `gummi clean <id\|ref>` \| `gummi clean --all` | remove a landed or closed card's worktree and branch (a goal: its cards' come out with it; an adopted card keeps its branch, and so does a closed card whose branch is the only copy of its work); `--all` does this for every closed card in one pass instead of naming one |
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link a card to a PR you opened, or read its status and review comments |
 | `gummi push <id>`, `gummi pr create\|update\|ready\|draft <id> [flags]` | a person publishes a card: push its branch, open or update its PR, mark it ready or draft. Prints the facts and commands and asks at the terminal; without one, `--yes=<fingerprint>` of facts already printed. Refused inside a gummi-spawned session (DESIGN §22) |
 | `gummi deps add\|rm <dependent> <depends-on>`, `gummi deps list <id>` | dependency edges between cards |
@@ -244,12 +244,19 @@ Conventional Commits `type(scope): summary` with no diff dump and no agent
 attribution, or the command refuses before touching git. On success it
 emits a `merged` event with the landed sha and moves the card to `done`. The event's `method` is `squash` or `merge`; `--no-squash` is refused for a goal or a card in one. With `--no-squash` the `-m` is optional: the merge commit takes git's own merge message, and a `-m` given is validated and used verbatim.
 
+Closing a card takes its worktree and branch with it. A branch is a piece
+of work at a point in time, and a closed card has no further use for one,
+so after `merge` (and after `handoff`, below) gummi removes both and emits
+the `cleaned` event `clean` does. `--keep-branch` keeps them. A card with
+uncommitted work, one in a stack, a goal and a goal's own cards are left
+standing either way; `gummi clean` is there for them afterwards.
+
 ### Ending a card without landing it
 
 Landing is one of three endings, not the only one. When the branch is
 yours to take — you will push it, open the PR by hand, cherry-pick two
-commits out of it, or simply keep it — `handoff` closes the card and
-leaves the branch exactly where it is:
+commits out of it, or simply keep it — `handoff` closes the card without
+landing anything:
 
 ```sh
 gummi handoff FD-042
@@ -260,24 +267,32 @@ It commits a final checkpoint first (the branch is the deliverable, so
 loose work must not be left behind), stamps `handed_off`, and crosses the
 same verify→done gate with the landing waived and **every other floor
 intact**: open `%%` threads, open diff annotations, the omission gate and
-the document floor all still refuse it. Landing it after all stays
-available for as long as the branch exists (`gummi merge` accepts a
-handed-off card and retracts the stamp).
+the document floor all still refuse it.
+
+What happens to the branch depends on whether it is the only copy of the
+work. A branch that was never pushed is: the hand-off leaves it and its
+worktree exactly where they are, and landing it after all stays available
+(`gummi merge` accepts a handed-off card and retracts the stamp). A branch
+already on a remote — pushed, or with its PR open — is not, and it goes
+with the card like any other closed card's, unless `--keep-branch` is
+given.
 
 Before this verb the only way to say "I'll take it from here" was to
 delete the card, which destroys the branch.
 
-`clean <id>` is the board's `c` key: it removes a landed card's worktree
-and branch and keeps the card as a done entry. It refuses anything that
-has not actually landed — including a handed-off card, where cleaning up
-would delete the branch that was kept on purpose — or that carries
-tracked-dirty rework.
+`clean <id>` is the board's `c` key: it removes a card's worktree and
+branch and keeps the card as a done entry. It takes a card whose branch
+landed, or one that is closed, and refuses anything carrying uncommitted
+work. A closed card's branch is deleted when its work exists somewhere
+else: it landed, gummi recorded a landing for it (which still counts after
+the base was reset or rebased past that commit), a remote has it, or it
+never had a commit of its own. A branch that is none of those is the only
+copy of its work: `clean` removes the worktree, keeps the branch, and the
+`cleaned` event carries `"branch_kept": true`.
 
 `clean --all` is the headless counterpart of the TUI's close-out sweep
-(`C`): one pass that cleans every done card that has landed and is clean,
-instead of naming them one at a time. A handed-off card is left alone
-until its branch has reached the base — a PR merged on GitHub and pulled
-down, say — and is cleaned like any other once it has. A goal's own
+(`C`): one pass over every closed card that still holds a worktree or a
+deletable branch, instead of naming them one at a time. A goal's own
 cards are left to the goal's own clean. It streams the same `cleaned`
 event per card the single-id form does, and exits non-zero only if a card
 it attempted failed.

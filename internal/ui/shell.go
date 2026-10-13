@@ -3286,6 +3286,14 @@ func (m *Shell) boardSurfacesLive() bool { return m.tab == TabBoard }
 // anything — the composer keeping every printable key on the card page
 // is a deliberate design decision, not an oversight this notice should
 // paper over.
+// cleanUpDetail is what the clean-up confirm says it will remove.
+func cleanUpDetail(r featureRow) string {
+	if r.Landed {
+		return "removes the worktree (incl. untracked files) and merged branch — keeps the record"
+	}
+	return "removes the worktree, and the branch unless it is the only copy of its work — keeps the record"
+}
+
 const cleanUpNudge = "clean up removes the worktree and branch"
 
 // gotoTab switches to t and does the arrival work every route into a tab
@@ -3807,15 +3815,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				m.notice = *n
 				return nil
 			}
-			if !r.Landed {
-				// A handed-off card gets the honest sentence rather than
-				// "hasn't landed yet", which reads as a wait: nothing is
-				// coming, the branch was kept on purpose, and cleaning up
-				// would delete the one thing the reader chose to keep.
-				if r.F.HandedOff() {
-					m.notice = noticeMsg{text: r.F.Name() + " was handed off, not landed — cleaning up would delete " + r.F.BranchName(), isErr: true}
-					return nil
-				}
+			if !r.cleanable() {
 				m.notice = noticeMsg{text: r.F.Name() + " hasn't landed on " + r.baseBranch() + " yet", isErr: true}
 				return nil
 			}
@@ -3826,7 +3826,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				cancelLabel:  "Keep",
 				confirmLabel: "Clean up",
 				question:     "clean up " + f.Name() + "?",
-				detail:       "removes the worktree (incl. untracked files) and merged branch — keeps the record",
+				detail:       cleanUpDetail(r),
 				onConfirm:    func() tea.Cmd { return m.cleanupLanded(f) },
 			})
 		}

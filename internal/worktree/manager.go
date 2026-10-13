@@ -1108,6 +1108,87 @@ func (m *Manager) squashLanded(ctx context.Context, f *domain.Feature) (bool, er
 	return gitOK(ctx, m.repo, "merge-base", "--is-ancestor", sha, m.baseRev(ctx, f))
 }
 
+// Spent reports whether a closed card's branch holds nothing that exists
+// nowhere else, so closing the card may take the branch with it. A branch
+// is a piece of work at a point in time: once the card is closed the only
+// reason left to keep it is that it is the sole copy of that work.
+//
+// It is spent when any of these holds:
+//
+//   - it landed on its base (Landed);
+//   - gummi recorded a landing for it. A base rewritten since — a reset to
+//     the remote, a rebase — no longer carries that commit, and Landed then
+//     declines to answer or answers no; the record is what says the work
+//     was delivered, and what the base did afterwards is not the branch's
+//     to answer for;
+//   - a remote-tracking ref contains its tip: it was pushed, or reached a
+//     remote through a merged PR;
+//   - it has no commits of its own.
+//
+// What is left is a branch that was neither landed nor pushed — a card
+// closed by handing off, whose work lives here and nowhere else.
+//
+// Only meaningful for a closed card: the recorded landing describes the
+// branch as it was when the card ended, and an open card may have moved
+// past it.
+func (m *Manager) Spent(ctx context.Context, f *domain.Feature) (bool, error) {
+	_, branch, err := m.featurePaths(f)
+	if err != nil {
+		return false, err
+	}
+	if exists, err := m.BranchExists(ctx, f); err != nil {
+		return false, err
+	} else if !exists {
+		return true, nil
+	}
+	landed, err := m.Landed(ctx, f)
+	var drift *ForkDriftError
+	if err != nil && !errors.As(err, &drift) {
+		return false, err
+	}
+	if landed {
+		return true, nil
+	}
+	if sha, err := m.forkStore.LandedSHA(ctx, f.ID); err != nil {
+		return false, err
+	} else if sha != "" {
+		return true, nil
+	}
+	remote, err := runGit(ctx, m.repo, "for-each-ref", "--count=1", "--contains", branch, "refs/remotes")
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(remote) != "" {
+		return true, nil
+	}
+	own, err := runGit(ctx, m.repo, "rev-list", "--count", m.baseRev(ctx, f)+".."+branch)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(own) == "0", nil
+}
+
+// DeleteClosedBranch removes a closed card's branch once it is Spent, and
+// refuses one that is not: that branch is the only copy of its work. The
+// check is made here, at the delete, so no caller can force a branch away
+// on an answer read earlier. An adopted branch is refused as everywhere.
+func (m *Manager) DeleteClosedBranch(ctx context.Context, f *domain.Feature) error {
+	if f.Adopted() {
+		return fmt.Errorf("%s: %w", f.ID, ErrAdoptedBranch)
+	}
+	if err := m.unregisterStaleWorktree(ctx, f); err != nil {
+		return err
+	}
+	spent, err := m.Spent(ctx, f)
+	if err != nil {
+		return err
+	}
+	if !spent {
+		return fmt.Errorf("%s: %s was neither landed nor pushed — it is the only copy of its work", f.ID, f.BranchName())
+	}
+	return m.DeleteBranch(ctx, f, true)
+}
+
 // RebaseConflictError reports that a rebase stopped short of finishing and
 // was undone (the worktree is left as it was, on its original tip). Files
 // lists the paths that conflicted, so the UI can tell the user what to

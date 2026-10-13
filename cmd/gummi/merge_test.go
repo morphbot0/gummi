@@ -184,6 +184,30 @@ func TestMergeCommandRequiresMessage(t *testing.T) {
 	}
 }
 
+// Landing closes the card, and a closed card's worktree and branch go
+// with it; --keep-branch is how a person keeps both.
+func TestMergeTakesTheBranchUnlessKept(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		store, f := verifiedCLIRepo(t)
+		args := []string{"merge", string(f.ID), "-m", "feat(export): land headlessly"}
+		if keep {
+			args = append(args, "--keep-branch")
+		}
+		if err := runCLI(args...); err != nil {
+			t.Fatalf("runMerge: %v", err)
+		}
+		wt, err := worktree.NewManager(context.Background(), ".", ".", store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ex, _ := wt.Exists(context.Background(), &f)
+		br, _ := wt.BranchExists(context.Background(), &f)
+		if ex != keep || br != keep {
+			t.Errorf("keep=%v: worktree present=%v, branch present=%v", keep, ex, br)
+		}
+	}
+}
+
 // A landed card cleans and exits 0: the worktree and branch are removed.
 func TestCleanCommandRemovesLanded(t *testing.T) {
 	store, f := verifiedCLIRepo(t)

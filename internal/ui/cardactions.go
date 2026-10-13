@@ -515,8 +515,8 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
 		},
 		{
-			"clean", "c", "clean up", "branch landed on " + r.baseBranch() + " — remove the worktree and branch", true,
-			needsWT && r.Landed,
+			"clean", "c", "clean up", r.cleanHelp(), true,
+			needsWT && r.cleanable(),
 		},
 		// no accelerator, same reasoning as duplicate/gate below: the
 		// board's lowercase letters are nearly exhausted, and linking is a

@@ -197,11 +197,10 @@ func TestHandOffAbsentOnResearch(t *testing.T) {
 	}
 }
 
-// The clean-up refusal on a handed-off card says what is actually true.
-// "hasn't landed yet" reads as a wait, and nothing is coming: the branch
-// was kept on purpose, and `c` would delete exactly the thing the reader
-// chose to keep.
-func TestCleanUpRefusalOnAHandedOffCard(t *testing.T) {
+// A closed card is done with its branch however it closed, so clean-up
+// is offered on a handed-off one too, and its confirm says what it does:
+// the branch stays where it is the only copy of the work.
+func TestCleanUpIsOfferedOnAHandedOffCard(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.sel = 4 // the verify row, which carries a worktree
 	m.rows[m.sel].F.Stage = domain.StageDone
@@ -209,11 +208,11 @@ func TestCleanUpRefusalOnAHandedOffCard(t *testing.T) {
 	m.rows[m.sel].Landed = false
 
 	m.boardVerb("c")
-	if !strings.Contains(m.notice.text, "handed off, not landed") {
-		t.Errorf("clean-up refusal = %q, want it to name the hand-off", m.notice.text)
+	if m.notice.isErr {
+		t.Fatalf("clean-up refused a closed card: %q", m.notice.text)
 	}
-	if !strings.Contains(m.notice.text, m.rows[m.sel].F.BranchName()) {
-		t.Errorf("clean-up refusal = %q, want it to name the branch it would delete", m.notice.text)
+	if got := cleanUpDetail(m.rows[m.sel]); !strings.Contains(got, "only copy") {
+		t.Errorf("confirm = %q, want it to say the branch is kept while it is the only copy", got)
 	}
 }
 

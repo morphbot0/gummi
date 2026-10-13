@@ -580,6 +580,22 @@ func (p *Pool) DeleteLandedBranch(ctx context.Context, f *domain.Feature) error 
 	return wt.DeleteLandedBranch(ctx, f)
 }
 
+func (p *Pool) Spent(ctx context.Context, f *domain.Feature) (bool, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return false, err
+	}
+	return wt.Spent(ctx, f)
+}
+
+func (p *Pool) DeleteClosedBranch(ctx context.Context, f *domain.Feature) error {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return err
+	}
+	return wt.DeleteClosedBranch(ctx, f)
+}
+
 func (p *Pool) Head(ctx context.Context, f *domain.Feature) (string, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {

@@ -1614,9 +1614,12 @@ func closedActions(in nextInput) []nextAction {
 	// the moment there is nothing left to clean. A card whose ending is
 	// landed only because LandedSHA survives that removal is already
 	// tidy, and offering it the row would be offering a refusal.
-	if in.landed {
-		a := nextStep("clean", "c", "clean up",
-			"branch landed on "+in.landBase()+" — remove the worktree and branch")
+	if in.landed || (in.hasWorktree && in.stage == domain.StageDone && !in.mainCheckout) {
+		help := "closed — remove the worktree, and the branch unless it is the only copy of its work"
+		if in.landed {
+			help = "branch landed on " + in.landBase() + " — remove the worktree and branch"
+		}
+		a := nextStep("clean", "c", "clean up", help)
 		a.danger = true
 		out = append(out, a)
 	}

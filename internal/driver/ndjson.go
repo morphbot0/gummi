@@ -419,8 +419,10 @@ type cleanedEvent struct {
 	Cards []string `json:"cards,omitempty"`
 	Kept  []string `json:"kept,omitempty"`
 	// BranchKept marks a clean that deliberately left the card's branch
-	// alone because gummi did not cut it (DESIGN §10 D22). Absent on every
-	// ordinary clean, where the branch went with the worktree.
+	// alone: gummi did not cut it (DESIGN §10 D22), or the card was closed
+	// without landing or pushing and the branch is the only copy of its
+	// work. Absent on every ordinary clean, where the branch went with the
+	// worktree.
 	BranchKept bool `json:"branch_kept,omitempty"`
 }
 
