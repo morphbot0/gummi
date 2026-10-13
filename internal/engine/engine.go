@@ -946,6 +946,12 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
+	// The start below runs on the caller's goroutine and builds the card's
+	// worktree: Close joins it like the pump and kickoff it leads to. The
+	// Add shares the lock Close sets closed under, so it never races the
+	// Wait.
+	e.wg.Add(1)
+	defer e.wg.Done()
 	e.mu.Unlock()
 
 	if old != nil {
