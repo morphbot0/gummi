@@ -16,16 +16,18 @@ parts:
   metadata:
     plugin: nil
     source: .
+    source-type: git
     override-build: |
-      craftctl set version="$(sh scripts/snap-version.sh)"
+      craftctl set version="$(cd "$CRAFT_PART_SRC" && sh scripts/snap-version.sh)"
 
   gummi:
     plugin: dump
     source: .
+    source-type: git
     build-snaps:
       - go/1.26/stable
     override-build: |
-      version="$(sh scripts/snap-version.sh)"
+      version="$(cd "$CRAFT_PART_SRC" && sh scripts/snap-version.sh)"
       go build -ldflags "-X main.Version=$version" -o "$CRAFT_PART_INSTALL"/bin/gummi ./cmd/gummi
     prime:
       - bin/gummi
