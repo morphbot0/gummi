@@ -16,8 +16,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# copy tracked source into tempdir
-( cd "$orig_pwd" && git archive --format=tar --prefix=src/ HEAD ) | ( cd "$workdir" && tar -xf - )
+# Copy HEAD into a tempdir as a clone, not an archive: the snap's version is
+# derived from git, so the build tree needs the history and tags.
+git clone -q --no-hardlinks "$orig_pwd" "$workdir/src"
 
 if [ ! -f "$workdir/src/snap/snapcraft.yaml" ]; then
   echo "expected $workdir/src/snap/snapcraft.yaml to exist" >&2
