@@ -1724,6 +1724,9 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// hint saying `mktemp -d`, as it always did.
 	scratch := e.scratchFilesDirFor(f.ID)
 	hints := stageHints(f, specPath, scratch, flavor)
+	if h := coAuthorHint(); h != "" && !readOnly {
+		hints = append(hints, h)
+	}
 	if nb := e.notebookHint(f); nb != "" {
 		// what the goal knows that this card does not own: a line per
 		// entry, however much that comes to

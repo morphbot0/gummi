@@ -453,6 +453,20 @@ func TestAPassedVerifyStoppedByHandStillReadsPassed(t *testing.T) {
 	c := waitCard(t, b, "FD-001", "verify passed", func(c webapi.Card) bool {
 		return c.Decision != nil && c.Decision.Word == "verify passed"
 	})
+	// the card reads "verify passed" once the session is done, a beat
+	// before the board handles its end and raises the gate: a stop that
+	// lands in between leaves no gate to keep, so wait for the gate
+	deadline := time.Now().Add(15 * time.Second)
+	for raised := false; !raised; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the passed verify never raised its gate")
+		}
+		_ = b.Do(ctx, func(m *Shell) tea.Cmd {
+			it, ok := m.inbox.get(f.ID)
+			raised = ok && it.Kind == attnGate
+			return nil
+		})
+	}
 	// the gate settles a beat after it is raised (the stamp, the diff):
 	// an answer against a token that moved is read again and resent
 	for try := 0; ; try++ {
@@ -468,7 +482,7 @@ func TestAPassedVerifyStoppedByHandStillReadsPassed(t *testing.T) {
 			t.Fatalf("re-reading the gate: %v", err)
 		}
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(5 * time.Second)
 	for paused := false; !paused; time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("the stop never paused the session")

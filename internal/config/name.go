@@ -41,6 +41,17 @@ func SetName(path, name string) error {
 	if err != nil {
 		return err
 	}
+	var value *yaml.Node
+	if name != "" {
+		value = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}
+	}
+	return setKey(path, "name", value, true)
+}
+
+// setKey writes one top-level key of the workspace config at path, leaving
+// every other key, and its comments, where they were. A nil value removes
+// the key; a new key goes first or last. A missing file is created.
+func setKey(path, key string, value *yaml.Node, first bool) error {
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("reading %s: %w", path, err)
@@ -60,24 +71,22 @@ func SetName(path, name string) error {
 	}
 	idx := -1
 	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value == "name" {
+		if root.Content[i].Value == key {
 			idx = i
 			break
 		}
 	}
 	switch {
-	case name == "" && idx >= 0:
+	case value == nil && idx >= 0:
 		root.Content = append(root.Content[:idx], root.Content[idx+2:]...)
-	case name == "":
+	case value == nil:
 		return nil
 	case idx >= 0:
-		v := root.Content[idx+1]
-		v.Kind, v.Tag, v.Value, v.Style = yaml.ScalarNode, "!!str", name, 0
+		root.Content[idx+1] = value
+	case first:
+		root.Content = append([]*yaml.Node{{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, value}, root.Content...)
 	default:
-		root.Content = append([]*yaml.Node{
-			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "name"},
-			{Kind: yaml.ScalarNode, Tag: "!!str", Value: name},
-		}, root.Content...)
+		root.Content = append(root.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, value)
 	}
 	out, err := yaml.Marshal(&doc)
 	if err != nil {

@@ -819,7 +819,7 @@ func (m *Manager) commitLoose(ctx context.Context, p, message string) (bool, err
 	if strings.TrimSpace(staged) == "" {
 		return false, nil
 	}
-	if _, err := runGit(ctx, p, "commit", "-m", message); err != nil {
+	if _, err := runGit(ctx, p, "commit", "-m", WithCoAuthors(message)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1662,7 +1662,7 @@ func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, m
 		}
 		return "", fmt.Errorf("nothing to merge — %s already landed on main", branch)
 	}
-	commitArgs := []string{"commit", "-m", message}
+	commitArgs := []string{"commit", "-m", WithCoAuthors(message)}
 	if strings.TrimSpace(message) == "" {
 		commitArgs = []string{"commit", "--no-edit"}
 	}

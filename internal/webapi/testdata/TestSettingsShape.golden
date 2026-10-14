@@ -14,5 +14,9 @@
   "identity": {
     "name": "Ada Lovelace",
     "email": "ada@example.com"
-  }
+  },
+  "coAuthors": [
+    "Grace Hopper \u003cgrace@example.com\u003e"
+  ],
+  "maxCoAuthors": 10
 }

@@ -12,11 +12,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/morphis/gummi/internal/gitenv"
 )
 
 // Signing commits with the stored key (DESIGN §22.2). git signs through a
@@ -72,17 +72,7 @@ func (s Store) syncPublic() error {
 	return s.write(pubFile, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))+" gummi")
 }
 
-var (
-	signer string
-	// signEnv is what applySigning last did to the process environment:
-	// the entries it added, the index they start at and whether
-	// GIT_CONFIG_COUNT was set before them.
-	signEnv struct {
-		cfg      [][2]string
-		base     int
-		hadCount bool
-	}
-)
+var signer string
 
 // UseSigner names the program git is told to sign with: gummi's own
 // binary, which main answers as (RunSigner) when git calls it. Until it is
@@ -106,56 +96,14 @@ func signConfig(s Store, program string) [][2]string {
 }
 
 // applySigning makes the process environment agree with the current
-// store: git's GIT_CONFIG_COUNT/KEY/VALUE entries for signing while it is
-// on, after any the environment already carried, and none of gummi's when
-// it is off. mu must be held.
-//
-// A git command may be started at any moment, so the environment is never
-// left counting entries that are not there: the count is lowered before
-// entries are removed and raised after they are set, and a call that
-// changes nothing touches nothing.
+// store: git's configuration for signing while it is on, and none of it
+// when it is off (gitenv). mu must be held.
 func applySigning() {
 	var want [][2]string
 	if signer != "" && current.Signing() {
 		want = signConfig(current, signer)
 	}
-	if slices.Equal(want, signEnv.cfg) {
-		return
-	}
-	if signEnv.cfg != nil {
-		if signEnv.hadCount {
-			_ = os.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(signEnv.base))
-		} else {
-			_ = os.Unsetenv("GIT_CONFIG_COUNT")
-		}
-		for i := range signEnv.cfg {
-			n := strconv.Itoa(signEnv.base + i)
-			_ = os.Unsetenv("GIT_CONFIG_KEY_" + n)
-			_ = os.Unsetenv("GIT_CONFIG_VALUE_" + n)
-		}
-		signEnv.cfg = nil
-	}
-	if want == nil {
-		return
-	}
-	raw, had := os.LookupEnv("GIT_CONFIG_COUNT")
-	base := 0
-	if had {
-		n, err := strconv.Atoi(strings.TrimSpace(raw))
-		if err != nil || n < 0 {
-			// git refuses this environment as it stands; adding to it
-			// would only overwrite entries that are not gummi's
-			return
-		}
-		base = n
-	}
-	for i, kv := range want {
-		n := strconv.Itoa(base + i)
-		_ = os.Setenv("GIT_CONFIG_KEY_"+n, kv[0])
-		_ = os.Setenv("GIT_CONFIG_VALUE_"+n, kv[1])
-	}
-	_ = os.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(base+len(want)))
-	signEnv.cfg, signEnv.base, signEnv.hadCount = want, base, had
+	gitenv.Set("sign", want)
 }
 
 // IsSignerCall reports whether args are git calling its signing program,

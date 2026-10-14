@@ -103,7 +103,7 @@ func untrackGummiInWorktree(ctx context.Context, wsRoot, repo, wt string) error 
 	// No pathspec: `git commit -- <path>` records the path's working-tree
 	// content, which would resurrect the files just untracked (they stay
 	// on disk by design). A fresh worktree has nothing else staged.
-	_, err = runGit(ctx, wt, "commit", "-m", "Untrack workspace files")
+	_, err = runGit(ctx, wt, "commit", "-m", WithCoAuthors("Untrack workspace files"))
 	return err
 }
 

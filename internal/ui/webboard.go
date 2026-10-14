@@ -293,6 +293,7 @@ func (m *Shell) WebSettings() webapi.Settings {
 	st := m.credentialStore().Status()
 	return webapi.Settings{
 		Name: m.name, Repo: filepath.Base(m.ws.Root), MaxName: config.MaxNameLen,
+		CoAuthors: append([]string{}, worktree.CoAuthors()...), MaxCoAuthors: config.MaxCoAuthors,
 		Credentials: webapi.Credentials{
 			TokenSet: st.TokenSet, TokenHint: st.TokenHint,
 			KeySet: st.KeySet, KeyType: st.KeyType, KeyFingerprint: st.KeyFingerprint, KeyPublic: st.KeyPublic, Signing: st.Signing,
@@ -357,6 +358,25 @@ func (b *Bridge) SetIdentity(ctx context.Context, req webapi.IdentityRequest) (w
 		if err := worktree.SetIdentity(ctx, root, name, email); err != nil {
 			return webapi.Settings{}, err
 		}
+	}
+	return b.Settings(ctx)
+}
+
+// SetCoAuthors is PUT /api/settings/coauthors: the people named in a
+// Co-authored-by trailer on every commit made in this workspace from here
+// on. A list the workspace refuses is a bad request.
+func (b *Bridge) SetCoAuthors(ctx context.Context, req webapi.CoAuthorsRequest) (webapi.Settings, error) {
+	var refused error
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		if err := m.setCoAuthors(req.CoAuthors); err != nil {
+			refused = webErr(WebBadRequest, "%s", err.Error())
+		}
+		return nil
+	}); err != nil {
+		return webapi.Settings{}, err
+	}
+	if refused != nil {
+		return webapi.Settings{}, refused
 	}
 	return b.Settings(ctx)
 }

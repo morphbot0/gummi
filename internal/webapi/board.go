@@ -196,6 +196,18 @@ type Settings struct {
 	Credentials Credentials `json:"credentials"`
 	// Identity is who git writes this workspace's commits as.
 	Identity Identity `json:"identity"`
+	// CoAuthors are the people named in a Co-authored-by trailer on every
+	// commit made in this workspace, each "Name <email>". Empty means no
+	// trailer.
+	CoAuthors []string `json:"coAuthors"`
+	// MaxCoAuthors is how many the workspace accepts.
+	MaxCoAuthors int `json:"maxCoAuthors"`
+}
+
+// CoAuthorsRequest is PUT /api/settings/coauthors' body: the whole list,
+// each entry "Name <email>". An empty list switches the trailer off.
+type CoAuthorsRequest struct {
+	CoAuthors []string `json:"coAuthors"`
 }
 
 // Identity is a git author: user.name and user.email as git resolves them

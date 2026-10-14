@@ -29,9 +29,11 @@ var provenanceRe = regexp.MustCompile(`(?im)(` +
 // MatchesAttribution returns the first provenance match found in s (the
 // matched text, "" when s is clean). It backs both the branch warning scan
 // and the squash landing-message scrub, so a generated message can never
-// carry agent-authorship metadata into main's history on ctrl+s.
+// carry agent-authorship metadata into main's history on ctrl+s. A
+// Co-authored-by line naming a co-author the workspace configured is not
+// attribution: a person put it there (coauthors.go).
 func MatchesAttribution(s string) string {
-	return provenanceRe.FindString(s)
+	return provenanceRe.FindString(withoutCoAuthors(s))
 }
 
 // Commit is one commit on the feature branch, surfaced to the scribe as

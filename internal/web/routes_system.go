@@ -13,6 +13,7 @@ func (s *Server) systemRoutes() {
 	s.api("PUT /api/settings", s.handleSetSettings)
 	s.api("PUT /api/settings/credentials", s.handleSetCredentials)
 	s.api("PUT /api/settings/identity", s.handleSetIdentity)
+	s.api("PUT /api/settings/coauthors", s.handleSetCoAuthors)
 }
 
 // handleSettings is GET /api/settings: the workspace's own knobs.
@@ -68,6 +69,23 @@ func (s *Server) handleSetIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.opt.Board.SetIdentity(r.Context(), req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleSetCoAuthors is PUT /api/settings/coauthors: who is named in a
+// Co-authored-by trailer on this workspace's commits, written to its
+// config.
+func (s *Server) handleSetCoAuthors(w http.ResponseWriter, r *http.Request) {
+	var req webapi.CoAuthorsRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		return
+	}
+	out, err := s.opt.Board.SetCoAuthors(r.Context(), req)
 	if err != nil {
 		s.fail(w, err)
 		return
