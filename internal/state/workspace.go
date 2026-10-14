@@ -46,6 +46,10 @@ func (w Workspace) WebDir() string { return filepath.Join(w.StateDir(), "web") }
 // them.
 func (w Workspace) CredentialsDir() string { return filepath.Join(w.StateDir(), "credentials") }
 
+// HooksDir holds the git hooks gummi names to git in its own environment
+// (worktree.UseCoAuthorHooks), never a repository's.
+func (w Workspace) HooksDir() string { return filepath.Join(w.StateDir(), "hooks") }
+
 // SpecsDir holds approved specs — the artifact's workspace home from
 // spec approval on. Workspace content, never committed.
 func (w Workspace) SpecsDir() string { return filepath.Join(w.GummiDir(), "specs") }

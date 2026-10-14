@@ -1,34 +1,45 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
-// settingsDialog is the settings overlay: the workspace's own knobs, which
-// today is the one — the name this instance goes by, so boards running
-// side by side can be told apart in a status bar and a browser tab. The
-// web face's counterpart is views/settings.js, and both write through
-// Shell.setName.
+// settingsDialog is the settings overlay: the workspace's own knobs — the
+// name this instance goes by, so boards running side by side can be told
+// apart in a status bar and a browser tab, and the co-authors named on
+// every commit. The web face's counterpart is views/settings.js, and both
+// write through Shell.setName and Shell.setCoAuthors.
 type settingsDialog struct {
-	input    textinput.Model
-	buttons  *buttonRow
-	focus    int
-	problem  string
-	onSubmit func(name string) error
+	input     textinput.Model
+	coAuthors textarea.Model
+	// coAuthorsWas is the box as it opened: an untouched box is not
+	// written, so saving a name never copies a user-level list into the
+	// workspace config.
+	coAuthorsWas string
+	buttons      *buttonRow
+	focus        int
+	problem      string
+	onSubmit     func(name string) error
+	onCoAuthors  func(list []string) error
 }
 
 const (
 	settingsFieldName = iota
+	settingsFieldCoAuthors
 	settingsFieldButtons
+	settingsFields
 )
 
-func newSettingsDialog(current string, onSubmit func(string) error) *settingsDialog {
+func newSettingsDialog(current string, coAuthors []string, onSubmit func(string) error, onCoAuthors func([]string) error) *settingsDialog {
 	in := textinput.New()
 	in.Placeholder = "e.g. staging, laptop, east"
 	in.CharLimit = config.MaxNameLen
@@ -36,8 +47,17 @@ func newSettingsDialog(current string, onSubmit func(string) error) *settingsDia
 	in.SetValue(current)
 	in.CursorEnd()
 	in.Focus()
+	ca := textarea.New()
+	ca.Placeholder = "Ada Lovelace <ada@example.com>"
+	ca.ShowLineNumbers = false
+	ca.SetWidth(56)
+	ca.SetHeight(3)
+	was := strings.Join(coAuthors, "\n")
+	ca.SetValue(was)
+	ca.Blur()
 	return &settingsDialog{
-		input: in, onSubmit: onSubmit,
+		input: in, coAuthors: ca, coAuthorsWas: was,
+		onSubmit: onSubmit, onCoAuthors: onCoAuthors,
 		buttons: newButtonRow(button{label: "Cancel"}, button{label: "Save"}),
 	}
 }
@@ -50,28 +70,45 @@ func (d *settingsDialog) submit() (bool, tea.Cmd) {
 		d.problem = err.Error()
 		return false, nil
 	}
+	if text := d.coAuthors.Value(); text != d.coAuthorsWas {
+		if err := d.onCoAuthors(strings.Split(text, "\n")); err != nil {
+			d.problem = "co-authors: " + err.Error()
+			d.setFocus(settingsFieldCoAuthors)
+			return false, nil
+		}
+	}
 	return true, nil
 }
 
 func (d *settingsDialog) setFocus(f int) {
 	d.focus = f
-	if f == settingsFieldName {
+	d.input.Blur()
+	d.coAuthors.Blur()
+	switch f {
+	case settingsFieldName:
 		d.input.Focus()
-	} else {
-		d.input.Blur()
+	case settingsFieldCoAuthors:
+		d.coAuthors.Focus()
 	}
 }
 
-// HandleKey implements overlay.Dialog.
+// HandleKey implements overlay.Dialog. Enter saves from the name field and
+// starts a new line in the co-authors box, where ctrl+s saves.
 func (d *settingsDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		return true, nil
-	case "tab", "shift+tab":
-		d.setFocus((d.focus + 1) % 2)
+	case "tab":
+		d.setFocus((d.focus + 1) % settingsFields)
 		return false, nil
+	case "shift+tab":
+		d.setFocus((d.focus + settingsFields - 1) % settingsFields)
+		return false, nil
+	case "ctrl+s":
+		return d.submit()
 	}
-	if d.focus == settingsFieldButtons {
+	switch d.focus {
+	case settingsFieldButtons:
 		switch key.String() {
 		case "left", "h":
 			d.buttons.Move(-1)
@@ -84,6 +121,10 @@ func (d *settingsDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			return d.submit()
 		}
 		return false, nil
+	case settingsFieldCoAuthors:
+		d.problem = ""
+		d.coAuthors, _ = d.coAuthors.Update(key)
+		return false, nil
 	}
 	if key.String() == "enter" {
 		return d.submit()
@@ -95,9 +136,13 @@ func (d *settingsDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 
 // HandlePaste implements overlay.Paster.
 func (d *settingsDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
-	if d.focus == settingsFieldName {
+	switch d.focus {
+	case settingsFieldName:
 		d.problem = ""
 		d.input, _ = d.input.Update(msg)
+	case settingsFieldCoAuthors:
+		d.problem = ""
+		d.coAuthors, _ = d.coAuthors.Update(msg)
 	}
 	return nil
 }
@@ -107,18 +152,21 @@ func (d *settingsDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("settings") + "\n\n")
 	b.WriteString(s.Faint.Render("name — how this gummi is told apart from the others (empty clears it)") + "\n\n")
-	b.WriteString(d.input.View() + "\n")
+	b.WriteString(d.input.View() + "\n\n")
+	b.WriteString(s.Faint.Render("co-authors — one \"Name <email>\" per line, named in a Co-authored-by") + "\n")
+	b.WriteString(s.Faint.Render(fmt.Sprintf("trailer on every commit (at most %d; empty turns it off)", config.MaxCoAuthors)) + "\n\n")
+	b.WriteString(d.coAuthors.View() + "\n")
 	if d.problem != "" {
 		b.WriteString(s.Error.Render(d.problem) + "\n")
 	}
 	b.WriteString("\n" + d.buttons.View(s, d.focus == settingsFieldButtons) + "\n")
-	b.WriteString("\n" + s.Faint.Render("enter save · tab buttons · esc cancel"))
+	b.WriteString("\n" + s.Faint.Render("ctrl+s save · tab next field · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }
 
 // openSettings pushes the settings dialog.
 func (m *Shell) openSettings() {
-	m.Overlay.Push(newSettingsDialog(m.name, m.setName))
+	m.Overlay.Push(newSettingsDialog(m.name, worktree.CoAuthors(), m.setName, m.setCoAuthors))
 }
 
 // setName stores the instance name in the workspace config and shows it
@@ -133,6 +181,28 @@ func (m *Shell) setName(name string) error {
 	}
 	m.name = name
 	return nil
+}
+
+// setCoAuthors stores the workspace's co-authors in its config and names
+// them for every commit this process makes from here on: what the config
+// now resolves to, which is a user-level list when the workspace's own is
+// cleared.
+func (m *Shell) setCoAuthors(list []string) error {
+	list, err := config.ParseCoAuthors(list)
+	if err != nil {
+		return err
+	}
+	if err := config.SetCoAuthors(m.ws.ConfigFile(), list); err != nil {
+		return err
+	}
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		userPath = ""
+	}
+	if c, _, err := config.LoadLayered(userPath, m.ws.ConfigFile()); err == nil {
+		list = c.CoAuthors
+	}
+	return worktree.UseCoAuthors(list)
 }
 
 // loadName reads the instance name the workspace config holds.

@@ -2,8 +2,8 @@
 // instance goes by, so boards running side by side can be told apart in a
 // header and a browser tab (the terminal's settings dialog writes the same
 // config key), and the GitHub token and SSH key gummi's own gh and push
-// commands use where the machine has none set up, and who git writes this
-// workspace's commits as. A stored secret is never sent back: the page is
+// commands use where the machine has none set up, who git writes this
+// workspace's commits as, and who those commits name as co-authors. A stored secret is never sent back: the page is
 // told only what names it, and a key can be made on the host so that its
 // private half never crosses the network at all.
 
@@ -95,6 +95,31 @@ registerView('settings', {
             h('button', { type: 'submit', class: 'btn primary', testid: 'settings-git-save', disabled: v.saving }, 'Save'))))
     }
 
+    async function saveCoAuthors (coAuthors) {
+      v.saving = true
+      v.err = null
+      draw()
+      try {
+        v.cur = await ctx.api.put('/api/settings/coauthors', { coAuthors })
+        const n = v.cur.coAuthors.length
+        ctx.toast?.(n ? `Commits name ${n} co-author${n === 1 ? '' : 's'}` : 'Commits name no co-author')
+      } catch (err) { v.err = err }
+      v.saving = false
+      if (v.alive) draw()
+    }
+
+    function drawCoAuthors () {
+      const list = h('textarea', { class: 'mono', testid: 'settings-coauthors', 'aria-label': 'Co-authors', rows: 3, placeholder: 'Ada Lovelace <ada@example.com>', autocomplete: 'off', spellcheck: 'false' })
+      list.value = (v.cur.coAuthors || []).join('\n')
+      return h('section', { class: 'vcreds' },
+        h('div', { class: 'vhead' }, h('b', null, 'Co-authors'),
+          tip('One per line, written Name <email>. Each is added as a Co-authored-by trailer to every commit made in this workspace from here on: gummi appends them to the commits it makes (checkpoints, squashes, landings) and a git hook of its own adds them to the commits a card’s agent makes, whatever the repository’s instructions say about trailers. Nothing is written to the repository. A session started before the first co-author was set commits through the hook from its next start. Leave empty for no trailer.', 'settings-coauthors-tip')),
+        h('form', { class: 'vform', onsubmit: (e) => { e.preventDefault(); saveCoAuthors(list.value.split('\n').map((s) => s.trim()).filter(Boolean)) } },
+          h('div', { class: 'field' }, list),
+          h('div', { class: 'vrow' },
+            h('button', { type: 'submit', class: 'btn primary', testid: 'settings-coauthors-save', disabled: v.saving }, 'Save'))))
+    }
+
     // secret is one stored credential: what names the one held, a control
     // to replace it, and a button to forget it.
     function secret ({ id, label, held, control, hint, key, saved, forgotten, extra }) {
@@ -156,7 +181,7 @@ registerView('settings', {
         tipField('Instance name', 'Shown in this header, the browser tab and the terminal’s status bar. Leave empty for none.', input, 'settings-name-tip'),
         h('div', { class: 'vrow' },
           h('button', { type: 'submit', class: 'btn primary', testid: 'settings-save', disabled: v.saving }, 'Save')))
-      body.append(form, drawIdentity(), drawCredentials())
+      body.append(form, drawIdentity(), drawCoAuthors(), drawCredentials())
     }
 
     load()

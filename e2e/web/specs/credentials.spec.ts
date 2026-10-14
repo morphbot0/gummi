@@ -90,3 +90,20 @@ test('the git identity is set from settings', async ({ pairedPage: page, api }) 
   await expect(page.getByTestId('settings-git-email')).toHaveValue('ada@example.com');
   await expect.poll(async () => (await api('GET', '/api/settings')).json.identity).toEqual({ name: 'Ada Lovelace', email: 'ada@example.com' });
 });
+
+test('co-authors are set from settings', async ({ pairedPage: page, api }) => {
+  await page.getByTestId('rail-more').click();
+  await page.getByTestId('menu-settings').click();
+  await page.getByTestId('settings-coauthors').fill('nobody');
+  await page.getByTestId('settings-coauthors-save').click();
+  await expect(page.getByTestId('view-error')).toContainText('Name <email>');
+
+  await page.getByTestId('settings-coauthors').fill('Ada Lovelace <ada@example.com>\n\nGrace Hopper <grace@example.com>\n');
+  await page.getByTestId('settings-coauthors-save').click();
+  await expect(page.getByTestId('settings-coauthors')).toHaveValue('Ada Lovelace <ada@example.com>\nGrace Hopper <grace@example.com>');
+  await expect.poll(async () => (await api('GET', '/api/settings')).json.coAuthors).toEqual(['Ada Lovelace <ada@example.com>', 'Grace Hopper <grace@example.com>']);
+
+  await page.getByTestId('settings-coauthors').fill('');
+  await page.getByTestId('settings-coauthors-save').click();
+  await expect.poll(async () => (await api('GET', '/api/settings')).json.coAuthors).toEqual([]);
+});

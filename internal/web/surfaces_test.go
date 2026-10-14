@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -705,6 +706,35 @@ func TestGitIdentityThroughTheBoard(t *testing.T) {
 		if code := b.call(http.MethodPut, "/api/settings/identity", bad, nil); code != http.StatusBadRequest {
 			t.Fatalf("%+v = %d, want 400", bad, code)
 		}
+	}
+}
+
+// The co-authors set from the page are the workspace's config, and what
+// this process's commits name from then on.
+func TestCoAuthorsThroughTheBoard(t *testing.T) {
+	b := newBoardHarness(t)
+	t.Cleanup(func() { worktree.UseCoAuthors(nil) })
+	var got webapi.Settings
+	b.must(http.StatusOK, http.MethodGet, "/api/settings", nil, &got)
+	if got.CoAuthors == nil || len(got.CoAuthors) != 0 || got.MaxCoAuthors == 0 {
+		t.Fatalf("settings before = %+v", got)
+	}
+	want := []string{"Ada Lovelace <ada@example.com>", "Grace Hopper <grace@example.com>"}
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/coauthors",
+		webapi.CoAuthorsRequest{CoAuthors: []string{" Ada Lovelace <ada@example.com> ", "Co-authored-by: Grace Hopper <grace@example.com>"}}, &got)
+	if !slices.Equal(got.CoAuthors, want) || !slices.Equal(worktree.CoAuthors(), want) {
+		t.Fatalf("co-authors = %q, in use %q", got.CoAuthors, worktree.CoAuthors())
+	}
+	raw, err := os.ReadFile(filepath.Join(b.root, ".gummi", "config.yaml"))
+	if err != nil || !strings.Contains(string(raw), "- Grace Hopper <grace@example.com>") {
+		t.Fatalf("the workspace config = %q, %v", raw, err)
+	}
+	if code := b.call(http.MethodPut, "/api/settings/coauthors", webapi.CoAuthorsRequest{CoAuthors: []string{"nobody"}}, nil); code != http.StatusBadRequest {
+		t.Fatalf("a co-author with no email = %d, want 400", code)
+	}
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/coauthors", webapi.CoAuthorsRequest{}, &got)
+	if len(got.CoAuthors) != 0 || len(worktree.CoAuthors()) != 0 {
+		t.Fatalf("after clearing = %q, in use %q", got.CoAuthors, worktree.CoAuthors())
 	}
 }
 

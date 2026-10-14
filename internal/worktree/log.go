@@ -307,6 +307,10 @@ func (m *Manager) resolveRewrite(ctx context.Context, f *domain.Feature, base st
 		}
 		if rg.message == "" {
 			rg.message = rg.first.Message()
+		} else if len(g.Commits) > 1 || rg.message != strings.TrimSpace(rg.first.Message()) {
+			// a message a person wrote for this rewrite is a new commit's;
+			// one carried over unchanged stays as it was written
+			rg.message = WithCoAuthors(rg.message)
 		}
 		if hit := MatchesAttribution(rg.message); hit != "" {
 			return nil, fmt.Errorf("%s: %w: %q", f.ID, ErrAttribution, hit)

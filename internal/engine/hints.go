@@ -8,6 +8,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/verifydoc"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // The artifact section lists the contract states so an agent never has
@@ -1493,4 +1494,23 @@ func indentBlock(text, pad string) string {
 		lines[i] = pad + l
 	}
 	return strings.Join(lines, "\n")
+}
+
+// coAuthorHint tells a session that writes commits what the co-author hook
+// does to them (worktree.UseCoAuthorHooks), or is "" when the workspace
+// names no co-author or no hook adds one. It asks the session for nothing
+// a repository's instructions could forbid: gummi adds the lines, and the
+// session is told only so it neither removes them nor copies the habit.
+func coAuthorHint() string {
+	trailers := worktree.CoAuthorTrailers()
+	if len(trailers) == 0 || !worktree.CoAuthorHookActive() {
+		return ""
+	}
+	return "This workspace's settings name the co-authors of every commit made in it, and " +
+		"gummi adds them itself: a git hook ends each commit message with these trailer lines.\n\n  " +
+		strings.Join(trailers, "\n  ") +
+		"\n\nWrite your commit messages as the repository's instructions say, without these " +
+		"lines; do not remove them from a commit that carries them, and do not commit with " +
+		"--no-verify. They are a person's setting, not attribution of yours: add no " +
+		"Co-authored-by line and no other attribution yourself."
 }

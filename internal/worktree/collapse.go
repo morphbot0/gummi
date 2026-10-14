@@ -145,7 +145,7 @@ func (m *Manager) Collapse(ctx context.Context, f *domain.Feature, message, base
 	if _, err := runGit(ctx, wtPath, "reset", "--soft", baseSHA); err != nil {
 		return "", err
 	}
-	if _, err := runGit(ctx, wtPath, "commit", "-m", message); err != nil {
+	if _, err := runGit(ctx, wtPath, "commit", "-m", WithCoAuthors(message)); err != nil {
 		restore()
 		return "", err
 	}

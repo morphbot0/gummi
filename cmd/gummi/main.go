@@ -563,7 +563,27 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 	// what a person stored in the web page's settings is read by every
 	// command's own gh calls and by publishing (DESIGN §22.2)
 	credentials.Use(credentials.Store{Dir: w.CredentialsDir()})
+	worktree.UseCoAuthorHooks(w.HooksDir(), w.Root)
+	useCoAuthors(w)
 	return w, nil
+}
+
+// useCoAuthors names the workspace's configured co-authors for every
+// commit this process makes. A config that does not load names none here:
+// the command that reads it for its own purposes reports why. A hook that
+// cannot be written costs the trailer on an agent's commits only, and the
+// settings report it where a person saves the list.
+func useCoAuthors(w state.Workspace) {
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		userPath = ""
+	}
+	cfg, _, err := config.LoadLayered(userPath, w.ConfigFile())
+	if err != nil {
+		_ = worktree.UseCoAuthors(nil)
+		return
+	}
+	_ = worktree.UseCoAuthors(cfg.CoAuthors)
 }
 
 // findGummiRoot searches upward from dir (dir included) for the nearest

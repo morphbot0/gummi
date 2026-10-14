@@ -316,6 +316,9 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	e.seedCardSpend(sess)
 
 	hints := e.freeformHints(ctx, f, workDir, budget, ag)
+	if h := coAuthorHint(); h != "" {
+		hints = append(hints, h)
+	}
 	// The context a person comes back to. Two ways, and which one applies
 	// is the backend's to decide, not ours to guess:
 	//

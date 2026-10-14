@@ -4955,6 +4955,26 @@ and a workspace with neither behaves exactly as above.
   landing are written as. gummi never writes the global configuration;
   clearing both removes the repository's own setting and leaves the
   machine's.
+- **Co-authors** sit there too, and in the TUI's settings dialog:
+  `PUT /api/settings/coauthors` writes the workspace config's `coauthors` list, each entry `Name <email>`. Every
+  commit made in the workspace from then on ends with a
+  `Co-authored-by:` trailer per entry — gummi appends them to the
+  commits it makes, and a `commit-msg` hook adds them to every other
+  commit made under it (`worktree/coauthorhook.go`). git has no setting
+  that adds a trailer, and asking a session to add one sets gummi against
+  whatever the repository's instructions say about trailers; so the hook
+  lives under `.gummi/state/hooks` and is named to git as
+  `core.hooksPath` in gummi's own environment (`internal/gitenv`, the
+  seam signing uses), which every child inherits. Nothing is written to
+  a repository. Naming a hooks directory hides the repository's own, so
+  every hook there runs the repository's of the same name first. It reads
+  the list at commit time, names co-authors only in checkouts under the
+  workspace root — a repository a test builds elsewhere is not the
+  workspace's — and `--no-verify` skips it. Empty, the default, means no
+  trailer and no hooks directory named. The attribution
+  scan (`worktree.MatchesAttribution`) lets exactly the configured lines
+  through: a person named them, where any other `Co-authored-by:` is an
+  agent signing its own work and is refused as before.
 - A paired browser may store or replace them, which makes pairing
   (§20.3) the strength of this too. Off loopback without TLS the key
   crosses the network in the clear; serve the page over HTTPS

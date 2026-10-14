@@ -99,6 +99,12 @@ type Config struct {
 	// entries both run — a personal pager beside a workspace's own
 	// pipeline — in that order.
 	Hooks []hooks.Hook `yaml:"hooks"`
+	// CoAuthors are the people named in a Co-authored-by trailer on every
+	// commit made in this workspace, each written "Name <email>": gummi
+	// appends them to the commits it makes and tells a card's agent to end
+	// its own with them. Empty means no trailer. A workspace list replaces
+	// a user-level one.
+	CoAuthors []string `yaml:"coauthors"`
 }
 
 // ChecksConfig holds workspace-wide check settings.
@@ -338,6 +344,9 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: name: %w", path, err)
 		}
 		c.Name = name
+	}
+	if c.CoAuthors, err = ParseCoAuthors(c.CoAuthors); err != nil {
+		return Config{}, fmt.Errorf("%s: coauthors: %w", path, err)
 	}
 	switch c.Permissions {
 	case "", "allow-all", "guarded":
@@ -615,6 +624,18 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["hooks"] = "default"
 	}
 
+	// coauthors layer like permissions: a workspace list replaces a
+	// user-level one, which is the fallback.
+	if len(ws.CoAuthors) > 0 {
+		merged.CoAuthors = ws.CoAuthors
+		sources["coauthors"] = workspacePath
+	} else if len(user.CoAuthors) > 0 {
+		merged.CoAuthors = user.CoAuthors
+		sources["coauthors"] = userPath
+	} else {
+		sources["coauthors"] = "default"
+	}
+
 	return merged, sources, nil
 }
 
@@ -787,6 +808,13 @@ permissions: allow-all
 # start anyway. Profiles may override this per-profile in
 # .gummi/profiles.yaml.
 # sandbox: warn
+
+# coauthors: — people named in a Co-authored-by trailer on every commit
+# made in this workspace, each written "Name <email>". gummi appends them
+# to the commits it makes and tells a card's agent to end its own with
+# them. Unset means no trailer. The web page's settings write this key.
+# coauthors:
+#   - Ada Lovelace <ada@example.com>
 
 # instructions: — a list of absolute paths to extra instruction files that
 # are appended to the workspace environment card, in user-then-workspace

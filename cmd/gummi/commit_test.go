@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
@@ -208,5 +209,27 @@ func TestCommitThenSquashComposesOnPRLinkedCard(t *testing.T) {
 	}
 	if got.PullRequest != ref {
 		t.Fatalf("PullRequest = %+v, want unchanged %+v", got.PullRequest, ref)
+	}
+}
+
+// A commit made through the CLI names the co-authors the workspace config
+// holds: every command reads them where it opens the workspace.
+func TestCommitCommand_NamesConfiguredCoAuthors(t *testing.T) {
+	_, f := commitCLIRepo(t)
+	t.Cleanup(func() { worktree.UseCoAuthors(nil) })
+	if err := config.SetCoAuthors(filepath.Join(".gummi", "config.yaml"), []string{"Ada Lovelace <ada@example.com>"}); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(".gummi", "worktrees", string(f.ID))
+	var runErr error
+	captureStdout(t, func() {
+		runErr = runCLI("commit", string(f.ID), "-m", "fix(export): commit stray worktree changes")
+	})
+	if runErr != nil {
+		t.Fatalf("runCommit: %v", runErr)
+	}
+	want := "fix(export): commit stray worktree changes\n\nCo-authored-by: Ada Lovelace <ada@example.com>"
+	if msg := cliGit(t, wtPath, "log", "-1", "--format=%B"); strings.TrimSpace(msg) != want {
+		t.Fatalf("commit message = %q, want %q", msg, want)
 	}
 }
