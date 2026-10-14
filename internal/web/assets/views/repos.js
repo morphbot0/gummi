@@ -125,14 +125,19 @@ registerView('repos', {
 
     // cleanCard sends the card's own clean action. The server asks its
     // question first (a 409 carrying a token); the person has answered it
-    // on this page already, so the token goes straight back.
+    // on this page already, so the token goes straight back. A closed card
+    // still holding its worktree offers clean-up as an answer to the stop
+    // it pins, and an answer is sent against that stop (as the card's own
+    // menu sends it), so the card is read first for its token.
     async function cleanCard (id) {
       const path = cardPath(id, 'actions/clean')
+      const against = (await ctx.api.get(cardPath(id)))?.decision?.against?.token
+      const body = against ? { against } : {}
       try {
-        await ctx.api.post(path, {})
+        await ctx.api.post(path, body)
       } catch (err) {
         if (err.status === 409 && (err.data?.error === 'confirm' || err.data?.needs === 'confirm')) {
-          await ctx.api.post(path, { confirm: err.data.confirm || '' })
+          await ctx.api.post(path, { ...body, confirm: err.data.confirm || '' })
           return
         }
         throw err
