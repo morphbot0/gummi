@@ -168,30 +168,110 @@ func TestAssertNoForkDrift_LazyBackfill(t *testing.T) {
 	}
 }
 
-// Diff refuses on drift, returning a ForkDriftError with an empty diff and
-// never shelling out to `git diff` (a dirty edit that would otherwise appear
-// in the output stays out).
-func TestDiffRefusesOnDrift(t *testing.T) {
+// A drifted card's diff is still readable, and it is the card's own work:
+// committed and uncommitted, measured from the recorded fork. The live
+// merge-base is what drift makes wrong — here the trunk was replaced, so
+// there is none at all — and the fork is the commit a rebase replays from.
+func TestDiffOfADriftedCardIsItsOwnWork(t *testing.T) {
 	root := newRepo(t)
-	m := newManager(t, root)
-	f := feature(1, "Diff guard")
+	fs := &memForkStore{}
+	m, err := NewManager(ctx, root, root, fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := feature(1, "Diff under drift")
 	p, err := m.Create(ctx, f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, p, "README.md", "uncommitted edit that would show in a real diff\n")
+	writeFile(t, p, "own.txt", "committed card work\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "card work")
+	writeFile(t, p, "README.md", "uncommitted edit\n")
 	rewindMainBackward(t, root)
 
+	if err := m.AssertNoForkDrift(ctx, f); err == nil {
+		t.Fatal("want drift")
+	}
 	diff, err := m.Diff(ctx, f)
-	if err == nil {
-		t.Fatal("Diff succeeded despite drift")
+	if err != nil {
+		t.Fatalf("Diff of a drifted card: %v", err)
 	}
-	var fe *ForkDriftError
-	if !errors.As(err, &fe) {
-		t.Fatalf("want *ForkDriftError, got %T: %v", err, err)
+	for _, want := range []string{"own.txt", "committed card work", "uncommitted edit"} {
+		if !strings.Contains(diff, want) {
+			t.Errorf("diff is missing %q:\n%s", want, diff)
+		}
 	}
-	if diff != "" {
-		t.Fatalf("Diff produced content despite refusal: %q", diff)
+	if strings.Contains(diff, "rewound.ts") {
+		t.Errorf("diff shows the base's own change as the card's:\n%s", diff)
+	}
+	base, err := m.DiffBase(ctx, f)
+	if err != nil || base != fs.m[f.ID] {
+		t.Errorf("DiffBase = %q, %v; want the recorded fork %q", base, err, fs.m[f.ID])
+	}
+	if stat, err := m.DiffStat(ctx, f); err != nil || !strings.Contains(stat, "own.txt") {
+		t.Errorf("DiffStat = %q, %v", stat, err)
+	}
+	files, err := m.ChangedFiles(ctx, f)
+	if err != nil || len(files) != 2 {
+		t.Errorf("ChangedFiles = %+v, %v; want own.txt and README.md", files, err)
+	}
+}
+
+// A base reset backward under a card is the case the live merge-base gets
+// wrong: it slides back with the base, and the commits the base dropped
+// would read as the card's. The recorded fork keeps them out.
+func TestDiffOfACardWhoseBaseWasResetLeavesOutWhatTheBaseDropped(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	writeFile(t, root, "dropped.txt", "a commit main will drop\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "to be dropped")
+	f := feature(1, "Reset under")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "own.txt", "card work\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "card work")
+	mustGit(t, root, "reset", "-q", "--hard", "HEAD~1")
+
+	diff, err := m.Diff(ctx, f)
+	if err != nil {
+		t.Fatalf("Diff of a drifted card: %v", err)
+	}
+	if !strings.Contains(diff, "own.txt") || strings.Contains(diff, "dropped.txt") {
+		t.Errorf("diff must be the card's own commit only:\n%s", diff)
+	}
+}
+
+// A branch rebased by hand no longer carries its recorded fork. What it
+// shares with the base as the base now stands is the reading left.
+func TestDiffOfAHandRebasedDriftedCardReadsFromTheBase(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "Hand rebased")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "own.txt", "card work\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "card work")
+	fork := mustGit(t, root, "rev-parse", "HEAD")
+	rewindMainBackward(t, root)
+	mustGit(t, p, "rebase", "-q", "--onto", "main", fork)
+
+	if err := m.AssertNoForkDrift(ctx, f); err == nil {
+		t.Fatal("want drift: the recorded fork is in neither history")
+	}
+	diff, err := m.Diff(ctx, f)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if !strings.Contains(diff, "own.txt") || strings.Contains(diff, "rewound.ts") {
+		t.Errorf("diff must be the card's own commit only:\n%s", diff)
 	}
 }
 

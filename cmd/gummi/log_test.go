@@ -190,4 +190,21 @@ func TestLogAndDiffReadAgainstAChosenBase(t *testing.T) {
 	if !strings.Contains(diff, "card.txt") || strings.Contains(diff, "feat.txt") {
 		t.Errorf("diff = %q, want the card's file alone", diff)
 	}
+
+	// the base rewritten under the card: the patch is still the card's
+	// own work, and stderr says what it is measured from
+	cliGit(t, root, "branch", "-f", "feat", "main")
+	var note string
+	diff = captureStdout(t, func() {
+		note = captureStderr(t, func() { runErr = runCLI("diff", string(f.ID)) })
+	})
+	if runErr != nil {
+		t.Fatalf("diff of a drifted card: %v", runErr)
+	}
+	if !strings.Contains(diff, "card.txt") || strings.Contains(diff, "feat.txt") {
+		t.Errorf("drifted diff = %q, want the card's file alone", diff)
+	}
+	if !strings.Contains(note, "feat no longer carries the commit this card forked from") {
+		t.Errorf("stderr = %q, want the drift note", note)
+	}
 }

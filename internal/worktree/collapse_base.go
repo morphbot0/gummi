@@ -62,6 +62,16 @@ func ResolveCollapseBase(ctx context.Context, store *state.Store, mgr *Manager, 
 	}
 	switch len(deps) {
 	case 0:
+		// A drifted card's own commits start at its recorded fork, the
+		// range its diff reads (diffBase). The live merge-base is what
+		// drift makes wrong: a trunk reset under the card slides it back,
+		// and the log would list — and a squash would fold in — commits
+		// the trunk dropped; a trunk replaced outright shares none.
+		if drift, _ := mgr.Drift(ctx, f); drift != nil {
+			if base, ok := mgr.driftedDiffBase(ctx, mgr.RepoRoot(), f.BranchName(), drift); ok {
+				return base, nil
+			}
+		}
 		sha, err := runGit(ctx, mgr.RepoRoot(), "merge-base", "HEAD", f.BranchName())
 		if err != nil {
 			return "", fmt.Errorf("resolving collapse base for %s: fork point with main: %w", f.ID, err)

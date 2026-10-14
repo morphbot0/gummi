@@ -601,9 +601,18 @@ func drainQuietEngineLoop(t *testing.T, m *Shell) *Shell {
 }
 
 // engineBusy reports whether any of the engine's sessions is mid-turn.
+//
+// An autonomous session still running with no open question counts too:
+// its turn has gone idle but the engine has not finished it yet. The idle
+// handler drops busy first and marks the run done only after it has ruled
+// out an ask, so on a loaded machine that gap alone can outlast the drain's
+// quiet window, and returning in it leaves the card a pass short.
 func engineBusy(eng *engine.Engine) bool {
 	for _, s := range eng.Sessions() {
 		if s.Busy() {
+			return true
+		}
+		if !s.Interactive && s.State() == engine.StateRunning && s.Snapshot().PendingAsk == nil {
 			return true
 		}
 	}

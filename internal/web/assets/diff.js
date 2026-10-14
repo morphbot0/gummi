@@ -11,7 +11,7 @@ import { h, plural, storage, isMobile } from './dom.js?v=__ASSET_V__'
 import { get, post, del, patch, cardPath } from './api.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { state } from './store.js?v=__ASSET_V__'
-import { changesButton } from './actions.js?v=__ASSET_V__'
+import { changesButton, runAction } from './actions.js?v=__ASSET_V__'
 
 // "Since you last read it": the branch head this browser showed on the
 // previous visit to a card's diff is the baseline, and the toggle asks the
@@ -96,6 +96,7 @@ function render (pane, entry, ctx) {
   // an orphaned anchor degrades, it never vanishes
   const loose = anns.filter(a => a.idx < 0 && !paths.has(a.file))
   if (!d || !d.files?.length) {
+    if (d?.drift) pane.append(driftBar(d, ctx))
     pane.append(h('div', { class: 'empty', testid: 'diff-none' }, h('b', null, 'No code yet'),
       d?.why || (ctx.card?.stage === 'plan' || ctx.card?.stage === 'todo'
         ? 'The plan stage only writes the spec. Code arrives with implement.'
@@ -143,6 +144,11 @@ function render (pane, entry, ctx) {
       h('span', null, `The branch moved to ${String(entry.fresh.rev || '').slice(0, 7)} since you opened this diff.`),
       h('button', { class: 'btn', type: 'button', testid: 'diff-fresh-show', onclick: () => ctx.swap(entry.fresh) }, 'Show it')))
   }
+  // the drift is a fact about the card now, not about the diff a reader
+  // is holding: a rebase that cleared it moved the branch too, and the
+  // note must not outlive it behind "Show it"
+  const now = entry.fresh || d
+  if (now.drift) top.append(driftBar(now, ctx))
   if (d.pendingComments) top.append(pendingBar(d, anns, ctx))
   if (loose.length) pane.append(looseBox(loose, ctx))
 
@@ -393,6 +399,19 @@ function commentBox (ln, ctx, saved) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) box.querySelector('[data-testid="annotation-save"]').click()
   })
   return box
+}
+
+// driftBar says a card's base no longer carries the commit it forked
+// from: what is drawn is the card's own work since that fork, and the
+// rebase that replays it onto the base is the card's own action, offered
+// here because this is where a reader decides the work is worth moving.
+function driftBar (d, ctx) {
+  const rebase = (ctx.card?.actions || []).find(a => a.id === 'rebase')
+  return h('div', { class: 'fresh drift', testid: 'diff-drift', role: 'status' },
+    h('span', null, d.drift.charAt(0).toUpperCase() + d.drift.slice(1) + '.'),
+    rebase && !ctx.closed
+      ? h('button', { class: 'btn', type: 'button', testid: 'diff-drift-rebase', title: rebase.detail || rebase.label, onclick: () => runAction(ctx.card, rebase) }, `Rebase onto ${d.base || 'its base'}`)
+      : null)
 }
 
 // adriftBox is a comment being written whose line the diff no longer has:

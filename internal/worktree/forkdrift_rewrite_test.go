@@ -392,3 +392,243 @@ func TestAMidRebaseStopWithNothingUnmergedSaysWhy(t *testing.T) {
 		t.Errorf("gen.txt = %q", b)
 	}
 }
+
+// replaceTrunk squashes main into one parentless commit the way the usual
+// recipe does — an orphan branch, the old main deleted, the new one renamed
+// over it — which leaves main's reflog with no memory of its old history.
+func replaceTrunk(t *testing.T, root string) {
+	t.Helper()
+	mustGit(t, root, "checkout", "-q", "--orphan", "squashed")
+	mustGit(t, root, "commit", "-q", "-m", "squashed")
+	mustGit(t, root, "branch", "-D", "main")
+	mustGit(t, root, "branch", "-m", "main")
+}
+
+// TestABackupBranchIsNotWhatTheCardForkedFrom: main was replaced by a
+// squash of itself, and a backup taken first still carries the old history.
+// The card forked from main, not from the backup, so the message must not
+// send a reader to land the backup — and the rebase must replay the card's
+// own commit, not the old trunk onto its replacement.
+func TestABackupBranchIsNotWhatTheCardForkedFrom(t *testing.T) {
+	for name, backupOf := range map[string]string{"of the card": "", "of the trunk": "main"} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			m := newManager(t, root)
+			writeFile(t, root, "m2.txt", "m2\n")
+			mustGit(t, root, "add", ".")
+			mustGit(t, root, "commit", "-q", "-m", "M2")
+			f, _ := cardWithCommit(t, m, 1, "feat.txt")
+			if backupOf == "" {
+				backupOf = f.BranchName()
+			}
+			mustGit(t, root, "branch", "backup/pre-squash", backupOf)
+			replaceTrunk(t, root)
+
+			d, err := m.Drift(ctx, f)
+			if err != nil || d == nil {
+				t.Fatalf("Drift = %v, %v; want drift after the trunk was replaced", d, err)
+			}
+			if d.ForkedFrom != "" || strings.Contains(d.Error(), "backup/pre-squash") {
+				t.Fatalf("the backup is blamed: ForkedFrom = %q, %q", d.ForkedFrom, d.Error())
+			}
+			recorded, _ := m.ForkPoint(ctx, f)
+			if cmd, _ := m.RebaseCommand(ctx, f); !strings.HasSuffix(cmd, " "+recorded) || !strings.Contains(cmd, "--onto") {
+				t.Fatalf("RebaseCommand = %q, want an --onto from the recorded fork", cmd)
+			}
+			if err := m.RebaseOnMainAutostash(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.ReanchorOnMain(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Split(mustGit(t, root, "log", "--format=%s", f.BranchName()), "\n")
+			if len(got) != 2 || got[0] != "card work feat.txt" || got[1] != "squashed" {
+				t.Fatalf("branch = %q, want the card's commit on the squashed trunk alone", got)
+			}
+		})
+	}
+}
+
+// TestADeletedBaseIsNamedAsGone: a card cut from a branch that was since
+// deleted is read against the checkout's HEAD, which never carried its
+// fork. The trunk was not rewritten and a sibling cut from the same base is
+// not what it forked from: the message says the base is gone and how to
+// bring it back, and the rebase replays the card's own work only.
+func TestADeletedBaseIsNamedAsGone(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		gone func(t *testing.T, root string)
+	}{
+		{"deleted unmerged", func(t *testing.T, root string) {
+			mustGit(t, root, "checkout", "-q", "main")
+			mustGit(t, root, "branch", "-D", "simon/dev")
+		}},
+		{"squash-merged then deleted", func(t *testing.T, root string) {
+			mustGit(t, root, "checkout", "-q", "main")
+			mustGit(t, root, "merge", "-q", "--squash", "simon/dev")
+			mustGit(t, root, "commit", "-q", "-m", "squash dev")
+			mustGit(t, root, "branch", "-D", "simon/dev")
+		}},
+		{"renamed", func(t *testing.T, root string) {
+			mustGit(t, root, "branch", "-m", "simon/dev", "simon/renamed")
+			mustGit(t, root, "checkout", "-q", "main")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, m, fs := baseRepo(t)
+			f, _ := cardWithCommit(t, m, 1, "a.txt")
+			cardWithCommit(t, m, 2, "b.txt")
+			tc.gone(t, root)
+
+			d, err := m.Drift(ctx, f)
+			if err != nil || d == nil {
+				t.Fatalf("Drift = %v, %v", d, err)
+			}
+			recorded, _ := fs.ForkPoint(ctx, f.ID)
+			if d.MissingBase != "simon/dev" || d.ForkedFrom != "" || d.Base != "main" {
+				t.Fatalf("drift = %+v, want simon/dev named as gone and nothing forked from", d)
+			}
+			msg := d.Error()
+			for _, want := range []string{"simon/dev, which no longer exists", "git branch simon/dev " + recorded, "onto main"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("message %q does not say %q", msg, want)
+				}
+			}
+			for _, not := range []string{"Land ", "reflog", "FD-002"} {
+				if strings.Contains(msg, not) {
+					t.Errorf("message %q says %q", msg, not)
+				}
+			}
+			if err := m.RebaseOnMainAutostash(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.ReanchorOnMain(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+			if got := subjects(t, root, f.BranchName()); len(got) != 1 || got[0] != "card work a.txt" {
+				t.Fatalf("branch = %q over main, want the card's own commit alone", got)
+			}
+		})
+	}
+}
+
+// TestBringingADeletedBaseBackClearsTheDrift: the command the message
+// prints is one that works.
+func TestBringingADeletedBaseBackClearsTheDrift(t *testing.T) {
+	root, m, fs := baseRepo(t)
+	f, _ := cardWithCommit(t, m, 1, "a.txt")
+	mustGit(t, root, "checkout", "-q", "main")
+	mustGit(t, root, "branch", "-D", "simon/dev")
+	if d, _ := m.Drift(ctx, f); d == nil {
+		t.Fatal("want drift while the base is gone")
+	}
+	recorded, _ := fs.ForkPoint(ctx, f.ID)
+	mustGit(t, root, "branch", "simon/dev", recorded)
+	if d, err := m.Drift(ctx, f); err != nil || d != nil {
+		t.Fatalf("still drifted with the base back: %v, %v", d, err)
+	}
+}
+
+// TestABaseMergedThenDeletedCarriesOnAgainstTheTrunk: the ordinary end of a
+// feature branch's life — merged, then deleted — leaves its cards on
+// commits the trunk now has. That is not drift.
+func TestABaseMergedThenDeletedCarriesOnAgainstTheTrunk(t *testing.T) {
+	root, m, _ := baseRepo(t)
+	f, _ := cardWithCommit(t, m, 1, "a.txt")
+	mustGit(t, root, "checkout", "-q", "main")
+	mustGit(t, root, "merge", "-q", "simon/dev")
+	mustGit(t, root, "branch", "-D", "simon/dev")
+	if d, err := m.Drift(ctx, f); err != nil || d != nil {
+		t.Fatalf("Drift = %v, %v; want none", d, err)
+	}
+	if _, err := m.Land(ctx, f, "land the card", domain.LandSquash); err != nil {
+		t.Fatalf("Land: %v", err)
+	}
+}
+
+// TestABaseThatMovedForwardIsNotDrift: new commits on the base leave the
+// fork in its history; the card is behind, not drifted, and a plain rebase
+// catches it up.
+func TestABaseThatMovedForwardIsNotDrift(t *testing.T) {
+	root, m, _ := baseRepo(t)
+	f, _ := cardWithCommit(t, m, 1, "a.txt")
+	writeFile(t, root, "d2.txt", "d2\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "D2")
+	if d, err := m.Drift(ctx, f); err != nil || d != nil {
+		t.Fatalf("Drift = %v, %v; want none", d, err)
+	}
+	if cmd, _ := m.RebaseCommand(ctx, f); strings.Contains(cmd, "--onto") {
+		t.Fatalf("RebaseCommand = %q for a base that only moved forward", cmd)
+	}
+	if err := m.RebaseOnMain(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if got := subjects(t, root, f.BranchName()); len(got) != 3 || got[0] != "card work a.txt" || got[1] != "D2" {
+		t.Fatalf("branch = %q", got)
+	}
+}
+
+// TestABaseDeletedAndRecreatedIsARewrite: a base deleted and cut again
+// under the same name has no reflog of its old history, and a sibling card
+// still carries the old commit. It is still the base that changed.
+func TestABaseDeletedAndRecreatedIsARewrite(t *testing.T) {
+	root, m, _ := baseRepo(t)
+	f, _ := cardWithCommit(t, m, 1, "a.txt")
+	cardWithCommit(t, m, 2, "b.txt")
+	mustGit(t, root, "checkout", "-q", "main")
+	mustGit(t, root, "branch", "-D", "simon/dev")
+	mustGit(t, root, "checkout", "-q", "-b", "simon/dev")
+	writeFile(t, root, "shared.txt", "dev v2\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "D1 again")
+
+	d, err := m.Drift(ctx, f)
+	if err != nil || d == nil {
+		t.Fatalf("Drift = %v, %v", d, err)
+	}
+	if d.ForkedFrom != "" || d.MissingBase != "" {
+		t.Fatalf("drift = %+v, want the plain rewritten-base reading", d)
+	}
+	if err := m.RebaseOnMain(ctx, f); err != nil {
+		t.Fatalf("the old base's commit was replayed onto its replacement: %v", err)
+	}
+	if got := subjects(t, root, f.BranchName()); len(got) != 2 || got[1] != "D1 again" {
+		t.Fatalf("branch = %q", got)
+	}
+}
+
+// The note a diff surface puts above a drifted card's diff says which of
+// the three things happened, what the diff is measured from, and what
+// clears it — in a sentence short enough to sit above a diff, with no
+// board key in it for a face that has none.
+func TestDiffNoteSaysWhatTheDiffIsMeasuredFrom(t *testing.T) {
+	const fork = "048fb6261f6678b0a19fbb884adf904b980b99ed"
+	for name, tc := range map[string]struct {
+		drift ForkDriftError
+		want  []string
+	}{
+		"rewritten": {
+			ForkDriftError{Recorded: fork, Base: "main"},
+			[]string{"main no longer carries the commit this card forked from", "own work since it forked (048fb62)", "replay it onto main"},
+		},
+		"unlanded": {
+			ForkDriftError{Recorded: fork, Base: "main", ForkedFrom: "goal/ship-it"},
+			[]string{"forked from goal/ship-it, which has not landed on main", "land goal/ship-it first"},
+		},
+		"gone": {
+			ForkDriftError{Recorded: fork, Base: "main", MissingBase: "simon/dev"},
+			[]string{"simon/dev, the branch this card was cut from, no longer exists", "git branch simon/dev " + fork},
+		},
+	} {
+		note := tc.drift.DiffNote()
+		for _, want := range tc.want {
+			if !strings.Contains(note, want) {
+				t.Errorf("%s: note %q is missing %q", name, note, want)
+			}
+		}
+		if strings.Contains(note, "press r") {
+			t.Errorf("%s: note %q names a board key", name, note)
+		}
+	}
+}

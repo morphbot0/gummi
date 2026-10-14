@@ -341,3 +341,46 @@ func TestResolveCollapseBaseRebasedOnChosenBase(t *testing.T) {
 		t.Errorf("log = %+v, want the card's one commit", entries)
 	}
 }
+
+// A drifted card's log starts at its recorded fork, like its diff. The
+// live merge-base listed the commits a reset trunk dropped as the card's
+// own — which a squash would then fold into it — and a trunk replaced
+// outright shares no commit with the branch at all, so the log failed.
+func TestResolveCollapseBaseOfADriftedCardIsItsRecordedFork(t *testing.T) {
+	for name, drift := range map[string]func(t *testing.T, root string){
+		"reset":    func(t *testing.T, root string) { mustGit(t, root, "reset", "-q", "--hard", "HEAD~1") },
+		"replaced": rewindMainBackward,
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			advanceMain(t, root, "dropped.txt")
+			store := openTestStore(t)
+			m, err := NewManager(ctx, root, root, store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := feature(9, "Drifted card")
+			if err := store.CreateFeature(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+			p, err := m.Create(ctx, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fork := mustGit(t, root, "rev-parse", "HEAD")
+			writeFile(t, p, "own.txt", "card work\n")
+			mustGit(t, p, "add", ".")
+			mustGit(t, p, "commit", "-q", "-m", "card work")
+			drift(t, root)
+
+			base, err := ResolveCollapseBase(ctx, store, m, f)
+			if err != nil || base != fork {
+				t.Fatalf("base = %q, %v; want the recorded fork %s", base, err, fork)
+			}
+			entries, err := m.Log(ctx, f, base)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("log = %+v, %v; want the card's one commit", entries, err)
+			}
+		})
+	}
+}

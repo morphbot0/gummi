@@ -94,6 +94,26 @@ test.describe('a card whose base was rewritten under it', () => {
     expect(after.stage).toBe('implement');
     expect(after.decision.question).not.toContain('fork drift');
   });
+
+  // The diff used to be replaced by the drift's refusal: the one surface
+  // that shows whether the work is worth replaying was the one it closed.
+  test('still shows its diff, with the rebase beside it', async ({ pairedPage: page, server, api }, info) => {
+    await open(page, server, id);
+    const drifted = (await api('GET', `/api/cards/${id}/diff`)).json;
+    expect(drifted.files.length, JSON.stringify(drifted)).toBeGreaterThan(0);
+    expect(drifted.files.map((f: any) => f.path)).not.toContain('AMENDED.md');
+    expect(drifted.drift).toContain('main no longer carries the commit this card forked from');
+
+    await showTab(page, 'diff');
+    await expect(page.getByTestId('diff-drift')).toContainText('own work since it forked');
+    await expect(page.getByTestId('diff-files')).toBeVisible();
+    await shot(page, info, 'drift-diff');
+
+    await page.getByTestId('diff-drift-rebase').click();
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}/diff`)).json.drift ?? '', { timeout: 30_000 }).toBe('');
+    await expect(page.getByTestId('diff-drift')).toHaveCount(0);
+    await expect(page.getByTestId('diff-files')).toBeVisible();
+  });
 });
 
 // The same card, but its own work really conflicts with the rewritten base,

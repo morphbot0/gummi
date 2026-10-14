@@ -678,6 +678,8 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .fresh{display:flex;align-items:center;gap:10px;margin:10px 12px 0;padding:8px 12px;border-radius:8px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 6%,var(--panel));font-size:12.5px;color:var(--fg2)}
 .fresh .btn{margin-left:auto;height:26px}
 .fresh .spinner{animation:none}
+.fresh.drift{border-color:color-mix(in srgb,var(--warn) 45%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--panel));align-items:flex-start}
+.fresh.drift .btn{flex:none;white-space:nowrap}
 .pending{margin:10px 12px 0;font-size:12.5px;color:var(--accent);display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px}
 /* the diff's head, branch-moved banner and open comments' bar, and the
    spec's bar, stay in view while the document scrolls under them */

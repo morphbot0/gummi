@@ -40,11 +40,23 @@ func (m *Shell) diffViewRender(w, h int) string {
 	if n := dv.openCount(); n > 0 && dv.openOrphanCount() == n {
 		b.WriteString(s.Warning.Render("  every open comment's line has already changed — x resolves one that the change addressed; R sends them back again") + "\n")
 	}
+	// A drifted card's diff is its own work since its fork, not the card
+	// against its base as the base now stands, and every run of it is
+	// refused until a rebase: said above the diff, since this is where a
+	// reader decides whether the work is worth replaying.
+	used := 4
+	if dv.drift != "" {
+		note := strings.Split(wrapText("⚠ "+dv.drift+" (r on the board, /rebase on the card)", max(w-4, 20)), "\n")
+		for _, line := range note {
+			b.WriteString(s.Warning.Render("  "+line) + "\n")
+		}
+		used += len(note)
+	}
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
 	// keys live in the status bar (keymap.go), so the body gets the pane
-	// minus the three header lines (plus one line of slack).
-	b.WriteString(dv.render(m, w, h-4))
+	// minus the header lines (plus one line of slack).
+	b.WriteString(dv.render(m, w, h-used))
 	return b.String()
 }
 

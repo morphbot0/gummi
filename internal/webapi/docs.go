@@ -100,6 +100,11 @@ type Diff struct {
 	// Why says why there is no diff to show: no worktree yet, or no
 	// change on the branch.
 	Why string `json:"why,omitempty"`
+	// Drift is set when the base no longer carries the commit the card
+	// forked from: the diff is then the card's own work since that fork,
+	// and this is the sentence saying so and what clears it. The page puts
+	// the card's rebase action beside it.
+	Drift string `json:"drift,omitempty"`
 	// Since echoes ?since=<rev>: files and lines changed after that
 	// commit are marked, for "since your review".
 	Since string `json:"since,omitempty"`

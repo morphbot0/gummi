@@ -284,3 +284,67 @@ func TestADriftedConflictGoesToTheAgentWithItsUncommittedWork(t *testing.T) {
 		t.Errorf("answers = %v, want try again first", got)
 	}
 }
+
+// A card whose base branch is gone is told that, not that its base was
+// rewritten.
+func TestADriftedRowNamesTheBaseThatIsGone(t *testing.T) {
+	in := nextInput{
+		stage: domain.StageImplement, kind: domain.KindFeature, attn: attnFailure,
+		drifted: true, driftMissingBase: "simon/dev", hasWorktree: true,
+	}
+	acts := stageActions(in)
+	if acts[0].id != "rebase" || !strings.Contains(acts[0].why, "simon/dev, which no longer exists") {
+		t.Fatalf("lead = %+v", acts[0])
+	}
+}
+
+// A drifted card's diff is read on both faces: its own work since its
+// fork, under a note saying that is what it is. Both used to show the
+// drift's refusal in place of the diff — on the page, a sentence pointing
+// at a board key it does not have.
+func TestADriftedCardsDiffIsStillRead(t *testing.T) {
+	m, root, wt := rebaseFeatureFixture(t)
+	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wt, "add", ".")
+	git(t, wt, "commit", "-qm", "feature work")
+	driftUnder(t, root)
+	ctx := context.Background()
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+
+	m = pump(t, m, m.openDiff(f))
+	if m.diff == nil {
+		t.Fatalf("the diff did not open (notice %q)", m.notice.text)
+	}
+	if !strings.Contains(m.diff.drift, "main no longer carries the commit this card forked from") {
+		t.Errorf("diff view drift note = %q", m.diff.drift)
+	}
+	m.width, m.height = 100, 30
+	out := m.diffViewRender(100, 30)
+	if !strings.Contains(out, "feat.go") || !strings.Contains(out, "no longer carries") || strings.Contains(out, "rewound.ts") {
+		t.Errorf("rendered diff must show the card's own file under the note:\n%s", out)
+	}
+
+	m = pump(t, m, m.loadRows)
+	d, err := m.WebDocs("FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, err := d.Diff(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(web.Files) != 1 || web.Files[0].Path != "feat.go" || web.Why != "" {
+		t.Fatalf("page diff = %+v (why %q), want the card's one file", web.Files, web.Why)
+	}
+	if !strings.Contains(web.Drift, "Rebase to replay it onto main") || strings.Contains(web.Drift, "press r") {
+		t.Errorf("page drift note = %q", web.Drift)
+	}
+
+	// the rebase clears the note with the drift
+	pump(t, m, m.rebaseFeature(f))
+	if web, err = d.Diff(ctx, ""); err != nil || web.Drift != "" || len(web.Files) != 1 {
+		t.Errorf("after the rebase: drift %q, files %+v, err %v", web.Drift, web.Files, err)
+	}
+}
