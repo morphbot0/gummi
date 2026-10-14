@@ -610,6 +610,27 @@ func engineBusy(eng *engine.Engine) bool {
 	return false
 }
 
+// drainedIdle holds the sessions whose closing event — idle, exhausted,
+// error or stopped — drain has handed to the board.
+var drainedIdle sync.Map
+
+// doneUnseen reports whether an autonomous stage session has finished
+// without its closing event reaching the board yet. A turn stops being
+// busy and reads done before the engine has checkpointed it, and the
+// idle event the board acts on comes only after the checkpoint, so
+// engineBusy alone lets the drain return in between.
+func doneUnseen(m *Shell) bool {
+	for _, s := range m.engine.Sessions() {
+		if s.Interactive || s.State() != engine.StateDone {
+			continue
+		}
+		if _, ok := drainedIdle.Load(s); !ok {
+			return true
+		}
+	}
+	return false
+}
+
 // failRoundStore fails reads, writes, or both on the keyed rounds seam —
 // the fail-closed proof for the TUI's round persistence, shared by the
 // plan and review round tests (mirrors the headless driver's fake).
@@ -660,10 +681,16 @@ func drain(t *testing.T, m *Shell, pred func(*Shell) bool, waitBusy bool) *Shell
 		select {
 		case ev := <-m.engine.Events():
 			i++
+			switch ev.Kind {
+			case engine.EventIdle, engine.EventExhausted, engine.EventError, engine.EventStopped:
+				if s := m.engine.Get(ev.Feature); s != nil {
+					drainedIdle.Store(s, true)
+				}
+			}
 			cmd := m.handleEngineEvent(ev)
 			m = pump(t, m, cmd) // run any auto-step (transition + run)
 		case <-time.After(80 * time.Millisecond):
-			if !waitBusy || !engineBusy(m.engine) {
+			if !waitBusy || !engineBusy(m.engine) && !doneUnseen(m) {
 				return m
 			}
 		case <-deadline:
