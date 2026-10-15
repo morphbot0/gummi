@@ -292,6 +292,11 @@ type AnswerRequest struct {
 	// lands the branch and the option offers a choice (Option.Methods).
 	// Empty is squash.
 	Method string `json:"method,omitempty"`
+	// KeepBranch asks that an answer which closes the card (a landing, a
+	// hand-off) leave its worktree and branch standing. Unset, a closed
+	// card's worktree and branch go with it, unless the branch is the only
+	// copy of its work.
+	KeepBranch bool `json:"keepBranch,omitempty"`
 	// Against is the Decision.Against.Token the answer was given against.
 	Against string `json:"against"`
 	// Confirm answers the confirmations the answer's flow raises on the
@@ -387,10 +392,13 @@ type ActionRequest struct {
 	Message string `json:"message,omitempty"`
 	// Method is the landing method, "squash" or "merge", when the action
 	// lands the branch and offers a choice (Action.Methods). Empty is squash.
-	Method  string   `json:"method,omitempty"`
-	Number  *int     `json:"number,omitempty"`
-	Profile string   `json:"profile,omitempty"`
-	Cards   []string `json:"cards,omitempty"`
+	Method string `json:"method,omitempty"`
+	// KeepBranch asks that an action which closes the card (a landing, a
+	// hand-off) leave its worktree and branch standing (AnswerRequest.KeepBranch).
+	KeepBranch bool     `json:"keepBranch,omitempty"`
+	Number     *int     `json:"number,omitempty"`
+	Profile    string   `json:"profile,omitempty"`
+	Cards      []string `json:"cards,omitempty"`
 	// Confirm is the token(s) of the confirmation(s) the server asked on an
 	// earlier try ("confirm" question) and the person said yes to (AnswerRequest.Confirm).
 	Confirm string `json:"confirm,omitempty"`

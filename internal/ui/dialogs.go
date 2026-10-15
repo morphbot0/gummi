@@ -132,6 +132,14 @@ type confirmDialog struct {
 	confirmLabel string
 	cancelLabel  string
 
+	// option is a choice the confirm carries beside its yes, where the act
+	// has one a person may want the other way (a hand-off that would take
+	// the branch with it): b flips it, and onConfirm reads optionOn. It is
+	// drawn under the detail rather than in it, so the question a web
+	// confirmation is bound to reads the same whichever way it stands.
+	option   string
+	optionOn bool
+
 	buttons *buttonRow
 }
 
@@ -163,6 +171,11 @@ func (d *confirmDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		return true, d.onConfirm()
 	case "n", "N", "esc":
 		return true, nil
+	case "b", "B":
+		if d.option != "" {
+			d.optionOn = !d.optionOn
+		}
+		return false, nil
 	case "left", "h", "shift+tab":
 		row.Move(-1)
 		return false, nil
@@ -185,10 +198,19 @@ func (d *confirmDialog) View(s *theme.Styles, w, h int) string {
 	if d.detail != "" {
 		b.WriteString(s.Subtle.Render(d.detail) + "\n")
 	}
+	hint := "enter select · ←/→ move · y / n · esc cancel"
+	if d.option != "" {
+		box := "[ ] "
+		if d.optionOn {
+			box = "[x] "
+		}
+		b.WriteString("\n" + s.Subtle.Render(box+d.option) + "\n")
+		hint = "enter select · ←/→ move · y / n · b " + d.option + " · esc cancel"
+	}
 	b.WriteString("\n" + row.View(s, true) + "\n")
 	// "y / n", not "y/n accelerators". Round 2 §5 listed "accelerators" as
 	// a word the reader will not know and this is the last dialog carrying
 	// it — on the confirm boxes, which is where a first-time user meets it.
-	b.WriteString("\n" + s.Faint.Render("enter select · ←/→ move · y / n · esc cancel"))
+	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())
 }

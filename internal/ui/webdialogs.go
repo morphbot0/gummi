@@ -41,6 +41,9 @@ type webAnswer struct {
 	question string
 	draft    *string
 	token    string
+	// option, on a confirmation, names the choice it carries beside its
+	// yes (webapi.Error.Option).
+	option string
 	// refused is the dialog's own refusal of the value it was given.
 	refused string
 	// newCard is a line the dialog would start a new card with.
@@ -104,7 +107,14 @@ func (d *confirmDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 		q += "\n" + detail
 	}
 	if !in.takeConfirm(webConfirmToken(d.id, in.card, q)) {
-		return confirmAsk(d.id, in.card, q)
+		ask := confirmAsk(d.id, in.card, q)
+		if d.option == keepBranchOption {
+			ask.option = webapi.OptionKeepBranch
+		}
+		return ask
+	}
+	if d.option == keepBranchOption {
+		d.optionOn = in.keepBranch
 	}
 	return webAnswer{cmd: d.onConfirm()}
 }
@@ -193,6 +203,7 @@ func (d *commitMsgDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 		return webAnswer{refused: "this landing cannot be a merge commit — it lands as one squash commit"}
 	}
 	d.method = method
+	d.keepBranch = in.keepBranch
 	msg := strings.TrimSpace(in.message)
 	if why := tooLong(d.input.CharLimit, "the landing message", msg); why != "" {
 		return webAnswer{refused: why}

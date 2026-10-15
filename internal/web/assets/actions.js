@@ -79,6 +79,8 @@ function dialog (card, a, { ask = null } = {}) {
   // clicking yes under one sends it back, with any asked before it
   const confirms = []
   let asked = ''
+  // the choice a confirmation offers beside its yes (keepBranchControl)
+  let keep = null
   body.append(question)
   const addField = (need) => {
     if (!need || need === 'confirm' || fields.has(need)) return
@@ -96,6 +98,10 @@ function dialog (card, a, { ask = null } = {}) {
       clear(question).append(sentence(e.text) || `${cap(a.label)} ${cardName(card.id)}?`)
       go.textContent = `Yes, ${a.label}`
       go.classList.add('danger')
+      if (e.option === 'keepBranch' && !keep) {
+        keep = keepBranchControl()
+        question.after(keep.el)
+      }
     } else {
       addField(e.needs)
       clear(question).append(sentence(e.text) || question.textContent)
@@ -145,6 +151,7 @@ function dialog (card, a, { ask = null } = {}) {
           }
           if (asked) { confirms.push(asked); asked = '' }
           if (confirms.length) req.confirm = confirms.join(' ')
+          if (keep?.value()) req.keepBranch = true
           error.hidden = true
           go.disabled = true
           // a landing sent with no message waits on a drafting pass, a
@@ -199,6 +206,16 @@ export function landMethodControl (methods) {
   return { el, value: () => el.value || 'squash' }
 }
 
+// keepBranchControl is the choice a closing carries: a closed card's
+// worktree and branch go with it unless this is ticked. It is shown on a
+// landing, and on a confirmation the server says offers it
+// (Error.option "keepBranch"); value() is what the request sends.
+export function keepBranchControl () {
+  const box = h('input', { type: 'checkbox', testid: 'keep-branch' })
+  const el = h('label', { class: 'keep-branch' }, box, ' Keep the worktree and branch')
+  return { el, value: () => box.checked }
+}
+
 // landMessageBox hides a landing's message box and its hint while the
 // method in force is a merge commit, and shows them for a squash. Returns
 // nothing: the box is only a control to hide or show.
@@ -228,11 +245,15 @@ function fieldFor (card, a, need) {
     // box is built there)
     const aff = hint ? draftAffordance(ta, hint) : null
     if (control) landMessageBox(control, ta, hint)
+    // a landing closes the card and takes its worktree and branch with it;
+    // a squash in place lands nothing and takes nothing
+    const keep = landing && !squash && card.kind !== 'goal' ? keepBranchControl() : null
     return {
-      el: h('label', { class: 'field' }, label, control?.el, ta, hint),
+      el: h('div', { class: 'field-group' }, h('label', { class: 'field' }, label, control?.el, ta, hint), keep?.el),
       value: () => {
-        if (merging()) return { method: 'merge' }
-        return control ? { message: ta.value.trim(), method: control.value() } : { message: ta.value.trim() }
+        const v = merging() ? { method: 'merge' } : control ? { message: ta.value.trim(), method: control.value() } : { message: ta.value.trim() }
+        if (keep?.value()) v.keepBranch = true
+        return v
       },
       focus: () => ta.focus(),
       // the draft the server stopped to have read is in the box now: the

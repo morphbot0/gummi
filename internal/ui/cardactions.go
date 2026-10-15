@@ -174,7 +174,7 @@ var promotedActions = map[string]bool{}
 // the action inventory, the board's key table, the ? overlay. It names
 // what is kept before what is lost, because keeping the branch is the
 // whole reason anyone reaches for it.
-const handOffHelp = "close the card and keep the branch — nothing lands"
+const handOffHelp = "close the card without landing it — nothing reaches the base"
 
 // foreignBlockedKeys is the same rule stated as accelerators, for the
 // board's key handler (shell.go's boardVerb). The two must stay in
@@ -515,8 +515,8 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
 		},
 		{
-			"clean", "c", "clean up", "branch landed on " + r.baseBranch() + " — remove the worktree and branch", true,
-			needsWT && r.Landed,
+			"clean", "c", "clean up", r.cleanHelp(), true,
+			needsWT && r.cleanable(),
 		},
 		// no accelerator, same reasoning as duplicate/gate below: the
 		// board's lowercase letters are nearly exhausted, and linking is a

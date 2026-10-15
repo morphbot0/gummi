@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // captureNDJSON runs fn with stdout redirected and returns what the
@@ -100,23 +101,58 @@ func TestMergeAfterHandOffRetractsIt(t *testing.T) {
 	}
 }
 
-// Cleaning a handed-off card would delete the one thing the reader chose
-// to keep, so it is refused — and the refusal says so rather than
-// reporting a landing that is never coming.
-func TestCleanRefusesAHandedOffCard(t *testing.T) {
-	_, f := verifiedCLIRepo(t)
+// A card handed off and never pushed holds the only copy of its work in
+// its branch: closing it leaves it standing, and cleaning it takes the
+// worktree and says the branch was kept.
+func TestCleanKeepsABranchThatIsTheOnlyCopy(t *testing.T) {
+	store, f := verifiedCLIRepo(t)
 	if err := runCLI("handoff", string(f.ID)); err != nil {
 		t.Fatalf("runHandOff: %v", err)
 	}
+	wt, err := worktree.NewManager(context.Background(), ".", ".", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex, _ := wt.Exists(context.Background(), &f); !ex {
+		t.Fatal("hand-off removed the worktree of a branch that is the only copy of its work")
+	}
 	out, err := captureNDJSON(t, func() error { return runCLI("clean", string(f.ID)) })
-	if err == nil {
-		t.Fatal("clean accepted a handed-off card")
+	if err != nil {
+		t.Fatalf("clean of a closed card: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "handed off, not landed") {
-		t.Fatalf("refusal does not name the hand-off: %s", out)
+	if !strings.Contains(out, `"branch_kept":true`) {
+		t.Fatalf("clean does not say the branch was kept: %s", out)
 	}
-	if !strings.Contains(out, f.BranchName()) {
-		t.Fatalf("refusal does not name the branch it would delete: %s", out)
+	if ex, _ := wt.Exists(context.Background(), &f); ex {
+		t.Error("worktree still present after the clean")
+	}
+	if ok, _ := wt.BranchExists(context.Background(), &f); !ok {
+		t.Error("the only copy of the work was deleted")
+	}
+}
+
+// Closing a card takes its worktree and branch with it once the branch is
+// on a remote, and --keep-branch is how a person keeps both.
+func TestHandOffTakesAPushedBranchUnlessKept(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		store, f := verifiedCLIRepo(t)
+		cliGit(t, ".", "update-ref", "refs/remotes/origin/"+f.BranchName(), f.BranchName())
+		args := []string{"handoff", string(f.ID)}
+		if keep {
+			args = append(args, "--keep-branch")
+		}
+		if err := runCLI(args...); err != nil {
+			t.Fatalf("runHandOff: %v", err)
+		}
+		wt, err := worktree.NewManager(context.Background(), ".", ".", store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ex, _ := wt.Exists(context.Background(), &f)
+		br, _ := wt.BranchExists(context.Background(), &f)
+		if ex != keep || br != keep {
+			t.Errorf("keep=%v: worktree present=%v, branch present=%v", keep, ex, br)
+		}
 	}
 }
 

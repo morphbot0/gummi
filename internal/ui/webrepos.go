@@ -47,10 +47,9 @@ func (m *Shell) webRepoHandles() (webRepoHandles, error) {
 		landed: map[domain.FeatureID]bool{}, cleanable: map[domain.FeatureID]bool{},
 	}
 	for _, r := range m.rows {
-		if !r.Landed && r.F.LandedSHA == "" {
-			continue
+		if r.Landed || r.F.LandedSHA != "" {
+			h.landed[r.F.ID] = true
 		}
-		h.landed[r.F.ID] = true
 		for _, a := range m.webActions(r) {
 			if a.ID == "clean" {
 				h.cleanable[r.F.ID] = true

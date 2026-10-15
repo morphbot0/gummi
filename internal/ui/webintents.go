@@ -76,7 +76,7 @@ func (b *Bridge) Answer(ctx context.Context, id string, req webapi.AnswerRequest
 	if cur.Decision == nil || cur.Decision.Ref != req.Ref || req.Against != cur.Decision.Against.Token {
 		return webapi.Card{}, b.answeredOrMoved(ctx, id, req.Ref, req.Against, cur)
 	}
-	in := webInput{actor: state.PersonActor(person), confirm: req.Confirm, method: method}
+	in := webInput{actor: state.PersonActor(person), confirm: req.Confirm, method: method, keepBranch: req.KeepBranch}
 	wait := webWait
 	if (req.Option == "advance" && cur.Stage == string(domain.StageVerify)) || req.Option == "merge" {
 		// landing from the verify gate opens the landing message, which
@@ -483,7 +483,7 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 		actor: state.PersonActor(person), message: req.Message, number: req.Number,
 		profile: req.Profile, repo: req.Repo, mode: req.Mode, confirm: req.Confirm,
 		land: action == "merge" || action == "squash", autopilot: action == "gate" || action == "autopilot",
-		method: method,
+		method: method, keepBranch: req.KeepBranch,
 	}
 	switch req.Mode {
 	case "", domain.GateAutopilot, domain.GateAttended:

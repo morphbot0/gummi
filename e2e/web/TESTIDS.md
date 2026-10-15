@@ -91,7 +91,11 @@ picker), `action-cards-filter`, `action-error` (the board's refusal, in the
 dialog), `action-confirm`, `action-cancel`, `land-method` (the landing method select
 above a landing's message, in the menu's dialog and in the verify answer's
 landing dialog, where a card may keep its commits; its options are `squash`
-and `merge`. Choosing `merge` hides `action-input` and `action-hint`).
+and `merge`. Choosing `merge` hides `action-input` and `action-hint`),
+`keep-branch` (the "Keep the worktree and branch" checkbox a closing carries: on
+a landing, in the menu's dialog and the verify answer's landing dialog, and on a
+hand-off's confirmation — `action-dialog` or `decision-confirm` — only where the
+branch would be removed).
 
 ## Thread
 

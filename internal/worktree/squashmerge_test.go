@@ -242,3 +242,47 @@ func TestDeleteLandedBranch(t *testing.T) {
 		t.Errorf("BranchExists after delete = %v, %v; want false", ok, err)
 	}
 }
+
+// A closed card's branch goes once its work exists somewhere else, and
+// stays while it is the only copy. A base rewritten after the landing
+// drops the landing commit, and the record of it still says the work was
+// delivered.
+func TestSpentBranch(t *testing.T) {
+	t.Run("landed, then the base was rewritten", func(t *testing.T) {
+		root := newRepo(t)
+		m, f, _ := committedFeature(t, root)
+		if spent, err := m.Spent(ctx, f); err != nil || spent {
+			t.Fatalf("Spent of an unlanded, unpushed branch = %v, %v; want false", spent, err)
+		}
+		if err := m.Remove(ctx, f, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.DeleteClosedBranch(ctx, f); err == nil {
+			t.Fatal("the only copy of the work was deleted")
+		}
+		if _, err := m.SquashMerge(ctx, f, "FD-009: land me"); err != nil {
+			t.Fatal(err)
+		}
+		mustGit(t, root, "reset", "-q", "--hard", "HEAD~1")
+		if landed, err := m.Landed(ctx, f); err == nil && landed {
+			t.Fatal("Landed still true after the base dropped the landing")
+		}
+		if spent, err := m.Spent(ctx, f); err != nil || !spent {
+			t.Fatalf("Spent of a branch with a recorded landing = %v, %v; want true", spent, err)
+		}
+		if err := m.DeleteClosedBranch(ctx, f); err != nil {
+			t.Fatalf("spent branch not deleted: %v", err)
+		}
+		if ok, _ := m.BranchExists(ctx, f); ok {
+			t.Error("branch still present")
+		}
+	})
+	t.Run("pushed", func(t *testing.T) {
+		root := newRepo(t)
+		m, f, _ := committedFeature(t, root)
+		mustGit(t, root, "update-ref", "refs/remotes/origin/"+f.BranchName(), f.BranchName())
+		if spent, err := m.Spent(ctx, f); err != nil || !spent {
+			t.Fatalf("Spent of a pushed branch = %v, %v; want true", spent, err)
+		}
+	})
+}

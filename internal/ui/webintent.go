@@ -67,6 +67,10 @@ type webInput struct {
 	mode string
 	// method is the landing method the request names; empty is squash.
 	method domain.LandMethod
+	// keepBranch: the request asks that the closing it makes leave the
+	// card's worktree and branch standing. It answers the landing
+	// message's and the hand-off confirm's own choice.
+	keepBranch bool
 	// confirm is the confirmation tokens the request carries
 	// (webapi.AnswerRequest.Confirm): each the yes to one question the
 	// person was shown, spent by the dialog that asked it (takeConfirm).
@@ -96,6 +100,8 @@ type webOutcome struct {
 	question string
 	// confirm is the token a confirmation's question was issued with.
 	confirm string
+	// option is the choice a confirmation carries beside its yes.
+	option string
 	// draft is the landing message a landing stopped to have read.
 	draft *string
 	// restore is a composer line the board handed back unsent (the agent
@@ -119,7 +125,7 @@ func (o webOutcome) err() error {
 		return &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: o.restore}
 	case o.needs == webapi.ActionNeedsConfirm:
 		// the same word the surfaces' confirmations answer with
-		return &WebError{Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(o.needs), Text: o.question, Confirm: o.confirm}
+		return &WebError{Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(o.needs), Text: o.question, Confirm: o.confirm, Option: o.option}
 	case o.needs != "":
 		return &WebError{Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(o.needs), Text: o.question, Draft: o.draft}
 	case o.newCard != "":
@@ -337,7 +343,7 @@ func (t *webIntent) answerDialogs(m *Shell, before int) tea.Cmd {
 			t.waiting = append(t.waiting, d)
 			continue
 		case res.needs != "":
-			t.out.needs, t.out.question, t.out.draft, t.out.confirm = res.needs, res.question, res.draft, res.token
+			t.out.needs, t.out.question, t.out.draft, t.out.confirm, t.out.option = res.needs, res.question, res.draft, res.token, res.option
 		case res.newCard != "":
 			t.out.newCard = res.newCard
 		case res.refused != "":

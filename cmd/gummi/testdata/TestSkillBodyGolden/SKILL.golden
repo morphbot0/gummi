@@ -77,6 +77,7 @@ gummi resume <id|ref> [decision]
 gummi verify <id|ref>
 
 gummi merge <id|ref> -m <message|->
+    --keep-branch         keep the card's worktree and branch after it closes (default: both are removed, except a branch that is the only copy of its work)
     -m, --message string  landing commit message (required for a squash; - reads from stdin)
     --no-squash           land as a merge commit keeping the branch's commits (default: one squash commit); -m is optional and git's merge message is used without it
 
@@ -97,8 +98,10 @@ gummi rewrite <id|ref> --plan <file|->
     --sign          sign the card's commits: every commit from the first unsigned one up is made again, signed; alone it needs no --plan. Refused where commits are not signed
 
 gummi handoff <id|ref>
+    --keep-branch  keep the card's worktree and branch after it closes (default: both are removed, except a branch that is the only copy of its work)
 
 gummi clean <id|ref>
+    --all  clean every closed card in the workspace in one pass, instead of naming one
 
 gummi status <id|ref>
     --json   emit machine-readable JSON instead of the text summary

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -37,7 +38,7 @@ func runMerge(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
@@ -47,15 +48,27 @@ func runMerge(fl cliFlags, args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
-		return d.Merge(ctx, f.ID, message, method)
+		out, err := d.Merge(ctx, f.ID, message, method)
+		return closeOut(ctx, d, store, pool, f.ID, fl.Bool("keep-branch"), out, err)
 	})
 }
 
-// runClean implements `gummi clean <id|ref>`: the headless cleanup verb. It
-// removes a landed card's worktree and branch (keeping the card record),
-// streaming a `cleaned` NDJSON event and exiting 0 on success. It refuses
-// anything that has not actually landed, or that carries tracked-dirty rework.
-func runClean(args []string) error {
+// runClean implements `gummi clean <id|ref>` and `gummi clean --all`: the
+// headless cleanup verb. A single id removes that card's worktree and
+// branch (keeping the card record), streaming a `cleaned` NDJSON event
+// and exiting 0 on success; it takes a card whose branch landed or that
+// is closed, keeps a closed card's branch when it is the only copy of its
+// work, and refuses anything carrying uncommitted work. --all is the
+// headless counterpart of the TUI's close-out sweep: every closed card
+// that is not a goal's own is cleaned the same way, one `cleaned` (or
+// `error`) event per card, in one pass.
+func runClean(fl cliFlags, args []string) error {
+	if fl.Bool("all") {
+		if len(args) > 0 {
+			return fmt.Errorf("clean --all takes no id")
+		}
+		return runCleanAll()
+	}
 	idArg, err := oneID("clean", args)
 	if err != nil {
 		return err
@@ -75,18 +88,58 @@ func runClean(args []string) error {
 	})
 }
 
+// runCleanAll implements `gummi clean --all`. It walks every card in the
+// workspace and, for each one that could only succeed (worktree.Pool.Cleanable),
+// cleans it under its own per-card lock exactly as a single
+// `gummi clean <id>` would. Anything else is left alone rather
+// than reported as a refusal: the set this selects is, barring a race,
+// exactly the set that succeeds, so there is nothing to hold back and
+// explain. A card that still fails (a race, a locked card someone else is
+// driving) is skipped and counted, and the run exits non-zero if any did.
+func runCleanAll() error {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
+		feats, err := store.ListFeatures(ctx)
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		var cleaned, failed int
+		for _, f := range feats {
+			if !pool.Cleanable(ctx, &f) {
+				continue
+			}
+			release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+			if err != nil {
+				failed++
+				continue
+			}
+			state.ReapOrphanAgent(ws, f.ID)
+			out, _ := d.Clean(ctx, f.ID)
+			release()
+			if out.Status == driver.StatusVerified {
+				cleaned++
+			} else {
+				failed++
+			}
+		}
+		if failed > 0 {
+			return driver.Outcome{Status: driver.StatusError}, fmt.Errorf("clean --all: cleaned %d, failed %d", cleaned, failed)
+		}
+		return driver.Outcome{Status: driver.StatusVerified}, nil
+	})
+}
+
 // runHandOff implements `gummi handoff <id|ref>`: the headless counterpart of
 // the TUI's h key. It ends a verified card WITHOUT landing it — the branch
 // stays exactly where it is, the card moves to done, and the caller owns
 // whatever happens to the branch next. It refuses anything that is not at a
 // verified branch, and every gate floor that holds a landing holds a hand-off
 // too: waiving the merge never waived the quality bar.
-func runHandOff(args []string) error {
+func runHandOff(fl cliFlags, args []string) error {
 	idArg, err := oneID("handoff", args)
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
@@ -96,8 +149,32 @@ func runHandOff(args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
-		return d.HandOff(ctx, f.ID)
+		out, err := d.HandOff(ctx, f.ID)
+		return closeOut(ctx, d, store, pool, f.ID, fl.Bool("keep-branch"), out, err)
 	})
+}
+
+// closeOut is what closing a card does next: it takes the card's worktree
+// and branch with it. A branch is a piece of work at a point in time, and
+// a closed card has no further use for one, so keeping it is the choice a
+// person makes (--keep-branch) rather than what happens when they make
+// none. A card whose branch is the only copy of its work — handed off,
+// never landed, never pushed — is left as it stands.
+//
+// The closing is what the command was asked for and its outcome is what
+// is returned: a card closeOut leaves standing (uncommitted work, a stack
+// other branches fork from, a goal's own sweep) is still closed, and
+// `gummi clean` is there for it afterwards.
+func closeOut(ctx context.Context, d *driver.Driver, store *state.Store, pool *worktree.Pool, id domain.FeatureID, keep bool, out driver.Outcome, err error) (driver.Outcome, error) {
+	if err != nil || out.Status != driver.StatusVerified || keep {
+		return out, err
+	}
+	f, ferr := store.GetFeature(ctx, id)
+	if ferr != nil || !pool.GoesWithClose(ctx, &f) {
+		return out, err
+	}
+	_, _ = d.Clean(ctx, id)
+	return out, err
 }
 
 // withLandingWorkspace wires the workspace, store, worktree manager, and a

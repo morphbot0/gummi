@@ -91,15 +91,17 @@ var squashCmd = &cobra.Command{
 // handoffCmd implements `gummi handoff <id|ref>`.
 var handoffCmd = &cobra.Command{
 	Use:   "handoff <id|ref>",
-	Short: "Close a verified card and keep its branch — nothing lands",
-	RunE:  func(_ *cobra.Command, args []string) error { return runHandOff(args) },
+	Short: "Close a verified card without landing it — its branch is kept while it is the only copy of the work",
+	RunE:  func(cmd *cobra.Command, args []string) error { return runHandOff(cliFlags{cmd.Flags()}, args) },
 }
 
-// cleanCmd implements `gummi clean <id|ref>`.
+// cleanCmd implements `gummi clean <id|ref>` and `gummi clean --all`.
 var cleanCmd = &cobra.Command{
-	Use:   "clean <id|ref>",
-	Short: "Remove a landed card's worktree and branch",
-	RunE:  func(_ *cobra.Command, args []string) error { return runClean(args) },
+	Use:   "clean <id|ref> | --all",
+	Short: "Remove a landed card's worktree and branch, or every one at once",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runClean(cmdFlags(cmd), args)
+	},
 }
 
 // commitCmd implements `gummi commit <id|ref> -m <message|->`.
@@ -487,8 +489,10 @@ func init() {
 	bindGoalFlags(goalCmd.Flags())
 	bindResumeFlags(resumeCmd.Flags())
 	bindMergeFlags(mergeCmd.Flags())
+	bindHandoffFlags(handoffCmd.Flags())
 	bindSquashFlags(squashCmd.Flags())
 	bindCommitFlags(commitCmd.Flags())
+	bindCleanFlags(cleanCmd.Flags())
 	jsonFlag(logCmd.Flags(), "emit the commits as JSON (the shape the board's web page reads)")
 	bindRewriteFlags(rewriteCmd.Flags())
 	bindStatusFlags(statusCmd.Flags())
@@ -607,9 +611,22 @@ func bindResumeFlags(fs *pflag.FlagSet) {
 // them — and print them in the goals reference instead.
 var goalResumeFlagNames = []string{"goal-note", "reverse", "wrap-up", "runs", "minutes", "retake"}
 
+func bindCleanFlags(fs *pflag.FlagSet) {
+	fs.Bool("all", false, "clean every closed card in the workspace in one pass, instead of naming one")
+}
+
+// keepBranchFlag is the one opt-out the closing verbs share: a closed
+// card's worktree and branch go with it unless this is given.
+func keepBranchFlag(fs *pflag.FlagSet) {
+	fs.Bool("keep-branch", false, "keep the card's worktree and branch after it closes (default: both are removed, except a branch that is the only copy of its work)")
+}
+
+func bindHandoffFlags(fs *pflag.FlagSet) { keepBranchFlag(fs) }
+
 func bindMergeFlags(fs *pflag.FlagSet) {
 	fs.StringP("message", "m", "", "landing commit message (required for a squash; - reads from stdin)")
 	fs.Bool("no-squash", false, "land as a merge commit keeping the branch's commits (default: one squash commit); -m is optional and git's merge message is used without it")
+	keepBranchFlag(fs)
 }
 
 func bindCommitFlags(fs *pflag.FlagSet) {

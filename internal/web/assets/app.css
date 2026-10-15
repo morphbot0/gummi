@@ -1209,6 +1209,8 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .plan .force .cmd button{margin-left:auto;color:var(--accent);font-family:var(--ui);font-size:12px;flex-shrink:0}
 .plan .btn[disabled]{opacity:.5;cursor:default}
 .land-method{align-self:flex-start;max-width:100%;font-size:13px;color:var(--fg2)}
+.field-group{display:flex;flex-direction:column;gap:8px}
+.keep-branch{display:flex;align-items:center;gap:6px;align-self:flex-start;font-size:13px;color:var(--fg2)}
 
 /* ---- the conversation's shape: the person's bubbles, the agent's replies ---- */
 .msg.mine{display:flex;flex-direction:column;align-items:flex-end;gap:3px}

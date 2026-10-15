@@ -238,16 +238,26 @@ Stage semantics:
     open `%%` threads, open diff annotations, the omission gate and the
     document floor all still hold it. Landing it after all stays
     available for as long as the branch exists, and retracts the stamp.
-    Cleanup refuses a handed-off card: `c` would delete the branch that
-    was kept on purpose.
+    A hand-off keeps the branch only where it is the only copy of its
+    work: one a remote already holds goes with the card, unless the person
+    keeps it at the confirm.
 
   Because of the last two, **Done means the card is closed, not that
   anything merged.** The board badges which ending a card took (`landed`
   / `handed off` / `dropped`), and `status --json` names it in one
   `ending` field beside `branch_state` — "how did it close" and "is the
-  work on the trunk" being two different questions. gummi then offers
-  worktree cleanup on a landed card — per card with `c`, or for the whole
-  board in the close-out sweep. The card's artifact stays where it is at
+  work on the trunk" being two different questions. **A closed card takes
+  its worktree and branch with it.** A branch is a piece of work at a point
+  in time and a closed card has no further use for one, so keeping it is a
+  choice made at the closing (the landing dialog's field, the hand-off
+  confirm's option, `--keep-branch`), not the default. One rule decides
+  whether a closed card's branch may go, `worktree.Manager.Spent`: it
+  landed, a landing was recorded for it (which survives the base being
+  reset or rebased past it), a remote has it, or it has no commits of its
+  own. A branch that is the only copy of its work stays. What a closing
+  leaves standing — uncommitted work, a stacked card, a goal's own cards —
+  cleans up per card with `c` or `gummi clean`, or for the whole board in
+  the close-out sweep and `gummi clean --all`. The card's artifact stays where it is at
   its workspace home: "spec archival" was described here for a long time
   and never built, and the artifact of a finished card is the thing a
   follow-up reads, so there is nothing archival to do to it.

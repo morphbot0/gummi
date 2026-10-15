@@ -2257,11 +2257,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeMsg{text: sanitize(msg.warn), isErr: true}
 		}
 		f, thenDone := msg.f, msg.thenDone
-		d := newCommitMsgDialog(f, func(message string, method domain.LandMethod) tea.Cmd {
+		var d *commitMsgDialog
+		d = newCommitMsgDialog(f, func(message string, method domain.LandMethod) tea.Cmd {
 			if f.IsGoal() {
 				return m.landGoal(f, message)
 			}
-			return m.landFeature(f, message, method, thenDone)
+			return m.landFeature(f, message, method, thenDone, d.keepBranch)
 		}, func(dctx context.Context, feature domain.Feature, fresh bool) (string, error) {
 			// best-effort: a nil engine or any drafting failure yields an
 			// empty draft, never a hard error or a delayed dialog; dctx
@@ -2279,6 +2280,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.engine.LandingMessage(dctx, feature, fresh)
 		})
 		d.baseBranch = m.baseBranch(f) // see openSquashDialog's own wiring
+		// the cards a closing takes the worktree and branch of: the ones
+		// this landing closes (or finds closed), outside a stack or a goal
+		d.closes = (thenDone || f.Stage == domain.StageDone) && !f.IsGoal() && !f.InGoal() && !f.Stacked() && !f.MainCheckout
 		m.Overlay.Push(d)
 		// start the draft pass off the render loop; the dialog is already
 		// open and editable, and the draft fills only while unmodified.
@@ -2495,15 +2499,19 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		f := msg.f
-		m.Overlay.Push(&confirmDialog{
+		d := &confirmDialog{
 			card:         f.ID,
 			id:           "confirm-handoff",
 			cancelLabel:  "Cancel",
 			confirmLabel: "Hand off",
 			question:     "hand off " + f.Name() + "?",
-			detail:       handOffDetail(f, m.baseBranch(f), msg.dependents, msg.drift),
-			onConfirm:    func() tea.Cmd { return m.handOffFeature(f) },
-		})
+			detail:       handOffDetail(f, m.baseBranch(f), msg.dependents, msg.drift, msg.goes),
+		}
+		if msg.goes {
+			d.option = keepBranchOption
+		}
+		d.onConfirm = func() tea.Cmd { return m.handOffFeature(f, d.optionOn) }
+		m.Overlay.Push(d)
 		return m, nil
 
 	case mergeThenDoneMsg:
@@ -3286,7 +3294,20 @@ func (m *Shell) boardSurfacesLive() bool { return m.tab == TabBoard }
 // anything — the composer keeping every printable key on the card page
 // is a deliberate design decision, not an oversight this notice should
 // paper over.
+// cleanUpDetail is what the clean-up confirm says it will remove.
+func cleanUpDetail(r featureRow) string {
+	if r.Landed {
+		return "removes the worktree (incl. untracked files) and merged branch — keeps the record"
+	}
+	return "removes the worktree, and the branch unless it is the only copy of its work — keeps the record"
+}
+
 const cleanUpNudge = "clean up removes the worktree and branch"
+
+// keepBranchOption names the choice a closing offers beside its yes: a
+// closed card's worktree and branch go with it unless the person says to
+// keep them.
+const keepBranchOption = "keep the branch and worktree"
 
 // gotoTab switches to t and does the arrival work every route into a tab
 // shares, so alt+N and the tab cycle cannot drift apart on it.
@@ -3807,15 +3828,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				m.notice = *n
 				return nil
 			}
-			if !r.Landed {
-				// A handed-off card gets the honest sentence rather than
-				// "hasn't landed yet", which reads as a wait: nothing is
-				// coming, the branch was kept on purpose, and cleaning up
-				// would delete the one thing the reader chose to keep.
-				if r.F.HandedOff() {
-					m.notice = noticeMsg{text: r.F.Name() + " was handed off, not landed — cleaning up would delete " + r.F.BranchName(), isErr: true}
-					return nil
-				}
+			if !r.cleanable() {
 				m.notice = noticeMsg{text: r.F.Name() + " hasn't landed on " + r.baseBranch() + " yet", isErr: true}
 				return nil
 			}
@@ -3826,7 +3839,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				cancelLabel:  "Keep",
 				confirmLabel: "Clean up",
 				question:     "clean up " + f.Name() + "?",
-				detail:       "removes the worktree (incl. untracked files) and merged branch — keeps the record",
+				detail:       cleanUpDetail(r),
 				onConfirm:    func() tea.Cmd { return m.cleanupLanded(f) },
 			})
 		}

@@ -27,6 +27,9 @@ test.describe('a verified card that may keep its commits', () => {
   test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a farewell helper'); } } });
 
   test('lands as a merge commit when the merge-commit method is chosen', async ({ pairedPage: page, server, workspace, api }, info) => {
+    // the tip is read first: a landing takes the branch with it
+    const branch = (await api('GET', `/api/cards/${id}`)).json.branch as string;
+    const tip = (await workspace.git('rev-parse', branch)).trim();
     await open(page, server, id, phone(info));
     await menu(page, 'merge');
     // the method select sits above the message, squash first and selected
@@ -47,8 +50,6 @@ test.describe('a verified card that may keep its commits', () => {
     // main's tip is a merge commit: two parents, the second the branch tip
     const parents = (await workspace.git('log', '-1', '--format=%P', 'main')).trim().split(/\s+/);
     expect(parents).toHaveLength(2);
-    const branch = (await api('GET', `/api/cards/${id}`)).json.branch as string;
-    const tip = (await workspace.git('rev-parse', branch)).trim();
     expect(parents[1]).toBe(tip);
   });
 });

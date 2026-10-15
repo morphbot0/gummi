@@ -692,11 +692,15 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string,
 	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 
-// Clean removes a landed card's worktree and branch — the headless
-// counterpart of the TUI's c key. It keeps the card record (it stays as a
-// done entry) and never removes anything that has not actually landed or
-// that carries tracked-dirty rework. On success it emits a `cleaned` event
-// and returns StatusVerified.
+// Clean removes a card's worktree and branch once the card has no more use
+// for them — the headless counterpart of the TUI's c key. It keeps the
+// card record (it stays as a done entry). Two cards qualify: one whose
+// branch landed, and one that is closed. A closed card's branch goes with
+// it unless it is the only copy of its work (worktree.Manager.Spent): a
+// card handed off and never landed or pushed loses its worktree and keeps
+// its branch, and the `cleaned` event says so. Nothing with uncommitted
+// work is ever removed. On success it emits a `cleaned` event and returns
+// StatusVerified.
 func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 	f, err := d.store.GetFeature(ctx, id)
 	if err != nil {
@@ -707,21 +711,55 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 		return d.fail(ctx, string(id), err)
 	}
 
-	landed, err := wt.Landed(ctx, &f)
+	closed := f.Stage == domain.StageDone
+	hasBranch, err := wt.BranchExists(ctx, &f)
 	if err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	if !landed {
-		if f.HandedOff() {
-			return d.fail(ctx, string(id),
-				fmt.Errorf("%s was handed off, not landed — cleaning up would delete %s", id, f.BranchName()))
-		}
+	// A closed card whose branch already went (its closing took it) has
+	// nothing to ask git about: what is left to remove is the card's files.
+	var landed bool
+	if hasBranch || !closed {
+		landed, err = wt.Landed(ctx, &f)
+	}
+	// A base rewritten past the card's fork makes Landed decline to answer.
+	// For an open card that is a refusal; a closed one is read by Spent,
+	// which does not need the base to still carry the landing.
+	var drift *worktree.ForkDriftError
+	if err != nil && (!closed || !errors.As(err, &drift)) {
+		return d.fail(ctx, string(id), err)
+	}
+	if !landed && !closed {
 		return d.fail(ctx, string(id), fmt.Errorf("%s has not landed on %s — nothing to clean", id, wt.BaseBranch(ctx)))
 	}
-	if dirty, err := wt.TrackedDirty(ctx, &f); err != nil {
+	spent := landed
+	if !landed {
+		if spent, err = wt.Spent(ctx, &f); err != nil {
+			return d.fail(ctx, string(id), err)
+		}
+	}
+	// A closing already takes the worktree with it, so a clean that finds
+	// none has only the branch left to look at.
+	hasWT, err := wt.Exists(ctx, &f)
+	if err != nil {
 		return d.fail(ctx, string(id), err)
-	} else if dirty {
-		return d.fail(ctx, string(id), fmt.Errorf("%s worktree has tracked-dirty rework; resolve or commit it before cleaning", id))
+	}
+	if hasWT {
+		if dirty, err := wt.TrackedDirty(ctx, &f); err != nil {
+			return d.fail(ctx, string(id), err)
+		} else if dirty {
+			return d.fail(ctx, string(id), fmt.Errorf("%s worktree has tracked-dirty rework; resolve or commit it before cleaning", id))
+		}
+		// The branch stays because nothing else holds its work, and the same
+		// goes for a file the worktree holds that no commit does: untracked
+		// counts here, where on a landed card it is only build output.
+		if !spent {
+			if dirty, err := wt.Dirty(ctx, &f); err != nil {
+				return d.fail(ctx, string(id), err)
+			} else if dirty {
+				return d.fail(ctx, string(id), fmt.Errorf("%s was neither landed nor pushed and its worktree holds uncommitted work — commit or discard it before cleaning", id))
+			}
+		}
 	}
 	// A goal's cards resolve to a manager rooted at the goal's tree, so
 	// they come out before it does: after this remove their checkouts are
@@ -733,8 +771,10 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	if f.IsGoal() {
 		swept, _ = d.eng.CleanGoalCards(ctx, id)
 	}
-	if err := wt.Remove(ctx, &f, true); err != nil {
-		return d.fail(ctx, string(id), err)
+	if hasWT {
+		if err := wt.Remove(ctx, &f, true); err != nil {
+			return d.fail(ctx, string(id), err)
+		}
 	}
 	// A research card runs in a scratch tree rather than a branch worktree
 	// (a research branch never receives a commit); absent is success, so
@@ -747,9 +787,17 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	// clean still succeeds — the card is cleaned, and the branch surviving
 	// is the intended outcome, not a partial failure — and the `cleaned`
 	// event says the branch was kept so a script can tell the two apart.
-	keptBranch := f.Adopted()
-	if !keptBranch {
-		if err := wt.DeleteLandedBranch(ctx, &f); err != nil {
+	//
+	// A closed card's branch that is the only copy of its work is left
+	// standing for the same reason a person would want it left: deleting
+	// it is the one step here that could lose something.
+	keptBranch := f.Adopted() || !spent
+	if !keptBranch && hasBranch {
+		del := wt.DeleteLandedBranch
+		if !landed {
+			del = wt.DeleteClosedBranch
+		}
+		if err := del(ctx, &f); err != nil {
 			return d.fail(ctx, string(id), err)
 		}
 	}
