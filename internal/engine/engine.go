@@ -31,6 +31,7 @@ import (
 	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/sandbox"
+	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/substrate"
@@ -238,6 +239,9 @@ type Config struct {
 	// Instructions are absolute paths to extra instruction files appended
 	// to the workspace environment card, in user-then-workspace order.
 	Instructions []string
+	// Curator is the skill curator's configuration (DESIGN §23.4); nil
+	// means no curator runs. The pack itself is delivered either way.
+	Curator *config.Curator
 }
 
 // Engine orchestrates all live sessions and the autonomous runs.
@@ -405,6 +409,12 @@ type Engine struct {
 	// empty is not recomputed on every session.
 	repoCardMu sync.Mutex
 	repoCards  map[string]string
+
+	// pack is the workspace skill pack (skillpack.go); curator holds the
+	// curator's run state (curator.go).
+	packOnce sync.Once
+	pack     *skillpack.Pack
+	curator  curatorState
 	// repoInstructions caches the managed repository's own instruction
 	// card (AGENTS.md/CLAUDE.md, quoted) per repository root, under the
 	// same mutex and with the same lifetime as repoCards.
@@ -1864,6 +1874,8 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		// Where a backend keeps its per-card home: never named to the
 		// session, so following the hint above cannot reach it.
 		AgentHomeDir: e.agentHomeDirFor(f.ID),
+		// The workspace skill pack at its published revision (§23.2).
+		SkillDirs: e.skillDirsFor(ctx, ag, &f),
 	})
 	if specErr != nil {
 		mcpTeardown()

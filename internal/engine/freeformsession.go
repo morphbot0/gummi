@@ -412,6 +412,8 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// there), so the session's home — and the conversations it keeps
 		// there — survive a restart, which ResumeID below depends on.
 		AgentHomeDir: e.agentHomeDirFor(ff.id),
+		// The workspace skill pack at its published revision (§23.2).
+		SkillDirs: e.skillDirsFor(ctx, ag, &f),
 		// No ArtifactPath: there is no document.
 		//
 		// ResumePath and ResumeID are how a freeform conversation survives

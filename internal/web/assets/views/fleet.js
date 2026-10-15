@@ -69,7 +69,7 @@ registerView('fleet', {
       const r = v.rep
       if (!r) return
       const lanes = r.lanes || []
-      if (!lanes.length && !r.credits && !r.allTimeCards) {
+      if (!lanes.length && !r.credits && !r.allTimeCards && !r.curator) {
         return out.append(h('div', { class: 'empty', testid: 'fleet-empty' }, h('b', null, 'Nothing has run on this board yet'), 'Cards show up here once a stage has run.'))
       }
       out.append(headline(r), clockBar(r), h('div', { class: 'fsplit' }, byStage(r), byModel(r)), timeline(r))
@@ -81,16 +81,22 @@ registerView('fleet', {
     // ---- headline ----
     function headline (r) {
       const reworkPct = r.credits ? Math.round(r.rework / r.credits * 100) : 0
+      // the curator's spend is the workspace's, never a card's: in the
+      // figure, and named beside the cards that spent the rest
+      const cur = r.curator && r.curator.credits ? r.curator.credits : 0
+      const curAll = r.curator && r.curator.allTimeCredits ? r.curator.allTimeCredits : 0
       return h('div', { class: 'ftiles', testid: 'fleet-headline' },
         h('div', { class: 'ftile hero', testid: 'fleet-spent' },
           h('div', { class: 'k' }, 'Spent in this window'),
-          h('div', { class: 'v' }, cr(r.credits)),
+          h('div', { class: 'v' }, cr(r.credits + cur)),
           r.estimated > 0 ? h('div', { class: 's est', testid: 'fleet-estimated' }, `~${cr(r.estimated)} estimated — not yet settled by the provider`) : h('div', { class: 's' }, plural(lanesWithSpend(r), 'card') + ' spent'),
+          cur ? h('div', { class: 's', testid: 'fleet-curator-spent' }, `${cr(cur)} by the curator`) : null,
           tokenTotal(r.tokens) ? h('div', { class: 's', testid: 'fleet-tokens' }, tokenText(r.tokens)) : null),
         h('div', { class: 'ftile', testid: 'fleet-alltime' },
           h('div', { class: 'k' }, 'All time'),
-          h('div', { class: 'v' }, cr(r.allTimeCredits)),
-          h('div', { class: 's' }, plural(r.allTimeCards || 0, 'card'))),
+          h('div', { class: 'v' }, cr((r.allTimeCredits || 0) + curAll)),
+          h('div', { class: 's' }, plural(r.allTimeCards || 0, 'card')),
+          curAll ? h('div', { class: 's', testid: 'fleet-curator-alltime' }, `${cr(curAll)} by the curator`) : null),
         h('div', { class: 'ftile', testid: 'fleet-rework' },
           h('div', { class: 'k' }, 'Rework'),
           h('div', { class: 'v' }, cr(r.rework), h('small', null, ` · ${reworkPct}%`)),
@@ -169,7 +175,7 @@ registerView('fleet', {
         // a window longer than what ran in it would squeeze every mark
         // into its right edge: the track starts at the first activity
         // instead, with the same air, and never spans under an hour
-        const first = firstMark(lanes)
+        const first = firstMark(r.curator ? lanes.concat([r.curator]) : lanes)
         if (first && first > from) {
           const start = Math.max(from, Math.min(first - Math.max((to - first) * 0.02, 60e3), to - 3600e3))
           zoomed = start > from
@@ -180,6 +186,8 @@ registerView('fleet', {
       const x = (t) => Math.max(0, Math.min(100, (+new Date(t) - from) / span * 100))
       const flags = { stages: new Set(), wait: false, gate: false, endings: new Set(), running: false }
       const rows = lanes.map(l => lane(l, x, to, flags))
+      // the curator is not a card: its own row above theirs, nothing to open
+      if (r.curator && (r.curator.blocks || []).length) rows.unshift(curatorLane(r.curator, x, to))
       if (!rows.length) {
         return h('section', { class: 'fsec', testid: 'fleet-timeline' }, h('h3', null, 'Timeline'), h('div', { class: 'vnote' }, 'Nothing ran in this window.'))
       }
@@ -241,6 +249,19 @@ registerView('fleet', {
           h('span', { class: 't', title: l.title }, l.title),
           h('span', { class: 'c', title: [tokenTotal(l.tokens) ? tokenText(l.tokens) : '', l.note || ''].filter(Boolean).join(' · ') || null }, cr(l.credits)),
           l.openWaitFrom ? h('span', { class: 'w' }, `on you since ${when(l.openWaitFrom)}`) : l.running ? h('span', { class: 'r' }, 'running') : null),
+        h('div', { class: 'track' }, marks))
+    }
+
+    function curatorLane (c, x, to) {
+      const marks = (c.blocks || []).map(b => span(['blk', 'cur', !b.to && 'open'], x(b.from), x(b.to || to),
+        `curator run\n${when(b.from)} – ${b.to ? when(b.to) : 'running'} · ${dur((b.to ? +new Date(b.to) : to) - +new Date(b.from))}`))
+      const summary = [`curator, ${plural(c.runs || 0, 'run')}`, cr(c.credits), c.running ? 'running' : null].filter(Boolean).join(', ')
+      return h('div', { class: ['lane', c.running && 'running'], testid: 'fleet-lane-curator', tabindex: '0', role: 'group', 'aria-label': summary },
+        h('div', { class: 'lab' },
+          h('span', { class: 'id' }, 'curator'),
+          h('span', { class: 't' }, plural(c.runs || 0, 'run')),
+          h('span', { class: 'c', title: `${cr(c.allTimeCredits)} all time` }, cr(c.credits)),
+          c.running ? h('span', { class: 'r' }, 'running') : null),
         h('div', { class: 'track' }, marks))
     }
 

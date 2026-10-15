@@ -339,6 +339,57 @@ var scheduleRmCmd = &cobra.Command{
 	RunE:  func(_ *cobra.Command, args []string) error { return runScheduleRm(args) },
 }
 
+// curatorCmd groups the workspace skill pack and its curator (DESIGN
+// §23): what the pack holds, what each curator run did, and the person's
+// after-the-fact controls — revert and pin. Only `run --wait` starts a
+// session from this process, and only while no board is up.
+var curatorCmd = &cobra.Command{
+	Use:   "curator",
+	Short: "The workspace skill pack and the curator that writes it",
+}
+
+var curatorStatusCmd = &cobra.Command{
+	Use:   "status [--json]",
+	Short: "Show the curator's config, budget and next run, and the pack's skills",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runCuratorStatus(cmdFlags(cmd), args)
+	},
+}
+
+var curatorLogCmd = &cobra.Command{
+	Use:   "log [--json]",
+	Short: "List the curator's runs: what each wrote, archived and cost",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runCuratorLog(cmdFlags(cmd), args)
+	},
+}
+
+var curatorRunCmd = &cobra.Command{
+	Use:   "run [--wait]",
+	Short: "Ask the running board to run the curator once, or run it here with --wait",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runCuratorRun(cmdFlags(cmd), args)
+	},
+}
+
+var curatorRevertCmd = &cobra.Command{
+	Use:   "revert <run-id|commit>",
+	Short: "Undo one curator run, or one pack commit, and publish the result",
+	RunE:  func(_ *cobra.Command, args []string) error { return runCuratorRevert(args) },
+}
+
+var curatorPinCmd = &cobra.Command{
+	Use:   "pin <skill>",
+	Short: "Hold a skill where it is: the curator and the timers leave it alone",
+	RunE:  func(_ *cobra.Command, args []string) error { return runCuratorPin(args, true) },
+}
+
+var curatorUnpinCmd = &cobra.Command{
+	Use:   "unpin <skill>",
+	Short: "Give a pinned curator skill back to the curator",
+	RunE:  func(_ *cobra.Command, args []string) error { return runCuratorPin(args, false) },
+}
+
 // prCmd groups the outbound-PR operations (link/unlink/status).
 var prCmd = &cobra.Command{
 	Use:   "pr",
@@ -508,6 +559,9 @@ func init() {
 	bindScheduleDisableFlags(scheduleDisableCmd.Flags())
 	bindScheduleRunNowFlags(scheduleRunNowCmd.Flags())
 	bindScheduleListFlags(scheduleListCmd.Flags())
+	jsonFlag(curatorStatusCmd.Flags(), "emit the status as JSON")
+	jsonFlag(curatorLogCmd.Flags(), "emit the runs as JSON")
+	curatorRunCmd.Flags().Bool("wait", false, "run the curator in this process and wait for it (only while no board is up)")
 	bindPRLinkFlags(prLinkCmd.Flags())
 	bindPRStatusFlags(prStatusCmd.Flags())
 	bindPRCommentsFlags(prCommentsCmd.Flags())
@@ -524,6 +578,7 @@ func init() {
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
 	stackCmd.AddCommand(stackNewCmd, stackAddCmd, stackRmCmd, stackMvCmd, stackListCmd, stackRestackCmd)
 	scheduleCmd.AddCommand(scheduleListCmd, scheduleAddCmd, scheduleEnableCmd, scheduleDisableCmd, scheduleRunNowCmd, scheduleRmCmd)
+	curatorCmd.AddCommand(curatorStatusCmd, curatorLogCmd, curatorRunCmd, curatorRevertCmd, curatorPinCmd, curatorUnpinCmd)
 	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd, prCreateCmd, prUpdateCmd, prReadyCmd, prDraftCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 	webCmd.AddCommand(webPairCmd, webDevicesCmd, webUnpairCmd)

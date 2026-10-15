@@ -63,7 +63,7 @@ func (o *Opencode) Name() string { return "opencode" }
 // reports per-step token/cost usage on its event bus, aborts a turn on
 // request, and reaches gummi's tools via its MCP child.
 func (o *Opencode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, Images: true, Compact: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, Images: true, Compact: true, SkillDirs: true}
 }
 
 // CreditRate implements Agent. opencode reports its own USD cost per step
@@ -103,7 +103,7 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: locating own executable: %w", err)
 	}
-	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, opts.ExtraReadAllows, opts.ReadOnly, opts.ScratchDir, opts.Permission)
+	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, append(slices.Clone(opts.ExtraReadAllows), opts.SkillDirs...), opts.ReadOnly, opts.ScratchDir, opts.Permission, opts.SkillDirs...)
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
 	}

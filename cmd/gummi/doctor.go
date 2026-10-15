@@ -20,6 +20,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/sandbox"
+	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/substrate"
 	"github.com/morphis/gummi/internal/ui"
@@ -253,6 +254,11 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	// consult — whether a card's consult runs read-only on the backend
 	// that answers it, or can write to the checkout.
 	checks = append(checks, consultChecks(def, profiles)...)
+
+	// skills — the workspace skill pack, its curator, and which backends'
+	// sessions run without it (DESIGN §23.2). Read-only: doctor never
+	// makes the pack.
+	checks = append(checks, skillPackChecks(context.Background(), wsCfg, ws, ordered, rolesByBackend)...)
 
 	// 4. profile
 	bi := backendInfoFor(def)
@@ -640,6 +646,122 @@ func consultChecks(def string, profiles config.Profiles) []doctorCheck {
 		})
 	}
 	return checks
+}
+
+// skillPackChecks reports the workspace skill pack (DESIGN §23): whether it
+// exists and what sessions read from it, whether a curator is configured
+// and can run, and — once, here rather than on every session — each
+// backend the profiles route to that takes no skill directory, whose
+// sessions run without the pack. It reads the pack and never makes it.
+func skillPackChecks(ctx context.Context, cfg config.Config, ws state.Workspace, backends []string, rolesByBackend map[string][]string) []doctorCheck {
+	var checks []doctorCheck
+	pack := skillpack.New(ws.GummiDir(), ws.StateDir())
+	inUse := false
+	switch rev := pack.Published(ctx); {
+	case !pack.Exists():
+		checks = append(checks, doctorCheck{
+			Name: "skills:pack", Status: statusOK,
+			Detail: "no skill pack yet — it is made at " + pack.Dir + " on the curator's first run",
+		})
+	case rev == "":
+		checks = append(checks, doctorCheck{
+			Name: "skills:pack", Status: statusWarn,
+			Detail:      "the skill pack at " + pack.Dir + " has no published revision, so no session gets it",
+			Remediation: "run `gummi curator run`, or point " + skillpack.PublishedRef + " at the pack's tip",
+		})
+	default:
+		skills, err := pack.Skills(ctx, rev)
+		if err != nil {
+			checks = append(checks, doctorCheck{
+				Name: "skills:pack", Status: statusWarn,
+				Detail:      "the skill pack's published revision cannot be read, so no session gets it: " + err.Error(),
+				Remediation: "inspect the repository at " + pack.Dir,
+			})
+			break
+		}
+		inUse = len(skills) > 0
+		checks = append(checks, doctorCheck{
+			Name: "skills:pack", Status: statusOK,
+			Detail: fmt.Sprintf("skill pack at %s: %d skill%s published at %s", pack.Dir, len(skills), plural(len(skills)), shortRev(rev)),
+		})
+	}
+
+	if c := cfg.Curator; c == nil {
+		checks = append(checks, doctorCheck{
+			Name: "skills:curator", Status: statusOK,
+			Detail: "no curator configured — nothing distils sessions into the pack and nothing spends on it",
+		})
+	} else {
+		inUse = true
+		checks = append(checks, curatorCheck(c))
+	}
+
+	// Sessions on a backend that cannot take a skill directory run without
+	// the pack. Only worth a warning once there is a pack to miss.
+	for _, name := range backends {
+		caps, ok := agent.CapabilitiesFor(name)
+		if !ok || caps.SkillDirs {
+			continue
+		}
+		detail := name + " takes no skill directory, so its sessions run without the skill pack" + roleAttribution(rolesByBackend[name])
+		chk := doctorCheck{Name: "skills:" + name, Status: statusOK, Detail: detail}
+		if inUse {
+			chk.Status = statusWarn
+			chk.Remediation = "route those roles to claude, copilot, opencode or antigravity in .gummi/profiles.yaml for them to get the pack"
+		}
+		checks = append(checks, chk)
+	}
+	return checks
+}
+
+// curatorCheck reads a configured curator back: what it runs on, what it
+// may spend, when it runs, and whether its backend can reach the tools it
+// curates through.
+func curatorCheck(c *config.Curator) doctorCheck {
+	model := cmp.Or(c.Model, "the backend's default model")
+	monthly := "no monthly cap"
+	if c.Monthly > 0 {
+		monthly = fmt.Sprintf("%g credits a month", c.Monthly)
+	}
+	sched := cmp.Or(strings.TrimSpace(c.Schedule), config.DefaultCuratorSchedule)
+	detail := fmt.Sprintf("curator on %s (%s), %g credits per run, %s, schedule %s", c.Backend, model, c.Budget, monthly, sched)
+	chk := doctorCheck{Name: "skills:curator", Status: statusOK, Detail: detail}
+	if _, err := engine.CuratorCron(c); err != nil {
+		chk.Status = statusWarn
+		chk.Detail += " — the schedule does not compile, so it never runs on its own: " + err.Error()
+		chk.Remediation = "fix curator.schedule in .gummi/config.yaml (a cron line or @daily, @weekly, …)"
+		return chk
+	}
+	caps, known := agent.CapabilitiesFor(c.Backend)
+	switch {
+	case !known:
+		chk.Status = statusWarn
+		chk.Detail += " — gummi does not know backend " + c.Backend
+		chk.Remediation = "set curator.backend in .gummi/config.yaml to claude, copilot, codex, opencode, pi, antigravity or headless"
+	case !caps.ClientTools && !caps.MCPTools:
+		chk.Status = statusWarn
+		chk.Detail += " — " + c.Backend + " cannot reach gummi's tools, so it cannot curate"
+		chk.Remediation = "set curator.backend in .gummi/config.yaml to a backend that reaches gummi's tools"
+	default:
+		switch bi := backendInfoFor(c.Backend); {
+		case bi.bin == "":
+			chk.Status = statusWarn
+			chk.Detail += " — GUMMI_AGENT_CMD is empty, so its runs fail"
+			chk.Remediation = "set GUMMI_AGENT_CMD to the agent command line, or set curator.backend in .gummi/config.yaml to another backend"
+		case !onPath(bi.bin):
+			chk.Status = statusWarn
+			chk.Detail += fmt.Sprintf(" — %q is not on PATH, so its runs fail", bi.bin)
+			chk.Remediation = "install " + bi.bin + ", or set curator.backend in .gummi/config.yaml to another backend"
+		}
+	}
+	return chk
+}
+
+func shortRev(rev string) string {
+	if len(rev) > 12 {
+		return rev[:12]
+	}
+	return rev
 }
 
 // The check REPORTS itself as "budget", not "envelope". The env var and

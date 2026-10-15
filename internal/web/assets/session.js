@@ -14,16 +14,16 @@
 // session that exists, a pick is the card's "model" action. A card in the
 // workflow shows no picker: its stages take their models from its profile.
 
-import { $, h, clear, append, setVars, isMobile, cr, dollarsInput, parseDollars, cardName } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, isMobile, cr, dollarsInput, parseDollars, cardName } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { openModal } from './views.js?v=__ASSET_V__'
+import { openPop, closePop, popKind, openModelPicker as openPairPicker } from './modelpick.js?v=__ASSET_V__'
 
 let ctx = {}
 let form = null // webapi.Form: the draft's choices and the picker's catalog
 let formLoad = null // the /api/form fetch in flight, for a send that cannot wait on nothing
-let pop = null // the open popover: { el, close }
 
 const BUDGETS = [500, 1500, 5000, 0]
 
@@ -225,7 +225,7 @@ function render () {
       class: 'mbtn', type: 'button', testid: 'model-picker-btn',
       title: 'The agent and model this session runs on',
       'aria-haspopup': 'dialog', 'aria-expanded': 'false',
-      onclick: () => (pop?.kind === 'model' ? closePop() : openPicker(btn))
+      onclick: () => (popKind() === 'model' ? closePop() : openPicker(btn))
     }, h('span', { class: 'mono m' }, p.model || 'default model'), h('span', { class: 'mono a' }, p.backend || 'agent'), h('span', { class: 'caret', 'aria-hidden': 'true' }, '▴'))
     slot.append(btn)
   }
@@ -264,69 +264,12 @@ function render () {
   }
   const bud = h('button', {
     class: 'dsel dbtn', type: 'button', testid: 'draft-budget', 'aria-haspopup': 'dialog',
-    onclick: () => (pop?.kind === 'budget' ? closePop() : openBudget(bud))
+    onclick: () => (popKind() === 'budget' ? closePop() : openBudget(bud))
   }, 'budget ', h('b', null, budgetWord(d.envelope)))
   row.append(bud)
 }
 
 // ---- popovers ----
-
-function closePop () {
-  if (!pop) return
-  const p = pop
-  pop = null
-  p.close()
-}
-
-// placeAbove pins a popover's bottom edge just above anchor, its right edge
-// to the anchor's (left, for one opened from the left of the composer).
-function openPop (kind, anchor, el, { alignLeft = false } = {}) {
-  closePop()
-  // the composer redraws its buttons on every card and connection change:
-  // one replaced while the form loaded is gone from the page, and a
-  // popover placed against it would hang off the top of the window
-  if (!anchor.isConnected && anchor.dataset.testid) anchor = document.querySelector(`[data-testid="${anchor.dataset.testid}"]`)
-  if (!anchor) return
-  document.body.append(el)
-  const r = anchor.getBoundingClientRect()
-  // pinned above the anchor, and kept inside the window whichever edge it
-  // hangs from: on a phone the picker is wider than the space left of Send
-  const w = el.offsetWidth
-  const left = alignLeft ? r.left : r.right - w
-  setVars(el, {
-    bottom: Math.max(8, window.innerHeight - r.top + 6) + 'px',
-    left: Math.max(8, Math.min(left, window.innerWidth - w - 8)) + 'px',
-    right: null
-  })
-  anchor.setAttribute('aria-expanded', 'true')
-  const outside = (e) => { if (!el.contains(e.target) && !anchor.contains(e.target)) closePop() }
-  // every key typed in a popover is the popover's: the page's shortcuts
-  // (] hides the panel, [ the rail) would move the layout out from under it
-  const keys = (e) => {
-    e.stopPropagation()
-    if (e.key === 'Escape') { closePop(); anchor.focus() }
-  }
-  // a resize here is usually the on-screen keyboard, raised by this same
-  // popover's own search/budget input grabbing focus below — not the page
-  // moving out from under it, so it must not close what focus just opened
-  const moved = () => { if (!el.contains(document.activeElement)) closePop() }
-  // added a tick later, so the click that opened it does not close it —
-  // and only if it is still open then: a popover closed within that tick
-  // would leave the listener behind, closing every later one on mousedown
-  setTimeout(() => { if (pop?.el === el) document.addEventListener('mousedown', outside) }, 0)
-  el.addEventListener('keydown', keys)
-  window.addEventListener('resize', moved)
-  pop = {
-    kind,
-    el,
-    close: () => {
-      document.removeEventListener('mousedown', outside)
-      window.removeEventListener('resize', moved)
-      anchor.setAttribute('aria-expanded', 'false')
-      el.remove()
-    }
-  }
-}
 
 function openBudget (anchor) {
   const d = state.sessionDraft
@@ -354,16 +297,6 @@ function openBudget (anchor) {
   input.select()
 }
 
-// modelShownMax bounds how many of one agent's rows the picker draws
-// before pointing at the rest: an agent that enumerates its catalog can
-// offer hundreds of ids, and every one of them as a row is exactly what
-// the search box was put there to prevent. The rows are the filtered
-// list's head; the note names how many wait behind the next character
-// typed.
-const modelShownMax = 30
-
-// openModelPicker opens the picker from the card's menu: anchored to the
-// model beside Send, which is where it lives.
 export function openModelPicker () {
   const btn = document.querySelector('[data-testid=model-picker-btn]')
   if (btn) openPicker(btn)
@@ -371,91 +304,14 @@ export function openModelPicker () {
 
 async function openPicker (anchor) {
   if (!form) await loadForm(state.sessionDraft?.repo || '')
-  const cat = form?.sessions || { agents: [], recent: [] }
-  const cur = sessionPair() || {}
-  const search = h('input', { class: 'inp', testid: 'model-search', placeholder: 'Search, or type any model id', 'aria-label': 'Search models', autocomplete: 'off' })
-  const list = h('div', { class: 'mlist', role: 'listbox', 'aria-label': 'Models' })
-  const foot = h('div', { class: 'mfoot-s' })
-  const el = h('div', { class: 'mpick', role: 'dialog', 'aria-label': 'Choose a model', testid: 'model-picker' },
-    h('div', { class: 'msearch' }, search), list, foot)
-
-  const pick = (backend, model) => choose(backend, model)
-  const rowEl = (backend, model, sub, testid) => h('button', {
-    class: ['mrow', backend === cur.backend && model === cur.model && 'on'],
-    type: 'button', role: 'option', testid, data: { model },
-    'aria-selected': String(backend === cur.backend && model === cur.model),
-    onclick: () => pick(backend, model)
-  }, h('span', { class: 'mono m' }, model || 'default model'), h('span', { class: 'sub' }, sub))
-
-  // enter takes what was typed at its word: the row that is exactly that
-  // id, else the typed id itself — a suggestion that merely contains it
-  // (claude-sonnet-4-6 for "sonnet-4") only once nothing else is left
-  const enterRow = () => {
-    const q = search.value.trim()
-    const rows = [...list.querySelectorAll('.mrow')]
-    if (!q) return rows[0]
-    return rows.find(r => r.dataset.model === q) || list.querySelector('[data-testid^="model-typed-"]') || rows[0]
-  }
-
-  const draw = () => {
-    const q = search.value.trim()
-    const ql = q.toLowerCase()
-    const hit = (s) => !ql || String(s).toLowerCase().includes(ql)
-    clear(list)
-    const recent = (cat.recent || []).filter(p => hit(p.model) || hit(p.backend))
-    if (recent.length) {
-      append(list, [h('div', { class: 'mgh' }, 'Recent'), recent.map(p => rowEl(p.backend, p.model, p.backend, `model-recent-${p.backend}-${p.model}`))])
-    }
-    const missing = []
-    const installed = []
-    let exact = false
-    for (const a of cat.agents || []) {
-      if (!a.installed) { missing.push(a.name); continue }
-      installed.push(a)
-      const models = [...(a.needsModel ? [] : ['']), ...(a.models || [])]
-      if (q && models.includes(q)) exact = true
-      const shown = models.filter(m => hit(m) || hit(a.name))
-      if (!shown.length) continue
-      const cap = shown.slice(0, modelShownMax)
-      append(list, [h('div', { class: 'mgh' }, a.name, a.hint ? h('span', { class: 'hint' }, a.hint) : null),
-        cap.map(m => rowEl(a.name, m, m ? '' : `${a.name} picks`, `model-${a.name}-${m || 'default'}`)),
-        shown.length > cap.length
-          ? h('div', { class: 'mgh more' }, `+${shown.length - cap.length} more — search to narrow`)
-          : null])
-    }
-    // an id nobody suggested is still a model: offered once, on each agent
-    // that could run it, below everything the workspace already uses
-    const fits = installed.filter(a => { try { return !a.pattern || new RegExp(a.pattern, 'i').test(q) } catch { return true } })
-    if (q && !exact && fits.length) {
-      append(list, [h('div', { class: 'mgh' }, 'Use this id'),
-        fits.map(a => rowEl(a.name, q, `on ${a.name}`, `model-typed-${a.name}`))])
-    }
-    if (!list.children.length) list.append(h('div', { class: 'mempty' }, 'No agent on this host can run a session.'))
-    clear(foot)
-    append(foot, [state.sessionDraft
+  openPairPicker(anchor, {
+    catalog: form?.sessions,
+    current: sessionPair() || {},
+    onPick: choose,
+    note: state.sessionDraft
       ? 'Any model an installed agent runs — the ones it names itself, plus the ids this workspace has used. Profiles do not apply to sessions.'
-      : 'Switching keeps the conversation: the next turn runs on the new model with what was said so far.',
-    missing.length ? h('span', { class: 'missing' }, ` Not installed here: ${missing.join(', ')}.`) : null])
-  }
-  search.addEventListener('input', draw)
-  search.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      enterRow()?.click()
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      list.querySelector('.mrow')?.focus()
-    }
+      : 'Switching keeps the conversation: the next turn runs on the new model with what was said so far.'
   })
-  list.addEventListener('keydown', (e) => {
-    const rows = [...list.querySelectorAll('.mrow')]
-    const i = rows.indexOf(document.activeElement)
-    if (e.key === 'ArrowDown' && i >= 0) { e.preventDefault(); rows[Math.min(rows.length - 1, i + 1)].focus() }
-    if (e.key === 'ArrowUp' && i >= 0) { e.preventDefault(); (i === 0 ? search : rows[i - 1]).focus() }
-  })
-  draw()
-  openPop('model', anchor, el)
-  search.focus()
 }
 
 // choose applies a pick: to the draft, or as the open session's "model"

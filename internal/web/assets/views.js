@@ -26,6 +26,7 @@ export const VIEW_LABELS = {
   stacks: 'Stacks',
   repos: 'Repositories',
   schedules: 'Schedules',
+  skills: 'Skills',
   ingest: 'Import spec',
   bugs: 'Import bugs',
   doctor: 'Doctor',
@@ -222,10 +223,10 @@ function layer (box, { onClose, returnTo }) {
 const OVER = new Set(['toasts', 'approvals', 'approvals-live'])
 
 // holdsFocus: focus is inside the overlay, or on something that sits over
-// it (a menu it opened, a notice, a device asking to join).
+// it (a menu or a picker it opened, a notice, a device asking to join).
 function holdsFocus (scrim) {
   const a = document.activeElement
-  return !!a && a !== document.body && (scrim.contains(a) || !!a.closest?.('.menu, #toasts, #approvals'))
+  return !!a && a !== document.body && (scrim.contains(a) || !!a.closest?.('.menu, .mpick, .spop, #toasts, #approvals'))
 }
 
 // wrapTab keeps Tab inside the box: past the last control to the first,

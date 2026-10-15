@@ -122,10 +122,11 @@ test('the schedule form previews its cadence, picks a pair from the catalog, and
   const form = page.getByTestId('schedule-form');
   await expect(form).toBeVisible();
 
-  // the catalog fills the agent picker; headless is installed here (the
-  // workspace runs the scripted agent), so its row carries no refusal
-  const backend = page.getByTestId('schedule-form-backend');
-  await expect(backend).toContainText('headless');
+  // the agent and model are the composer's own picker, opening on the
+  // profile's default; headless is installed here (the workspace runs the
+  // scripted agent), so it is offered
+  const pair = page.getByTestId('schedule-form-pair');
+  await expect(pair).toContainText('profile default');
 
   // the cadence preview: the default preset compiles and shows when the
   // schedule would fire, before anything is stored
@@ -147,8 +148,10 @@ test('the schedule form previews its cadence, picks a pair from the catalog, and
 
   // picking the pair from the catalog: headless' models are the ids this
   // workspace's profiles run
-  await backend.selectOption('headless');
-  await page.getByTestId('schedule-form-model').fill('e2e-implementer');
+  await pair.click();
+  await page.getByTestId('model-search').fill('e2e-implementer');
+  await page.getByTestId('model-headless-e2e-implementer').click();
+  await expect(pair).toHaveAttribute('data-model', 'e2e-implementer');
   await expect(page.getByTestId('schedule-form-envelope-hint')).toContainText(/envelope/i);
 
   await page.getByTestId('schedule-form-name').fill('previewed mint');

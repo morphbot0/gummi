@@ -428,6 +428,14 @@ It is gone — four backends of seven could take it, under four different
 mechanisms — and a config that still names `skills:` is refused at load,
 by name, rather than loading and quietly losing them.
 
+*Amended for the skill pack (§23.2).* gummi now adds one thing: the
+workspace's own skill pack, `.gummi/skills`, which its curator writes.
+It reaches every session on the four backends that can take a skill
+directory, scoped per repository, at the revision the session started
+with. The rest of this section stands: the operator's discovery is
+untouched, and `skills:` is still refused, because the pack is not
+user-configured forwarding.
+
 **Where gummi still touches discovery, and why:**
 
 - claude's tool roster is never narrowed for a session that writes: it is
@@ -1728,6 +1736,14 @@ Decided in the design interview (2026-07-03):
     *who approves*, never *what must happen* — no implementation without
     an approved spec, no merge without review and verify, at every stop.
 
+    *Amended for the skill curator (§23, D26).* The curator is not
+    autopilot and crosses no gate, but it does change what every later
+    pass is told, critique and verify included, without a person
+    approving it first. That is allowed because it changes neither rule
+    above: every pass still runs, and a skill can make a pass worse at
+    its work but cannot remove it, answer its decision or land its card.
+    The check is after the fact: snapshots, a digest and revert.
+
     A decision autopilot has taken renders open, with its options,
     marked as autopilot's — and collapses when the answer event lands,
     never on a timer. A countdown was proposed and cut: it would make the
@@ -1947,6 +1963,25 @@ Decided in the design interview (2026-07-03):
       or locally, never both; creating one is the act that picks.
     This reverses the "never pushes, never opens a PR" of decisions 6
     and 22, §7, §18.5, §20.5 and §21.2, each amended in place.
+26. **gummi learns, and no person approves the lesson first**, decided
+    2026-10-15 (§23). Sessions record what they learned; a curator
+    distils it into the workspace's skill pack, `.gummi/skills`; gummi
+    lints each write, counts each skill's use, archives what goes
+    unused, and delivers the pack to every session on a backend that can
+    take it. Four rules bound it:
+    - **The curator is a background job, not a card.** Its backend,
+      model, schedule and budget are config; its spend is its own ledger,
+      shown on the stats tab. It acts on no card (§16).
+    - **It writes through tools, only into the pack.** gummi does the
+      write, the lint and the commit. Never global memory, never a
+      person's or a pinned skill.
+    - **Sessions read a published revision**, pinned at session start,
+      scoped per repository. A revert moves it.
+    - **The check is after, not before.** Snapshots, a digest and
+      revert, as in Hermes. Every pass, critique and verify included,
+      gets the pack: a skill can make a pass worse, never remove it.
+    This amends §4.1a, §16, §19.3c, §19.7, §19.9 and decision 17 in
+    place.
 
 Still open:
 
@@ -2677,7 +2712,9 @@ headless driver is the way; where you want an agent to *work*, it is a
 card. An unattended goal's lead (§17) is the sanctioned form of "an agent
 acting on the whole board": it is inside gummi's own driving loop,
 constrained to the goal doc, and every turn it costs is recorded
-against the goal.
+against the goal. The skill curator (§23.4) is the second: it acts on
+no card, writes only the workspace's skill pack through two tools, and
+charges its own ledger.
 
 **The knowledge-delivery contract.** Knowledge about *gummi* — the
 workflow, the gates, the lock, this taxonomy — travels with the agent's
@@ -3806,7 +3843,9 @@ stage session is ever offered the tools — a stage's durable context
 carrier is the spec, and memory is deliberately not that. The files sit
 inside the workspace's git exclusions, and the web face displays them
 read-only (§20). What distills from session memory into global is
-deferred with §19.7's list.
+deferred with §19.7's list. What distills into skills is the curator's
+(§23): it reads every card's session memory and dead-ends, and writes
+the workspace's skill pack, never these files.
 
 ### 19.3d Agents — a session with a home of its own
 
@@ -3953,7 +3992,9 @@ landing route is withheld rather than wired: what "gummi follows the PR
 and waits" means for a card with no gate to wait at is a question nobody
 has answered. And project memory (§19.3c) waits for its distillation
 pass — the writer that folds what sessions record in their own memory up
-into the global tier they all read.
+into the global tier they all read. Half of that is now designed: the
+curator (§23) folds session memory into skills. Global memory stays
+deferred until it has a history to revert from (§23.7).
 
 Two things worth building next for their own sake: recording **which
 floor a landing crossed**, so "how much of this week landed without
@@ -4173,6 +4214,12 @@ schedules are an operator surface, reachable from the TUI's `L` view,
 routes, all of which sit behind the same device-token and same-origin
 guards as every other mutating route). What a scheduled session
 produces waits for a person to land, like any freeform card's work.
+
+*One exception, stated on purpose (§23.6):* the skill curator fires on
+the same cron engine, and what it writes reaches sessions without a
+person landing it. It is not a schedule row and mints no card. It is
+budgeted by its own config, and a person checks it after the fact,
+through its digest and revert.
 
 Deferred: a fresh-process `gummi schedule tick` driven by system cron or
 launchd — there is no headless freeform driver for it to run yet
@@ -5234,3 +5281,256 @@ workflow card.
   this job's log" is the follow-up if the bounded end proves too short.
 - **Not followed.** gummi does not poll a PR's checks or raise attention
   when they turn red; that needs the per-card remote read §22.10 defers.
+
+## 23. Self-improvement — the skill pack and its curator
+
+Every session gummi runs learns something the next one will pay for
+again: a flag that does not exist, a test that only fails in a card's
+environment, the one command that rebuilds the goldens. Freeform
+sessions already write that down (§19.3c), and nothing reads it beyond
+the card that wrote it. This section closes the loop, in the shape
+Hermes uses for its own agent: sessions record, one curator distils,
+and gummi delivers, lints and counts. There is no person in the loop
+before a skill reaches a session: it is checked after the fact, with
+snapshots and revert (§23.6).
+
+```
+sessions ──record──▶ session memory, dead-ends, card events
+                              │
+                         curator (scheduled, budgeted, §23.4)
+                              │  skill_write / skill_archive
+                              ▼
+          gummi: lint ─▶ commit in .gummi/skills ─▶ advance `published`
+                              │
+          every session start: materialize `published`, scoped per repo
+                              ▼
+                       the backend discovers it
+```
+
+### 23.1 The pack
+
+The pack is `.gummi/skills`, a git repository of its own beside global
+memory, made by gummi on first use under an identity of gummi's own,
+like an agent home (§19.3d). Each skill is a directory holding a
+`SKILL.md` in the agentskills form every backend that takes skills
+already reads: frontmatter `name` and `description`, a markdown body,
+optional `references/`. gummi adds three frontmatter keys:
+
+- `scope` — `general`, or the name of one of the workspace's
+  repositories (§10 D10). A repository skill reaches only sessions
+  working in that repository; a general one reaches every session.
+- `source` — `curator` or `person`. A skill a person wrote or edited is
+  `person`; the curator never edits, merges or archives one, and the
+  usage timers never move it.
+- `pinned` — a person's way to hold a curator skill where it is.
+
+A person may commit to the pack by hand; it is their repository. The
+curator never touches the working tree at all (§23.4).
+
+**`published` is what sessions read.** The pack's branch is where
+commits land; the ref `published` is what delivery reads. gummi
+advances it after each write that passes lint, and a revert moves it
+(§23.6). A write to the pack's working tree that is not a commit on
+`published` — a session's stray shell write, a half-edited file —
+reaches nothing, because delivery never reads the working tree.
+
+### 23.2 Delivery: into every session
+
+This reverses §4.1a's "adds nothing" for the pack, and only the pack.
+The `skills:` config key stays refused at load: there is still no
+user-configured forwarding. At each session start gummi materializes
+`published` (`git archive` into `.gummi/state/skillpacks/<rev>`, kept
+while any session reads it), filters it by `scope` against the
+session's repository, and hands the filtered set to the backend through
+the mechanism each already has:
+
+- **claude**: a generated plugin, `--plugin-dir`, its skills named
+  `gummi-skills:<name>`.
+- **copilot**: the SDK's skill directories.
+- **opencode**: its config's skill paths, merged with the operator's
+  rather than replacing them.
+- **antigravity**: links in the card home's `.gemini/config/skills`,
+  beside the operator's own (§4.1a), told apart by name.
+
+codex, pi and the headless adapter have no mechanism; a session on one
+of them runs without the pack and `doctor` says so once, not each turn.
+That gap is why the old `skills.forward` was dropped (§4.1a); it is
+accepted here because the pack is gummi's own learning, not a
+convenience over the operator's discovery.
+
+Every pass gets the pack: plan, implement, critique, verify, and
+freeform sessions. A session pins the revision it started with, so a
+curator run mid-session never changes what a running session sees.
+
+### 23.3 What gummi does without a model
+
+Everything that can be decided without a model is Go in the engine,
+costs nothing and runs whether or not the curator is configured:
+
+- **Lint at write time.** A write that breaks the structure (no
+  `name` or `description`, a name that collides, a body or `references/`
+  over the size bound, a `scope` naming no repository) is refused and
+  the refusal goes back to the curator as the tool's answer. The shape
+  checks are advisory and travel with the answer too: a body that reads
+  as an incident log rather than a rule, a description that does not
+  say when to use it, a path or symbol named in the body that does not
+  exist on the scoped repository's base branch.
+- **Usage.** A backend's skill invocations are already in the card-event
+  log (`agent/tooldetail.go`, read by `cardrun` as a run's skills).
+  gummi counts them per skill and revision. A backend that reads a
+  skill as a file rather than invoking it counts as a read of that
+  `SKILL.md`.
+- **Timers.** A curator skill unused for 14 days is marked stale; for
+  30, it is archived — moved under `archive/` in a commit, never
+  deleted. A skill younger than its first 14 days is not stale for
+  never having been used. Pinned and `person` skills are exempt.
+- **Publishing and revert** (§23.6).
+
+### 23.4 The curator: a background job, not a card
+
+Distilling needs a model. The curator is that model's session, run by
+gummi on a clock, and it is **not a card**: it has no stage, no branch,
+no thread on the board and nothing to land. It is configured in
+`.gummi/config.yaml`:
+
+```yaml
+curator:
+  backend: claude
+  model: claude-sonnet-5-5
+  schedule: "@daily"     # cron, compiled by internal/schedule (§19.9)
+  budget: 100            # credits per run
+  monthly: 1500          # credits per calendar month, all runs (0: no cap)
+```
+
+No `curator:` block, no curator: the pack is then a person's, and
+§23.3 still lints, counts and archives nothing but what a person
+marked `curator`. The block is the switch that starts spending, and
+`doctor` reads it back. A person may also write it from the web page's
+skills view (`PUT`/`DELETE /api/curator/config`): the same block, saved
+into `config.yaml` with the rest of the file and its comments left
+alone, and live at the board's next tick without a restart. A run
+already going finishes on the block it started with. The page is
+refused, before anything is written, what `Load` would refuse and a
+curator that could not run: a schedule that does not compile, or a
+backend gummi does not know or that cannot reach its tools
+(`engine.CheckCurator`).
+
+**Its budget is its own.** Each run starts with `budget`, capped by
+what is left of `monthly`, and gummi stops the turn when it is spent,
+exactly as it stops a card's. An exhausted month pauses the curator
+until the next one; raising either number is the person's. Every run
+is a row of its own — start, end, revision before and after, credits,
+outcome — read by the stats tab, which draws the curator as a lane of
+its own in the timeline and charges its spend to the window it started
+in (`fleetrun`), and by the digest (§23.6). A curator's spend is never
+a card's.
+
+**Where it runs.** Its working directory is `.gummi/curator`, a
+directory gummi made, under the same `GIT_CEILING_DIRECTORIES` guard as
+a home (§19.3d), sandboxed by the configured posture (§4.4). It is
+given no repository checkout. It fires like a schedule (§19.9): only
+while a board runs, missed fires coalesce, a fire while a run is still
+going is skipped. A person can run it once from either face.
+
+**What it reads and writes is tools, not files.** Its session carries
+its own tool set on its own MCP endpoint:
+
+- reads: every card's session memory and dead-ends, the card-event log
+  since its last run (verdicts, failed verifies, critique findings,
+  `ask_user` answers), the pack at `published` with each skill's usage
+  and age;
+- writes: `skill_write` (create or replace one curator skill) and
+  `skill_archive`. Merging several skills into one is a write and some
+  archives in one call, which gummi commits as one commit.
+
+gummi does each write: lint, commit to the pack under gummi's identity
+with the run's id in the message, advance `published`. The curator
+never holds a path to the pack, so how its backend cages file writes
+does not matter, and no other session is offered these tools.
+
+**Why not a card, and why this is not a board-level agent.** §16
+removed an agent bound to the whole workspace that acted on cards: it
+ran them, minted them and read their state for a person who had not
+asked. The curator acts on no card. It reads what sessions left behind
+and writes into one repository gummi owns, through two tools. A card
+would have given it a budget, metering and a place on the board, at the
+cost of a branch it never lands, a worktree it never uses and a thread
+nobody is meant to talk in. The goal lead (§17.4) already showed the
+other way: a model session inside gummi's own loop, charged to a ledger
+that is not a card's. The curator is the second.
+
+### 23.5 What a session records
+
+Capture is what sessions already do. A freeform session writes session
+memory and dead-ends (§19.3c), and its hints now say what the curator
+reads them for: a rule a later session should follow, said once, not
+the story of how it was learned. Stage sessions carry no memory tools
+and are not given any. What a workflow card teaches is in its events
+(a critique's findings, a failed verify, a rerun edge taken), and the
+curator reads those instead.
+
+**What is new to a run.** The cutoff belongs to each card, not to each
+run. A run records the cards it opened, and when: their memory through
+`curator_read` and their events through `curator_events`. A card is
+offered again only once it has changed since the curator last read it.
+One cutoff for the whole run would have hidden every card a run listed
+and never opened. A first run on a workspace with history reads three
+cards out of fifty, and the next run would have been offered none of
+them. A run that reads nothing therefore moves nothing. The kickoff
+gives each card's memory size and asks the curator to work through the
+list until its budget runs low. It also says that only the pack counts:
+a skill the curator's own backend loads from its home reaches no other
+backend, so it does not make a lesson covered.
+
+### 23.6 No person before, a person after
+
+A skill reaches sessions as soon as its write passes lint. That is
+Hermes's default, and the safety it relies on is Hermes's too:
+
+- **Snapshots.** Every curator write is a commit; every run's
+  before-and-after is a pair of revisions on its row.
+- **Revert.** A person reverts a run (one commit undoing all of it) or
+  one skill, from either face or `gummi skills revert`; `published`
+  moves with the commit, so the next session starts without it. A pin
+  holds a skill the curator would otherwise rewrite or archive.
+- **A digest, not a gate.** After each run that changed something, the
+  board raises a notice listing what was written and archived and what
+  it cost, with revert beside each line. Nothing waits on it.
+- **Only its own.** The curator never touches a `person` or pinned
+  skill, never global memory, and nothing outside the pack.
+
+This is the one scheduled output that takes effect without a person,
+and it is stated here and in Decisions 17 and 26 and §19.9 for that
+reason. What it does not change: every card still walks the whole
+graph, every critique and verify still runs, and a skill cannot cross a
+gate, answer a decision or land anything. A skill can make a pass worse
+at its work. It cannot remove the pass.
+
+**Where it shows.** The digest is a board notice and an alert. A
+person reverts a run and pins a skill from the TUI's skills view (`E`),
+the web page's Skills view, or `gummi curator revert|pin|unpin`; all
+three call the same engine acts over one read model
+(`engine.CuratorView`). The stats tab draws the curator as its own
+lane and money line, outside the card figures and outside the clock
+and concurrency figures, which measure cards. `doctor` reports the
+pack, the curator and every routed backend that runs without the pack.
+The curator reads a card's failed verifies, critiques that asked for
+changes, rerun edges and answered questions from the event log, but
+not a spec's reviewer threads.
+
+### 23.7 Deferred
+
+- **Global memory.** The curator does not write `global.md`: it has no
+  history to revert from, and it is the tier a person curates (§19.3c).
+  The distillation pass §19.7 lists stays open. When it comes, the file
+  moves into a repository first.
+- **codex, pi and headless delivery**, until their CLIs take a skill
+  directory.
+- **Validation beyond Hermes's.** Usage and lint are the signals.
+  Checking that a skill's lesson stops recurring, holding it back from
+  a random share of sessions, or replaying a session with and without
+  it are all possible, because gummi picks what each session gets, and
+  none is built.
+- **Importing existing skills.** Skills an operator's own tools wrote
+  into `~/.claude/skills` are the operator's discovery (§4.1a), not the
+  pack. Bringing them in is a person's commit.

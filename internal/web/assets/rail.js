@@ -394,6 +394,7 @@ function renderFoot (unpair, newSession) {
       item('stacks', 'Stacks', 'stack'),
       item('repos', 'Repositories', 'repo'),
       item('schedules', 'Schedules', 'clock'),
+      item('skills', 'Skills', 'skill'),
       'sep',
       item('ingest', 'Import spec', 'import'),
       item('bugs', 'Import bugs', 'bug'),

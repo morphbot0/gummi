@@ -183,6 +183,23 @@ type Fleet struct {
 	// AllTimeCredits and AllTimeCards are the ledger beyond the window.
 	AllTimeCredits float64 `json:"allTimeCredits"`
 	AllTimeCards   int     `json:"allTimeCards"`
+	// Curator is the skill curator's lane and spend (DESIGN §23.4): beside
+	// the lanes and never one of them — a curator's spend is never a
+	// card's, so it is in neither Credits nor AllTimeCredits. Absent
+	// where the curator never ran.
+	Curator *FleetCurator `json:"curator,omitempty"`
+}
+
+// FleetCurator is the curator's lane: its runs in the window (a run is
+// charged to the window it started in) and its whole ledger.
+type FleetCurator struct {
+	Credits        float64 `json:"credits"`
+	Runs           int     `json:"runs"`
+	Running        bool    `json:"running,omitempty"`
+	AllTimeCredits float64 `json:"allTimeCredits"`
+	AllTimeRuns    int     `json:"allTimeRuns"`
+	// Blocks are the runs clipped to the window; an open run has no To.
+	Blocks []Span `json:"blocks"`
 }
 
 // Tokens is a token count split the way the adapters report it.

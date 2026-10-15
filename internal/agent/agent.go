@@ -179,6 +179,11 @@ type SessionOpts struct {
 	// means no per-card anchor: a backend that wants one falls back to a
 	// throwaway home of its own.
 	AgentHomeDir string
+	// SkillDirs are the workspace skill pack's skill directories that
+	// reach this session (DESIGN §23.2): absolute, one per skill, from a
+	// revision materialized for the session's life. Adapters without
+	// Capabilities().SkillDirs ignore it.
+	SkillDirs []string
 	// ReadOnly marks an autonomous research session that must never
 	// mutate the main checkout (it runs in the repo root, no worktree).
 	// The adapter enforces it structurally — stripping every mutating
@@ -264,6 +269,13 @@ type Capabilities struct {
 	// a role at a backend: a role's worktree discipline is the backend's
 	// to keep, and the two tiers below are not the same guarantee.
 	WriteCage WriteCage
+	// SkillDirs reports that the adapter honors SessionOpts.SkillDirs: it
+	// can point the backend at skill directories outside WorkDir, in
+	// addition to what it discovers itself. copilot takes an SDK field,
+	// opencode a config key, claude a generated plugin (claude_skills.go)
+	// and antigravity links in its redirected home. codex, pi and headless
+	// have no mechanism.
+	SkillDirs bool
 	// Images reports that the backend can take images natively with a
 	// turn — the session implements ImageSender and SendTurn actually
 	// reaches the model as multimodal input, not just a path the agent

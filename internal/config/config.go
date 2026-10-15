@@ -5,6 +5,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -105,6 +106,48 @@ type Config struct {
 	// its own with them. Empty means no trailer. A workspace list replaces
 	// a user-level one.
 	CoAuthors []string `yaml:"coauthors"`
+	// Curator turns on the skill curator (DESIGN §23.4): the background
+	// job that distils what sessions recorded into the workspace's skill
+	// pack. Absent, nothing curates and nothing spends. Workspace-only.
+	Curator *Curator `yaml:"curator"`
+}
+
+// Curator is the skill curator's configuration. Its budget is its own:
+// Budget credits per run, Monthly across every run in a calendar month.
+type Curator struct {
+	Backend  string  `yaml:"backend"`
+	Model    string  `yaml:"model"`
+	Schedule string  `yaml:"schedule"`
+	Budget   float64 `yaml:"budget"`
+	Monthly  float64 `yaml:"monthly"`
+}
+
+// DefaultCuratorSchedule is when a curator with no schedule runs.
+const DefaultCuratorSchedule = "@daily"
+
+func validateCurator(path string, c *Curator) error {
+	if err := CheckCurator(c); err != nil {
+		return fmt.Errorf("%s: curator: %w", path, err)
+	}
+	return nil
+}
+
+// CheckCurator is why Load would refuse the curator block c, or nil; a nil
+// c (no curator) is fine.
+func CheckCurator(c *Curator) error {
+	if c == nil {
+		return nil
+	}
+	if strings.TrimSpace(c.Backend) == "" {
+		return errors.New("backend is required (the agent the curator runs on)")
+	}
+	if c.Budget <= 0 {
+		return errors.New("budget must be a positive number of credits per run")
+	}
+	if c.Monthly < 0 || (c.Monthly > 0 && c.Monthly < c.Budget) {
+		return errors.New("monthly must be at least one run's budget, or 0 for no monthly cap")
+	}
+	return nil
 }
 
 // ChecksConfig holds workspace-wide check settings.
@@ -380,6 +423,9 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: instructions: entry %q is not an absolute path", path, inst)
 		}
 	}
+	if err := validateCurator(path, c.Curator); err != nil {
+		return Config{}, err
+	}
 	if c.RemovedSkills != nil {
 		return Config{}, fmt.Errorf("%s: skills: this key was removed — gummi no longer forwards skills; "+
 			"each backend loads the skills it discovers itself, so move them into the repository's or your "+
@@ -484,9 +530,13 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 	if len(user.Discover) > 0 {
 		return Config{}, nil, fmt.Errorf("%s: discover is workspace-only and cannot be set in the user config", userPath)
 	}
+	if user.Curator != nil {
+		return Config{}, nil, fmt.Errorf("%s: curator is workspace-only and cannot be set in the user config", userPath)
+	}
 
 	sources := map[string]string{}
 	var merged Config
+	merged.Curator = ws.Curator
 
 	merged.Name = ws.Name
 	if ws.Name != "" {

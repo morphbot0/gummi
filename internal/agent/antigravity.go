@@ -88,7 +88,7 @@ func (a *Antigravity) Name() string { return "antigravity" }
 // no ClientTools, no ReadOnlyEnforce, no Images, no NativeWatch, no
 // Compact.
 func (a *Antigravity) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, MCPTools: true, WriteCage: WriteCageCwd}
+	return Capabilities{Resume: true, UsageEvents: true, MCPTools: true, WriteCage: WriteCageCwd, SkillDirs: true}
 }
 
 // AntigravityRateEnv is the operator's token price for an antigravity
@@ -220,7 +220,7 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 		s.teardown()
 		return nil, err
 	}
-	if err := materializeAntigravitySkills(home.dir, operatorAntigravitySkillDirs()); err != nil {
+	if err := materializeAntigravitySkills(home.dir, append(operatorAntigravitySkillDirs(), opts.SkillDirs...)); err != nil {
 		a.mu.Unlock()
 		s.teardown()
 		return nil, err

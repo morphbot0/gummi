@@ -1,0 +1,98 @@
+{
+  "on": {
+    "config": {
+      "backend": "claude",
+      "model": "claude-haiku",
+      "schedule": "@daily",
+      "budget": 40,
+      "monthly": 400
+    },
+    "next": "2026-10-15T03:00:00Z",
+    "running": false,
+    "monthSpent": 61.5,
+    "packDir": "/work/.gummi/skills",
+    "published": "4b1d0c9e2f3a",
+    "skills": [
+      {
+        "name": "go-scoped-test-run",
+        "description": "Run named Go tests and confirm they ran",
+        "scope": "general",
+        "owner": "curator",
+        "pinned": false,
+        "pinnable": true,
+        "uses": 4,
+        "lastUsed": "2026-10-14T01:00:00Z",
+        "born": "2026-10-11T03:00:00Z"
+      },
+      {
+        "name": "release-notes",
+        "description": "How this team writes release notes",
+        "scope": "gummi",
+        "owner": "person",
+        "pinned": false,
+        "pinnable": false,
+        "uses": 0
+      },
+      {
+        "name": "flaky-e2e-triage",
+        "description": "Triage a flaky e2e by repeat rates",
+        "scope": "general",
+        "owner": "pinned",
+        "pinned": true,
+        "pinnable": true,
+        "uses": 0,
+        "born": "2026-09-04T03:00:00Z"
+      },
+      {
+        "name": "old-lint-trick",
+        "description": "A lint workaround nobody needs now",
+        "scope": "general",
+        "owner": "curator",
+        "pinned": false,
+        "pinnable": true,
+        "uses": 0,
+        "born": "2026-08-15T03:00:00Z",
+        "stale": true,
+        "due": true
+      }
+    ],
+    "runs": [
+      {
+        "id": "cur-20261014-0300",
+        "why": "schedule",
+        "start": "2026-10-14T03:00:00Z",
+        "end": "2026-10-14T03:04:00Z",
+        "backend": "claude",
+        "model": "claude-haiku",
+        "credits": 21.5,
+        "outcome": "done",
+        "written": [
+          "go-scoped-test-run"
+        ],
+        "archived": [
+          "old-flag"
+        ],
+        "digest": "skill curator cur-20261014-0300: wrote go-scoped-test-run; archived old-flag (21.50 credits)",
+        "revertable": true
+      },
+      {
+        "id": "cur-20261013-0300",
+        "why": "person",
+        "start": "2026-10-13T03:00:00Z",
+        "backend": "claude",
+        "credits": 0,
+        "outcome": "failed",
+        "detail": "the session could not start",
+        "digest": "skill curator failed: the session could not start",
+        "revertable": false
+      }
+    ]
+  },
+  "off": {
+    "running": false,
+    "monthSpent": 0,
+    "packDir": "/work/.gummi/skills",
+    "skills": [],
+    "runs": []
+  }
+}

@@ -299,7 +299,7 @@ func TestTheStatsTabCountsSpendThatLogsNoEvent(t *testing.T) {
 	rows := []featureRow{{F: f, StageSpend: bd}, {F: quiet}}
 	now := time.Now()
 	w := fleetrun.Window{From: now.Add(-time.Hour), To: now.Add(time.Hour)}
-	rep, err := buildFleetReport(ctx, store, rows, w, now, map[domain.FeatureID]bool{f.ID: true})
+	rep, err := buildFleetReport(ctx, store, rows, w, now, map[domain.FeatureID]bool{f.ID: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

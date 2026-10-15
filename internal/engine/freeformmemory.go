@@ -136,7 +136,10 @@ from it, in place of turns it cannot replay), and record a dead end when
 you hit one, so no later turn pays for it twice. Global memory is
 read-only to you: the person fills it by hand and a later distillation
 pass folds session memory into it, so if something you learned should
-move up, record it in your own memory and say so in the thread. None of
+move up, record it in your own memory and say so in the thread. A
+curator reads every session's memory and dead-ends to write the skills
+later sessions start with, so write a lesson as the rule to follow, not
+the story of how it was learned. None of
 it is required — no gate reads it and no section is demanded; this is
 not the spec process the workflow cards run.`
 

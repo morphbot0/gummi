@@ -1,6 +1,10 @@
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+)
 
 // buildOpencodeConfig renders the per-session OPENCODE_CONFIG file content
 // for an opencode-driven session. It emits exactly two blocks: opencode's
@@ -51,7 +55,7 @@ import "encoding/json"
 // Every pattern map relies on opencode letting the LAST matching rule
 // win and on encoding/json writing keys sorted: "*" sorts before any
 // absolute path, so the catch-all deny lands first and each allow after.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, scratchDir string, permission Permission) ([]byte, error) {
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, scratchDir string, permission Permission, skillDirs ...string) ([]byte, error) {
 	worktreeOnly := worktreeCage(workdir)
 	var external any = "deny"
 	if scratchDir != "" {
@@ -92,9 +96,13 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	perm["question"] = "deny"
 
 	out := map[string]any{"permission": perm}
-	// No `skills` key, ever: opencode merges this file over the operator's
-	// own config, so one here would replace their skills setup rather than
-	// add to it. Skill discovery is opencode's own (DESIGN §4.1a).
+	// The workspace skill pack (DESIGN §23.2). opencode merges this file
+	// over the operator's own config, so a `skills` key here replaces
+	// theirs: the operator's own paths are carried over first, and the
+	// pack's join them. With no pack there is no key at all.
+	if len(skillDirs) > 0 {
+		out["skills"] = map[string]any{"paths": append(operatorOpencodeSkillPaths(), skillDirs...)}
+	}
 	if mcpSock != "" && featureID != "" {
 		out["mcp"] = map[string]any{
 			"gummi": map[string]any{
@@ -127,4 +135,34 @@ func worktreeCage(workdir string) map[string]string {
 		"/**":           "deny",
 		workdir + "/**": "allow",
 	}
+}
+
+// operatorOpencodeSkillPaths reads the `skills.paths` of the operator's
+// own opencode config, so a session config that carries the pack does not
+// take theirs away. Only plain JSON is read; a config opencode reads with
+// comments is left as it is, and its paths are then the ones lost.
+func operatorOpencodeSkillPaths() []string {
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		dir = filepath.Join(home, ".config")
+	}
+	for _, name := range []string{"opencode.json", "config.json"} {
+		raw, err := os.ReadFile(filepath.Join(dir, "opencode", name)) //nolint:gosec // the operator's own config
+		if err != nil {
+			continue
+		}
+		var cfg struct {
+			Skills struct {
+				Paths []string `json:"paths"`
+			} `json:"skills"`
+		}
+		if json.Unmarshal(raw, &cfg) == nil {
+			return cfg.Skills.Paths
+		}
+	}
+	return nil
 }
