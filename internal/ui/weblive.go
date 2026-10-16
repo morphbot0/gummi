@@ -259,7 +259,7 @@ func webToolCall(msg engine.Message, inflight bool) webapi.ToolCall {
 		t, d, _ := strings.Cut(label, "  ")
 		tool, detail = strings.TrimSpace(t), strings.TrimSpace(d)
 	}
-	c := webapi.ToolCall{Tool: tool, Label: label, Detail: detail}
+	c := webapi.ToolCall{Tool: tool, Label: label, Detail: detail, Parent: msg.Parent}
 	if !msg.At.IsZero() && msg.DoneAt.After(msg.At) {
 		c.Ms = msg.DoneAt.Sub(msg.At).Milliseconds()
 	}
@@ -276,7 +276,7 @@ func webToolCall(msg engine.Message, inflight bool) webapi.ToolCall {
 			c.Status = "running"
 		case threadfold.WatchTool(tool):
 			// a backend's own background watch (Claude Code's Monitor
-			// tool) never gets a reported outcome while it runs, and the
+			// tool, or a subagent it spawned) never gets a reported outcome while it runs, and the
 			// turn that started it does not wait on it either — it stays
 			// outstanding long after the call stops being the inflight
 			// one, often past the turn going idle.

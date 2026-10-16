@@ -667,14 +667,22 @@ func (s *claudeSession) read(stdout io.Reader) {
 
 // ccLine is one stdout line's envelope; only the fields the adapter reads.
 type ccLine struct {
-	Type      string          `json:"type"`
-	Subtype   string          `json:"subtype"`
-	SessionID string          `json:"session_id"`
-	Model     string          `json:"model"`       // system/init
-	ToolUseID string          `json:"tool_use_id"` // system/task_notification
-	Status    string          `json:"status"`      // system/task_notification
-	Event     json.RawMessage `json:"event"`       // stream_event: the API SSE event
-	Message   json.RawMessage `json:"message"`     // assistant: the full API message
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype"`
+	SessionID string `json:"session_id"`
+	Model     string `json:"model"`       // system/init
+	ToolUseID string `json:"tool_use_id"` // system/task_notification
+	Status    string `json:"status"`      // system/task_notification
+	// ParentToolUseID is set on a subagent's own assistant and user
+	// lines: the id of the Agent call that spawned it.
+	ParentToolUseID string `json:"parent_tool_use_id"`
+	// HandbackReport is a finished subagent's report (task_notification).
+	HandbackReport struct {
+		Text string `json:"text"`
+	} `json:"handback_report"`
+	Summary string          `json:"summary"` // task_notification
+	Event   json.RawMessage `json:"event"`   // stream_event: the API SSE event
+	Message json.RawMessage `json:"message"` // assistant: the full API message
 	// result fields
 	IsError    bool                    `json:"is_error"`
 	Result     string                  `json:"result"`
@@ -783,8 +791,18 @@ func (s *claudeSession) mapLine(line []byte) []Event {
 				if status == "" {
 					status = "ended"
 				}
+				out := "watch " + status
+				if name == SubagentTool {
+					// a subagent's end carries what it reported back, the
+					// one part of its work the agent that spawned it reads
+					out = "subagent " + status
+					if r := cmpOr(strings.TrimSpace(l.HandbackReport.Text), strings.TrimSpace(l.Summary)); r != "" {
+						out += "\n" + r
+					}
+				}
+				ok := status == "completed"
 				return []Event{{Kind: EventToolResult, Tool: name, CallID: l.ToolUseID, Result: &ToolResult{
-					OK: status == "completed", Output: "watch " + status,
+					OK: ok, Output: boundTail(out, ok),
 				}}}
 			}
 		}
@@ -792,11 +810,11 @@ func (s *claudeSession) mapLine(line []byte) []Event {
 	case "stream_event":
 		return s.mapStreamEvent(l.Event)
 	case "assistant":
-		return s.mapAssistant(l.Message)
+		return s.mapAssistant(l.Message, l.ParentToolUseID)
 	case "result":
 		return s.mapResult(&l)
 	case "user":
-		return s.mapToolResults(l.Message)
+		return s.mapToolResults(l.Message, l.ParentToolUseID)
 	default:
 		// rate_limit_event, control_response
 		// (our interrupt's ack), and anything the CLI grows later.
@@ -887,13 +905,25 @@ func (s *claudeSession) mapStreamEvent(raw json.RawMessage) []Event {
 // blocks become tool-call lines. Thinking blocks were already streamed as
 // reasoning deltas; the block's usage stub is ignored (metered at
 // message_delta instead).
-func (s *claudeSession) mapAssistant(raw json.RawMessage) []Event {
+//
+// A subagent's lines carry parent, the id of the Agent call that spawned
+// it. Its tool calls are shown, tagged with that parent so a face can
+// draw them under the spawn instead of as the main agent's. Its prose is
+// not: it talks to the agent that spawned it, not to the person, and
+// read as the agent's own words it would reach the verdict and the
+// handoff (lastAssistant). What it reports comes back on the spawn's
+// own row instead (task_notification). Its task list is its own, and
+// its SubagentHandback call is how that report is delivered.
+func (s *claudeSession) mapAssistant(raw json.RawMessage, parent string) []Event {
 	var m ccAssistantMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil
 	}
 	var out []Event
 	for _, b := range m.Content {
+		if parent != "" && (b.Type != "tool_use" || b.Name == "SubagentHandback") {
+			continue
+		}
 		switch b.Type {
 		case "text":
 			if strings.TrimSpace(b.Text) != "" {
@@ -911,8 +941,10 @@ func (s *claudeSession) mapAssistant(raw json.RawMessage) []Event {
 					}
 					s.toolNames[b.ID] = b.Name
 				}
-				out = append(out, Event{Kind: EventToolCall, Tool: b.Name, Detail: toolDetail(s.workdir, b.Input), CallID: b.ID})
-				out = append(out, tasksEvent(b.Name, b.Input)...)
+				out = append(out, Event{Kind: EventToolCall, Tool: b.Name, Detail: toolDetail(s.workdir, b.Input), CallID: b.ID, Parent: parent})
+				if parent == "" {
+					out = append(out, tasksEvent(b.Name, b.Input)...)
+				}
 			}
 		}
 	}
@@ -935,8 +967,8 @@ func (s *claudeSession) imageMarkdown(src *ccImageSource) string {
 // mapToolResults turns a user line's tool_result blocks into tool-result
 // events paired by CallID with the tool_use they answer. A result for a
 // call this session never saw is dropped: it would be a result line with
-// no call above it.
-func (s *claudeSession) mapToolResults(raw json.RawMessage) []Event {
+// no call above it. parent is as for mapAssistant.
+func (s *claudeSession) mapToolResults(raw json.RawMessage, parent string) []Event {
 	var m ccToolResultMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil
@@ -955,16 +987,18 @@ func (s *claudeSession) mapToolResults(raw json.RawMessage) []Event {
 		// runs on past the turn. Settling the call on that ack would turn
 		// "watching" into "ok", so only a watch that failed to start
 		// reports here — one that started is settled by the CLI's
-		// task_notification when it ends (mapLine).
-		if WatchTool(name) && !b.IsError {
+		// task_notification when it ends (mapLine). A subagent the
+		// CLI ran in the background is the same; one it ran in the
+		// foreground returns its report here, and settles like any call.
+		body := toolResultText(b.Content)
+		if WatchTool(name) && !b.IsError && (name != SubagentTool || strings.HasPrefix(body, "Async agent launched")) {
 			if s.watching == nil {
 				s.watching = map[string]string{}
 			}
 			s.watching[b.ToolUseID] = name
 			continue
 		}
-		body := toolResultText(b.Content)
-		out = append(out, Event{Kind: EventToolResult, Tool: name, CallID: b.ToolUseID, Result: &ToolResult{OK: !b.IsError, Output: boundTail(body, !b.IsError)}})
+		out = append(out, Event{Kind: EventToolResult, Tool: name, CallID: b.ToolUseID, Parent: parent, Result: &ToolResult{OK: !b.IsError, Output: boundTail(body, !b.IsError)}})
 	}
 	return out
 }

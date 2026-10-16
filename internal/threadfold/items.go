@@ -124,6 +124,9 @@ type ToolCall struct {
 	// Output is kept for a failed call only: the tail a person needs to
 	// see why. A successful call's output is not the thread's to show.
 	Output string `json:"output,omitempty"`
+	// Parent is the call id of the subagent spawn that made this call
+	// (state.ToolPayload.Parent); empty for the agent's own calls.
+	Parent string `json:"parent,omitempty"`
 }
 
 // Receipt is an ItemReceipt's record.
@@ -614,7 +617,7 @@ func toolCall(p state.ToolPayload, ev state.CardEvent) ToolCall {
 			detail = strings.TrimSpace(d)
 		}
 	}
-	c := ToolCall{Tool: tool, Label: label, Detail: detail, Status: ev.Status, MS: p.MS}
+	c := ToolCall{Tool: tool, Label: label, Detail: detail, Status: ev.Status, MS: p.MS, Parent: p.Parent}
 	if ev.Status == state.StatusFail {
 		c.Output = Sanitize(ev.Output)
 	} else if ev.Status == "" && WatchTool(tool) {

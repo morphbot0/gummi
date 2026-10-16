@@ -318,6 +318,10 @@ type ToolPayload struct {
 	// to the EventTool it settles. Empty on a call gummi ran itself,
 	// whose outcome was known when it was recorded and needs no second row.
 	Call string `json:"call,omitempty"`
+	// Parent is the Call of the subagent spawn that made this call.
+	// Empty for the agent's own calls, and on every row written before
+	// subagent calls were told apart.
+	Parent string `json:"parent,omitempty"`
 	// MS is how long the call took, in milliseconds, set on the result
 	// row. Zero means not measured, which is every row written before
 	// durations were, and every call whose backend reports no outcome.

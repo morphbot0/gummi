@@ -32,6 +32,15 @@ const detailCap = 160
 // one line. Empty when the args carry nothing displayable — the caller
 // falls back to the bare tool name.
 func toolDetail(workdir string, args map[string]any) string {
+	// A subagent's type says what kind of agent was spawned and its
+	// description what it was sent to do; the row needs both, since
+	// three parallel "general-purpose" spawns are otherwise one line
+	// three times.
+	if typ, ok := args["subagent_type"].(string); ok {
+		if desc, ok := args["description"].(string); ok && strings.TrimSpace(typ) != "" && strings.TrimSpace(desc) != "" {
+			return collapseDetail(workdir, typ+": "+desc)
+		}
+	}
 	for _, k := range detailKeys {
 		if v, ok := args[k].(string); ok {
 			if d := collapseDetail(workdir, v); d != "" {
@@ -102,4 +111,12 @@ func collapseDetail(workdir, s string) string {
 // Code's Monitor tool (docs: tools-reference#monitor-tool), which
 // returns before the thing it is watching resolves and runs on, outside
 // any turn, until it fires or hits its deadline.
-func WatchTool(tool string) bool { return tool == "Monitor" }
+//
+// Claude Code's Agent tool is the other: a subagent it spawns runs in
+// the background by default, the call's result only says it launched,
+// and its end arrives later as a task_notification, which may wake the
+// agent after its turn has gone idle — exactly what a watch does.
+func WatchTool(tool string) bool { return tool == "Monitor" || tool == SubagentTool }
+
+// SubagentTool is Claude Code's name for the tool that spawns a subagent.
+const SubagentTool = "Agent"

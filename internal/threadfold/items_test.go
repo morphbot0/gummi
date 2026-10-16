@@ -438,3 +438,12 @@ func TestAVerifyWithNoChecksIsSaidAsOne(t *testing.T) {
 		t.Errorf("verify item = %+v, want it to carry the stage's verdict", *v)
 	}
 }
+
+// TestToolCallCarriesItsSubagentParent: the fold hands a stored call's
+// subagent parent on to the faces.
+func TestToolCallCarriesItsSubagentParent(t *testing.T) {
+	c := toolCall(state.ToolPayload{Label: "Bash  ls /", Tool: "Bash", Call: "toolu_B", Parent: "toolu_A"}, state.CardEvent{Status: state.StatusOK})
+	if c.Parent != "toolu_A" {
+		t.Errorf("folded parent = %q, want toolu_A", c.Parent)
+	}
+}

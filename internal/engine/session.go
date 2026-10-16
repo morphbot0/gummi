@@ -172,6 +172,10 @@ type Message struct {
 	// result to its call by exactly this value long after the call
 	// settled.
 	CallID string
+	// Parent is the CallID of the subagent spawn that made this call
+	// (agent.Event.Parent), so a face can draw it under that spawn rather
+	// than as the agent's own. Empty for the agent's own calls.
+	Parent string
 	// pending marks an agent tool call still awaiting its outcome;
 	// cleared on resolve. It is separate from CallID because "which call
 	// is this" and "is it still open" are different questions, and
@@ -913,10 +917,10 @@ func (s *Session) appendActivity(tool string) {
 // call id so a later resolveToolResult can attach the outcome — and the
 // tool's name and argument apart from the rendered line, so the durable
 // log can record what was called rather than only how it was shown.
-func (s *Session) appendToolCall(callID, line, tool, detail string) {
+func (s *Session) appendToolCall(callID, parent, line, tool, detail string) {
 	s.appendTool(Message{
 		Author: AuthorTool, Content: line,
-		Tool: tool, Detail: detail, CallID: callID, pending: callID != "",
+		Tool: tool, Detail: detail, CallID: callID, Parent: parent, pending: callID != "",
 	})
 }
 

@@ -2782,7 +2782,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		s.finishAssistant(ev.Text)
 		kind = EventMessage
 	case agent.EventToolCall:
-		s.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
+		s.appendToolCall(ev.CallID, ev.Parent, toolLine(ev), ev.Tool, ev.Detail)
 		e.noteSkillUse(s.Feature.ID, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result == nil {

@@ -577,7 +577,7 @@ func (e *Engine) handleConsult(c *ConsultSession, sess *Session, ev agent.Event)
 			c.recMu.Unlock()
 		}
 	case agent.EventToolCall:
-		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
+		sess.appendToolCall(ev.CallID, ev.Parent, toolLine(ev), ev.Tool, ev.Detail)
 		e.noteSkillUse(c.id, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result != nil {
@@ -624,7 +624,7 @@ func (e *Engine) dispatchConsultClientTool(c *ConsultSession, sess *Session, tc 
 	if tc == nil {
 		return
 	}
-	sess.appendToolCall(tc.ID, tc.Name, tc.Name, "")
+	sess.appendToolCall(tc.ID, "", tc.Name, tc.Name, "")
 	e.send(Event{Feature: c.id, Kind: EventUpdated})
 	e.wg.Add(1)
 	go func() {

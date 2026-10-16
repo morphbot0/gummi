@@ -125,6 +125,10 @@ type ToolCall struct {
 	// turn, any settled call's, so the page can show it when the call is
 	// opened.
 	Output string `json:"output,omitempty"`
+	// Parent is the call id of the subagent spawn that made this call;
+	// empty for the agent's own calls. The page draws a subagent's calls
+	// apart from the agent's.
+	Parent string `json:"parent,omitempty"`
 }
 
 // Receipt is a crossing's outcome line.

@@ -262,7 +262,7 @@ func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 // outcome without disturbing the call.
 func toolEvents(snap Snapshot, m Message, prefix string, i int) []state.CardEvent {
 	payload, _ := json.Marshal(state.ToolPayload{
-		Label: m.Content, Tool: m.Tool, Detail: m.Detail, Call: m.CallID,
+		Label: m.Content, Tool: m.Tool, Detail: m.Detail, Call: m.CallID, Parent: m.Parent,
 	})
 	call := state.CardEvent{
 		Feature: snap.Feature.ID, Stage: snap.Feature.Stage,

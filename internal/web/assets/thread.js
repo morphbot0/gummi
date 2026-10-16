@@ -383,13 +383,14 @@ function toolRow (t, fold) {
   const target = rest === t.detail || rest.includes(t.detail || '\0') ? rest : [rest, t.detail].filter(Boolean).join(' ')
   const k = /^gummi \//.test(t.tool) ? { kind: 'gummi', mark: 'g', verb: t.tool.slice(6) } : toolKind(t.tool)
   const head = [
+    t.parent ? h('span', { class: 'sub', title: 'by a subagent' }, '↳') : null,
     h('span', { class: 'mark', 'aria-hidden': 'true' }, k.mark),
     h('b', null, k.kind === 'other' ? t.tool : k.verb),
     h('span', { class: 'target', title: target }, target),
     t.status === 'running' ? h('span', { class: 'spinner sm' }) : null,
     t.ms ? h('span', { class: 'ms' }, dur(t.ms)) : null
   ]
-  const cls = ['tool', `k-${k.kind}`, t.status || null]
+  const cls = ['tool', `k-${k.kind}`, t.status || null, t.parent ? 'by-sub' : null]
   if (!t.output) return h('li', { class: cls, testid: 'tool-row' }, h('div', { class: 'thead' }, ...head))
   const out = String(t.output)
   const cut = out.startsWith('…(truncated)')

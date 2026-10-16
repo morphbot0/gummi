@@ -1122,11 +1122,11 @@ func TestClaudeRosterAlwaysOffersSkill(t *testing.T) {
 // read "ok" instead of "watching"); a failed start still reports.
 func TestClaudeMonitorAckKeepsTheWatchOpen(t *testing.T) {
 	s := &claudeSession{}
-	s.mapAssistant([]byte(`{"content":[{"type":"tool_use","id":"m1","name":"Monitor","input":{}},{"type":"tool_use","id":"m2","name":"Monitor","input":{}}]}`))
-	if evs := s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"m1","content":"monitor started"}]}`)); len(evs) != 0 {
+	s.mapAssistant([]byte(`{"content":[{"type":"tool_use","id":"m1","name":"Monitor","input":{}},{"type":"tool_use","id":"m2","name":"Monitor","input":{}}]}`), "")
+	if evs := s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"m1","content":"monitor started"}]}`), ""); len(evs) != 0 {
 		t.Errorf("a started watch settled: %+v", evs)
 	}
-	evs := s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"m2","is_error":true,"content":"bad command"}]}`))
+	evs := s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"m2","is_error":true,"content":"bad command"}]}`), "")
 	if len(evs) != 1 || evs[0].Result == nil || evs[0].Result.OK {
 		t.Errorf("a failed watch = %+v, want one failed result", evs)
 	}
@@ -1145,8 +1145,8 @@ func TestClaudeWatchEndAndUnpromptedTurn(t *testing.T) {
 	if evs := s.mapLine([]byte(`{"type":"system","subtype":"init","session_id":"x","model":"claude-haiku"}`)); len(evs) != 0 {
 		t.Errorf("a prompted turn's init = %+v, want nothing", evs)
 	}
-	s.mapAssistant([]byte(`{"content":[{"type":"tool_use","id":"toolu_m","name":"Monitor","input":{}}]}`))
-	s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"toolu_m","content":"Monitor started (task b1)"}]}`))
+	s.mapAssistant([]byte(`{"content":[{"type":"tool_use","id":"toolu_m","name":"Monitor","input":{}}]}`), "")
+	s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"toolu_m","content":"Monitor started (task b1)"}]}`), "")
 	s.mapLine([]byte(`{"type":"result","subtype":"success","result":"started"}`))
 
 	evs := s.mapLine([]byte(`{"type":"system","subtype":"task_notification","task_id":"b1","tool_use_id":"toolu_m","status":"completed"}`))
@@ -1166,5 +1166,69 @@ func TestClaudeWatchEndAndUnpromptedTurn(t *testing.T) {
 	s.mu.Unlock()
 	if !in {
 		t.Error("the unprompted turn is not one Interrupt would stop")
+	}
+}
+
+// TestClaudeSubagentStream follows the lines the CLI (2.1.300) wrote for
+// one backgrounded subagent: the Agent call, its "launched" ack, the
+// subagent's own lines tagged parent_tool_use_id, its SubagentHandback,
+// and the task_notification that ends it. The spawn stays open until
+// that notification and settles with the report; the subagent's calls
+// carry their parent; its prose and its handback never reach the thread
+// as the agent's own.
+func TestClaudeSubagentStream(t *testing.T) {
+	s := &claudeSession{}
+	lines := []string{
+		`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_A","name":"Agent","input":{"description":"List root directory first entry","prompt":"Run ls /","subagent_type":"general-purpose"}}]}}`,
+		`{"type":"system","subtype":"task_started","task_id":"a5","tool_use_id":"toolu_A","description":"List root directory first entry","subagent_type":"general-purpose","is_backgrounded":true}`,
+		`{"type":"user","parent_tool_use_id":null,"message":{"content":[{"tool_use_id":"toolu_A","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully.\nagentId: a5"}]}]}}`,
+		`{"type":"assistant","parent_tool_use_id":"toolu_A","message":{"content":[{"type":"text","text":"I will run ls."},{"type":"tool_use","id":"toolu_B","name":"Bash","input":{"command":"ls /"}}]}}`,
+		`{"type":"system","subtype":"task_progress","task_id":"a5","tool_use_id":"toolu_A","description":"Running ls"}`,
+		`{"type":"user","parent_tool_use_id":"toolu_A","message":{"content":[{"tool_use_id":"toolu_B","type":"tool_result","content":"bin\nboot","is_error":false}]}}`,
+		`{"type":"assistant","parent_tool_use_id":"toolu_A","message":{"content":[{"type":"tool_use","id":"toolu_H","name":"SubagentHandback","input":{"message":"First entry: bin"}}]}}`,
+		`{"type":"user","parent_tool_use_id":"toolu_A","message":{"content":[{"tool_use_id":"toolu_H","type":"tool_result","content":[{"type":"text","text":"{\"success\":true}"}]}]}}`,
+		`{"type":"system","subtype":"task_notification","task_id":"a5","tool_use_id":"toolu_A","status":"completed","summary":"delivered","handback_report":{"text":"First entry: bin"}}`,
+	}
+	var evs []Event
+	for _, l := range lines {
+		evs = append(evs, s.mapLine([]byte(l))...)
+	}
+	want := []struct {
+		kind   EventKind
+		tool   string
+		call   string
+		parent string
+	}{
+		{EventToolCall, "Agent", "toolu_A", ""},
+		{EventToolCall, "Bash", "toolu_B", "toolu_A"},
+		{EventToolResult, "Bash", "toolu_B", "toolu_A"},
+		{EventToolResult, "Agent", "toolu_A", ""},
+	}
+	if len(evs) != len(want) {
+		t.Fatalf("events = %+v, want %d", evs, len(want))
+	}
+	for i, w := range want {
+		e := evs[i]
+		if e.Kind != w.kind || e.Tool != w.tool || e.CallID != w.call || e.Parent != w.parent {
+			t.Errorf("event %d = %+v, want %+v", i, e, w)
+		}
+	}
+	if d := evs[0].Detail; d != "general-purpose: List root directory first entry" {
+		t.Errorf("spawn detail = %q", d)
+	}
+	if r := evs[3].Result; r == nil || !r.OK || !strings.Contains(r.Output, "First entry: bin") {
+		t.Errorf("spawn settled as %+v, want ok with the report", r)
+	}
+}
+
+// TestClaudeForegroundSubagentSettlesOnItsResult: a subagent the CLI ran
+// in the foreground answers with its report as the call's own result,
+// and no notification follows, so that result settles it.
+func TestClaudeForegroundSubagentSettlesOnItsResult(t *testing.T) {
+	s := &claudeSession{}
+	s.mapAssistant([]byte(`{"content":[{"type":"tool_use","id":"a1","name":"Agent","input":{"subagent_type":"Explore"}}]}`), "")
+	evs := s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"a1","content":"found it in x.go"}]}`), "")
+	if len(evs) != 1 || evs[0].Result == nil || !evs[0].Result.OK {
+		t.Errorf("a foreground subagent = %+v, want settled ok", evs)
 	}
 }

@@ -13,12 +13,12 @@ func TestAssistantImageBlockGoesThroughTheSink(t *testing.T) {
 	}}})
 	var got []byte
 	s := &claudeSession{imageSink: func(b []byte, _ string) string { got = b; return "![image](.gummi/attachments/x.png)" }}
-	evs := s.mapAssistant(raw)
+	evs := s.mapAssistant(raw, "")
 	if len(evs) != 1 || evs[0].Kind != EventMessage || evs[0].Text != "![image](.gummi/attachments/x.png)" || string(got) != "png-bytes" {
 		t.Fatalf("events = %+v, sink got %q", evs, got)
 	}
 	s.imageSink = nil
-	if evs := s.mapAssistant(raw); len(evs) != 0 {
+	if evs := s.mapAssistant(raw, ""); len(evs) != 0 {
 		t.Fatalf("no sink must drop the image, got %+v", evs)
 	}
 }
