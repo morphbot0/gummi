@@ -10,6 +10,7 @@ import { h, clear, plural, cr, clock, dollarsInput, parseDollars } from '../dom.
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { errorBox, confirmStrip, refetcher, field } from './kit.js?v=__ASSET_V__'
 import { pairField } from '../modelpick.js?v=__ASSET_V__'
+import { markdown } from '../markdown.js?v=__ASSET_V__'
 
 function errText (err) {
   return err?.data?.text || err?.message || String(err)
@@ -28,6 +29,22 @@ function when (iso) {
   return `in ${Math.round(hr / 24)}d`
 }
 
+// frontmatter splits a SKILL.md into its frontmatter and its body: the
+// rendered view reads the body, the source view shows it whole.
+function frontmatter (md) {
+  const m = /^---\n([\s\S]*?)\n---\n?/.exec(String(md || '').replace(/\r\n?/g, '\n'))
+  return m ? { head: m[1], body: md.slice(m[0].length) } : { head: '', body: md || '' }
+}
+
+// diffLines draws a unified diff, a line per row, marked the way the
+// diff tab marks its own.
+function diffLines (diff, testid) {
+  return h('pre', { class: 'sk-diff', testid },
+    diff.replace(/\n$/, '').split('\n').map(l => h('div', {
+      class: l.startsWith('+++') || l.startsWith('---') ? 'fh' : l.startsWith('@@') ? 'hk' : l[0] === '+' ? 'add' : l[0] === '-' ? 'del' : null
+    }, l || ' ')))
+}
+
 const OWNER = { curator: 'curator', person: 'person', pinned: 'curator, pinned' }
 
 const OUTCOME = { done: 'done', failed: 'failed', exhausted: 'ran out of budget', paused: 'paused' }
@@ -44,7 +61,10 @@ registerView('skills', {
   mount (body, ctx) {
     // form is the curator's settings form while it is open: built once from
     // the read it opened on, so a board event's redraw keeps what is typed.
-    const v = { data: null, err: null, busy: false, asking: null, notice: null, noticeErr: false, form: null, catalog: null }
+    // docs are the SKILL.md reads a person has open, by key: each keeps
+    // the version it was read at (the published revision, or the staged
+    // change's time and status) and is read again only when that moves.
+    const v = { data: null, err: null, busy: false, asking: null, notice: null, noticeErr: false, form: null, catalog: null, docs: new Map() }
     body.classList.add('vskills')
 
     const head = h('div', { class: 'sk-head' })
@@ -82,6 +102,46 @@ registerView('skills', {
       }
       v.busy = false
       await load()
+    }
+
+    // doc is the open SKILL.md read under key, fetched again when ver has
+    // moved since; null when it is closed.
+    function doc (key, ver, path) {
+      const d = v.docs.get(key)
+      if (!d) return null
+      if (d.ver !== ver && !d.loading) {
+        d.loading = true
+        ctx.api.get(path).then(data => { d.data = data; d.err = null }, err => { d.err = err })
+          .finally(() => { d.ver = ver; d.loading = false; if (v.docs.get(key) === d) draw() })
+      }
+      return d
+    }
+
+    function toggleDoc (key) {
+      if (v.docs.has(key)) v.docs.delete(key)
+      else v.docs.set(key, { ver: null, data: null, err: null, raw: false, loading: false })
+      draw()
+    }
+
+    // docPane draws one SKILL.md: rendered, or its source a person may
+    // switch to, to read the frontmatter sessions are matched on.
+    function docPane (d, md, testid) {
+      const pane = h('div', { class: 'sk-doc', testid })
+      const src = h('button', {
+        class: ['btn', 'sk-doc-src', d.raw && 'on'], type: 'button', 'aria-pressed': String(d.raw), testid: `${testid}-source`,
+        onclick: () => { d.raw = !d.raw; draw() }
+      }, 'Source')
+      const fm = frontmatter(md)
+      pane.append(h('div', { class: 'sk-doc-bar' }, h('span', { class: 'mute' }, 'SKILL.md'), h('span', { class: 'grow' }), src))
+      if (d.raw) pane.append(h('pre', { class: 'sk-doc-raw', testid: `${testid}-raw` }, md))
+      else pane.append(markdown(fm.body, { headingBase: 4 }))
+      return pane
+    }
+
+    function docBody (d, testid, fill) {
+      if (d.err) return errorBox(d.err, `${testid}-error`)
+      if (!d.data) return h('div', { class: 'vbusy' }, h('span', { class: 'spinner' }), 'Reading SKILL.md…')
+      return fill(d.data)
     }
 
     function draw () {
@@ -256,10 +316,12 @@ registerView('skills', {
           h('thead', null, h('tr', null,
             h('th', null, 'Skill'), h('th', null, 'Scope'), h('th', null, 'Owner'),
             h('th', { class: 'num' }, 'Uses'), h('th', null, 'Standing'), h('th', null, ''))),
-          h('tbody', null, rows.map(s => skillRow(s))))))
+          h('tbody', null, rows.flatMap(s => skillRow(s, d.published))))))
     }
 
-    function skillRow (s) {
+    function skillRow (s, published) {
+      const key = `skill:${s.name}`
+      const open = doc(key, published, `/api/curator/skills/${encodeURIComponent(s.name)}`)
       const standing = s.due ? 'archived at the next sweep' : s.stale ? 'stale' : s.lastUsed ? `used ${clock(s.lastUsed)}` : ''
       const pin = s.pinnable
         ? h('button', {
@@ -268,13 +330,39 @@ registerView('skills', {
             onclick: () => act(`/api/curator/skills/${encodeURIComponent(s.name)}/${s.pinned ? 'unpin' : 'pin'}`)
           }, s.pinned ? 'Unpin' : 'Pin')
         : null
-      return h('tr', { testid: `skill-${s.name}`, data: { owner: s.owner } },
+      const read = h('button', {
+        class: ['btn', open && 'on'], type: 'button', testid: `skill-${s.name}-read`, 'aria-expanded': String(!!open),
+        title: open ? 'Close its SKILL.md' : 'Read its SKILL.md',
+        onclick: () => toggleDoc(key)
+      }, 'Read')
+      const row = h('tr', { testid: `skill-${s.name}`, data: { owner: s.owner } },
         h('td', { class: 'sk-name' }, h('b', null, s.name), s.description ? h('div', { class: 'sk-desc' }, s.description) : null),
         h('td', null, s.scope),
         h('td', { testid: `skill-${s.name}-owner` }, OWNER[s.owner] || s.owner),
         h('td', { class: 'num', title: `invoked ${s.uses || 0}, read ${s.views || 0}, edited ${s.edits || 0} times` }, String((s.uses || 0) + (s.views || 0))),
         h('td', { class: [s.due || s.stale ? 'sk-stale' : 'mute'], testid: `skill-${s.name}-standing` }, standing),
-        h('td', { class: 'sk-act' }, pin))
+        h('td', { class: 'sk-act' }, h('div', { class: 'sk-acts' }, read, pin)))
+      if (!open) return [row]
+      return [row, h('tr', { class: 'sk-doc-row' }, h('td', { colspan: 6 },
+        docBody(open, `skill-${s.name}-doc`, data => docPane(open, data.text, `skill-${s.name}-doc`))))]
+    }
+
+    // stagedDoc is a staged change under review: a write's diff against
+    // the published skill and the SKILL.md it would publish, or the
+    // published SKILL.md an archive would take out of the pack.
+    function stagedDoc (d, id) {
+      return docBody(d, id, data => {
+        if (data.op === 'archive') {
+          return h('div', { class: 'sk-review' },
+            h('div', { class: 'mute' }, 'Archiving takes this SKILL.md out of the pack:'),
+            data.published ? docPane(d, data.published, `${id}-doc`) : h('div', { class: 'mute' }, 'The pack no longer has it.'))
+        }
+        return h('div', { class: 'sk-review' },
+          data.diff
+            ? h('div', null, h('div', { class: 'mute' }, 'Changes against the published skill:'), diffLines(data.diff, `${id}-diff`))
+            : h('div', { class: 'mute', testid: `${id}-new` }, data.published ? 'Same as the published skill.' : 'A new skill: the pack has none by this name.'),
+          docPane(d, data.text, `${id}-doc`))
+      })
     }
 
     // drawStaged lists what card sessions staged for the curator (§23.5):
@@ -294,7 +382,10 @@ registerView('skills', {
       }
       const list = h('ul', { class: 'sk-staged', testid: 'staged' })
       for (const c of [...pending, ...rejected]) {
-        list.append(h('li', { testid: `staged-${c.card}-${c.name}`, data: { status: c.status } },
+        const id = `staged-${c.card}-${c.name}`
+        const key = `staged:${c.card}/${c.name}`
+        const open = doc(key, `${c.at}|${c.status}|${d.published}`, `/api/curator/staged/${encodeURIComponent(c.card)}/${encodeURIComponent(c.name)}`)
+        list.append(h('li', { testid: id, data: { status: c.status } },
           h('div', { class: 'sk-staged-head' },
             h('span', { class: 'sk-staged-op' }, c.op === 'archive' ? 'archive' : 'write'),
             h('b', { class: 'sk-staged-name' }, c.name),
@@ -303,11 +394,16 @@ registerView('skills', {
             h('span', { class: 'grow' }),
             c.status === 'rejected'
               ? h('span', { class: 't-err' }, 'rejected')
-              : h('span', { class: 't-warn' }, 'waiting for the curator')),
+              : h('span', { class: 't-warn' }, 'waiting for the curator'),
+            h('button', {
+              class: ['btn', open && 'on'], type: 'button', testid: `${id}-review`, 'aria-expanded': String(!!open),
+              onclick: () => toggleDoc(key)
+            }, open ? 'Close' : 'Review')),
           c.why ? h('div', { class: 'sk-staged-why' }, c.why) : null,
           c.status === 'rejected' && c.verdict
             ? h('div', { class: 'sk-staged-verdict', testid: `staged-${c.card}-${c.name}-verdict` }, `the curator: ${c.verdict}`)
-            : null))
+            : null,
+          open ? stagedDoc(open, id) : null))
       }
       staged.append(list)
     }

@@ -112,3 +112,24 @@ type CuratorRun struct {
 	// Reverted is a run a person has already undone.
 	Reverted bool `json:"reverted,omitempty"`
 }
+
+// CuratorDoc is GET /api/curator/skills/{name} and GET
+// /api/curator/staged/{card}/{name}: one skill's SKILL.md for a person to
+// review, the published one or a card's staged change to it.
+type CuratorDoc struct {
+	Name string `json:"name"`
+	// Card, CardName, Op and Status are a staged change's; empty for a
+	// published skill.
+	Card     string `json:"card,omitempty"`
+	CardName string `json:"cardName,omitempty"`
+	Op       string `json:"op,omitempty"`
+	Status   string `json:"status,omitempty"`
+	// Text is the SKILL.md under review; empty for a staged archive.
+	Text string `json:"text"`
+	// Published is the pack's SKILL.md a staged change replaces or
+	// archives; empty for a new skill and for a published read.
+	Published string `json:"published,omitempty"`
+	// Diff is a staged write against Published, unified; empty for a new
+	// skill, an archive, a published read and a write that changes nothing.
+	Diff string `json:"diff,omitempty"`
+}

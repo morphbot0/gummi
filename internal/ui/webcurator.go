@@ -12,8 +12,10 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/aymanbagabas/go-udiff"
 
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/webapi"
@@ -43,6 +45,36 @@ func (b *Bridge) Curator(ctx context.Context) (webapi.Curator, error) {
 				return webapi.Curator{}, webErr(WebConflict, "%s", sanitize(err.Error()))
 			}
 			return webCurator(v), nil
+		}, nil
+	})
+}
+
+// CuratorDoc is GET /api/curator/skills/{name} (card empty) and GET
+// /api/curator/staged/{card}/{name}: one SKILL.md for a person to review,
+// a staged write with its diff against the published one.
+func (b *Bridge) CuratorDoc(ctx context.Context, card, name string) (webapi.CuratorDoc, error) {
+	return webLoad(ctx, b, func(m *Shell) (func(context.Context) (webapi.CuratorDoc, error), error) {
+		eng, err := curatorEngine(m)
+		if err != nil {
+			return nil, err
+		}
+		cardName := ""
+		if card != "" {
+			cardName = m.cardName(domain.FeatureID(card))
+		}
+		return func(ctx context.Context) (webapi.CuratorDoc, error) {
+			d, err := eng.SkillDoc(ctx, card, name)
+			if err != nil {
+				return webapi.CuratorDoc{}, webErr(WebNotFound, "%s", sanitize(err.Error()))
+			}
+			out := webapi.CuratorDoc{
+				Name: d.Name, Card: d.Card, CardName: cardName, Op: d.Op, Status: d.Status,
+				Text: d.Text, Published: d.Published,
+			}
+			if d.Text != "" && d.Published != "" && d.Text != d.Published {
+				out.Diff = udiff.Unified("published", "staged", d.Published, d.Text)
+			}
+			return out, nil
 		}, nil
 	})
 }

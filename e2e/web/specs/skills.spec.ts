@@ -44,6 +44,14 @@ async function seedCuratorRun(ws: Workspace) {
     { name: 'scoped-tests', op: 'archive', base: after, at: now.toISOString(), why: 'the Makefile counts them now', status: 'pending' },
     { name: 'always-sleep', op: 'write', base: after, at: now.toISOString(), status: 'rejected', verdict: 'a sleep hides the race' },
   ]));
+  // another card's staged rewrite of the curator's skill, for review
+  const rewrite = path.join(ws.repo, '.gummi', 'state', 'skillstage', 'FF-901');
+  await fs.promises.mkdir(path.join(rewrite, 'skills', 'scoped-tests'), { recursive: true });
+  await fs.promises.writeFile(path.join(rewrite, 'skills', 'scoped-tests', 'SKILL.md'),
+    '---\nname: scoped-tests\ndescription: Run the named tests and check they ran\nscope: general\nsource: curator\n---\n\nRun them with -count=1, then count them.\n');
+  await fs.promises.writeFile(path.join(rewrite, 'stage.json'), JSON.stringify([
+    { name: 'scoped-tests', op: 'write', base: after, at: now.toISOString(), status: 'pending' },
+  ]));
 }
 
 test.use({ seed: { run: seedCuratorRun } });
@@ -70,11 +78,28 @@ test('a curator skill is pinned and unpinned, and its run reverted', async ({ pa
 
   // what a session staged is shown, read-only: pending with its reason,
   // rejected with the curator's
-  await expect(page.getByTestId('staged-count')).toHaveText('1 pending · 1 rejected');
+  await expect(page.getByTestId('staged-count')).toHaveText('2 pending · 1 rejected');
   await expect(page.getByTestId('staged-FF-900-scoped-tests')).toHaveAttribute('data-status', 'pending');
   await expect(page.getByTestId('staged-FF-900-scoped-tests')).toContainText('the Makefile counts them now');
   await expect(page.getByTestId('staged-FF-900-always-sleep')).toHaveAttribute('data-status', 'rejected');
   await expect(page.getByTestId('staged-FF-900-always-sleep-verdict')).toContainText('a sleep hides the race');
+
+  // a person reads the published SKILL.md, rendered and as source
+  await page.getByTestId('skill-scoped-tests-read').click();
+  const doc = page.getByTestId('skill-scoped-tests-doc');
+  await expect(doc).toContainText('Run them, then count them.');
+  await page.getByTestId('skill-scoped-tests-doc-source').click();
+  await expect(page.getByTestId('skill-scoped-tests-doc-raw')).toContainText('source: curator');
+  await page.getByTestId('skill-scoped-tests-read').click();
+  await expect(doc).toHaveCount(0);
+
+  // and reviews a staged rewrite as a diff against it, and an archive
+  // as the SKILL.md it would take out
+  await page.getByTestId('staged-FF-901-scoped-tests-review').click();
+  await expect(page.getByTestId('staged-FF-901-scoped-tests-diff')).toContainText('+Run them with -count=1, then count them.');
+  await expect(page.getByTestId('staged-FF-901-scoped-tests-doc')).toContainText('-count=1');
+  await page.getByTestId('staged-FF-900-scoped-tests-review').click();
+  await expect(page.getByTestId('staged-FF-900-scoped-tests-doc')).toContainText('Run them, then count them.');
 
   // pin, then unpin
   await page.getByTestId('skill-scoped-tests-pin').click();

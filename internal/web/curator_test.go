@@ -178,6 +178,57 @@ func TestCuratorRouteStaged(t *testing.T) {
 	}
 }
 
+// TestCuratorRouteDocs: a person reads a published skill's SKILL.md, a
+// staged write's with its diff against the published one, and an
+// archive's published one; a skill or change the pack lacks is not found.
+func TestCuratorRouteDocs(t *testing.T) {
+	b := newBoardHarness(t)
+	ctx := context.Background()
+	curatorWrote(t, b, "cur-1", "scoped-tests")
+	f := b.card(7, "rate limits", domain.StageImplement)
+	g := b.card(8, "lint config", domain.StageImplement)
+	pack := b.eng.SkillPack()
+	if l, err := pack.StageWrite(ctx, string(f.ID), skillpack.Draft{
+		Name: "scoped-tests", Description: "Run the named tests and check they ran", Body: "Run them with -count=1, then count them.\n",
+	}, nil); err != nil || !l.OK() {
+		t.Fatalf("stage write: %v %v", err, l.Refusals)
+	}
+	if err := pack.StageArchive(ctx, string(g.ID), "scoped-tests", "the Makefile counts them now"); err != nil {
+		t.Fatal(err)
+	}
+
+	type docBody struct {
+		Name, Card, CardName, Op, Status, Text, Published, Diff string
+	}
+	var pub docBody
+	b.must(http.StatusOK, http.MethodGet, "/api/curator/skills/scoped-tests", nil, &pub)
+	if !strings.Contains(pub.Text, "Run them, then count them.") || pub.Card != "" || pub.Diff != "" {
+		t.Errorf("the published read = %+v", pub)
+	}
+
+	var w docBody
+	b.must(http.StatusOK, http.MethodGet, "/api/curator/staged/"+string(f.ID)+"/scoped-tests", nil, &w)
+	if w.Op != "write" || w.Status != "pending" || w.CardName != f.Name() ||
+		!strings.Contains(w.Text, "-count=1") || w.Published != pub.Text ||
+		!strings.Contains(w.Diff, "-Run them, then count them.") || !strings.Contains(w.Diff, "+Run them with -count=1, then count them.") || strings.Contains(w.Diff, "No newline") {
+		t.Errorf("the staged write reads %+v", w)
+	}
+
+	var a docBody
+	b.must(http.StatusOK, http.MethodGet, "/api/curator/staged/"+string(g.ID)+"/scoped-tests", nil, &a)
+	if a.Op != "archive" || a.Text != "" || a.Published != pub.Text || a.Diff != "" {
+		t.Errorf("the staged archive reads %+v", a)
+	}
+
+	var out map[string]any
+	if code := b.call(http.MethodGet, "/api/curator/skills/no-such", nil, &out); code != http.StatusNotFound {
+		t.Errorf("an unknown skill = %d %v, want 404", code, out)
+	}
+	if code := b.call(http.MethodGet, "/api/curator/staged/"+string(g.ID)+"/no-such", nil, &out); code != http.StatusNotFound {
+		t.Errorf("an unstaged change = %d %v, want 404", code, out)
+	}
+}
+
 // TestCuratorRouteRefusals: an unknown run or skill is not found, a run
 // asked of a board with no curator is a conflict in the engine's words,
 // and every write is refused unpaired or cross-origin before the board

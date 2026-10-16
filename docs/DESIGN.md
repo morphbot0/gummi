@@ -5645,7 +5645,11 @@ the web page's Skills view, or `gummi curator revert|pin|unpin`; all
 three call the same engine acts over one read model
 (`engine.CuratorView`). Both skills views also list what sessions
 staged (§23.5): each change's card, pending ones with their reason and
-rejected ones with the curator's, read-only. The stats tab draws the curator as its own
+rejected ones with the curator's, read-only. The web page's view also
+reads a skill's SKILL.md (`engine.SkillDoc`): a published one rendered or
+as source, a staged write as a diff against the published one beside the
+SKILL.md it would publish, and a staged archive as the SKILL.md it would
+take out. A person's read counts no use. The stats tab draws the curator as its own
 lane and money line, outside the card figures and outside the clock
 and concurrency figures, which measure cards. `doctor` reports the
 pack, the curator and every routed backend that runs without the pack.

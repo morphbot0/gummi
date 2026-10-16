@@ -47,3 +47,15 @@
 .skc-form{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--line2);border-radius:10px;background:var(--sunk)}
 .skc-form .field input,.skc-form .field select{background:var(--panel)}
 .skc-foot{display:flex;align-items:center;gap:8px}
+.sk-acts{display:flex;gap:6px;justify-content:flex-end}
+.sk-doc-row > td{padding:0 12px 12px;white-space:normal}
+.sk-review{display:flex;flex-direction:column;gap:8px;font-size:12px;margin-top:4px;min-width:0}
+.sk-doc{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--line2);border-radius:8px;background:var(--sunk);min-width:0}
+.sk-doc-bar{display:flex;align-items:center;gap:8px;font-size:12px}
+.sk-doc .md{font-size:13px;color:var(--fg2);overflow-wrap:anywhere}
+.sk-doc-raw,.sk-diff{margin:0;font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--fg2)}
+.sk-diff{padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--sunk)}
+.sk-diff .add{color:var(--ok);background:color-mix(in srgb,var(--ok) 10%,transparent)}
+.sk-diff .del{color:var(--err);background:color-mix(in srgb,var(--err) 10%,transparent)}
+.sk-diff .hk{color:var(--accent)}
+.sk-diff .fh{color:var(--fg4)}

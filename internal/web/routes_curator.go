@@ -10,6 +10,8 @@ import (
 // read, and the person's acts on the pack afterwards (§23.6).
 func (s *Server) curatorRoutes() {
 	s.api("GET /api/curator", s.handleCurator)
+	s.api("GET /api/curator/skills/{name}", s.handleCuratorDoc)
+	s.api("GET /api/curator/staged/{card}/{name}", s.handleCuratorDoc)
 	s.api("PUT /api/curator/config", s.handleSetCurator)
 	s.api("DELETE /api/curator/config", s.handleClearCurator)
 	s.api("POST /api/curator/run", s.handleRunCurator)
@@ -22,6 +24,17 @@ func (s *Server) curatorRoutes() {
 // pack's skills and the curator's runs, newest first.
 func (s *Server) handleCurator(w http.ResponseWriter, r *http.Request) {
 	out, err := s.opt.Board.Curator(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleCuratorDoc is GET /api/curator/skills/{name} and GET
+// /api/curator/staged/{card}/{name}: one SKILL.md for a person to review.
+func (s *Server) handleCuratorDoc(w http.ResponseWriter, r *http.Request) {
+	out, err := s.opt.Board.CuratorDoc(r.Context(), r.PathValue("card"), r.PathValue("name"))
 	if err != nil {
 		s.fail(w, err)
 		return

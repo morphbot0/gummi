@@ -13,8 +13,10 @@ var curatorAt = time.Date(2026, 10, 14, 3, 0, 0, 0, time.UTC)
 // is a broken page and has to show up here as a golden diff first.
 func TestCuratorShapes(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, struct {
-		On  Curator `json:"on"`
-		Off Curator `json:"off"`
+		On     Curator    `json:"on"`
+		Off    Curator    `json:"off"`
+		Doc    CuratorDoc `json:"doc"`
+		Staged CuratorDoc `json:"staged"`
 	}{
 		On: Curator{
 			Config:     &CuratorConfig{Backend: "claude", Model: "claude-haiku", Schedule: "@daily", Budget: 40, Monthly: 400},
@@ -59,5 +61,11 @@ func TestCuratorShapes(t *testing.T) {
 			}},
 		},
 		Off: Curator{PackDir: "/work/.gummi/skills", Skills: []CuratorSkill{}, Runs: []CuratorRun{}, Staged: []CuratorStaged{}},
+		Doc: CuratorDoc{Name: "make-ci", Text: "---\nname: make-ci\n---\n\nRun make ci.\n"},
+		Staged: CuratorDoc{
+			Name: "make-ci", Card: "FF-21", CardName: "\"tidy the lint config\"", Op: "write", Status: "pending",
+			Text: "---\nname: make-ci\n---\n\nRun make ci with GUMMI_SPAWNED unset.\n", Published: "---\nname: make-ci\n---\n\nRun make ci.\n",
+			Diff: "--- published\n+++ staged\n@@ -3,1 +3,1 @@\n-Run make ci.\n+Run make ci with GUMMI_SPAWNED unset.\n",
+		},
 	}))
 }

@@ -123,5 +123,19 @@
     "skills": [],
     "runs": [],
     "staged": []
+  },
+  "doc": {
+    "name": "make-ci",
+    "text": "---\nname: make-ci\n---\n\nRun make ci.\n"
+  },
+  "staged": {
+    "name": "make-ci",
+    "card": "FF-21",
+    "cardName": "\"tidy the lint config\"",
+    "op": "write",
+    "status": "pending",
+    "text": "---\nname: make-ci\n---\n\nRun make ci with GUMMI_SPAWNED unset.\n",
+    "published": "---\nname: make-ci\n---\n\nRun make ci.\n",
+    "diff": "--- published\n+++ staged\n@@ -3,1 +3,1 @@\n-Run make ci.\n+Run make ci with GUMMI_SPAWNED unset.\n"
   }
 }

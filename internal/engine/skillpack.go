@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -263,3 +264,63 @@ func (e *Engine) releasePackRevisions(ctx context.Context) {
 	e.SkillPack().Release(ctx, live)
 	e.SkillPack().ReleaseStage(live)
 }
+
+// SkillDoc is one skill's SKILL.md as a person reviews it (§23.6): the
+// published one, or a card's staged change beside the published one it
+// would replace.
+type SkillDoc struct {
+	Name string
+	// Card, Op and Status are a staged change's; empty for a published
+	// skill.
+	Card, Op, Status string
+	// Text is the SKILL.md under review: the published one, or the
+	// staged write's. Empty for a staged archive.
+	Text string
+	// Published is the pack's SKILL.md a staged change replaces or
+	// archives; empty for a new skill and for a published read.
+	Published string
+}
+
+// SkillDoc reads name's SKILL.md: published with card empty, else card's
+// staged change to it, pending or rejected. A person's read is not a
+// session's: it counts no use.
+func (e *Engine) SkillDoc(ctx context.Context, card, name string) (SkillDoc, error) {
+	pack := e.SkillPack()
+	rev := pack.Published(ctx)
+	published := func() string {
+		if rev == "" {
+			return ""
+		}
+		md, err := pack.Show(ctx, rev, name)
+		if err != nil {
+			return ""
+		}
+		return endLine(md)
+	}
+	if card == "" {
+		md := published()
+		if md == "" {
+			return SkillDoc{}, fmt.Errorf("no skill %q in the pack", name)
+		}
+		return SkillDoc{Name: name, Text: md}, nil
+	}
+	for _, st := range pack.StagedFor(card) {
+		if st.Name != name {
+			continue
+		}
+		d := SkillDoc{Name: name, Card: card, Op: st.Op, Status: st.Status, Published: published()}
+		if st.Op != skillpack.OpArchive {
+			md, ok := pack.StagedFile(card, name, "SKILL.md")
+			if !ok {
+				return SkillDoc{}, fmt.Errorf("no skill %q staged by %s", name, card)
+			}
+			d.Text = endLine(md)
+		}
+		return d, nil
+	}
+	return SkillDoc{}, fmt.Errorf("no skill %q staged by %s", name, card)
+}
+
+// endLine ends md in one newline: the pack's read trims it and a staged
+// file keeps it, and a review's diff must not show the difference.
+func endLine(md string) string { return strings.TrimRight(md, "\n") + "\n" }
