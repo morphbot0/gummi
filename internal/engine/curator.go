@@ -53,7 +53,7 @@ func curatorCommitPrefix(id string) string { return "curator " + id + ": " }
 // CuratorRun is one row of the curator's ledger.
 type CuratorRun struct {
 	ID       string    `json:"id"`
-	Why      string    `json:"why"` // "schedule" or "person"
+	Why      string    `json:"why"` // "schedule", "person" or "staged"
 	Start    time.Time `json:"start"`
 	End      time.Time `json:"end"`
 	Backend  string    `json:"backend"`
@@ -312,10 +312,60 @@ func (e *Engine) curatorArmed(now time.Time) time.Time {
 // timers: they count in days.
 const curatorSweepEvery = time.Hour
 
+// curatorWhyStaged is the run a staged change starts: it reviews what
+// card sessions staged and reads nothing else (§23.5).
+const curatorWhyStaged = "staged"
+
+// A staged change starts a review once its session has staged nothing
+// for stagedQuiet, so a session's few changes go to one run, and no
+// sooner than stagedGap after the last run began, so a busy board does
+// not run the curator all day.
+const (
+	stagedQuiet = 30 * time.Minute
+	stagedGap   = 6 * time.Hour
+)
+
+// stagedDue reports whether a change waits for review that a run should
+// be started for now: the newest has been quiet stagedQuiet, the last run
+// began stagedGap ago, and the month's budget can pay for a turn (a
+// paused run every stagedGap would only repeat that it is spent).
+func (e *Engine) stagedDue(now time.Time) bool {
+	var newest time.Time
+	for _, list := range e.SkillPack().AllStaged() {
+		for _, s := range list {
+			if s.At.After(newest) {
+				newest = s.At
+			}
+		}
+	}
+	if newest.IsZero() || now.Sub(newest) < stagedQuiet {
+		return false
+	}
+	runs, err := e.CuratorRuns()
+	if err != nil {
+		return false
+	}
+	if len(runs) > 0 && now.Sub(runs[len(runs)-1].Start) < stagedGap {
+		return false
+	}
+	return curatorBudget(e.CuratorConfig(), runs, now) >= e.turnReserve()
+}
+
+// curatorBudget is what a run starting now may spend: its own budget,
+// cut to what is left of the month's.
+func curatorBudget(c *config.Curator, runs []CuratorRun, now time.Time) float64 {
+	budget := c.Budget
+	if c.Monthly > 0 {
+		budget = min(budget, c.Monthly-CuratorMonthSpent(runs, now))
+	}
+	return budget
+}
+
 // CuratorTick is the board's clock for the pack (called beside
 // ScheduleTick): it folds skill usage and archives what the timers
 // came due on, at most hourly and whether or not a curator is configured,
-// then starts a curator run when one is due or a person asked for one.
+// then starts a curator run when one is due, a person asked for one, or
+// a staged change has waited (stagedDue).
 // The run goes on in the background; started says whether one did.
 func (e *Engine) CuratorTick(ctx context.Context, now time.Time) (started bool, err error) {
 	e.curator.mu.Lock()
@@ -340,6 +390,8 @@ func (e *Engine) CuratorTick(ctx context.Context, now time.Time) (started bool, 
 		return false, err
 	} else if !now.Before(next) {
 		why = "schedule"
+	} else if e.stagedDue(now) {
+		why = curatorWhyStaged
 	}
 	if why == "" {
 		return false, nil
@@ -477,10 +529,7 @@ func (e *Engine) runCurator(ctx context.Context, why string) (CuratorRun, error)
 	}
 	runs, _ := e.CuratorRuns()
 	run.ID = uniqueRunID(run.ID, runs)
-	budget := c.Budget
-	if c.Monthly > 0 {
-		budget = min(budget, c.Monthly-CuratorMonthSpent(runs, now))
-	}
+	budget := curatorBudget(c, runs, now)
 	if budget < e.turnReserve() {
 		if c.Budget < e.turnReserve() {
 			return finish(CuratorNoBudget, fmt.Sprintf("the budget per run (%.2f) is under one turn's reserve (%.0f credits); raise it", c.Budget, e.turnReserve()), nil)
@@ -495,7 +544,7 @@ func (e *Engine) runCurator(ctx context.Context, why string) (CuratorRun, error)
 	if err != nil {
 		return finish(CuratorFailed, err.Error(), err)
 	}
-	ct := &curatorTurn{e: e, run: &run, seen: curatorSeenIn(runs)}
+	ct := &curatorTurn{e: e, run: &run, seen: curatorSeenIn(runs), reviewOnly: why == curatorWhyStaged}
 	e.curator.mu.Lock()
 	e.curator.current = run.ID
 	e.curator.mu.Unlock()
@@ -712,7 +761,10 @@ type curatorTurn struct {
 	e    *Engine
 	run  *CuratorRun
 	seen curatorSeen
-	mu   sync.Mutex
+	// reviewOnly is a run a staged change started: it decides the staged
+	// changes and is offered no memory or events to read.
+	reviewOnly bool
+	mu         sync.Mutex
 	// lastCheckpoint is when the run's row was last written.
 	lastCheckpoint time.Time
 }
@@ -735,6 +787,16 @@ func obj(props map[string]any, required ...string) map[string]any {
 }
 
 func (ct *curatorTurn) tools() []agent.ToolDef {
+	all := ct.allTools()
+	if !ct.reviewOnly {
+		return all
+	}
+	return slices.DeleteFunc(all, func(t agent.ToolDef) bool {
+		return t.Name == curatorReadTool || t.Name == curatorEventsTool
+	})
+}
+
+func (ct *curatorTurn) allTools() []agent.ToolDef {
 	return append([]agent.ToolDef{
 		{
 			Name: curatorInputsTool,
@@ -790,6 +852,9 @@ func (ct *curatorTurn) dispatch(ctx context.Context, name string, raw json.RawMe
 	e := ct.e
 	if out, ok, err := ct.reviewDispatch(ctx, name, raw); ok {
 		return out, err
+	}
+	if ct.reviewOnly && (name == curatorReadTool || name == curatorEventsTool) {
+		return "", fmt.Errorf("this run reviews staged changes only; %s is not offered", name)
 	}
 	switch name {
 	case curatorInputsTool:
@@ -911,11 +976,22 @@ func kb(n int64) string {
 }
 
 func (ct *curatorTurn) inputs(ctx context.Context) string {
-	e := ct.e
 	var b strings.Builder
 	ct.writeStagedCards(ctx, &b)
+	if !ct.reviewOnly {
+		ct.writeMemoryCards(ctx, &b)
+		ct.writeEventCards(ctx, &b)
+	}
+	ct.writePack(ctx, &b)
+	return b.String()
+}
+
+// writeMemoryCards is curator_inputs' list of cards whose session memory
+// is new to the curator.
+func (ct *curatorTurn) writeMemoryCards(ctx context.Context, b *strings.Builder) {
+	e := ct.e
 	cards := ct.memoryCards()
-	fmt.Fprintf(&b, "Cards whose session memory you have not read since it last changed (%d, newest first):\n", len(cards))
+	fmt.Fprintf(b, "Cards whose session memory you have not read since it last changed (%d, newest first):\n", len(cards))
 	for _, c := range cards {
 		title := ""
 		if e.cfg.Store != nil {
@@ -926,18 +1002,23 @@ func (ct *curatorTurn) inputs(ctx context.Context) string {
 				}
 			}
 		}
-		fmt.Fprintf(&b, "- %s %s: %s of memory\n", c.id, title, kb(c.size))
+		fmt.Fprintf(b, "- %s %s: %s of memory\n", c.id, title, kb(c.size))
 	}
 	if len(cards) == 0 {
 		b.WriteString("(none)\n")
 	}
-	ct.writeEventCards(ctx, &b)
+}
+
+// writePack is curator_inputs' list of the published skills and the
+// scopes a skill may name.
+func (ct *curatorTurn) writePack(ctx context.Context, b *strings.Builder) {
+	e := ct.e
 	rows, err := e.PackStanding(ctx, time.Now())
 	b.WriteString("\nThe pack's published skills, the only skills that count: a skill your own backend " +
 		"offers you is not in the pack and reaches no other backend, so it covers nothing here:\n")
 	switch {
 	case err != nil:
-		fmt.Fprintf(&b, "(cannot be read: %v)\n", err)
+		fmt.Fprintf(b, "(cannot be read: %v)\n", err)
 	case len(rows) == 0:
 		b.WriteString("(none yet)\n")
 	}
@@ -953,20 +1034,19 @@ func (ct *curatorTurn) inputs(ctx context.Context) string {
 		if scope == "" {
 			scope = skillpack.ScopeGeneral
 		}
-		fmt.Fprintf(&b, "- %s [%s, %s, invoked %d, read %d, edited %d times", s.Name, scope, owner, s.Uses, s.Views, s.Edits)
+		fmt.Fprintf(b, "- %s [%s, %s, invoked %d, read %d, edited %d times", s.Name, scope, owner, s.Uses, s.Views, s.Edits)
 		if s.Stale {
 			b.WriteString(", stale")
 		}
-		fmt.Fprintf(&b, "]: %s\n", s.Description)
+		fmt.Fprintf(b, "]: %s\n", s.Description)
 	}
 	if repos := e.PackRepos(); len(repos) > 0 {
-		fmt.Fprintf(&b, "\nRepositories a scope may name: %s. A card's repository is shown beside it; "+
+		fmt.Fprintf(b, "\nRepositories a scope may name: %s. A card's repository is shown beside it; "+
 			"a card with none is in the workspace's own repository, scope default.\n", strings.Join(repos, ", "))
 	} else {
 		b.WriteString("\nThis workspace has one repository, scope default. Use scope general for a lesson " +
 			"about the tools or the environment, default for one about this repository's code.\n")
 	}
-	return b.String()
 }
 
 // writeEventCards is curator_inputs' list of cards whose events since the
@@ -1029,6 +1109,14 @@ func (ct *curatorTurn) readMemory(card string) (string, error) {
 }
 
 func (ct *curatorTurn) kickoff(ctx context.Context) string {
+	if ct.reviewOnly {
+		return "Review the changes card sessions staged for the workspace skill pack. Here they are, " +
+			"with the pack as it stands:\n\n" + ct.inputs(ctx) +
+			"\nThis run reviews the staged changes only: read each with staged_read, check what it claims " +
+			"with repo_read and repo_grep, and decide it with staged_decide. Do not curate anything else; " +
+			"the scheduled run does that. When you are done, reply with one short paragraph saying what " +
+			"you took, merged and rejected, and why."
+	}
 	return "Curate the workspace skill pack. Here is what is new:\n\n" + ct.inputs(ctx) +
 		"\nWork through the lists: first review every staged change with staged_read and decide it with " +
 		"staged_decide, then read every card's session memory with curator_read, newest first, " +

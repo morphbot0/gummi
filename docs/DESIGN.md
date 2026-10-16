@@ -5482,6 +5482,17 @@ while a board runs, missed fires coalesce and are caught up by the next
 board (its clock starts when it is first armed on the workspace, not at
 each board's start), a fire while a run is still going is skipped. A person can run it once from either face.
 
+A staged change (§23.5) starts a run of its own rather than waiting a
+schedule out: once the newest pending change is 30 minutes old (so the
+few changes one session stages go to one run) and the last run began at
+least 6 hours ago (so a busy board does not curate all day), the next
+tick starts one, unless the month's budget cannot pay for a turn. That
+run is review-only: its kickoff lists the staged changes and the pack,
+and it is not offered the memory or event reads, so it costs a review
+and not a curation. The scheduled run still does the rest. Both waits
+are fixed, not configured; the ledger records the run's reason as
+`staged`.
+
 **What it reads and writes is tools, not files.** Its session carries
 its own tool set on its own MCP endpoint:
 

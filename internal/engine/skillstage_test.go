@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
@@ -23,6 +24,59 @@ func cardSkill(t *testing.T, e *Engine, card, tool string, args map[string]any) 
 		t.Fatalf("%s %v: %v", tool, args, err)
 	}
 	return out
+}
+
+// A staged change starts a review-only run of its own once its session
+// has gone quiet, and not again within the gap after it.
+func TestAStagedChangeStartsAReview(t *testing.T) {
+	ctx := context.Background()
+	cf := newCuratorFake(nil)
+	e := curatorEngine(t, cf, &config.Curator{Budget: 100, Schedule: "@weekly"})
+	tick := func(at time.Time) bool {
+		t.Helper()
+		started, err := e.CuratorTick(ctx, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for e.CuratorRunning() && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		return started
+	}
+	now := time.Now()
+	if tick(now) {
+		t.Fatal("a run started with nothing staged")
+	}
+	cardSkill(t, e, "FF-1", skillManageTool, map[string]any{
+		"action": "write", "name": "make-test", "description": "Use when running tests.", "body": "Run `make test`.",
+	})
+	if tick(now.Add(stagedQuiet / 2)) {
+		t.Fatal("a run started while the session was still staging")
+	}
+	if !tick(now.Add(stagedQuiet + time.Minute)) {
+		t.Fatal("a quiet staged change started no run")
+	}
+	runs, _ := e.CuratorRuns()
+	if len(runs) != 1 || runs[0].Why != curatorWhyStaged {
+		t.Fatalf("ledger = %+v", runs)
+	}
+	if !strings.Contains(cf.prompts[0], "reviews the staged changes only") || strings.Contains(cf.prompts[0], "session memory you have not read") {
+		t.Errorf("the review run's kickoff:\n%s", cf.prompts[0])
+	}
+	for _, tool := range cf.opts[0].Tools {
+		if tool.Name == curatorReadTool || tool.Name == curatorEventsTool {
+			t.Errorf("the review run was offered %s", tool.Name)
+		}
+	}
+	// The fake decided nothing, so the change still waits: the gap holds
+	// the next run off.
+	if tick(runs[0].Start.Add(stagedGap - time.Minute)) {
+		t.Error("a second run started inside the gap")
+	}
+	if !tick(runs[0].Start.Add(stagedGap + time.Minute)) {
+		t.Error("the change still waiting after the gap started no run")
+	}
 }
 
 // A card stages a skill: it reads it at once and its next session gets
