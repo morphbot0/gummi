@@ -1,0 +1,158 @@
+{
+  "Tree": {
+    "branch": "feat/x",
+    "remote": "origin",
+    "tracked": true,
+    "ahead": 1,
+    "head": "bbbbbbb2",
+    "remotes": [
+      "origin",
+      "upstream"
+    ],
+    "staged": [
+      {
+        "path": "a.go",
+        "status": "M",
+        "add": 6,
+        "del": 2
+      },
+      {
+        "path": "b.go",
+        "from": "old.go",
+        "status": "R"
+      }
+    ],
+    "changes": [
+      {
+        "path": "img.png",
+        "status": "M",
+        "binary": true
+      },
+      {
+        "path": "new.txt",
+        "status": "?"
+      }
+    ],
+    "conflicts": [
+      {
+        "path": "c.go",
+        "status": "U"
+      }
+    ],
+    "stashes": [
+      {
+        "sha": "ccccccc3",
+        "subject": "On feat/x: before rebase",
+        "at": 1700000000
+      }
+    ],
+    "signing": true
+  },
+  "Locked": {
+    "branch": "feat/x",
+    "remotes": [],
+    "why": "the agent is working in this tree",
+    "staged": [],
+    "changes": [],
+    "conflicts": [],
+    "stashes": []
+  },
+  "Diff": {
+    "path": "a.go",
+    "staged": true,
+    "digest": "0f3a9c21d4e5b6a7",
+    "file": {
+      "path": "a.go",
+      "status": "modified",
+      "add": 1,
+      "del": 0,
+      "hunks": [
+        {
+          "header": "@@ -1 +1,2 @@",
+          "lines": [
+            {
+              "t": " ",
+              "old": 1,
+              "new": 1,
+              "text": "a",
+              "idx": 5
+            },
+            {
+              "t": "+",
+              "new": 2,
+              "text": "b",
+              "idx": 6
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "Request": {
+    "op": "hunk",
+    "path": "a.go",
+    "hunk": 1,
+    "lines": [
+      6
+    ],
+    "digest": "0f3a9c21d4e5b6a7",
+    "hunkOp": "stage"
+  },
+  "Fetch": {
+    "op": "fetch",
+    "remote": "upstream"
+  },
+  "Result": {
+    "done": "committed bbbbbbb feat: x",
+    "sha": "bbbbbbb2",
+    "tree": {
+      "branch": "feat/x",
+      "remote": "origin",
+      "tracked": true,
+      "ahead": 1,
+      "head": "bbbbbbb2",
+      "remotes": [
+        "origin",
+        "upstream"
+      ],
+      "staged": [
+        {
+          "path": "a.go",
+          "status": "M",
+          "add": 6,
+          "del": 2
+        },
+        {
+          "path": "b.go",
+          "from": "old.go",
+          "status": "R"
+        }
+      ],
+      "changes": [
+        {
+          "path": "img.png",
+          "status": "M",
+          "binary": true
+        },
+        {
+          "path": "new.txt",
+          "status": "?"
+        }
+      ],
+      "conflicts": [
+        {
+          "path": "c.go",
+          "status": "U"
+        }
+      ],
+      "stashes": [
+        {
+          "sha": "ccccccc3",
+          "subject": "On feat/x: before rebase",
+          "at": 1700000000
+        }
+      ],
+      "signing": true
+    }
+  }
+}

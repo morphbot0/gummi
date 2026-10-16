@@ -27,6 +27,7 @@ import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
 import { runAction, messageHint, draftAffordance, landMethodControl, landMessageBox, keepBranchControl } from './actions.js?v=__ASSET_V__'
+import { pushAfterControl, openBasePush } from './pushbase.js?v=__ASSET_V__'
 
 let ctx = {}
 let answering = false
@@ -759,6 +760,9 @@ function openLanding (id, d, o, draft, question = '') {
   }
   // a goal's landing sweeps its own cards and keeps its own rules
   const keep = state.card?.kind === 'goal' ? null : keepBranchControl()
+  // where the repository closes cards by push, the base push follows the
+  // landing (pushbase.js)
+  const pushAfter = o.pushTo ? pushAfterControl(o.pushTo, state.card?.base) : null
   const err = h('p', { class: 'aerr', testid: 'landing-error', role: 'alert', hidden: true })
   // kept: the last reply was routed into the dialog rather than past it,
   // so the send that is out must not close it (a draft to read, a failure
@@ -771,7 +775,7 @@ function openLanding (id, d, o, draft, question = '') {
     // the answer that opened it is redrawn while it is up
     returnTo: `[data-testid$="-option-${CSS.escape(o.id)}"]`,
     onClose: () => { dlg.left = true; landing = null; landingDismissed = true },
-    body: [q, h('label', { class: 'field' }, control?.el, input, hint), keep?.el, err],
+    body: [q, h('label', { class: 'field' }, control?.el, input, hint), keep?.el, pushAfter?.el, err],
     actions: [
       { label: 'Cancel', testid: 'landing-cancel' },
       {
@@ -796,6 +800,7 @@ function openLanding (id, d, o, draft, question = '') {
           if (wait) { aff.busy(true); go.textContent = 'Drafting…' }
           try {
             await send(id, b, o.label, false, true)
+            if (pushAfter?.value() && state.card?.id === id && state.card.stage === 'done') openBasePush({ repo: state.card.repo || '', card: id })
           } finally {
             if (wait) aff.busy(false)
             go.disabled = false

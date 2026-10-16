@@ -288,6 +288,13 @@ type PublishPayload struct {
 	Draft   bool   `json:"draft,omitempty"`
 	ToDraft bool   `json:"toDraft,omitempty"`
 	By      string `json:"by,omitempty"`
+	// Commit and Subject are a commit a person made by hand in the card's
+	// working tree (act "commit"), Amend marking one that replaced the
+	// last; Base is the branch a base push sent (act "pushbase").
+	Commit  string `json:"commit,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Amend   bool   `json:"amend,omitempty"`
+	Base    string `json:"base,omitempty"`
 }
 
 // ToolPayload is the JSON shape of an EventTool and EventToolResult

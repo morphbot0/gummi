@@ -387,12 +387,46 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 	}
 	c.DecisionsMore = m.webDecisionsMore(ctx, st.f.ID, c.Decision)
 	m.webActionDefaults(ctx, st.f, c.Actions)
+	m.webClosePush(ctx, st.f, &c)
 	c.Actions = m.webDropCleanCommit(ctx, st.f, c.Actions)
 	if dir, ok := filesDir(ctx, m.wt, st.f); ok {
 		// the server, which holds the key, fills in the URL
 		c.Files = &webapi.Files{Dir: dir}
 	}
 	return c, nil
+}
+
+// webClosePush names, on the card's landings, the remote its repository
+// closes cards on by push: the page then offers the base push as the
+// landing's second half. It reads the repository's config, so it runs off
+// the loop.
+func (m *Shell) webClosePush(ctx context.Context, f domain.Feature, c *webapi.Card) {
+	if m.wt == nil || f.InGoal() || f.IsGoal() {
+		return
+	}
+	mgr, err := m.wt.ManagerFor(ctx, &f)
+	if err != nil {
+		return
+	}
+	remote := mgr.ClosePushRemote(ctx)
+	if remote == "" {
+		return
+	}
+	landing := func(id string) bool {
+		return id == "merge" || (id == "advance" && f.Stage == domain.StageVerify)
+	}
+	for i := range c.Actions {
+		if landing(c.Actions[i].ID) {
+			c.Actions[i].PushTo = remote
+		}
+	}
+	if c.Decision != nil {
+		for i := range c.Decision.Options {
+			if landing(c.Decision.Options[i].ID) {
+				c.Decision.Options[i].PushTo = remote
+			}
+		}
+	}
 }
 
 // writespecDraftable is the guard the writespec-draft fetch and the

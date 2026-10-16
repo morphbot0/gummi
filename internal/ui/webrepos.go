@@ -124,6 +124,10 @@ func (h webRepoHandles) repo(ctx context.Context, name string, cards []domain.Fe
 		rr.URL, secret = worktree.MaskRemoteURL(r.URL)
 		rr.PushURL, pushSecret = worktree.MaskRemoteURL(r.PushURL)
 		rr.Secret = secret || pushSecret
+		if mgr.CloseModeOf(ctx, r.Name) == worktree.ClosePush {
+			rr.Close = string(worktree.ClosePush)
+			out.ClosePush = r.Name
+		}
 		out.Remotes = append(out.Remotes, rr)
 	}
 	out.RemoteBranches = mgr.RemoteBranches(ctx)
@@ -467,5 +471,112 @@ func (b *Bridge) SetRepoBranchUpstream(ctx context.Context, req webapi.RepoReque
 			return branch + " no longer tracks a remote branch", nil
 		}
 		return fmt.Sprintf("%s now tracks %s", branch, upstream), nil
+	})
+}
+
+// SetRepoRemoteClose is POST /api/repos/remotes/close: how the
+// repository's cards close on a remote — by pull request, or by landing
+// and pushing the base there. One remote at most closes by push.
+func (b *Bridge) SetRepoRemoteClose(ctx context.Context, req webapi.RepoRequest) (WebOutcome, error) {
+	mode, err := worktree.ParseCloseMode(req.Close)
+	if err != nil {
+		return WebOutcome{}, webErr(WebBadRequest, "%s", err.Error())
+	}
+	return b.remoteWrite(ctx, req, func(ctx context.Context, mgr *worktree.Manager, remote string) (string, error) {
+		if err := mgr.SetCloseMode(ctx, remote, mode); err != nil {
+			return "", err
+		}
+		if mode == worktree.ClosePush {
+			return "cards close by landing and pushing the base to " + remote, nil
+		}
+		return "cards close by pull request on " + remote, nil
+	})
+}
+
+// basePushCard is the branch of card id that a base push deletes on the
+// remote afterwards: only a landed card's, whose work the base now holds.
+func (h webRepoHandles) basePushCard(ctx context.Context, id string) (domain.Feature, string, error) {
+	if id == "" {
+		return domain.Feature{}, "", nil
+	}
+	f, err := h.store.GetFeature(ctx, webID(id))
+	if err != nil {
+		return domain.Feature{}, "", webErr(WebNotFound, "no card %s on this board", id)
+	}
+	if !h.landed[f.ID] {
+		return f, "", nil
+	}
+	return f, f.BranchName(), nil
+}
+
+func webBasePush(repo string, b worktree.BasePush) webapi.BasePush {
+	out := webapi.BasePush{
+		Repo: repo, Remote: b.Remote, URL: b.URL, Base: b.Base, Local: b.Local, RemoteTip: b.RemoteTip,
+		Card: b.Card, Hook: b.Hook, Refusal: b.Refusal, Fingerprint: b.Fingerprint, Commands: []string{},
+	}
+	if b.Refusal == "" {
+		out.Commands = b.Commands()
+	}
+	return out
+}
+
+// BasePushFacts is GET /api/repos/pushbase: what pushing the repository's
+// base to its push-close remote would do, read from git and the remote,
+// for a person to confirm. card names a landed card whose branch the push
+// deletes on the remote too.
+func (b *Bridge) BasePushFacts(ctx context.Context, repo, card string) (webapi.BasePush, error) {
+	return webLoad(ctx, b, func(m *Shell) (func(context.Context) (webapi.BasePush, error), error) {
+		h, err := m.webRepoHandles()
+		if err != nil {
+			return nil, err
+		}
+		return func(ctx context.Context) (webapi.BasePush, error) {
+			mgr, err := h.repoManager(ctx, repo)
+			if err != nil {
+				return webapi.BasePush{}, err
+			}
+			_, branch, err := h.basePushCard(ctx, card)
+			if err != nil {
+				return webapi.BasePush{}, err
+			}
+			facts, err := mgr.ResolveBasePush(ctx, "", branch)
+			if err != nil {
+				return webapi.BasePush{}, webErr(WebConflict, "%s", sanitize(mgr.RedactRemotes(ctx, err.Error())))
+			}
+			return webBasePush(repo, facts), nil
+		}, nil
+	})
+}
+
+// PushBase is POST /api/repos/pushbase: the base push a person confirmed
+// by its fingerprint. It is a fast-forward or nothing; facts that moved
+// since they were shown refuse it. The card it closes, when named, has the
+// push in its thread.
+func (b *Bridge) PushBase(ctx context.Context, req webapi.RepoRequest, person string) (WebOutcome, error) {
+	if req.Fingerprint == "" {
+		return WebOutcome{}, webErr(WebBadRequest, "confirm the facts first")
+	}
+	return b.repoWrite(ctx, func(ctx context.Context, h webRepoHandles) (string, error) {
+		mgr, err := h.repoManager(ctx, req.Repo)
+		if err != nil {
+			return "", err
+		}
+		f, branch, err := h.basePushCard(ctx, req.Card)
+		if err != nil {
+			return "", err
+		}
+		facts, done, err := mgr.PushBase(ctx, "", branch, req.Fingerprint)
+		if len(done) > 0 && f.ID != "" {
+			_ = h.store.AppendPublish(ctx, f.ID, f.Stage, state.PublishPayload{
+				Act: "pushbase", Pushed: facts.Local, Repo: facts.Remote, Base: facts.Base, By: state.PersonActor(person),
+			}, time.Now())
+		}
+		if errors.Is(err, worktree.ErrBasePushMoved) {
+			return "", webErr(WebConflict, "%s", err.Error())
+		}
+		if err != nil {
+			return "", errors.New(mgr.RedactRemotes(ctx, err.Error()))
+		}
+		return strings.Join(done, "; "), nil
 	})
 }

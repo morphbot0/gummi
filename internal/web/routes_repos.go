@@ -34,6 +34,15 @@ func (s *Server) repoRoutes() {
 	s.api("POST /api/repos/remotes/remove", s.repoWrite(func(ctx context.Context, req webapi.RepoRequest) (ui.WebOutcome, error) {
 		return s.opt.Board.RemoveRepoRemote(ctx, req)
 	}))
+	s.api("POST /api/repos/remotes/close", s.repoWrite(func(ctx context.Context, req webapi.RepoRequest) (ui.WebOutcome, error) {
+		return s.opt.Board.SetRepoRemoteClose(ctx, req)
+	}))
+	s.api("GET /api/repos/pushbase", s.handleBasePushFacts)
+	s.api("POST /api/repos/pushbase", func(w http.ResponseWriter, r *http.Request) {
+		s.repoWrite(func(ctx context.Context, req webapi.RepoRequest) (ui.WebOutcome, error) {
+			return s.opt.Board.PushBase(ctx, req, person(r))
+		})(w, r)
+	})
 }
 
 // handleRepos is GET /api/repos: every managed repository and its
@@ -64,4 +73,17 @@ func (s *Server) repoWrite(write func(context.Context, webapi.RepoRequest) (ui.W
 		}
 		s.answer(w, out)
 	}
+}
+
+// handleBasePushFacts is GET /api/repos/pushbase?repo=&card=: what pushing
+// the repository's base to its push-close remote would do, for a person to
+// confirm by the answer's fingerprint.
+func (s *Server) handleBasePushFacts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	facts, err := s.opt.Board.BasePushFacts(r.Context(), q.Get("repo"), q.Get("card"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, facts)
 }

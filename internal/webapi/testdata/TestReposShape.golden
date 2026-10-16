@@ -11,7 +11,8 @@
           {
             "name": "origin",
             "url": "git@github.com:morphis/gummi.git",
-            "tracking": 2
+            "tracking": 2,
+            "close": "push"
           },
           {
             "name": "fork",
@@ -20,6 +21,7 @@
             "secret": true
           }
         ],
+        "closePush": "origin",
         "remoteBranches": [
           "origin/main",
           "origin/release"
@@ -102,6 +104,24 @@
     "remote": "fork",
     "newName": "simon",
     "url": "git@github.com:simon/gummi.git",
-    "upstream": "fork/wip/simon"
+    "upstream": "fork/wip/simon",
+    "close": "push",
+    "card": "FD-012",
+    "fingerprint": "0f3a9c21d4e5b6a7"
+  },
+  "pushBase": {
+    "repo": "gummi",
+    "remote": "origin",
+    "url": "git@github.com:morphis/gummi.git",
+    "base": "main",
+    "local": "9f3c21a0b1c2",
+    "remoteTip": "d895f0740000",
+    "card": "feat/loader",
+    "hook": ".git/hooks/pre-push",
+    "commands": [
+      "git push origin 9f3c21a0b1c2:refs/heads/main",
+      "git push origin --delete feat/loader"
+    ],
+    "fingerprint": "0f3a9c21d4e5b6a7"
   }
 }

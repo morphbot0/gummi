@@ -50,6 +50,9 @@ func (s *Server) docsRoutes() {
 	s.api("GET /api/cards/{id}/log/{sha}", s.handleLogCommit)
 	s.api("POST /api/cards/{id}/log/plan", s.handleLogPlan)
 	s.api("POST /api/cards/{id}/log/rewrite", s.handleLogRewrite)
+	s.api("GET /api/cards/{id}/tree", s.handleTree)
+	s.api("GET /api/cards/{id}/tree/diff", s.handleTreeDiff)
+	s.api("POST /api/cards/{id}/tree", s.handleTreeWrite)
 	s.api("GET /api/fleet", s.handleFleet)
 }
 
@@ -613,5 +616,56 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, cache *pr
 	cache.drop(id)
 	_ = s.opt.Board.Do(context.Background(), func(m *ui.Shell) tea.Cmd { return m.WebPublished(id) })
 	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: id})
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleTree is GET /api/cards/{id}/tree: the card's working tree.
+func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	t, err := d.Tree(r.Context())
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+// handleTreeDiff is GET /api/cards/{id}/tree/diff?path=[&staged=1].
+func (s *Server) handleTreeDiff(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	diff, err := d.TreeDiff(r.Context(), q.Get("path"), q.Get("staged") == "1")
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, diff)
+}
+
+// handleTreeWrite is POST /api/cards/{id}/tree: one write to the working
+// tree by hand — stage, unstage, discard, a hunk, a commit, a stash, a
+// fetch — refused while an agent works in it.
+func (s *Server) handleTreeWrite(w http.ResponseWriter, r *http.Request) {
+	var req webapi.TreeRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	res, err := d.TreeWrite(r.Context(), req, person(r))
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	s.changed(r.PathValue("id"))
 	writeJSON(w, http.StatusOK, res)
 }

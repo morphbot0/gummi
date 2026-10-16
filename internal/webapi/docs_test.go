@@ -204,3 +204,29 @@ func TestLogShapes(t *testing.T) {
 		Result:  RewriteResult{Head: "ccccccc3", PushCommand: log.PushCommand, Log: log},
 	}))
 }
+
+func TestTreeShapes(t *testing.T) {
+	tree := Tree{
+		Branch: "feat/x", Remote: "origin", Tracked: true, Ahead: 1, Head: "bbbbbbb2", Signing: true,
+		Remotes:   []string{"origin", "upstream"},
+		Staged:    []TreeFile{{Path: "a.go", Status: "M", Add: 6, Del: 2}, {Path: "b.go", From: "old.go", Status: "R"}},
+		Changes:   []TreeFile{{Path: "img.png", Status: "M", Binary: true}, {Path: "new.txt", Status: "?"}},
+		Conflicts: []TreeFile{{Path: "c.go", Status: "U"}},
+		Stashes:   []TreeStash{{SHA: "ccccccc3", Subject: "On feat/x: before rebase", At: 1700000000}},
+	}
+	golden.RequireEqual(t, marshal(t, struct {
+		Tree    Tree
+		Locked  Tree
+		Diff    TreeDiff
+		Request TreeRequest
+		Fetch   TreeRequest
+		Result  TreeResult
+	}{
+		Fetch:   TreeRequest{Op: TreeFetch, Remote: "upstream"},
+		Tree:    tree,
+		Locked:  Tree{Branch: "feat/x", Why: "the agent is working in this tree", Remotes: []string{}, Staged: []TreeFile{}, Changes: []TreeFile{}, Conflicts: []TreeFile{}, Stashes: []TreeStash{}},
+		Diff:    TreeDiff{Path: "a.go", Staged: true, Digest: "0f3a9c21d4e5b6a7", File: &DiffFile{Path: "a.go", Status: "modified", Add: 1, Hunks: []Hunk{{Header: "@@ -1 +1,2 @@", Lines: []DiffLine{{T: " ", Old: 1, New: 1, Text: "a", Idx: 5}, {T: "+", New: 2, Text: "b", Idx: 6}}}}}},
+		Request: TreeRequest{Op: TreeHunk, Path: "a.go", Hunk: 1, Lines: []int{6}, Digest: "0f3a9c21d4e5b6a7", HunkOp: "stage"},
+		Result:  TreeResult{Done: "committed bbbbbbb feat: x", SHA: "bbbbbbb2", Tree: tree},
+	}))
+}

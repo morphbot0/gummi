@@ -178,7 +178,7 @@ export async function showCard(page: Page, id: string): Promise<void> {
 // switch in its header. An icon pressed while its surface is open closes
 // it, so this presses only what is not already showing.
 export async function showTab(page: Page, name: string): Promise<void> {
-  const changes = ['diff', 'log', 'pr'].includes(name);
+  const changes = ['diff', 'log', 'tree', 'pr'].includes(name);
   const icon = page.getByTestId(`tab-${changes ? 'diff' : name}`);
   if ((await icon.getAttribute('aria-selected')) !== 'true') await icon.click();
   if (!changes) return;

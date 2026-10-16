@@ -23,6 +23,7 @@ import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { state, set, rows } from './store.js?v=__ASSET_V__'
 import { openModelPicker, openWriteSpec } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
+import { pushAfterControl, openBasePush } from './pushbase.js?v=__ASSET_V__'
 
 const NOUN = { message: 'Message', number: 'Dollars', profile: 'Profile', repo: 'Repository', mode: 'Mode', cards: 'Waits for', text: 'Value' }
 
@@ -89,6 +90,10 @@ function dialog (card, a, { ask = null } = {}) {
     body.append(f.el)
   }
   addField(a.needs)
+  // where the repository closes cards by push, a landing offers the
+  // base push as its second half (pushbase.js), asked once it has landed
+  const pushAfter = a.pushTo && a.id !== 'squash' && isLandingEntry(card, a) ? pushAfterControl(a.pushTo, card.base) : null
+  if (pushAfter) body.append(pushAfter.el)
   body.append(error)
   const takeAsk = (e) => {
     if (e.error === 'confirm' || e.needs === 'confirm') {
@@ -160,7 +165,8 @@ function dialog (card, a, { ask = null } = {}) {
           const drafting = !!msg?.drafting && !req.message
           if (drafting) { msg.drafting(true); go.textContent = 'Drafting…' }
           try {
-            await send(card.id, a, req)
+            const res = await send(card.id, a, req)
+            if (pushAfter?.value() && res?.stage === 'done') openBasePush({ repo: card.repo || '', card: card.id })
             return true
           } catch (err) {
             const e = err.data || {}

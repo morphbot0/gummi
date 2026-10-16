@@ -193,6 +193,16 @@ func RebaseLine(p state.RebasePayload) string {
 
 // PublishLine is the thread's line for a person's publish act (DESIGN §22).
 func PublishLine(p state.PublishPayload) string {
+	switch p.Act {
+	case "commit":
+		verb := "committed "
+		if p.Amend {
+			verb = "amended the last commit to "
+		}
+		return verb + domain.ShortRev(p.Commit) + " “" + Sanitize(p.Subject) + "” by hand"
+	case "pushbase":
+		return "landed it and pushed " + domain.ShortRev(p.Pushed) + " to " + p.Repo + "/" + p.Base
+	}
 	var parts []string
 	if p.Pushed != "" {
 		push := "pushed " + domain.ShortRev(p.Pushed)
