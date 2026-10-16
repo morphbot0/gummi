@@ -222,6 +222,27 @@ func (p *Pack) StagedFor(card string) []Staged {
 	return p.readStage(dir)
 }
 
+// StageCards lists every card holding a staged change, pending or
+// rejected, with its changes.
+func (p *Pack) StageCards() map[string][]Staged {
+	out := map[string][]Staged{}
+	if p.StageDir == "" {
+		return out
+	}
+	entries, err := os.ReadDir(p.StageDir)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			if list := p.readStage(filepath.Join(p.StageDir, e.Name())); len(list) > 0 {
+				out[e.Name()] = list
+			}
+		}
+	}
+	return out
+}
+
 // AllStaged lists every card's changes that wait for review.
 func (p *Pack) AllStaged() map[string][]Staged {
 	out := map[string][]Staged{}

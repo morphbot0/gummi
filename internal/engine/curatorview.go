@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/skillpack"
 )
 
@@ -25,6 +27,16 @@ type CuratorView struct {
 	Published  string // "" until the pack is made
 	Skills     []skillpack.Status
 	Runs       []CuratorRun // newest first
+	// Staged is every change card sessions staged (§23.5), pending and
+	// rejected, by card then skill.
+	Staged []StagedChange
+}
+
+// StagedChange is one card's staged change, with the card's title.
+type StagedChange struct {
+	Card     string
+	CardName string // the card's title, quoted and cut short; "" when the card is gone
+	skillpack.Staged
 }
 
 // CuratorView reads the pack and the ledger at now.
@@ -43,6 +55,7 @@ func (e *Engine) CuratorView(ctx context.Context, now time.Time) (CuratorView, e
 	if v.Config != nil {
 		v.Next, _ = e.CuratorNext(now)
 	}
+	v.Staged = e.stagedChanges(ctx)
 	if v.Skills, err = e.PackStanding(ctx, now); err != nil {
 		return v, err
 	}
@@ -129,4 +142,27 @@ func (e *Engine) RequestCuratorRun() error {
 		return errors.New("a curator run is already going")
 	}
 	return CuratorRunNow(e.cfg.Workspace)
+}
+
+// stagedChanges lists every card's staged changes, by card then skill.
+func (e *Engine) stagedChanges(ctx context.Context) []StagedChange {
+	all := e.SkillPack().StageCards()
+	cards := make([]string, 0, len(all))
+	for c := range all {
+		cards = append(cards, c)
+	}
+	sort.Strings(cards)
+	var out []StagedChange
+	for _, c := range cards {
+		name := ""
+		if e.cfg.Store != nil {
+			if f, err := e.cfg.Store.GetFeature(ctx, domain.FeatureID(c)); err == nil {
+				name = f.Name()
+			}
+		}
+		for _, s := range all[c] {
+			out = append(out, StagedChange{Card: c, CardName: name, Staged: s})
+		}
+	}
+	return out
 }
