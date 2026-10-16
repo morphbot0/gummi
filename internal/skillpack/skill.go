@@ -17,9 +17,11 @@ import (
 )
 
 // Scope values. A scope that is neither names one of the workspace's
-// repositories.
+// named repositories; ScopeDefault names the one a card with no
+// repository works in.
 const (
 	ScopeGeneral  = "general"
+	ScopeDefault  = "default"
 	SourceCurator = "curator"
 	SourcePerson  = "person"
 )
@@ -57,7 +59,9 @@ func (m Meta) General() bool { return m.Scope == "" || m.Scope == ScopeGeneral }
 func (m Meta) Curated() bool { return m.Source == SourceCurator && !m.Pinned }
 
 // Reaches reports whether a session working in repo meets the skill.
-func (m Meta) Reaches(repo string) bool { return m.General() || m.Scope == repo }
+func (m Meta) Reaches(repo string) bool {
+	return m.General() || m.Scope == repo || (repo == "" && m.Scope == ScopeDefault)
+}
 
 // Parse reads a SKILL.md: YAML frontmatter between two --- lines, then
 // the body.
@@ -155,7 +159,7 @@ func LintDraft(d Draft, existing map[string]Meta, repos []string) Lint {
 	case strings.Contains(desc, "\n"):
 		refuse("description must be one line")
 	}
-	if d.Scope != "" && d.Scope != ScopeGeneral && !slices.Contains(repos, d.Scope) {
+	if d.Scope != "" && d.Scope != ScopeGeneral && d.Scope != ScopeDefault && !slices.Contains(repos, d.Scope) {
 		refuse("scope %q names no repository of this workspace (have: %s)", d.Scope, scopeChoices(repos))
 	}
 	body := strings.TrimSpace(d.Body)
@@ -189,7 +193,7 @@ func LintDraft(d Draft, existing map[string]Meta, repos []string) Lint {
 }
 
 func scopeChoices(repos []string) string {
-	return strings.Join(append([]string{ScopeGeneral}, repos...), ", ")
+	return strings.Join(append([]string{ScopeGeneral, ScopeDefault}, repos...), ", ")
 }
 
 // safeRel reports whether p is a clean relative path that stays inside

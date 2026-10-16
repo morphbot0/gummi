@@ -51,8 +51,12 @@ const (
 // strings and are painted into their rects (the Crush hybrid pattern);
 // all IO runs in commands, never in Update or View.
 type Shell struct {
-	styles  *theme.Styles
-	version string
+	// curatorErr is the curator's last tick error, said once until it
+	// changes: a curator that cannot run is not a reason to repeat it on
+	// every poll, nor to hide what the schedules did.
+	curatorErr string
+	styles     *theme.Styles
+	version    string
 
 	width, height int
 	layout        layout.Layout

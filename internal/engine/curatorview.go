@@ -71,7 +71,16 @@ func (e *Engine) RevertCuratorRun(ctx context.Context, id string) (CuratorRun, e
 		case r.Reverted:
 			return r, fmt.Errorf("curator run %s is already reverted", r.ID)
 		}
-		return r, pack.Revert(ctx, r.Before, r.After, revertRunSubject+r.ID)
+		// Only the run's own commits: a sweep or a person's pin that
+		// landed while it ran is not the run's to undo.
+		commits, err := pack.CommitsSince(ctx, r.Before, curatorCommitPrefix(r.ID))
+		if err != nil {
+			return r, err
+		}
+		if len(commits) == 0 {
+			return r, fmt.Errorf("curator run %s changed nothing", r.ID)
+		}
+		return r, pack.RevertCommits(ctx, commits, revertRunSubject+r.ID)
 	}
 	return CuratorRun{}, fmt.Errorf("no curator run %s", id)
 }

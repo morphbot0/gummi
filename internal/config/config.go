@@ -17,6 +17,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/hooks"
+	"github.com/morphis/gummi/internal/schedule"
 )
 
 // Config is the parsed .gummi/config.yaml.
@@ -147,7 +148,26 @@ func CheckCurator(c *Curator) error {
 	if c.Monthly < 0 || (c.Monthly > 0 && c.Monthly < c.Budget) {
 		return errors.New("monthly must be at least one run's budget, or 0 for no monthly cap")
 	}
+	if _, err := CuratorCron(c); err != nil {
+		return fmt.Errorf("schedule does not compile: %w", err)
+	}
 	return nil
+}
+
+// CuratorCron is the cron expression c's schedule compiles to (the default
+// when it names none), or why it does not compile.
+func CuratorCron(c *Curator) (string, error) {
+	expr := strings.TrimSpace(c.Schedule)
+	if expr == "" {
+		expr = DefaultCuratorSchedule
+	}
+	if strings.HasPrefix(expr, "@") || !strings.Contains(expr, " ") {
+		return schedule.Compile(expr)
+	}
+	if err := schedule.Check(expr, ""); err != nil {
+		return "", err
+	}
+	return expr, nil
 }
 
 // ChecksConfig holds workspace-wide check settings.

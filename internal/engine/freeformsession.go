@@ -413,7 +413,9 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// there — survive a restart, which ResumeID below depends on.
 		AgentHomeDir: e.agentHomeDirFor(ff.id),
 		// The workspace skill pack at its published revision (§23.2).
-		SkillDirs: e.skillDirsFor(ctx, ag, &f),
+		// One conversation for the card's life: a reopen or a switch of
+		// backend carries it on, and keeps the revision it started with.
+		SkillDirs: e.skillDirsFor(ctx, ag, &f, string(ff.id), resumeID != "" || len(seed) > 0),
 		// No ArtifactPath: there is no document.
 		//
 		// ResumePath and ResumeID are how a freeform conversation survives
@@ -1284,6 +1286,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		e.persist(sess)
 	case agent.EventToolCall:
 		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
+		e.noteSkillUse(ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result != nil {
 			sess.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)

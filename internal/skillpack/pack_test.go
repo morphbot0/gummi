@@ -211,3 +211,89 @@ func TestRevertBlockedByALaterCommitLeavesThePack(t *testing.T) {
 		t.Errorf("a refused revert left the pack dirty: %s", out)
 	}
 }
+
+// An archive refused for one of its names moves none of them, and leaves
+// nothing staged for the next commit to sweep up.
+func TestARefusedArchiveLeavesNothingStaged(t *testing.T) {
+	ctx := context.Background()
+	p := newPack(t)
+	if _, err := p.Write(ctx, draft("aa", ""), nil, "write aa"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Archive(ctx, []string{"aa", "nope"}, "archive"); err == nil {
+		t.Fatal("archiving a skill that does not exist was not refused")
+	}
+	if st, _ := p.git(ctx, "status", "--porcelain"); st != "" {
+		t.Fatalf("a refused archive left the pack dirty:\n%s", st)
+	}
+	if err := p.Archive(ctx, []string{"aa"}, "archive aa"); err != nil {
+		t.Fatalf("the next archive fails: %v", err)
+	}
+	if st, _ := p.git(ctx, "status", "--porcelain"); st != "" {
+		t.Fatalf("an archive left the pack dirty:\n%s", st)
+	}
+}
+
+// A skill brought back from the archive is born again: its time in the
+// archive is not time unused.
+func TestARestoredSkillIsBornAgain(t *testing.T) {
+	ctx := context.Background()
+	p := newPack(t)
+	at := func(day int) time.Time { return time.Date(2026, 9, day, 12, 0, 0, 0, time.UTC) }
+	t.Setenv("GIT_COMMITTER_DATE", at(1).Format(time.RFC3339))
+	if _, err := p.Write(ctx, draft("aa", ""), nil, "write aa"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_COMMITTER_DATE", at(5).Format(time.RFC3339))
+	if err := p.Archive(ctx, []string{"aa"}, "archive aa"); err != nil {
+		t.Fatal(err)
+	}
+	archived, _ := p.Head(ctx)
+	t.Setenv("GIT_COMMITTER_DATE", at(20).Format(time.RFC3339))
+	if err := p.Revert(ctx, "", archived, "revert the archive"); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Born(ctx, []string{"aa"})["aa"]; !got.Equal(at(20)) {
+		t.Fatalf("a restored skill is born %v, want the restore's %v", got, at(20))
+	}
+}
+
+// A conversation keeps the revision it started with across a resume while
+// a new one takes the published revision; a revision stays on disk while
+// a live card's conversation reads it, and goes once none does.
+func TestAConversationKeepsItsRevision(t *testing.T) {
+	ctx := context.Background()
+	p := newPack(t)
+	first, rev1, err := p.SessionDir(ctx, "FF-1", "FF-1", false)
+	if err != nil || first == "" {
+		t.Fatalf("SessionDir: %q %v", first, err)
+	}
+	if _, err := p.Write(ctx, draft("aa", ""), nil, "write aa"); err != nil {
+		t.Fatal(err)
+	}
+	if _, rev, _ := p.SessionDir(ctx, "FF-1", "FF-1", true); rev != rev1 {
+		t.Errorf("a continuing conversation moved to %s from %s", rev, rev1)
+	}
+	if _, rev, _ := p.SessionDir(ctx, "FF-2", "FF-2", false); rev != p.Published(ctx) || rev == rev1 {
+		t.Errorf("a new conversation got %s, want the published %s", rev, p.Published(ctx))
+	}
+	p.Release(ctx, func(card string) bool { return true })
+	if _, err := os.Stat(first); err != nil {
+		t.Fatalf("a revision a live card reads was pruned: %v", err)
+	}
+	p.Release(ctx, func(card string) bool { return card != "FF-1" })
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Errorf("a revision no card reads is still on disk: %v", err)
+	}
+}
+
+// The default repository has a scope of its own.
+func TestDefaultScopeReachesTheDefaultRepository(t *testing.T) {
+	m := Meta{Scope: ScopeDefault}
+	if !m.Reaches("") || m.Reaches("web") {
+		t.Errorf("scope default reaches \"\": %v, web: %v", m.Reaches(""), m.Reaches("web"))
+	}
+	if l := LintDraft(draft("aa", ScopeDefault), nil, nil); !l.OK() {
+		t.Errorf("scope default refused: %s", l)
+	}
+}

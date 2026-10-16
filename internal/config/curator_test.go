@@ -52,3 +52,14 @@ func TestSetCuratorKeepsTheRestOfTheConfig(t *testing.T) {
 		t.Fatalf("after removing the block:\n%s\nwant:\n%s", raw, orig)
 	}
 }
+
+// A schedule that does not compile is refused at load, as a face's write
+// of it is.
+func TestCheckCuratorCompilesTheSchedule(t *testing.T) {
+	if err := CheckCurator(&Curator{Backend: "claude", Budget: 100, Schedule: "every tuesday"}); err == nil {
+		t.Error("a schedule that does not compile was accepted")
+	}
+	if err := CheckCurator(&Curator{Backend: "claude", Budget: 100, Schedule: "0 3 * * *"}); err != nil {
+		t.Errorf("a cron schedule was refused: %v", err)
+	}
+}

@@ -39,7 +39,15 @@ const (
 	CuratorFailed   = "failed"    // the session failed or could not start
 	CuratorSpent    = "exhausted" // the run's budget ran out mid-run
 	CuratorNoBudget = "paused"    // this month's budget is spent; nothing ran
+	// CuratorRunning is a row checkpointed while its run goes on. One the
+	// ledger still holds after its run is gone is read as failed: the
+	// board stopped mid-run, and the row keeps what it had spent and
+	// written by then.
+	CuratorRunning = "running"
 )
+
+// curatorCommitPrefix begins the subject of every pack commit run id made.
+func curatorCommitPrefix(id string) string { return "curator " + id + ": " }
 
 // CuratorRun is one row of the curator's ledger.
 type CuratorRun struct {
@@ -79,6 +87,7 @@ type curatorState struct {
 	cfg       *config.Curator
 	set       bool
 	running   bool
+	current   string // the id of the run going on, "" when none
 	armedAt   time.Time
 	lastSweep time.Time
 	// reports are background runs a person should hear about, kept until
@@ -137,11 +146,23 @@ func CheckCurator(c *config.Curator) error {
 	return nil
 }
 
-// CuratorRuns reads the ledger, oldest first.
+// CuratorRuns reads the ledger, oldest first: one row per run, its last.
 func (e *Engine) CuratorRuns() ([]CuratorRun, error) {
-	return readCuratorLedger(e.curatorLedgerPath())
+	runs, err := readCuratorLedger(e.curatorLedgerPath())
+	e.curator.mu.Lock()
+	current := e.curator.current
+	e.curator.mu.Unlock()
+	for i := range runs {
+		if runs[i].Outcome == CuratorRunning && runs[i].ID != current {
+			runs[i].Outcome = CuratorFailed
+			runs[i].Detail = "the board stopped before the run finished"
+		}
+	}
+	return runs, err
 }
 
+// readCuratorLedger reads every row, keeping each run's last at the place
+// of its first: a run checkpoints its row as it goes.
 func readCuratorLedger(path string) ([]CuratorRun, error) {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -152,13 +173,20 @@ func readCuratorLedger(path string) ([]CuratorRun, error) {
 	}
 	defer f.Close()
 	var runs []CuratorRun
+	at := map[string]int{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for sc.Scan() {
 		var r CuratorRun
-		if json.Unmarshal(sc.Bytes(), &r) == nil {
-			runs = append(runs, r)
+		if json.Unmarshal(sc.Bytes(), &r) != nil {
+			continue
 		}
+		if i, ok := at[r.ID]; ok {
+			runs[i] = r
+			continue
+		}
+		at[r.ID] = len(runs)
+		runs = append(runs, r)
 	}
 	return runs, sc.Err()
 }
@@ -204,7 +232,7 @@ func CuratorRunNow(w interface{ StateDir() string }) error {
 }
 
 // CuratorNext is when the schedule next fires after the last run (or
-// after the board armed the curator, before any run).
+// after the curator was first armed on this workspace, before any run).
 func (e *Engine) CuratorNext(now time.Time) (time.Time, error) {
 	c := e.CuratorConfig()
 	if c == nil {
@@ -225,27 +253,31 @@ func (e *Engine) CuratorNext(now time.Time) (time.Time, error) {
 // does not compile: what doctor reads the schedule back with.
 func CuratorCron(c *config.Curator) (string, error) { return curatorCron(c) }
 
-func curatorCron(c *config.Curator) (string, error) {
-	expr := strings.TrimSpace(c.Schedule)
-	if expr == "" {
-		expr = config.DefaultCuratorSchedule
-	}
-	if strings.HasPrefix(expr, "@") || !strings.Contains(expr, " ") {
-		return schedule.Compile(expr)
-	}
-	if err := schedule.Check(expr, ""); err != nil {
-		return "", err
-	}
-	return expr, nil
-}
+func curatorCron(c *config.Curator) (string, error) { return config.CuratorCron(c) }
 
+// curatorArmed is when the curator was first armed on this workspace. It
+// is kept in a file, so a fire missed while no board ran is caught up at
+// the next board's first tick, as a schedule's is, rather than measured
+// afresh from each board's start (a board up only by day would then never
+// reach an @daily's midnight).
 func (e *Engine) curatorArmed(now time.Time) time.Time {
 	e.curator.mu.Lock()
 	defer e.curator.mu.Unlock()
-	if e.curator.armedAt.IsZero() {
-		e.curator.armedAt = now
+	if !e.curator.armedAt.IsZero() {
+		return e.curator.armedAt
 	}
-	return e.curator.armedAt
+	path := filepath.Join(e.cfg.Workspace.StateDir(), "curator.armed")
+	if raw, err := os.ReadFile(path); err == nil {
+		if t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(raw))); err == nil {
+			e.curator.armedAt = t
+			return t
+		}
+	}
+	e.curator.armedAt = now
+	if e.cfg.Workspace.StateDir() != "" && os.MkdirAll(filepath.Dir(path), 0o700) == nil {
+		_ = os.WriteFile(path, []byte(now.UTC().Format(time.RFC3339)), 0o600)
+	}
+	return now
 }
 
 // curatorSweepEvery bounds how often the tick reads the pack for the
@@ -265,6 +297,7 @@ func (e *Engine) CuratorTick(ctx context.Context, now time.Time) (started bool, 
 	}
 	e.curator.mu.Unlock()
 	if sweep && e.SkillPack().Exists() {
+		e.releasePackRevisions(ctx)
 		if _, err := e.SweepPack(ctx, now); err != nil {
 			return false, err
 		}
@@ -418,6 +451,9 @@ func (e *Engine) runCurator(ctx context.Context, why string) (CuratorRun, error)
 		budget = min(budget, c.Monthly-CuratorMonthSpent(runs, now))
 	}
 	if budget < e.turnReserve() {
+		if c.Budget < e.turnReserve() {
+			return finish(CuratorNoBudget, fmt.Sprintf("the budget per run (%.2f) is under one turn's reserve (%.0f credits); raise it", c.Budget, e.turnReserve()), nil)
+		}
 		return finish(CuratorNoBudget, fmt.Sprintf("this month's curator budget (%.2f) is spent", c.Monthly), nil)
 	}
 	if err := e.SkillPack().Ensure(ctx); err != nil {
@@ -429,8 +465,19 @@ func (e *Engine) runCurator(ctx context.Context, why string) (CuratorRun, error)
 		return finish(CuratorFailed, err.Error(), err)
 	}
 	ct := &curatorTurn{e: e, run: &run, seen: curatorSeenIn(runs)}
+	e.curator.mu.Lock()
+	e.curator.current = run.ID
+	e.curator.mu.Unlock()
+	defer func() {
+		e.curator.mu.Lock()
+		e.curator.current = ""
+		e.curator.mu.Unlock()
+	}()
+	ct.checkpoint(ctx)
 	text, credits, err := e.curatorSession(ctx, ag, c, ct, budget)
+	ct.mu.Lock()
 	run.Credits = credits
+	ct.mu.Unlock()
 	switch {
 	case errors.Is(err, errCuratorSpent):
 		return finish(CuratorSpent, text, nil)
@@ -447,9 +494,11 @@ type curatorSeen struct {
 }
 
 // curatorSeenIn folds the ledger into the last read of every card, over
-// the runs that finished reading (done or spent). It is per card, not
-// one cutoff for the run: a run that read three cards of fifty leaves the
-// other forty-seven new to the next.
+// every run that got to read: a run that failed or timed out still read
+// what it read, and offering those cards again would spend each run of a
+// large backlog on the same ones. It is per card, not one cutoff for the
+// run: a run that read three cards of fifty leaves the other forty-seven
+// new to the next.
 func curatorSeenIn(runs []CuratorRun) curatorSeen {
 	seen := curatorSeen{memory: map[string]time.Time{}, events: map[string]time.Time{}}
 	fold := func(into, from map[string]time.Time) {
@@ -460,9 +509,6 @@ func curatorSeenIn(runs []CuratorRun) curatorSeen {
 		}
 	}
 	for _, r := range runs {
-		if r.Outcome != CuratorDone && r.Outcome != CuratorSpent {
-			continue
-		}
 		fold(seen.memory, r.ReadMemory)
 		fold(seen.events, r.ReadEvents)
 	}
@@ -482,6 +528,37 @@ func (ct *curatorTurn) markRead(events bool, card string) {
 	}
 	(*m)[card] = time.Now()
 }
+
+// checkpoint writes the run's row as it stands, so a board that stops
+// mid-run leaves what it spent, wrote and read in the ledger: the month's
+// spend still counts it, and its commits can still be reverted as a run.
+func (ct *curatorTurn) checkpoint(ctx context.Context) {
+	after, _ := ct.e.SkillPack().Head(ctx)
+	// Written under the lock: the row shares the read maps a concurrent
+	// tool call may be adding to.
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+	r := *ct.run
+	r.Outcome, r.After, r.End = CuratorRunning, after, time.Now()
+	_ = ct.e.appendCuratorRun(r)
+}
+
+// spent records the credits so far, checkpointing at most every
+// curatorCheckpointEvery so a long run's row stays near what it cost.
+func (ct *curatorTurn) spent(ctx context.Context, credits float64) {
+	ct.mu.Lock()
+	ct.run.Credits = credits
+	due := time.Since(ct.lastCheckpoint) >= curatorCheckpointEvery
+	if due {
+		ct.lastCheckpoint = time.Now()
+	}
+	ct.mu.Unlock()
+	if due {
+		ct.checkpoint(ctx)
+	}
+}
+
+const curatorCheckpointEvery = 15 * time.Second
 
 var errCuratorSpent = errors.New("the curator run spent its budget")
 
@@ -559,6 +636,13 @@ func (e *Engine) curatorSession(ctx context.Context, ag agent.Agent, c *config.C
 			switch ev.Kind {
 			case agent.EventUsage:
 				credits += domain.Spend{Credits: ev.Usage.Credits, InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens}.CreditEquivalent()
+				ct.spent(tctx, credits)
+				// gummi stops the run at its budget, as it stops a
+				// card's turn: not every backend honors MaxCredits.
+				if credits >= budget {
+					_ = sess.Interrupt(context.Background())
+					return text.String(), credits, errCuratorSpent
+				}
 			case agent.EventClientToolCall:
 				if ev.ToolCall == nil {
 					continue
@@ -598,6 +682,8 @@ type curatorTurn struct {
 	run  *CuratorRun
 	seen curatorSeen
 	mu   sync.Mutex
+	// lastCheckpoint is when the run's row was last written.
+	lastCheckpoint time.Time
 }
 
 const (
@@ -652,7 +738,7 @@ func (ct *curatorTurn) tools() []agent.ToolDef {
 			Parameters: obj(map[string]any{
 				"name":        str("lowercase-dashed, at most 64 characters"),
 				"description": str("One line: what the skill does and when to use it. Backends read this to decide."),
-				"scope":       str("\"general\", or the name of one repository the skill is only for."),
+				"scope":       str("\"general\"; \"default\" for the workspace's own repository; or the name of one repository the skill is only for."),
 				"body":        str("The SKILL.md body, markdown: the rule and how to apply it, not the story of how it was learned."),
 				"files":       map[string]any{"type": "object", "description": "Optional files beside SKILL.md, by relative path (references/x.md).", "additionalProperties": map[string]any{"type": "string"}},
 			}, "name", "description", "body"),
@@ -702,7 +788,7 @@ func (ct *curatorTurn) dispatch(ctx context.Context, name string, raw json.RawMe
 		}
 		l, err := e.SkillPack().Write(ctx, skillpack.Draft{
 			Name: a.Name, Description: a.Description, Scope: a.Scope, Body: a.Body, Files: a.Files,
-		}, e.PackRepos(), fmt.Sprintf("curator %s: write %s", ct.run.ID, a.Name))
+		}, e.PackRepos(), curatorCommitPrefix(ct.run.ID)+"write "+a.Name)
 		if err != nil {
 			return "", err
 		}
@@ -712,6 +798,7 @@ func (ct *curatorTurn) dispatch(ctx context.Context, name string, raw json.RawMe
 		ct.mu.Lock()
 		ct.run.Written = append(ct.run.Written, a.Name)
 		ct.mu.Unlock()
+		ct.checkpoint(ctx)
 		return strings.TrimSpace("written and published\n" + l.String()), nil
 	case skillArchiveTool:
 		var a struct {
@@ -721,13 +808,14 @@ func (ct *curatorTurn) dispatch(ctx context.Context, name string, raw json.RawMe
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return "", err
 		}
-		msg := fmt.Sprintf("curator %s: archive %s: %s", ct.run.ID, strings.Join(a.Names, ", "), a.Reason)
+		msg := curatorCommitPrefix(ct.run.ID) + "archive " + strings.Join(a.Names, ", ") + ": " + a.Reason
 		if err := e.SkillPack().Archive(ctx, a.Names, msg); err != nil {
 			return "", err
 		}
 		ct.mu.Lock()
 		ct.run.Archived = append(ct.run.Archived, a.Names...)
 		ct.mu.Unlock()
+		ct.checkpoint(ctx)
 		return "archived", nil
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
@@ -831,9 +919,10 @@ func (ct *curatorTurn) inputs(ctx context.Context) string {
 	}
 	if repos := e.PackRepos(); len(repos) > 0 {
 		fmt.Fprintf(&b, "\nRepositories a scope may name: %s. A card's repository is shown beside it; "+
-			"a card with none is in the workspace's default repository, which only scope general reaches.\n", strings.Join(repos, ", "))
+			"a card with none is in the workspace's own repository, scope default.\n", strings.Join(repos, ", "))
 	} else {
-		b.WriteString("\nThis workspace has one repository, so every skill is scope general: a lesson about it belongs there.\n")
+		b.WriteString("\nThis workspace has one repository, scope default. Use scope general for a lesson " +
+			"about the tools or the environment, default for one about this repository's code.\n")
 	}
 	return b.String()
 }

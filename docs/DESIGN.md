@@ -5316,9 +5316,11 @@ like an agent home (§19.3d). Each skill is a directory holding a
 already reads: frontmatter `name` and `description`, a markdown body,
 optional `references/`. gummi adds three frontmatter keys:
 
-- `scope` — `general`, or the name of one of the workspace's
-  repositories (§10 D10). A repository skill reaches only sessions
-  working in that repository; a general one reaches every session.
+- `scope` — `general`, `default` (the workspace's own repository, the
+  one a card naming none works in), or the name of one of the
+  workspace's repositories (§10 D10). A repository skill reaches only
+  sessions working in that repository; a general one reaches every
+  session.
 - `source` — `curator` or `person`. A skill a person wrote or edited is
   `person`; the curator never edits, merges or archives one, and the
   usage timers never move it.
@@ -5340,7 +5342,7 @@ This reverses §4.1a's "adds nothing" for the pack, and only the pack.
 The `skills:` config key stays refused at load: there is still no
 user-configured forwarding. At each session start gummi materializes
 `published` (`git archive` into `.gummi/state/skillpacks/<rev>`, kept
-while any session reads it), filters it by `scope` against the
+while any conversation reads it), filters it by `scope` against the
 session's repository, and hands the filtered set to the backend through
 the mechanism each already has:
 
@@ -5359,8 +5361,14 @@ accepted here because the pack is gummi's own learning, not a
 convenience over the operator's discovery.
 
 Every pass gets the pack: plan, implement, critique, verify, and
-freeform sessions. A session pins the revision it started with, so a
-curator run mid-session never changes what a running session sees.
+freeform sessions. A conversation pins the revision it started with, so
+a curator run mid-conversation never changes what it sees. The pin
+outlives one backend process: a resumed stage session, a reopened
+freeform card and a freeform card switched to another backend keep it,
+and only a conversation that starts afresh takes the newest
+`published`. The pins are `.gummi/state/skillpacks/pins.json`; the
+hourly sweep drops those of finished cards and removes every
+materialized revision no pin reads.
 
 ### 23.3 What gummi does without a model
 
@@ -5375,11 +5383,13 @@ costs nothing and runs whether or not the curator is configured:
   as an incident log rather than a rule, a description that does not
   say when to use it, a path or symbol named in the body that does not
   exist on the scoped repository's base branch.
-- **Usage.** A backend's skill invocations are already in the card-event
-  log (`agent/tooldetail.go`, read by `cardrun` as a run's skills).
-  gummi counts them per skill and revision. A backend that reads a
-  skill as a file rather than invoking it counts as a read of that
-  `SKILL.md`.
+- **Usage.** gummi counts each skill call as the engine sees it, in
+  every session, stage and freeform alike, into
+  `.gummi/state/skillusage.json`. It cannot fold the card-event log
+  afterwards: a freeform card's calls never reach it (§19.3), and a
+  stage's call details are pruned when the stage ends. A backend's
+  skill invocation counts (`agent/tooldetail.go`), and so does a read of
+  a delivered `SKILL.md` by a backend that reads skills as files.
 - **Timers.** A curator skill unused for 14 days is marked stale; for
   30, it is archived — moved under `archive/` in a commit, never
   deleted. A skill younger than its first 14 days is not stale for
@@ -5420,7 +5430,8 @@ what is left of `monthly`, and gummi stops the turn when it is spent,
 exactly as it stops a card's. An exhausted month pauses the curator
 until the next one; raising either number is the person's. Every run
 is a row of its own — start, end, revision before and after, credits,
-outcome — read by the stats tab, which draws the curator as a lane of
+outcome — checkpointed as the run goes, so a board stopped mid-run
+leaves what it spent and wrote (read back as failed), read by the stats tab, which draws the curator as a lane of
 its own in the timeline and charges its spend to the window it started
 in (`fleetrun`), and by the digest (§23.6). A curator's spend is never
 a card's.
@@ -5429,8 +5440,9 @@ a card's.
 directory gummi made, under the same `GIT_CEILING_DIRECTORIES` guard as
 a home (§19.3d), sandboxed by the configured posture (§4.4). It is
 given no repository checkout. It fires like a schedule (§19.9): only
-while a board runs, missed fires coalesce, a fire while a run is still
-going is skipped. A person can run it once from either face.
+while a board runs, missed fires coalesce and are caught up by the next
+board (its clock starts when it is first armed on the workspace, not at
+each board's start), a fire while a run is still going is skipped. A person can run it once from either face.
 
 **What it reads and writes is tools, not files.** Its session carries
 its own tool set on its own MCP endpoint:
@@ -5472,7 +5484,8 @@ curator reads those instead.
 **What is new to a run.** The cutoff belongs to each card, not to each
 run. A run records the cards it opened, and when: their memory through
 `curator_read` and their events through `curator_events`. A card is
-offered again only once it has changed since the curator last read it.
+offered again only once it has changed since the curator last read it. A run that failed, timed out or ran out of budget still read what it
+read, so a large backlog moves on rather than being reread each run.
 One cutoff for the whole run would have hidden every card a run listed
 and never opened. A first run on a workspace with history reads three
 cards out of fifty, and the next run would have been offered none of
@@ -5489,8 +5502,9 @@ Hermes's default, and the safety it relies on is Hermes's too:
 
 - **Snapshots.** Every curator write is a commit; every run's
   before-and-after is a pair of revisions on its row.
-- **Revert.** A person reverts a run (one commit undoing all of it) or
-  one skill, from either face or `gummi skills revert`; `published`
+- **Revert.** A person reverts a run (one commit undoing all of the
+  run's own commits, and none of a sweep's or a person's pins that
+  landed while it ran) or one skill, from either face or `gummi skills revert`; `published`
   moves with the commit, so the next session starts without it. A pin
   holds a skill the curator would otherwise rewrite or archive.
 - **A digest, not a gate.** After each run that changed something, the

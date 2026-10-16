@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/skillpack"
-	"github.com/morphis/gummi/internal/state"
 )
 
 // The workspace skill pack (DESIGN §23): delivered to every session at its
@@ -28,22 +29,19 @@ func (e *Engine) SkillPack() *skillpack.Pack {
 }
 
 // skillDirsFor returns the pack's skill directories that reach f's
-// session on ag, from the published revision materialized for it. A
-// backend that cannot take a skill directory gets none (doctor says so),
-// and a pack that cannot be read is no reason to refuse a card's work:
-// the session runs without it.
-func (e *Engine) skillDirsFor(ctx context.Context, ag agent.Agent, f *domain.Feature) []string {
+// session on ag. key names the conversation and continuing says it is one
+// going on (a resume, a reopen, a switch of backend): a conversation keeps
+// the revision it was first given (§23.2), a new one takes the published
+// revision. A backend that cannot take a skill directory gets none (doctor
+// says so), and a pack that cannot be read is no reason to refuse a
+// card's work: the session runs without it.
+func (e *Engine) skillDirsFor(ctx context.Context, ag agent.Agent, f *domain.Feature, key string, continuing bool) []string {
 	if ag == nil || !ag.Capabilities().SkillDirs || e.cfg.Workspace.Root == "" {
 		return nil
 	}
-	pack := e.SkillPack()
-	rev := pack.Published(ctx)
-	if rev == "" {
-		return nil
-	}
-	dir, err := pack.Materialize(ctx, rev)
-	if err != nil {
-		return nil // `gummi curator list` and doctor show a pack that cannot be read
+	dir, _, err := e.SkillPack().SessionDir(ctx, key, string(f.ID), continuing)
+	if err != nil || dir == "" {
+		return nil // `gummi curator status` and doctor show a pack that cannot be read
 	}
 	return skillpack.DirsFor(dir, f.Repo)
 }
@@ -56,73 +54,81 @@ func (e *Engine) PackRepos() []string {
 	return e.cfg.Pool.Names()
 }
 
-// skillUsage is the pack's use, folded from the card-event log into a
-// file of its own, because the log's retention sweep removes the detail
-// that names the skill a call invoked.
+// skillUsage is the pack's use: a file of its own, counted as sessions
+// call a skill, because no log keeps a session's tool calls whole — a
+// freeform card's never reach the card-event log, and a stage's details
+// are pruned when it ends.
 type skillUsage struct {
-	Through time.Time                `json:"through"`
-	Skills  map[string]skillpack.Use `json:"skills"`
+	Skills map[string]skillpack.Use `json:"skills"`
 }
 
 func (e *Engine) skillUsagePath() string {
 	return filepath.Join(e.cfg.Workspace.StateDir(), "skillusage.json")
 }
 
-// SkillUsage folds every skill call recorded since the last fold into the
-// usage file and returns the totals. A call counts for a pack skill when
-// its detail names it, bare or namespaced (claude's gummi-skills:<name>).
-func (e *Engine) SkillUsage(ctx context.Context) map[string]skillpack.Use {
-	u := skillUsage{Skills: map[string]skillpack.Use{}}
+func (e *Engine) readSkillUsage() skillUsage {
+	u := skillUsage{}
 	if raw, err := os.ReadFile(e.skillUsagePath()); err == nil {
 		_ = json.Unmarshal(raw, &u)
-		if u.Skills == nil {
-			u.Skills = map[string]skillpack.Use{}
+	}
+	if u.Skills == nil {
+		u.Skills = map[string]skillpack.Use{}
+	}
+	return u
+}
+
+// SkillUsage is every skill's use so far, by name.
+func (e *Engine) SkillUsage(context.Context) map[string]skillpack.Use {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	return e.readSkillUsage().Skills
+}
+
+// packSkillPathRE matches a read of a pack skill's SKILL.md through any of
+// the places delivery puts it: the materialized revision copilot and
+// opencode read, claude's generated plugin, and agy's links.
+var packSkillPathRE = regexp.MustCompile(`(?:^|/)(?:skillpacks/[0-9a-f]{7,64}|gummi-skills/skills|\.gemini/config/skills)/([a-z0-9][a-z0-9-]{0,63})/SKILL\.md$`)
+
+// skillCalled names the skill a tool call used, or "": a backend's skill
+// invocation (bare, or namespaced as claude's gummi-skills:<name>), or a
+// read of a delivered SKILL.md by a backend that reads skills as files.
+func skillCalled(tool, detail string) string {
+	detail = strings.TrimSpace(detail)
+	if strings.EqualFold(tool, "skill") {
+		if i := strings.LastIndex(detail, ":"); i >= 0 {
+			detail = detail[i+1:]
 		}
+		return detail
 	}
-	if e.cfg.Store == nil {
-		return u.Skills
+	if m := packSkillPathRE.FindStringSubmatch(detail); m != nil {
+		return m[1]
 	}
-	evs, err := e.cfg.Store.WorkspaceEvents(ctx, u.Through)
+	return ""
+}
+
+// noteSkillUse counts one tool call toward the skill it used, if any. It
+// is called for every session's tool calls, stage and freeform alike; a
+// name the pack does not hold is counted harmlessly and never read.
+func (e *Engine) noteSkillUse(tool, detail string, at time.Time) {
+	name := skillCalled(tool, detail)
+	if name == "" || e.cfg.Workspace.StateDir() == "" {
+		return
+	}
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	u := e.readSkillUsage()
+	use := u.Skills[name]
+	use.Count++
+	if at.After(use.Last) {
+		use.Last = at
+	}
+	u.Skills[name] = use
+	raw, err := json.Marshal(u)
 	if err != nil {
-		return u.Skills
+		return
 	}
-	through := u.Through
-	for _, ev := range evs {
-		if !ev.At.After(u.Through) {
-			continue
-		}
-		if ev.At.After(through) {
-			through = ev.At
-		}
-		if ev.Kind != state.EventTool {
-			continue
-		}
-		var p state.ToolPayload
-		if json.Unmarshal([]byte(ev.Payload), &p) != nil || !strings.EqualFold(p.Tool, "skill") {
-			continue
-		}
-		name := strings.TrimSpace(p.Detail)
-		if i := strings.LastIndex(name, ":"); i >= 0 {
-			name = name[i+1:]
-		}
-		if name == "" {
-			continue
-		}
-		use := u.Skills[name]
-		use.Count++
-		if ev.At.After(use.Last) {
-			use.Last = ev.At
-		}
-		u.Skills[name] = use
-	}
-	if through.After(u.Through) {
-		u.Through = through
-		if raw, err := json.Marshal(u); err == nil {
-			_ = os.MkdirAll(filepath.Dir(e.skillUsagePath()), 0o700)
-			_ = os.WriteFile(e.skillUsagePath(), raw, 0o600)
-		}
-	}
-	return u.Skills
+	_ = os.MkdirAll(filepath.Dir(e.skillUsagePath()), 0o700)
+	_ = atomicfile.Write(e.skillUsagePath(), raw, 0o600)
 }
 
 // PackStanding is every published skill with its use and age.
@@ -161,4 +167,16 @@ func (e *Engine) SweepPack(ctx context.Context, now time.Time) ([]string, error)
 		return nil, nil
 	}
 	return due, e.SkillPack().Archive(ctx, due, "archive unused for 30 days: "+strings.Join(due, ", "))
+}
+
+// releasePackRevisions lets go of the revisions only finished or gone
+// cards were reading.
+func (e *Engine) releasePackRevisions(ctx context.Context) {
+	if e.cfg.Store == nil {
+		return
+	}
+	e.SkillPack().Release(ctx, func(card string) bool {
+		f, err := e.cfg.Store.GetFeature(ctx, domain.FeatureID(card))
+		return err == nil && f.Stage != domain.StageDone
+	})
 }

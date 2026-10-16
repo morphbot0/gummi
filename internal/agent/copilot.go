@@ -256,6 +256,8 @@ func resumeConfigFrom(cfg *copilot.SessionConfig) *copilot.ResumeSessionConfig {
 		Tools:               cfg.Tools,
 		OnPermissionRequest: cfg.OnPermissionRequest,
 		SessionLimits:       cfg.SessionLimits,
+		// The pack a resumed conversation keeps reading (DESIGN §23.2).
+		SkillDirectories: cfg.SkillDirectories,
 	}
 }
 

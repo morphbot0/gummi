@@ -50,7 +50,7 @@ func curatorWrote(t *testing.T, b *boardHarness, id, name string) {
 	}
 	l, err := pack.Write(ctx, skillpack.Draft{
 		Name: name, Description: "Run the named tests and check they ran", Body: "Run them, then count them.\n",
-	}, nil, "curator: write "+name)
+	}, nil, "curator "+id+": write "+name)
 	if err != nil || !l.OK() {
 		t.Fatalf("write %s: %v %v", name, err, l.Refusals)
 	}

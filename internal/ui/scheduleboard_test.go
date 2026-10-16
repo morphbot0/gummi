@@ -197,3 +197,25 @@ func TestSchedulesDialogToggleKeyOpensConfirm(t *testing.T) {
 		t.Fatal("disabling an enabled schedule asked; it is safe and does not")
 	}
 }
+
+// TestACuratorErrorHidesNoFire: a curator that cannot run is said on its
+// own, once, and every schedule's fire is still reported beside it.
+func TestACuratorErrorHidesNoFire(t *testing.T) {
+	m := populatedShell(120, 34)
+	n := &scheduleTestNotifier{}
+	m.AddAttentionNotifier(n)
+	m.Update(scheduleTickMsg{
+		fires:      []engine.ScheduleFire{scheduleFire("hourly", "hourly", domain.ScheduleHeartbeat, domain.ScheduleOK, "FF-001", "")},
+		curatorErr: fmt.Errorf("the schedule does not compile"),
+	})
+	if got := n.taken(); len(got) != 1 {
+		t.Fatalf("a fire beside a curator error raised %v, want its alert", got)
+	}
+	if m.curatorErr != "the schedule does not compile" {
+		t.Fatalf("the curator error was not kept: %q", m.curatorErr)
+	}
+	m.Update(scheduleTickMsg{})
+	if m.curatorErr != "" {
+		t.Errorf("a clean tick did not clear the curator error: %q", m.curatorErr)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,11 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/morphis/gummi/internal/atomicfile"
 )
 
 // PublishedRef is what sessions read. Commits land on the pack's branch;
@@ -179,6 +181,7 @@ func (p *Pack) Write(ctx context.Context, d Draft, repos []string, message strin
 	}
 	dir := filepath.Join(p.Dir, d.Name)
 	if err := os.RemoveAll(dir); err != nil {
+		p.restore(ctx, d.Name)
 		return l, err
 	}
 	scope := d.Scope
@@ -193,13 +196,19 @@ func (p *Pack) Write(ctx context.Context, d Draft, repos []string, message strin
 	for rel, c := range files {
 		path := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // read by sessions
+			p.restore(ctx, d.Name)
 			return l, err
 		}
 		if err := os.WriteFile(path, c, 0o644); err != nil { //nolint:gosec // read by sessions
+			p.restore(ctx, d.Name)
 			return l, err
 		}
 	}
-	return l, p.commit(ctx, message, d.Name)
+	if err := p.commit(ctx, message, d.Name); err != nil {
+		p.restore(ctx, d.Name)
+		return l, err
+	}
+	return l, nil
 }
 
 // Archive moves curator skills under archive/ in one commit and
@@ -214,7 +223,9 @@ func (p *Pack) Archive(ctx context.Context, names []string, message string) erro
 	if err != nil {
 		return err
 	}
-	var paths []string
+	// Every name is checked before any is moved: one refusal leaves the
+	// pack as it was, not with the names before it staged as moved.
+	names = slices.Compact(slices.Sorted(slices.Values(names)))
 	for _, name := range names {
 		m, ok := existing[name]
 		switch {
@@ -223,19 +234,43 @@ func (p *Pack) Archive(ctx context.Context, names []string, message string) erro
 		case !m.Curated():
 			return fmt.Errorf("%q is a person's or pinned skill; the curator never archives one", name)
 		}
+	}
+	if err := os.MkdirAll(filepath.Join(p.Dir, archiveDir), 0o755); err != nil { //nolint:gosec // read by sessions
+		return err
+	}
+	var paths []string
+	for _, name := range names {
 		dest := filepath.Join(archiveDir, name)
 		if _, err := os.Stat(filepath.Join(p.Dir, dest)); err == nil {
 			dest = filepath.Join(archiveDir, name+"-"+strconv.FormatInt(time.Now().Unix(), 10))
 		}
-		if err := os.MkdirAll(filepath.Join(p.Dir, archiveDir), 0o755); err != nil { //nolint:gosec // read by sessions
-			return err
-		}
-		if _, err := p.git(ctx, "mv", name, dest); err != nil {
-			return err
-		}
 		paths = append(paths, name, dest)
+		if _, err := p.git(ctx, "mv", name, dest); err != nil {
+			p.restore(ctx, paths...)
+			return err
+		}
 	}
-	return p.commit(ctx, message, paths...)
+	if err := p.commit(ctx, message, paths...); err != nil {
+		p.restore(ctx, paths...)
+		return err
+	}
+	return nil
+}
+
+// restore puts paths back as HEAD has them, in the index and on disk: a
+// write or archive that failed partway leaves nothing staged for the next
+// commit to sweep up. Best effort; a path HEAD lacks is just removed.
+func (p *Pack) restore(ctx context.Context, paths ...string) {
+	if len(paths) == 0 {
+		return
+	}
+	_, _ = p.git(ctx, append([]string{"reset", "--quiet", "--"}, paths...)...)
+	for _, path := range paths {
+		if _, err := p.git(ctx, "cat-file", "-e", "HEAD:"+filepath.ToSlash(path)); err == nil {
+			_, _ = p.git(ctx, "checkout", "--quiet", "HEAD", "--", path)
+		}
+	}
+	_, _ = p.git(ctx, append([]string{"clean", "-fdq", "--"}, paths...)...)
 }
 
 // commit commits only paths (a person's uncommitted edits elsewhere in
@@ -263,19 +298,49 @@ func (p *Pack) commit(ctx context.Context, message string, paths ...string) erro
 	return p.publish(ctx)
 }
 
-// Revert undoes the commits in (from, to] — one curator run, or one write
-// when from is to's parent — in one commit, and publishes. Reverting a run
-// a later run built on can conflict; the pack is then left as it was.
+// Revert undoes the commits in (from, to] — or to alone when from is "" —
+// in one commit, and publishes.
 func (p *Pack) Revert(ctx context.Context, from, to, message string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if from == "" {
 		from = to + "^"
 	}
-	if _, err := p.git(ctx, "revert", "--no-commit", from+".."+to); err != nil {
+	out, err := p.git(ctx, "rev-list", from+".."+to)
+	if err != nil {
+		return err
+	}
+	return p.RevertCommits(ctx, strings.Fields(out), message)
+}
+
+// CommitsSince is the commits after from whose subject starts with prefix,
+// newest first: one curator run's own, leaving out the sweep's and a
+// person's pins that landed while it ran.
+func (p *Pack) CommitsSince(ctx context.Context, from, prefix string) ([]string, error) {
+	out, err := p.git(ctx, "log", "--format=%H%x00%s", from+"..HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var commits []string
+	for _, line := range strings.Split(out, "\n") {
+		if hash, subject, ok := strings.Cut(line, "\x00"); ok && strings.HasPrefix(subject, prefix) {
+			commits = append(commits, hash)
+		}
+	}
+	return commits, nil
+}
+
+// RevertCommits undoes commits (newest first) in one commit, and
+// publishes. Reverting a run a later commit built on can conflict; the
+// pack is then left as it was.
+func (p *Pack) RevertCommits(ctx context.Context, commits []string, message string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(commits) == 0 {
+		return errors.New("nothing to revert")
+	}
+	if _, err := p.git(ctx, append([]string{"revert", "--no-commit"}, commits...)...); err != nil {
 		_, _ = p.git(ctx, "revert", "--abort")
 		if strings.Contains(err.Error(), "could not revert") {
-			return fmt.Errorf("%w: a later commit changed the same skills (%s); the pack is unchanged — revert that first, or edit the pack by hand", ErrRevertConflict, p.laterTouching(ctx, from, to))
+			return fmt.Errorf("%w: a later commit changed the same skills (%s); the pack is unchanged — revert that first, or edit the pack by hand", ErrRevertConflict, p.laterTouching(ctx, commits))
 		}
 		return err
 	}
@@ -289,18 +354,29 @@ func (p *Pack) Revert(ctx context.Context, from, to, message string) error {
 // ErrRevertConflict is a revert that later commits stand in the way of.
 var ErrRevertConflict = errors.New("cannot revert cleanly")
 
-// laterTouching names the commits after to that touch what (from, to]
-// touched: what stands in the way of reverting it.
-func (p *Pack) laterTouching(ctx context.Context, from, to string) string {
-	files, err := p.git(ctx, "diff", "--name-only", from, to)
+// laterTouching names the commits since the oldest of commits, other
+// than them, that touch what they touched: what stands in the way of
+// reverting them.
+func (p *Pack) laterTouching(ctx context.Context, commits []string) string {
+	files, err := p.git(ctx, append([]string{"show", "--name-only", "--format="}, commits...)...)
 	if err != nil || files == "" {
 		return "unknown"
 	}
-	out, err := p.git(ctx, append([]string{"log", "--format=%h %s", to + "..HEAD", "--"}, strings.Fields(files)...)...)
-	if err != nil || out == "" {
+	out, err := p.git(ctx, append([]string{"log", "--format=%H %h %s", commits[len(commits)-1] + "..HEAD", "--"}, strings.Fields(files)...)...)
+	if err != nil {
 		return "unknown"
 	}
-	return strings.ReplaceAll(out, "\n", "; ")
+	var later []string
+	for _, line := range strings.Split(out, "\n") {
+		hash, rest, ok := strings.Cut(line, " ")
+		if ok && !slices.Contains(commits, hash) {
+			later = append(later, rest)
+		}
+	}
+	if len(later) == 0 {
+		return "unknown"
+	}
+	return strings.Join(later, "; ")
 }
 
 // Pin marks a skill pinned (or not), in a commit of the person's, and
@@ -353,26 +429,104 @@ func (p *Pack) Log(ctx context.Context, n int) ([]Entry, error) {
 	return entries, nil
 }
 
-// Born returns when each skill at HEAD was first written: its SKILL.md's
-// oldest commit. The timers measure an unused skill from here.
+// Born returns when each skill at HEAD last came into the pack: the
+// newest commit that added its SKILL.md at that path. A skill brought
+// back from archive/ (a revert, or a person's move) is born again then,
+// so the timers do not count its time in the archive as time unused.
 func (p *Pack) Born(ctx context.Context, names []string) map[string]time.Time {
 	born := map[string]time.Time{}
 	for _, name := range names {
-		out, err := p.git(ctx, "log", "--format=%ct", "--", name+"/SKILL.md")
+		out, err := p.git(ctx, "log", "-n", "1", "--no-renames", "--diff-filter=A", "--format=%ct", "--", name+"/SKILL.md")
 		if err != nil || out == "" {
 			continue
 		}
-		lines := strings.Fields(out)
-		sec, _ := strconv.ParseInt(lines[len(lines)-1], 10, 64)
+		sec, _ := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 		born[name] = time.Unix(sec, 0)
 	}
 	return born
 }
 
+// pinsFile is the revision each conversation reads, in Cache.
+const pinsFile = "pins.json"
+
+// revPin is the revision one conversation was given, and whose it is.
+type revPin struct {
+	Rev  string    `json:"rev"`
+	Card string    `json:"card"`
+	At   time.Time `json:"at"`
+}
+
+func (p *Pack) readPins() map[string]revPin {
+	pins := map[string]revPin{}
+	if raw, err := os.ReadFile(filepath.Join(p.Cache, pinsFile)); err == nil {
+		_ = json.Unmarshal(raw, &pins)
+	}
+	return pins
+}
+
+func (p *Pack) writePins(pins map[string]revPin) error {
+	raw, err := json.Marshal(pins)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(p.Cache, 0o755); err != nil { //nolint:gosec // read by sessions
+		return err
+	}
+	return atomicfile.Write(filepath.Join(p.Cache, pinsFile), raw, 0o600)
+}
+
+// SessionDir returns the materialized pack a conversation reads, and its
+// revision. key names the conversation (it outlives one backend process:
+// a reopen, a resume, a switch of backend), card is whose it is. A
+// conversation that is continuing keeps the revision it was first given;
+// a new one is given the published revision, which it then keeps. "" is
+// a pack that has not been made.
+func (p *Pack) SessionDir(ctx context.Context, key, card string, continuing bool) (dir, rev string, err error) {
+	p.mu.Lock()
+	pins := p.readPins()
+	pin, ok := pins[key]
+	if !continuing || !ok || pin.Rev == "" {
+		if rev = p.Published(ctx); rev == "" {
+			p.mu.Unlock()
+			return "", "", nil
+		}
+		pins[key] = revPin{Rev: rev, Card: card, At: time.Now()}
+		if err := p.writePins(pins); err != nil {
+			p.mu.Unlock()
+			return "", "", err
+		}
+	} else {
+		rev = pin.Rev
+	}
+	p.mu.Unlock()
+	dir, err = p.Materialize(ctx, rev)
+	return dir, rev, err
+}
+
+// Release drops the pins of every card live does not hold (finished or
+// gone), then removes each materialized revision no pin reads and that is
+// not published: a revision stays on disk exactly while a conversation
+// may still read it.
+func (p *Pack) Release(ctx context.Context, live func(card string) bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pins := p.readPins()
+	changed := false
+	for key, pin := range pins {
+		if !live(pin.Card) {
+			delete(pins, key)
+			changed = true
+		}
+	}
+	if changed {
+		_ = p.writePins(pins)
+	}
+	p.prune(ctx, pins)
+}
+
 // Materialize extracts rev into Cache/<rev> once and returns that
 // directory. Revisions are immutable, so a session that started on one
-// keeps reading it while a curator run publishes the next; the oldest are
-// pruned past keep.
+// keeps reading it while a curator run publishes the next.
 func (p *Pack) Materialize(ctx context.Context, rev string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -410,37 +564,23 @@ func (p *Pack) Materialize(ctx context.Context, rev string) (string, error) {
 		}
 		return "", err
 	}
-	p.prune(dest)
 	return dest, nil
 }
 
-// keep is how many materialized revisions stay on disk. A session reads
-// the one it started with; ten publishes during one session's life is
-// far past what a daily curator makes.
-const keep = 10
-
-func (p *Pack) prune(current string) {
+// prune removes the materialized revisions no pin reads, but the
+// published one. A leftover temp directory from a crash goes too.
+func (p *Pack) prune(ctx context.Context, pins map[string]revPin) {
 	entries, err := os.ReadDir(p.Cache)
 	if err != nil {
 		return
 	}
-	type rev struct {
-		path string
-		mod  time.Time
+	read := map[string]bool{p.Published(ctx): true}
+	for _, pin := range pins {
+		read[pin.Rev] = true
 	}
-	var revs []rev
 	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		if fi, err := e.Info(); err == nil {
-			revs = append(revs, rev{filepath.Join(p.Cache, e.Name()), fi.ModTime()})
-		}
-	}
-	sort.Slice(revs, func(i, j int) bool { return revs[i].mod.After(revs[j].mod) })
-	for i, r := range revs {
-		if i >= keep && r.path != current {
-			_ = os.RemoveAll(r.path)
+		if e.IsDir() && !read[e.Name()] {
+			_ = os.RemoveAll(filepath.Join(p.Cache, e.Name()))
 		}
 	}
 }

@@ -414,7 +414,9 @@ type Engine struct {
 	// curator's run state (curator.go).
 	packOnce sync.Once
 	pack     *skillpack.Pack
-	curator  curatorState
+	// usageMu serializes the skill usage file's read-modify-write.
+	usageMu sync.Mutex
+	curator curatorState
 	// repoInstructions caches the managed repository's own instruction
 	// card (AGENTS.md/CLAUDE.md, quoted) per repository root, under the
 	// same mutex and with the same lifetime as repoCards.
@@ -1875,7 +1877,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		// session, so following the hint above cannot reach it.
 		AgentHomeDir: e.agentHomeDirFor(f.ID),
 		// The workspace skill pack at its published revision (§23.2).
-		SkillDirs: e.skillDirsFor(ctx, ag, &f),
+		SkillDirs: e.skillDirsFor(ctx, ag, &f, string(f.ID)+"/"+string(role)+"/"+flavorString(flavor), resumeID != ""),
 	})
 	if specErr != nil {
 		mcpTeardown()
@@ -2765,6 +2767,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		kind = EventMessage
 	case agent.EventToolCall:
 		s.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
+		e.noteSkillUse(ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result == nil {
 			break

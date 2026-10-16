@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -92,13 +93,13 @@ func TestCuratorRunWritesThePackAndEverySessionGetsIt(t *testing.T) {
 
 	// Every later session on a backend that takes skill directories gets
 	// the published skill.
-	dirs := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"})
+	dirs := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false)
 	if len(dirs) != 1 || filepath.Base(dirs[0]) != "make-test" {
 		t.Fatalf("a session gets %v", dirs)
 	}
 	noSkills := agent.NewFake("")
 	noSkills.Caps = agent.Capabilities{}
-	if got := e.skillDirsFor(ctx, noSkills, &domain.Feature{ID: "FD-1"}); got != nil {
+	if got := e.skillDirsFor(ctx, noSkills, &domain.Feature{ID: "FD-1"}, "FD-1", false); got != nil {
 		t.Errorf("a backend without SkillDirs got %v", got)
 	}
 
@@ -106,7 +107,7 @@ func TestCuratorRunWritesThePackAndEverySessionGetsIt(t *testing.T) {
 	if err := e.SkillPack().Revert(ctx, run.Before, run.After, "revert"); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}); len(got) != 0 {
+	if got := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 0 {
 		t.Errorf("after the revert a session still gets %v", got)
 	}
 
@@ -159,7 +160,7 @@ func TestCuratorRunIsPinnedAndRevertedByItsID(t *testing.T) {
 	if _, err := e.RevertCuratorRun(ctx, run.ID); err == nil || !strings.Contains(err.Error(), "already reverted") {
 		t.Errorf("a second revert of the run = %v", err)
 	}
-	if got := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}); len(got) != 0 {
+	if got := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 0 {
 		t.Errorf("after the revert a session still gets %v", got)
 	}
 
@@ -216,28 +217,165 @@ func TestCuratorTickRunsWhenAsked(t *testing.T) {
 	}
 }
 
-func TestSkillUsageCountsPackSkills(t *testing.T) {
-	cf := newCuratorFake(nil)
-	e := curatorEngine(t, cf, nil)
+// A skill call counts as it happens, from any session: a freeform card's
+// calls never reach the card-event log, and a stage's are pruned there.
+func TestSkillUsageCountsAFreeformSessionsCalls(t *testing.T) {
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventToolCall, Tool: "Skill", Detail: "gummi-skills:make-test", CallID: "1"},
+			{Kind: agent.EventToolCall, Tool: "Read", Detail: "/w/.gummi/state/skillpacks/0123abcd/make-test/SKILL.md", CallID: "2"},
+			{Kind: agent.EventToolCall, Tool: "Read", Detail: "docs/SKILL.md", CallID: "3"},
+			{Kind: agent.EventMessage, Text: "done"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	e := curatorEngine(t, ag, nil)
 	ctx := context.Background()
-	f := feature(3, "uses skills", domain.StageImplement)
-	if err := e.cfg.Store.CreateFeature(ctx, &f); err != nil {
+	f := freeformCard(1, "uses skills")
+	createFeature(t, e.cfg.Store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
 		t.Fatal(err)
 	}
-	at := time.Now().Add(-time.Minute)
-	for i, detail := range []string{"gummi-skills:make-test", "make-test", "other"} {
-		ev := toolEvent(f.ID, "Skill", detail, at.Add(time.Duration(i)*time.Second))
-		if err := e.cfg.Store.AppendEvent(ctx, ev); err != nil {
+	if err := ff.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	u := e.SkillUsage(ctx)
+	if u["make-test"].Count != 2 || len(u) != 1 {
+		t.Fatalf("usage = %+v, want make-test twice and nothing else", u)
+	}
+}
+
+func TestSkillCalled(t *testing.T) {
+	for _, c := range []struct{ tool, detail, want string }{
+		{"Skill", "gummi-skills:make-test", "make-test"},
+		{"skill", "make-test", "make-test"},
+		{"view", "/w/.gummi/state/skillpacks/0123abcd/make-test/SKILL.md", "make-test"},
+		{"Read", "/tmp/gummi-claude-skills-1/gummi-skills/skills/make-test/SKILL.md", "make-test"},
+		{"read_file", ".gemini/config/skills/make-test/SKILL.md", "make-test"},
+		{"Read", "docs/make-test/SKILL.md", ""},
+		{"Bash", "make test", ""},
+	} {
+		if got := skillCalled(c.tool, c.detail); got != c.want {
+			t.Errorf("skillCalled(%q, %q) = %q, want %q", c.tool, c.detail, got, c.want)
+		}
+	}
+}
+
+// gummi stops a run at its budget whether or not the backend does.
+func TestCuratorStopsAtItsBudget(t *testing.T) {
+	cf := newCuratorFake(nil)
+	cf.Responder = func(agent.SessionOpts, string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 60}},
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 60}},
+			toolCall("1", skillWriteTool, map[string]any{"name": "late", "description": "Use when x.", "body": "y"}),
+			{Kind: agent.EventIdle},
+		}
+	}
+	e := curatorEngine(t, cf, &config.Curator{Budget: 100})
+	run, err := e.RunCurator(context.Background(), "person")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Outcome != CuratorSpent || len(run.Written) != 0 {
+		t.Fatalf("run = %+v, want it stopped at its budget before writing", run)
+	}
+}
+
+// A run the board stopped mid-way leaves its row: its spend counts toward
+// the month and what it wrote can be reverted as a run.
+func TestARunCutShortKeepsItsRow(t *testing.T) {
+	e := curatorEngine(t, newCuratorFake(nil), &config.Curator{Budget: 100})
+	now := time.Now()
+	for _, r := range []CuratorRun{
+		{ID: "cr-1", Start: now, Outcome: CuratorRunning, Credits: 10},
+		{ID: "cr-1", Start: now, Outcome: CuratorRunning, Credits: 40, Written: []string{"aa"}},
+	} {
+		if err := e.appendCuratorRun(r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	u := e.SkillUsage(ctx)
-	if u["make-test"].Count != 2 || u["other"].Count != 1 {
-		t.Fatalf("usage = %+v", u)
+	runs, err := e.CuratorRuns()
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("ledger = %+v, %v", runs, err)
 	}
-	// A second fold does not count the same calls again.
-	if u := e.SkillUsage(ctx); u["make-test"].Count != 2 {
-		t.Errorf("a second fold recounted: %+v", u)
+	if r := runs[0]; r.Outcome != CuratorFailed || r.Credits != 40 || len(r.Written) != 1 {
+		t.Errorf("a run cut short reads %+v", r)
+	}
+	if got := CuratorMonthSpent(runs, now); got != 40 {
+		t.Errorf("month spent = %v, want the cut run's 40", got)
+	}
+}
+
+// Reverting a run undoes its own commits only, not a pin a person made
+// while it ran.
+func TestRevertingARunLeavesWhatElseLandedMeanwhile(t *testing.T) {
+	ctx := context.Background()
+	e := curatorEngine(t, newCuratorFake(nil), &config.Curator{Budget: 100})
+	pack := e.SkillPack()
+	write := func(name, msg string) {
+		t.Helper()
+		if l, err := pack.Write(ctx, skillpack.Draft{Name: name, Description: "Use when " + name + ".", Body: "rule"}, nil, msg); err != nil || !l.OK() {
+			t.Fatalf("write %s: %v %s", name, err, l)
+		}
+	}
+	write("kept", "curator cr-0: write kept")
+	before, _ := pack.Head(ctx)
+	write("aa", curatorCommitPrefix("cr-1")+"write aa")
+	if err := pack.Pin(ctx, "kept", true); err != nil {
+		t.Fatal(err)
+	}
+	write("bb", curatorCommitPrefix("cr-1")+"write bb")
+	after, _ := pack.Head(ctx)
+	if err := e.appendCuratorRun(CuratorRun{ID: "cr-1", Start: time.Now(), Before: before, After: after, Outcome: CuratorDone}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.RevertCuratorRun(ctx, "cr-1"); err != nil {
+		t.Fatal(err)
+	}
+	skills, _ := pack.Skills(ctx, pack.Published(ctx))
+	if _, ok := skills["aa"]; ok {
+		t.Error("the run's skill aa survived its revert")
+	}
+	if _, ok := skills["bb"]; ok {
+		t.Error("the run's skill bb survived its revert")
+	}
+	if !skills["kept"].Pinned {
+		t.Error("reverting the run undid a person's pin made while it ran")
+	}
+}
+
+// A run that failed after reading still read: the next is not offered
+// the same cards again.
+func TestAFailedRunsReadsCount(t *testing.T) {
+	read := time.Now()
+	seen := curatorSeenIn([]CuratorRun{{Outcome: CuratorFailed, ReadMemory: map[string]time.Time{"FF-1": read}}})
+	if !seen.memory["FF-1"].Equal(read) {
+		t.Errorf("a failed run's reads were dropped: %+v", seen.memory)
+	}
+}
+
+// A fire missed while no board ran is caught up by the next board, as a
+// schedule's is: the curator's clock does not restart with each board.
+func TestAMissedCuratorFireIsCaughtUp(t *testing.T) {
+	cf := newCuratorFake(nil)
+	e := curatorEngine(t, cf, &config.Curator{Budget: 100, Schedule: "@daily"})
+	armed := filepath.Join(e.cfg.Workspace.StateDir(), "curator.armed")
+	if err := os.MkdirAll(filepath.Dir(armed), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(armed, []byte(time.Now().Add(-48*time.Hour).UTC().Format(time.RFC3339)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started, err := e.CuratorTick(context.Background(), time.Now())
+	if err != nil || !started {
+		t.Fatalf("a fire missed while no board ran was not caught up: %v %v", started, err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for e.CuratorRunning() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -378,8 +516,8 @@ func TestCuratorOffersEveryCardItHasNotRead(t *testing.T) {
 		return ids
 	}
 
-	// A finished run that read nothing, and a failed one that did: neither
-	// moves a card.
+	// A finished run that read nothing moves no card; a failed one that
+	// read FF-1 still read it.
 	for _, r := range []CuratorRun{
 		{ID: "cr-a", Outcome: CuratorDone, Start: time.Now()},
 		{ID: "cr-b", Outcome: CuratorFailed, Start: time.Now(), ReadMemory: map[string]time.Time{"FF-1": time.Now()}},
@@ -388,8 +526,8 @@ func TestCuratorOffersEveryCardItHasNotRead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := offered(); !slices.Equal(got, []string{"FF-1", "FF-2", "FF-3"}) {
-		t.Fatalf("after runs that read nothing the curator is offered %v", got)
+	if got := offered(); !slices.Equal(got, []string{"FF-2", "FF-3"}) {
+		t.Fatalf("after a run that read FF-1 the curator is offered %v", got)
 	}
 
 	run, err := e.RunCurator(ctx, "person")
@@ -402,7 +540,7 @@ func TestCuratorOffersEveryCardItHasNotRead(t *testing.T) {
 	if !strings.Contains(cf.prompts[0], "FF-2 : 3 KB of memory") {
 		t.Errorf("the kickoff does not size a card's memory:\n%s", cf.prompts[0])
 	}
-	if got := offered(); !slices.Equal(got, []string{"FF-1", "FF-3"}) {
+	if got := offered(); !slices.Equal(got, []string{"FF-3"}) {
 		t.Fatalf("after reading FF-2 the curator is offered %v", got)
 	}
 
@@ -411,12 +549,7 @@ func TestCuratorOffersEveryCardItHasNotRead(t *testing.T) {
 	if err := os.Chtimes(e.cfg.Workspace.SessionMemoryFile("FF-2"), later, later); err != nil {
 		t.Fatal(err)
 	}
-	if got := offered(); !slices.Equal(got, []string{"FF-1", "FF-2", "FF-3"}) {
+	if got := offered(); !slices.Equal(got, []string{"FF-2", "FF-3"}) {
 		t.Fatalf("a card written after its read is not offered again: %v", got)
 	}
-}
-
-func toolEvent(id domain.FeatureID, tool, detail string, at time.Time) state.CardEvent {
-	raw, _ := json.Marshal(state.ToolPayload{Label: tool, Tool: tool, Detail: detail})
-	return state.CardEvent{Feature: id, Stage: domain.StageImplement, Kind: state.EventTool, At: at, Payload: string(raw)}
 }
