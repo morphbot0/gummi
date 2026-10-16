@@ -1982,6 +1982,10 @@ Decided in the design interview (2026-07-03):
     - **It writes through tools, only into the pack.** gummi does the
       write, the lint and the commit. Never global memory, never a
       person's or a pinned skill.
+    - **Sessions stage, the curator publishes** (amended 2026-10-16).
+      A card's session may stage a change to the pack that only its own
+      sessions read; the curator reviews it before any other card sees
+      it, and is the only writer of `published`.
     - **Sessions read a published revision**, pinned at session start,
       scoped per repository. A revert moves it.
     - **The check is after, not before.** Snapshots, a digest and
@@ -5296,16 +5300,18 @@ again: a flag that does not exist, a test that only fails in a card's
 environment, the one command that rebuilds the goldens. Freeform
 sessions already write that down (§19.3c), and nothing reads it beyond
 the card that wrote it. This section closes the loop, in the shape
-Hermes uses for its own agent: sessions record, one curator distils,
-and gummi delivers, lints and counts. There is no person in the loop
-before a skill reaches a session: it is checked after the fact, with
-snapshots and revert (§23.6).
+Hermes uses for its own agent: sessions record and stage, one curator
+reviews and distils, and gummi delivers, lints and counts. There is no
+person in the loop before a skill reaches a session: it is checked
+after the fact, with snapshots and revert (§23.6).
 
 ```
 sessions ──record──▶ session memory, dead-ends, card events
+    │                         │
+    └──stage──▶ the card's own overlay (only its sessions read it)
                               │
                          curator (scheduled, budgeted, §23.4)
-                              │  skill_write / skill_archive
+                              │  staged_decide / skill_write / skill_archive
                               ▼
           gummi: lint ─▶ commit in .gummi/skills ─▶ advance `published`
                               │
@@ -5483,10 +5489,25 @@ its own tool set on its own MCP endpoint:
   since its last run (verdicts, failed verifies, critique findings,
   `ask_user` answers), the pack at `published` with each skill's usage
   and age;
-- writes: `skill_write` (create or replace one curator skill) and
-  `skill_archive`. Merging several skills into one is one `skill_write`
-  naming the skills it absorbs in `replaces`, which gummi commits, the
-  write and the archives together, as one commit.
+- the changes card sessions staged (§23.5): `staged_read` shows one
+  beside the published skill it changes, and says when that skill moved
+  after it was staged;
+- each repository at its base branch: `repo_read` a file (its
+  `AGENTS.md` first) and `repo_grep` a pattern, so a claim a skill makes
+  about a codebase is checked against it, and a skill that only repeats
+  or contradicts `AGENTS.md` is caught. Never a card's worktree;
+- writes: `skill_write` (create or replace one curator skill),
+  `skill_archive`, and `staged_decide`: accept a staged change (gummi
+  lints and commits it, as one of the run's own commits), mark it
+  merged (the curator wrote what it taught into another skill), or
+  reject it with a reason the card reads. Merging several skills into
+  one is one `skill_write` naming the skills it absorbs in `replaces`,
+  which gummi commits, the write and the archives together, as one
+  commit.
+
+The curator is the review between one card's lesson and every session:
+it is the only writer of `published`, and reviewing what sessions staged
+is the first thing its kickoff asks of it.
 
 gummi does each write: lint, commit to the pack under gummi's identity
 with the run's id in the message, advance `published`. Every write to
@@ -5500,16 +5521,43 @@ does not matter, and no other session is offered these tools.
 removed an agent bound to the whole workspace that acted on cards: it
 ran them, minted them and read their state for a person who had not
 asked. The curator acts on no card. It reads what sessions left behind
-and writes into one repository gummi owns, through two tools. A card
+and writes into one repository gummi owns, through its own tools. A card
 would have given it a budget, metering and a place on the board, at the
 cost of a branch it never lands, a worktree it never uses and a thread
 nobody is meant to talk in. The goal lead (§17.4) already showed the
 other way: a model session inside gummi's own loop, charged to a ledger
 that is not a card's. The curator is the second.
 
-### 23.5 What a session records
+### 23.5 What a session records and stages
 
-Capture is what sessions already do. A freeform session writes session
+**Staging** (decided 2026-10-16). Every card session on a backend the
+pack reaches (§23.2), freeform and every pass but a rebase, is given two
+gummi tools: `skill_read` (a skill's `SKILL.md` or a file of it, as the
+card sees it) and `skill_manage` (`write` a new skill or the whole new
+text of a curator one, `archive` one with a reason, `withdraw` its own
+change, `list` its changes and the curator's verdicts). Neither touches
+the pack. A change is staged under `.gummi/state/skillstage/<card>/`,
+files rather than commits, with the published revision it was staged
+against, and is linted as the curator's own write would be; a person's
+or pinned skill is refused, as it is to the curator.
+
+Only the staging card reads its changes. Its sessions get the revision
+they pinned with the card's pending changes laid over it (written skills
+in, archived ones out), composed once per content under the card's
+stage; every other card gets the revision itself. `skill_read` reads
+the overlay live, so a skill staged mid-session is readable at once;
+the backend's own skill list waits for the card's next session, because
+every backend reads it at start. A use of a skill the card has staged
+is counted apart from the published skill's (`Use.Staged`), so the
+curator can tell whether a change was used where it was made.
+
+The curator decides each change (§23.4). An accepted one becomes a pack
+commit of the run's and leaves the stage; a merged one leaves it; a
+rejected one stays with its reason, reaches no session, and may be
+staged again. A card that finishes keeps its pending changes for review:
+they are the lessons. The hourly sweep removes its composed views.
+
+**Capture without staging** is what sessions already do. A freeform session writes session
 memory and dead-ends (§19.3c), and its hints now say what the curator
 reads them for: a rule a later session should follow, said once, not
 the story of how it was learned. Stage sessions carry no memory tools
@@ -5576,15 +5624,9 @@ not a spec's reviewer threads.
   moves into a repository first.
 - **Delivery beyond claude, copilot and opencode** (§23.2). No skill
   index in the hints and no MCP fallback for the others.
-- **Sessions author, staged** (decided 2026-10-16, not built). A card's
-  session may create, patch and archive skills through a gummi tool,
-  into a staging area of that card's own that only its own sessions read,
-  layered over `published`. The curator reviews staged changes on its
-  schedule and accepts, merges or rejects each, as commits like its
-  own; a rejection keeps its reason for the card. That makes the curator
-  a reviewer rather than the only author, and amends §23.4 and Decision
-  26 when it is built. The curator also needs read access to each
-  repository's base and its `AGENTS.md`, to judge a staged claim.
+- **Staged changes in the faces.** The skills views list the pack and
+  the curator's runs; a card's staged changes and their verdicts are
+  read only through `skill_manage list` and the curator's inputs.
 - **Validation beyond Hermes's.** Usage and lint are the signals.
   Checking that a skill's lesson stops recurring, holding it back from
   a random share of sessions, or replaying a session with and without

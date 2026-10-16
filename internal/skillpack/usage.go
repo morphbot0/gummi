@@ -35,7 +35,10 @@ type Status struct {
 type Use struct {
 	Count int
 	Views int `json:",omitempty"`
-	Last  time.Time
+	// Staged counts uses of a card's own staged copy (§23.5), apart from
+	// the published skill's: the curator weighs whether a change helped.
+	Staged int `json:",omitempty"`
+	Last   time.Time
 }
 
 // Standing folds the pack's skills, their birth dates and their use into

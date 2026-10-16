@@ -64,7 +64,11 @@ type CuratorRun struct {
 	Outcome  string    `json:"outcome"`
 	Written  []string  `json:"written,omitempty"`
 	Archived []string  `json:"archived,omitempty"`
-	Detail   string    `json:"detail,omitempty"`
+	// Accepted and Rejected are the staged changes the run decided, as
+	// card/name (§23.5): accepted ones are in Written or Archived too.
+	Accepted []string `json:"accepted,omitempty"`
+	Rejected []string `json:"rejected,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
 	// ReadMemory and ReadEvents are the cards the run opened with
 	// curator_read and curator_events, and when: a card is new to the
 	// next run only where it changed after the last read of it.
@@ -393,6 +397,9 @@ func (r CuratorRun) Summary() string {
 	}
 	if len(r.Archived) > 0 {
 		parts = append(parts, "archived "+strings.Join(r.Archived, ", "))
+	}
+	if n := len(r.Accepted) + len(r.Rejected); n > 0 {
+		parts = append(parts, fmt.Sprintf("reviewed %d staged (%d taken, %d rejected)", n, len(r.Accepted), len(r.Rejected)))
 	}
 	what := strings.Join(parts, "; ")
 	switch r.Outcome {
@@ -728,7 +735,7 @@ func obj(props map[string]any, required ...string) map[string]any {
 }
 
 func (ct *curatorTurn) tools() []agent.ToolDef {
-	return []agent.ToolDef{
+	return append([]agent.ToolDef{
 		{
 			Name: curatorInputsTool,
 			Description: "List what is new to curate: every card whose session memory or dead-ends " +
@@ -776,11 +783,14 @@ func (ct *curatorTurn) tools() []agent.ToolDef {
 				"reason": str("Why, in one line; it is the commit message."),
 			}, "names", "reason"),
 		},
-	}
+	}, curatorReviewTools()...)
 }
 
 func (ct *curatorTurn) dispatch(ctx context.Context, name string, raw json.RawMessage) (string, error) {
 	e := ct.e
+	if out, ok, err := ct.reviewDispatch(ctx, name, raw); ok {
+		return out, err
+	}
 	switch name {
 	case curatorInputsTool:
 		return ct.inputs(ctx), nil
@@ -903,6 +913,7 @@ func kb(n int64) string {
 func (ct *curatorTurn) inputs(ctx context.Context) string {
 	e := ct.e
 	var b strings.Builder
+	ct.writeStagedCards(ctx, &b)
 	cards := ct.memoryCards()
 	fmt.Fprintf(&b, "Cards whose session memory you have not read since it last changed (%d, newest first):\n", len(cards))
 	for _, c := range cards {
@@ -1019,7 +1030,8 @@ func (ct *curatorTurn) readMemory(card string) (string, error) {
 
 func (ct *curatorTurn) kickoff(ctx context.Context) string {
 	return "Curate the workspace skill pack. Here is what is new:\n\n" + ct.inputs(ctx) +
-		"\nWork through the lists: read every card's session memory with curator_read, newest first, " +
+		"\nWork through the lists: first review every staged change with staged_read and decide it with " +
+		"staged_decide, then read every card's session memory with curator_read, newest first, " +
 		"then the event cards with curator_events, writing, merging or archiving skills as lessons recur. " +
 		"Stop early only when your budget runs low; a card you leave unread is offered to the next run. " +
 		"When you are done, reply with one short paragraph saying what you changed and why, or that nothing " +
@@ -1059,6 +1071,19 @@ first. A person can revert you afterwards. So:
 - Read before you judge: a title says nothing about what a card's
   memory holds. Writing nothing is a fine outcome after reading.
 
+Card sessions may also stage changes to the pack: a new skill, a
+rewrite, an archive. Only the staging card sees one until you decide it,
+so you are the review between one card's lesson and every session.
+Accept a change that is true, general enough for its scope and not a
+near duplicate; when it overlaps a skill, write the merged skill with
+skill_write and mark the change merged; reject one that is wrong, a
+one-off, or a story rather than a rule, and say why: the card reads it.
+Check what a skill claims about a repository against that repository
+with repo_read and repo_grep (its AGENTS.md first: a skill must not
+repeat it, or contradict it). A published skill whose claims no longer
+hold is yours to fix or archive too.
+
 You act only through your tools: curator_inputs, curator_read,
-curator_events, skill_read, skill_write and skill_archive. You have no checkout to work
-in and need none: do not edit files or run commands.`
+curator_events, skill_read, skill_write, skill_archive, staged_read,
+staged_decide, repo_read and repo_grep. You have no checkout to work in
+and need none: do not edit files or run commands.`

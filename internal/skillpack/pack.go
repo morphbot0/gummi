@@ -30,6 +30,8 @@ const PublishedRef = "refs/gummi/published"
 type Pack struct {
 	Dir   string // .gummi/skills
 	Cache string // .gummi/state/skillpacks
+	// StageDir holds each card's staged changes (stage.go).
+	StageDir string // .gummi/state/skillstage
 	// Missing, when set, names the paths of paths that the base branch of
 	// the repository a scope names does not have: the grounding lint. A
 	// general skill names no repository and is not checked.
@@ -41,7 +43,11 @@ type Pack struct {
 // New returns the pack of a workspace whose .gummi directory is gummiDir
 // and whose state directory is stateDir.
 func New(gummiDir, stateDir string) *Pack {
-	return &Pack{Dir: filepath.Join(gummiDir, "skills"), Cache: filepath.Join(stateDir, "skillpacks")}
+	return &Pack{
+		Dir:      filepath.Join(gummiDir, "skills"),
+		Cache:    filepath.Join(stateDir, "skillpacks"),
+		StageDir: filepath.Join(stateDir, "skillstage"),
+	}
 }
 
 // identity is gummi's own, unsigned and past any hook, like an agent
@@ -175,6 +181,14 @@ func (p *Pack) Show(ctx context.Context, rev, name string) (string, error) {
 		return "", fmt.Errorf("no skill %q", name)
 	}
 	return p.git(ctx, "show", rev+":"+name+"/SKILL.md")
+}
+
+// ShowFile returns one file of a skill at rev, by its path in the skill.
+func (p *Pack) ShowFile(ctx context.Context, rev, name, rel string) (string, error) {
+	if !nameRE.MatchString(name) || !safeRel(rel) {
+		return "", fmt.Errorf("no file %q in skill %q", rel, name)
+	}
+	return p.git(ctx, "show", rev+":"+name+"/"+filepath.ToSlash(rel))
 }
 
 // Write lints d against the pack's tip and, if it passes, replaces the

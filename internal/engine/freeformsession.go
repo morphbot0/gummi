@@ -366,6 +366,13 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		extra = append(extra, memoryReadTool(), memoryWriteTool())
 		tools = append(tools, memoryReadTool(), memoryWriteTool())
 		hints = append(hints, freeformMemoryHint)
+		// The pack's staging tools (skillstage.go), where the pack
+		// reaches this backend at all (§23.2).
+		if skill := e.cardSkillToolsFor(ag); len(skill) > 0 {
+			extra = append(extra, skill...)
+			tools = append(tools, skill...)
+			hints = append(hints, skillStageHint)
+		}
 		// The card tools (delegate.go) only once the person has given the
 		// card a delegation budget: a session that is never shown them
 		// cannot decide to file a card for every change.
@@ -1286,7 +1293,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		e.persist(sess)
 	case agent.EventToolCall:
 		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
-		e.noteSkillUse(ev.Tool, ev.Detail, time.Now())
+		e.noteSkillUse(ff.id, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result != nil {
 			sess.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)

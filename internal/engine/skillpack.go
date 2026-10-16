@@ -45,6 +45,10 @@ func (e *Engine) skillDirsFor(ctx context.Context, ag agent.Agent, f *domain.Fea
 	if err != nil || dir == "" {
 		return nil // `gummi curator status` and doctor show a pack that cannot be read
 	}
+	// The card's own staged changes, over the pinned revision (§23.5).
+	if dir, err = e.SkillPack().Overlay(dir, string(f.ID)); err != nil {
+		return nil
+	}
 	if !ag.Capabilities().SkillNamespace {
 		// The pack sits beside the person's own skills, never over them.
 		if dir, err = skillpack.Prefixed(dir); err != nil {
@@ -151,21 +155,47 @@ func skillCalled(tool, detail string) (name string, view bool) {
 	return "", false
 }
 
-// noteSkillUse counts one tool call toward the skill it used, if any. It
-// is called for every session's tool calls, stage and freeform alike; a
-// name the pack does not hold is counted harmlessly and never read.
-func (e *Engine) noteSkillUse(tool, detail string, at time.Time) {
+// noteSkillUse counts one tool call of card's session toward the skill it
+// used, if any. It is called for every session's tool calls, stage and
+// freeform alike; a name the pack does not hold is counted harmlessly and
+// never read.
+func (e *Engine) noteSkillUse(card domain.FeatureID, tool, detail string, at time.Time) {
 	name, view := skillCalled(tool, detail)
-	if name == "" || e.cfg.Workspace.StateDir() == "" {
+	if name == "" {
 		return
+	}
+	e.countSkillUseAt(string(card), name, view, at)
+}
+
+// countSkillUse counts one use of name by card's session, now.
+func (e *Engine) countSkillUse(card, name string, view bool) {
+	e.countSkillUseAt(card, name, view, time.Now())
+}
+
+// countSkillUseAt counts one use. A use of a skill the card has staged a
+// write of is a use of its staged copy, counted apart (§23.5).
+func (e *Engine) countSkillUseAt(card, name string, view bool, at time.Time) {
+	if e.cfg.Workspace.StateDir() == "" {
+		return
+	}
+	staged := false
+	if card != "" {
+		for _, s := range e.SkillPack().StagedFor(card) {
+			if s.Name == name && s.Pending() && s.Op == skillpack.OpWrite {
+				staged = true
+			}
+		}
 	}
 	e.usageMu.Lock()
 	defer e.usageMu.Unlock()
 	u := e.readSkillUsage()
 	use := u.Skills[name]
-	if view {
+	switch {
+	case staged:
+		use.Staged++
+	case view:
 		use.Views++
-	} else {
+	default:
 		use.Count++
 	}
 	if at.After(use.Last) {
@@ -225,8 +255,10 @@ func (e *Engine) releasePackRevisions(ctx context.Context) {
 	if e.cfg.Store == nil {
 		return
 	}
-	e.SkillPack().Release(ctx, func(card string) bool {
+	live := func(card string) bool {
 		f, err := e.cfg.Store.GetFeature(ctx, domain.FeatureID(card))
 		return err == nil && f.Stage != domain.StageDone
-	})
+	}
+	e.SkillPack().Release(ctx, live)
+	e.SkillPack().ReleaseStage(live)
 }

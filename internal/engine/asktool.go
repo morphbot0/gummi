@@ -658,6 +658,8 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleMemoryTool(s, tc)
 	case cardCreateToolName, cardListToolName, cardLandToolName:
 		e.handleDelegateTool(s, tc)
+	case skillReadTool, skillManageTool:
+		e.handleSkillTool(s, tc)
 	default:
 		e.resolveNow(s, tc.ID, fmt.Sprintf("unknown tool %q — proceed without it", tc.Name))
 	}

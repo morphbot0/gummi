@@ -578,7 +578,7 @@ func (e *Engine) handleConsult(c *ConsultSession, sess *Session, ev agent.Event)
 		}
 	case agent.EventToolCall:
 		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
-		e.noteSkillUse(ev.Tool, ev.Detail, time.Now())
+		e.noteSkillUse(c.id, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result != nil {
 			sess.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)

@@ -1819,9 +1819,17 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// %% and VERDICT: text forms the stage hints already describe).
 	// A backend that reaches gummi's tools over MCP is told they exist the
 	// same way, so its stage sessions still receive the toolHint.
-	var tools []agent.ToolDef
+	var tools, skillTools []agent.ToolDef
 	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
 		tools = stageTools(f.Stage, flavor, e.decidingHeadings(&f))
+		// Every pass but a rebase may stage a change to the skill pack
+		// (§23.5), where the pack reaches this backend at all.
+		if flavor != flavorRebase {
+			if skillTools = e.cardSkillToolsFor(ag); len(skillTools) > 0 {
+				tools = append(tools, skillTools...)
+				hints = append(hints, skillStageHint)
+			}
+		}
 		// Every session that has the tools is told how to use them,
 		// research included. This used to skip a read-only session,
 		// because its surface had spec_replace_section stripped out from
@@ -1851,7 +1859,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// on start never races the bind. The teardown is returned for the caller
 	// to stash on the Session's lifecycle; on any failure below the endpoint
 	// is released here, so callers see a nil teardown alongside an error.
-	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor)
+	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor, skillTools...)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -2767,7 +2775,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		kind = EventMessage
 	case agent.EventToolCall:
 		s.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
-		e.noteSkillUse(ev.Tool, ev.Detail, time.Now())
+		e.noteSkillUse(s.Feature.ID, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result == nil {
 			break
