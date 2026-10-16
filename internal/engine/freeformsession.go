@@ -366,6 +366,13 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		extra = append(extra, memoryReadTool(), memoryWriteTool())
 		tools = append(tools, memoryReadTool(), memoryWriteTool())
 		hints = append(hints, freeformMemoryHint)
+		// The pack's staging tools (skillstage.go), where the pack
+		// reaches this backend at all (§23.2).
+		if skill := e.cardSkillToolsFor(ag); len(skill) > 0 {
+			extra = append(extra, skill...)
+			tools = append(tools, skill...)
+			hints = append(hints, skillStageHint)
+		}
 		// The card tools (delegate.go) only once the person has given the
 		// card a delegation budget: a session that is never shown them
 		// cannot decide to file a card for every change.
@@ -412,6 +419,10 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// there), so the session's home — and the conversations it keeps
 		// there — survive a restart, which ResumeID below depends on.
 		AgentHomeDir: e.agentHomeDirFor(ff.id),
+		// The workspace skill pack at its published revision (§23.2).
+		// One conversation for the card's life: a reopen or a switch of
+		// backend carries it on, and keeps the revision it started with.
+		SkillDirs: e.skillDirsFor(ctx, ag, &f, string(ff.id), resumeID != "" || len(seed) > 0),
 		// No ArtifactPath: there is no document.
 		//
 		// ResumePath and ResumeID are how a freeform conversation survives
@@ -681,10 +692,20 @@ func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []At
 		ff.compacting = true
 		ff.mu.Unlock()
 		sendErr = a.Send(ctx, prompt)
-	} else if len(images) > 0 {
-		sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: wire, Images: ff.engine.turnImages(images)})
 	} else {
-		sendErr = a.Send(ctx, wire)
+		// a turn the person sent asks, once, whether the pack skills the
+		// session used held up (skillstage.go); the transcript keeps the
+		// line as typed
+		note, asked := ff.engine.takeSkillAsk(ff.id, sess.Snapshot().AgentName)
+		wire = withSkillAsk(wire, note)
+		if len(images) > 0 {
+			sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: wire, Images: ff.engine.turnImages(images)})
+		} else {
+			sendErr = a.Send(ctx, wire)
+		}
+		if sendErr != nil {
+			ff.engine.requeueSkillAsk(ff.id, asked)
+		}
 	}
 	if sendErr != nil {
 		if errors.Is(sendErr, agent.ErrBusy) || errors.Is(sendErr, agent.ErrImagesUnsupported) {
@@ -1282,6 +1303,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		e.persist(sess)
 	case agent.EventToolCall:
 		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
+		e.noteSkillUse(ff.id, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result != nil {
 			sess.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)

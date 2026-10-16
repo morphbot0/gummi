@@ -533,6 +533,7 @@ func TestCopilotResumeConfigCarriesTheCreateConfig(t *testing.T) {
 		Tools:               []copilot.Tool{{Name: "ask_user"}},
 		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 		SessionLimits:       &copilotrpc.SessionLimitsConfig{MaxAiCredits: &credits},
+		SkillDirectories:    []string{"/pack/a-skill"},
 	}
 	rc := resumeConfigFrom(cfg)
 	if rc.Model != cfg.Model || rc.WorkingDirectory != cfg.WorkingDirectory {
@@ -552,6 +553,9 @@ func TestCopilotResumeConfigCarriesTheCreateConfig(t *testing.T) {
 	}
 	if rc.SessionLimits == nil {
 		t.Error("session limits not carried: the credit backstop is gone")
+	}
+	if len(rc.SkillDirectories) != 1 {
+		t.Error("skill directories not carried: a resumed session loses the skill pack")
 	}
 }
 

@@ -44,8 +44,10 @@ func schedulePoll() tea.Cmd {
 
 // scheduleTickMsg carries one poll's fires back to the update loop.
 type scheduleTickMsg struct {
-	fires []engine.ScheduleFire
-	err   error
+	fires      []engine.ScheduleFire
+	curator    []engine.CuratorRun
+	err        error
+	curatorErr error
 }
 
 // scheduleTick asks the engine to advance every due schedule at now.
@@ -56,7 +58,11 @@ func (m *Shell) scheduleTick() tea.Cmd {
 	}
 	return func() tea.Msg {
 		fires, err := eng.ScheduleTick(context.Background(), time.Now())
-		return scheduleTickMsg{fires: fires, err: err}
+		// The skill pack's clock rides the same poll (DESIGN §23.4): the
+		// timers, and a curator run when one is due. A run goes on in the
+		// background; what finished since the last poll is reported here.
+		_, cerr := eng.CuratorTick(context.Background(), time.Now())
+		return scheduleTickMsg{fires: fires, err: err, curator: eng.TakeCuratorReports(), curatorErr: cerr}
 	}
 }
 
@@ -78,6 +84,14 @@ func (m *Shell) onScheduleTick(msg scheduleTickMsg) tea.Cmd {
 	}
 	var lines []string
 	failed := false
+	switch {
+	case msg.curatorErr == nil:
+		m.curatorErr = ""
+	case msg.curatorErr.Error() != m.curatorErr:
+		m.curatorErr = msg.curatorErr.Error()
+		lines = append(lines, "skill curator: "+m.curatorErr)
+		failed = true
+	}
 	for _, fire := range msg.fires {
 		if fire.Outcome.Status == domain.ScheduleSkippedBusy {
 			continue
@@ -87,6 +101,13 @@ func (m *Shell) onScheduleTick(msg scheduleTickMsg) tea.Cmd {
 			failed = true
 		}
 		m.alert(domain.FeatureID("schedule:"+string(fire.ID)), scheduleFireNotice(fire))
+	}
+	for _, run := range msg.curator {
+		lines = append(lines, run.Digest())
+		if run.Outcome == engine.CuratorFailed {
+			failed = true
+		}
+		m.alert(domain.FeatureID("curator:"+run.ID), run.Digest())
 	}
 	if len(lines) > 0 {
 		text := strings.Join(lines, "\n")

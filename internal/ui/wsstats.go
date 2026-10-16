@@ -11,6 +11,7 @@ import (
 
 	"github.com/morphis/gummi/internal/cardrun"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/fleetrun"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -118,6 +119,7 @@ func (m *Shell) measureWsStats() tea.Cmd {
 	store := m.store
 	rows := append([]featureRow(nil), m.rows...)
 	busy := m.boardBusy()
+	eng := m.engine
 	v := m.wsstats
 	now := m.now()
 	from := time.Time{}
@@ -126,7 +128,7 @@ func (m *Shell) measureWsStats() tea.Cmd {
 	}
 	return func() tea.Msg {
 		ctx := context.Background()
-		rep, err := buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now, busy)
+		rep, err := buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now, busy, curatorRuns(eng))
 		if err != nil {
 			return wsStatsLoadedMsg{err: err}
 		}
@@ -141,15 +143,35 @@ func (m *Shell) measureWsStats() tea.Cmd {
 // get the part of the answer that is readable. It reads running off the
 // record (fleetrun.Input.Busy nil) — its reader wants money, not lanes.
 func buildWsReport(ctx context.Context, store *state.Store, rows []featureRow, from, now time.Time) (*fleetrun.Report, error) {
-	return buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now, nil)
+	return buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now, nil, nil)
+}
+
+// curatorRuns is the skill curator's ledger (DESIGN §23.4) as the fold
+// reads it: when each run went and what it spent. Nil with no engine or
+// a ledger that cannot be read — the page still draws the cards, the
+// rule every read here follows.
+func curatorRuns(eng *engine.Engine) []fleetrun.CuratorRun {
+	if eng == nil {
+		return nil
+	}
+	runs, err := eng.CuratorRuns()
+	if err != nil {
+		return nil
+	}
+	out := make([]fleetrun.CuratorRun, 0, len(runs))
+	for _, r := range runs {
+		out = append(out, fleetrun.CuratorRun{Start: r.Start, End: r.End, Credits: r.Credits})
+	}
+	return out
 }
 
 // buildFleetReport is buildWsReport over any window, not only one ending
 // now — the web face's fleet route asks for arbitrary ones. now is still
 // the clock an open session is counted to, and busy the board's own
 // reading of which cards are running (boardBusy), nil to read it off the
-// record.
-func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow, w fleetrun.Window, now time.Time, busy map[domain.FeatureID]bool) (*fleetrun.Report, error) {
+// record. curator is the skill curator's ledger (curatorRuns), whole: the
+// fold windows it.
+func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow, w fleetrun.Window, now time.Time, busy map[domain.FeatureID]bool, curator []fleetrun.CuratorRun) (*fleetrun.Report, error) {
 	from := w.From
 	evs, err := store.WorkspaceEvents(ctx, from)
 	if err != nil {
@@ -207,7 +229,7 @@ func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow
 		r := rows[i]
 		all = append(all, fleetrun.AllTimeRow{Feature: r.F, Landed: r.Landed, StageSpend: r.StageSpend})
 	}
-	rep := fleetrun.Fold(fleetrun.Input{Now: now, Window: w, Cards: cards, Rows: all, Busy: busy})
+	rep := fleetrun.Fold(fleetrun.Input{Now: now, Window: w, Cards: cards, Rows: all, Busy: busy, Curator: curator})
 	return &rep, nil
 }
 
@@ -377,7 +399,7 @@ const wsNowMarkRoom = 1 + 7 + 1
 // would spend its whole width on before-the-workspace and squeeze every
 // lane that ever ran into the last column.
 func wsOrigin(rep *fleetrun.Report) time.Time {
-	if !rep.Window.From.IsZero() || len(rep.Lanes) == 0 {
+	if !rep.Window.From.IsZero() || (len(rep.Lanes) == 0 && !rep.Curator.Drawn()) {
 		return rep.Window.From
 	}
 	earliest := time.Time{}
@@ -400,6 +422,9 @@ func wsOrigin(rep *fleetrun.Report) time.Time {
 			take(g)
 		}
 		take(l.LandedAt)
+	}
+	for _, b := range rep.Curator.Blocks {
+		take(b.From)
 	}
 	if earliest.IsZero() {
 		return rep.Window.To
@@ -536,11 +561,13 @@ func wsWindowLabel(d time.Duration) string {
 func (m *Shell) wsHeadlineLines(rep *fleetrun.Report) []string {
 	s := m.styles
 	var parts []string
-	if rep.Credits > 0 {
-		head := usd(rep.Credits)
+	// The headline is what the workspace spent — its cards and its
+	// curator (fleetrun.Report.Spent); the ledger below splits the two.
+	if spent := rep.Spent(); spent > 0 {
+		head := usd(spent)
 		parts = append(parts, s.CardTitle.Render(head))
 		if rep.RateSpan > 0 {
-			parts = append(parts, usd(rep.Credits/rep.RateSpan.Hours())+"/h")
+			parts = append(parts, usd(spent/rep.RateSpan.Hours())+"/h")
 		}
 	}
 	if tok := rep.Tokens.Total(); tok > 0 {
@@ -586,6 +613,7 @@ type wsLegendFlags struct {
 	stages         map[domain.Stage]bool
 	running, waits bool
 	gates, landed  bool
+	curator        bool
 }
 
 // wsLaneLines renders the lanes around the cursor: one row per card,
@@ -608,6 +636,29 @@ func (m *Shell) wsLaneLines(rep *fleetrun.Report, w, budget int) ([]string, wsLe
 	}
 	var flags wsLegendFlags
 	flags.stages = map[domain.Stage]bool{}
+
+	// The curator's lane sits above the cards' and out of the cursor's
+	// walk: it is not a card (DESIGN §23.4), so there is nothing for
+	// enter to open, and it holds its row however far the cursor goes.
+	var head []string
+	if rep.Curator.Drawn() {
+		cells := make([]string, laneW)
+		for c := range cells {
+			cells[c] = " "
+		}
+		for _, b := range rep.Curator.Blocks {
+			style := s.Subtle
+			if b.Open {
+				style = s.Info
+			}
+			for c := colOf(b.From); c <= colOf(b.To); c++ {
+				cells[c] = style.Render("▓")
+			}
+			flags.curator = true
+		}
+		head = append(head, " "+padRightANSI(s.Muted.Render("curator"), wsLabelWidth)+s.Separator.Render("│")+strings.Join(cells, ""))
+		budget--
+	}
 
 	var rows []wsLaneRow
 	for i, l := range rep.Lanes {
@@ -690,9 +741,12 @@ func (m *Shell) wsLaneLines(rep *fleetrun.Report, w, budget int) ([]string, wsLe
 		rows = append(rows, wsLaneRow{i, line})
 	}
 	if len(rows) == 0 {
+		if len(head) > 0 {
+			return head, flags
+		}
 		return []string{" " + s.Faint.Render("nothing ran in this window")}, flags
 	}
-	return wsLaneWindow(rows, m.wsstats.cursor, budget), flags
+	return append(head, wsLaneWindow(rows, m.wsstats.cursor, budget)...), flags
 }
 
 // wsLaneWindow returns at most budget rows, kept around the selected
@@ -871,6 +925,9 @@ func (m *Shell) wsLegend(_ *fleetrun.Report, flags wsLegendFlags, width int) str
 	if flags.running {
 		parts = append(parts, s.Info.Render("█ running"))
 	}
+	if flags.curator {
+		parts = append(parts, s.Subtle.Render("▓ curator"))
+	}
 	if flags.waits {
 		parts = append(parts, s.Warning.Render("▒ on you"))
 	}
@@ -893,7 +950,8 @@ func (m *Shell) wsLegend(_ *fleetrun.Report, flags wsLegendFlags, width int) str
 // credit somewhere.
 func (m *Shell) wsMoneyLines(rep *fleetrun.Report, w int) []string {
 	s := m.styles
-	if rep.Credits == 0 && rep.AllTime.Credits == 0 && rep.Tokens.Zero() && rep.AllTime.Tokens.Zero() {
+	if rep.Credits == 0 && rep.AllTime.Credits == 0 && rep.Tokens.Zero() && rep.AllTime.Tokens.Zero() &&
+		rep.Curator.AllTimeCredits == 0 {
 		return nil
 	}
 	out := wsHeading(s, "WHERE IT WENT", wsWindowName(rep.Window)+" · spent in the window")
@@ -972,6 +1030,15 @@ func (m *Shell) wsTotalLines(rep *fleetrun.Report, w int) []string {
 	}
 	if rep.AllTime.Credits > 0 || !rep.AllTime.Tokens.Zero() {
 		out = append(out, row("all-time", rep.AllTime.Credits, rep.AllTime.Tokens))
+	}
+	// The curator's spend is the workspace's and never a card's (DESIGN
+	// §23.4): its own row, outside both card totals, its window figure in
+	// the same credits column and its all-time one in the clause.
+	if cu := rep.Curator; cu.AllTimeCredits > 0 || cu.Credits > 0 {
+		line := fmt.Sprintf("  %-10s %s %9s", "curator", strings.Repeat(" ", wsBarWidth), usd(cu.Credits))
+		line += s.Faint.Render("  ·  ") + s.Muted.Render(fmt.Sprintf("%d run%s in the window · %s all-time",
+			cu.Runs, plural(cu.Runs), usd(cu.AllTimeCredits)))
+		out = append(out, ansi.Truncate(line, max(w-1, 10), "…"))
 	}
 	return out
 }

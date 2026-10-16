@@ -5,6 +5,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/hooks"
+	"github.com/morphis/gummi/internal/schedule"
 )
 
 // Config is the parsed .gummi/config.yaml.
@@ -105,6 +107,102 @@ type Config struct {
 	// its own with them. Empty means no trailer. A workspace list replaces
 	// a user-level one.
 	CoAuthors []string `yaml:"coauthors"`
+	// Curator turns on the skill curator (DESIGN §23.4): the background
+	// job that distils what sessions recorded into the workspace's skill
+	// pack. Absent, nothing curates and nothing spends. Workspace-only.
+	Curator *Curator `yaml:"curator"`
+}
+
+// Curator is the skill curator's configuration. Its budget is its own:
+// Budget credits per run, Monthly across every run in a calendar month.
+type Curator struct {
+	Backend  string  `yaml:"backend"`
+	Model    string  `yaml:"model"`
+	Schedule string  `yaml:"schedule"`
+	Budget   float64 `yaml:"budget"`
+	Monthly  float64 `yaml:"monthly"`
+	// ReviewGap is the least time between the last run's start and a run a
+	// staged change starts (§23.4), a duration such as "6h"; "off" leaves
+	// staged changes to the schedule and empty means the default.
+	ReviewGap string `yaml:"review_gap"`
+}
+
+// DefaultCuratorSchedule is when a curator with no schedule runs.
+const DefaultCuratorSchedule = "@daily"
+
+// DefaultCuratorReviewGap is a curator's ReviewGap when it names none, and
+// MinCuratorReviewGap the shortest it may name: a change the curator left
+// undecided would otherwise start a run at nearly every tick.
+const (
+	DefaultCuratorReviewGap = 6 * time.Hour
+	MinCuratorReviewGap     = 30 * time.Minute
+)
+
+// CuratorReviewGap is how long c waits between runs a staged change
+// starts, or off when it starts none, or why its review_gap does not read.
+func CuratorReviewGap(c *Curator) (gap time.Duration, off bool, err error) {
+	v := strings.TrimSpace(c.ReviewGap)
+	switch v {
+	case "":
+		return DefaultCuratorReviewGap, false, nil
+	case "off":
+		return 0, true, nil
+	}
+	gap, err = time.ParseDuration(v)
+	if err != nil {
+		return 0, false, fmt.Errorf("review_gap %q is not a duration such as 6h, or off", v)
+	}
+	if gap < MinCuratorReviewGap {
+		return 0, false, fmt.Errorf("review_gap must be at least %s, or off", MinCuratorReviewGap)
+	}
+	return gap, false, nil
+}
+
+func validateCurator(path string, c *Curator) error {
+	if err := CheckCurator(c); err != nil {
+		return fmt.Errorf("%s: curator: %w", path, err)
+	}
+	return nil
+}
+
+// CheckCurator is why Load would refuse the curator block c, or nil; a nil
+// c (no curator) is fine.
+func CheckCurator(c *Curator) error {
+	if c == nil {
+		return nil
+	}
+	if strings.TrimSpace(c.Backend) == "" {
+		return errors.New("backend is required (the agent the curator runs on)")
+	}
+	if c.Budget <= 0 {
+		return errors.New("budget must be a positive number of credits per run")
+	}
+	if c.Monthly < 0 || (c.Monthly > 0 && c.Monthly < c.Budget) {
+		return errors.New("monthly must be at least one run's budget, or 0 for no monthly cap")
+	}
+	if _, err := CuratorCron(c); err != nil {
+		return fmt.Errorf("schedule does not compile: %w", err)
+	}
+	if _, _, err := CuratorReviewGap(c); err != nil {
+		return err
+	}
+	return nil
+}
+
+// CuratorCron is the cron expression c's schedule compiles to (the default
+// when it names none), or why it does not compile.
+func CuratorCron(c *Curator) (string, error) {
+	expr := strings.TrimSpace(c.Schedule)
+	if expr == "" {
+		expr = DefaultCuratorSchedule
+	}
+	if strings.HasPrefix(expr, "@") || !strings.Contains(expr, " ") {
+		return schedule.Compile(expr)
+	}
+	if err := schedule.Check(expr, ""); err != nil {
+		return "", err
+	}
+	return expr, nil
 }
 
 // ChecksConfig holds workspace-wide check settings.
@@ -380,6 +478,9 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: instructions: entry %q is not an absolute path", path, inst)
 		}
 	}
+	if err := validateCurator(path, c.Curator); err != nil {
+		return Config{}, err
+	}
 	if c.RemovedSkills != nil {
 		return Config{}, fmt.Errorf("%s: skills: this key was removed — gummi no longer forwards skills; "+
 			"each backend loads the skills it discovers itself, so move them into the repository's or your "+
@@ -484,9 +585,13 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 	if len(user.Discover) > 0 {
 		return Config{}, nil, fmt.Errorf("%s: discover is workspace-only and cannot be set in the user config", userPath)
 	}
+	if user.Curator != nil {
+		return Config{}, nil, fmt.Errorf("%s: curator is workspace-only and cannot be set in the user config", userPath)
+	}
 
 	sources := map[string]string{}
 	var merged Config
+	merged.Curator = ws.Curator
 
 	merged.Name = ws.Name
 	if ws.Name != "" {

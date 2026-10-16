@@ -77,6 +77,7 @@
 .track{position:relative;height:14px}
 .track > span{position:absolute;top:0;height:100%;left:var(--x)}
 .track .blk{width:var(--w);min-width:2px;background:var(--sc);border-radius:3px;box-shadow:0 0 0 1px var(--panel)}
+.track .blk.cur{--sc:var(--fg4)}
 .track .blk.open{border-radius:3px 0 0 3px;background:linear-gradient(90deg,var(--sc) 70%,color-mix(in srgb,var(--sc) 35%,transparent))}
 .track .wait{width:var(--w);min-width:2px;top:3px;height:8px;border-radius:2px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--warn) 70%,transparent) 0 2px,color-mix(in srgb,var(--warn) 22%,transparent) 2px 5px)}
 .track .gate{width:8px;height:8px;top:3px;margin-left:-4px;background:var(--fg2);transform:rotate(45deg);box-shadow:0 0 0 2px var(--panel);border-radius:1px}

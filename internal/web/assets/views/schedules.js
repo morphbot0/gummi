@@ -12,7 +12,8 @@
 
 import { h, clear, plural, cr, dollarsInput, parseDollars, cardName } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
-import { errorBox, confirmStrip, field, segmented, choose } from './kit.js?v=__ASSET_V__'
+import { errorBox, confirmStrip, field, segmented } from './kit.js?v=__ASSET_V__'
+import { pairField } from '../modelpick.js?v=__ASSET_V__'
 
 // the last fire a run-now answered with, so a refresh does not drop it
 const results = new Map()
@@ -328,55 +329,22 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
   if (row?.prompt) prompt.value = row.prompt
   const target = h('input', { type: 'text', testid: 'schedule-form-target', placeholder: 'FF-001', class: 'mono', value: row?.target || seed?.target || '' })
   const repo = h('input', { type: 'text', testid: 'schedule-form-repo', placeholder: 'workspace default', value: row?.repo || '' })
-  const backendPick = { name: row?.backend || '' }
-  const backend = choose(
-    [{ value: '', label: 'profile default' }],
-    { value: backendPick.name, testid: 'schedule-form-backend', label: 'Agent',
-      onchange: (e) => {
-        backendPick.name = e.target.value
-        if (!(agentFor(backendPick.name)?.models || []).includes(model.value.trim())) model.value = ''
-        drawCatalog()
-        askPreview()
-      } })
-  const model = h('input', {
-    type: 'text', testid: 'schedule-form-model', placeholder: "the agent's default", list: 'schedule-model-list',
-    autocomplete: 'off', value: row?.model || ''
+  // the composer's own picker, with the profile's default as its first row
+  const pair = pairField({
+    catalog,
+    value: { backend: row?.backend, model: row?.model },
+    testid: 'schedule-form-pair',
+    blank: { label: 'profile default', sub: "the profile's implementer" },
+    note: 'Each minted card runs on this agent and model.',
+    onchange: () => askPreview()
   })
   const envelope = h('input', { type: 'text', inputmode: 'decimal', testid: 'schedule-form-envelope', value: dollarsInput(row?.envelope ?? 100) })
   const tzList = h('datalist', { id: 'schedule-tz-list' }, timezones.map(z => h('option', { value: z })))
-  const modelList = h('datalist', { id: 'schedule-model-list' })
 
   const targetField = field('Heartbeat target (FF card)', target)
   const repoField = field('Repository', repo)
-  const backendField = field('Agent', backend, { hint: "optional — the profile's implementer by default" })
-  const modelField = field('Model', model, { testid: 'schedule-form-model-field' })
+  const pairFieldEl = field('Agent and model', pair.el, { testid: 'schedule-form-pair-field', hint: "optional — the profile's implementer by default" })
   const envelopeField = field('Budget per card (dollars)', envelope, { hint: 'the brake — what one minted card may spend' })
-
-  // drawCatalog fills the pickers from the session picker's catalog:
-  // every agent a session can run on, its installed flag on the row, and
-  // the models it names itself (plus the ids this workspace runs) as the
-  // model field's suggestions — any other id still types in.
-  function drawCatalog () {
-    clear(modelList)
-    const agents = catalog?.agents || []
-    clear(backend)
-    backend.append(h('option', { value: '', selected: !backendPick.name }, 'profile default'))
-    for (const a of agents) {
-      backend.append(h('option', {
-        value: a.name,
-        selected: a.name === backendPick.name
-      }, a.installed ? a.name : `${a.name} — not installed`))
-    }
-    const agent = agentFor(backendPick.name)
-    modelField.querySelector('small.hint')?.remove()
-    if (agent) {
-      modelField.append(h('small', { class: 'hint' }, agent.hint || (agent.needsModel ? 'this agent needs a model id' : 'optional')))
-      if (agent.needsModel && !model.value.trim()) model.placeholder = agent.hint || 'provider/model'
-    }
-    for (const m of agent?.models || []) modelList.append(h('option', { value: m }))
-  }
-
-  function agentFor (name) { return (catalog?.agents || []).find(a => a.name === name) }
 
   // ---- the cadence preview: the server answers what the store would
   // hold and when it would fire; the page parses no cron of its own.
@@ -390,8 +358,8 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
       timezone: tzStored(tz.value)
     }
     if (kind.value === 'mint') {
-      body.backend = backendPick.name || undefined
-      body.model = model.value.trim() || undefined
+      body.backend = pair.value().backend || undefined
+      body.model = pair.value().model || undefined
     }
     try {
       const res = await ctx.api.post('/api/schedules/preview', body)
@@ -422,7 +390,7 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
   function drawKind () {
     const hb = kind.value === 'heartbeat'
     targetField.style.display = hb ? '' : 'none'
-    for (const f of [repoField, backendField, modelField, envelopeField]) {
+    for (const f of [repoField, pairFieldEl, envelopeField]) {
       f.style.display = hb ? 'none' : ''
     }
     askPreview()
@@ -446,8 +414,8 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
       } else {
         body.kind = 'mint'
         body.repo = repo.value.trim() || undefined
-        body.backend = backendPick.name || undefined
-        body.model = model.value.trim() || undefined
+        body.backend = pair.value().backend || undefined
+        body.model = pair.value().model || undefined
         const b = envelope.value.trim() === '' ? { credits: 0 } : parseDollars(envelope.value)
         if (b.err) { err.append(errorBox(b.err, 'schedule-form-error-detail')); return }
         body.envelope = b.credits || undefined
@@ -486,7 +454,7 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
     field('Timezone', tz, { hint: 'type any IANA zone' }), tzList),
   preview,
   field('Prompt', prompt, { hint: 'the opening turn of each minted card, or the recurring turn of the heartbeat' }),
-  backendField, modelField, modelList, envelopeField,
+  pairFieldEl, envelopeField,
   err,
   h('div', { class: 'sch-form-foot' },
     h('button', { class: 'btn', type: 'button', testid: 'schedule-form-cancel', onclick: done }, 'Cancel'),
@@ -495,9 +463,7 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
   every.addEventListener('input', askPreview)
   cron.addEventListener('input', askPreview)
   tz.addEventListener('input', askPreview)
-  model.addEventListener('input', askPreview)
 
-  drawCatalog()
   drawKind()
   return form
 }

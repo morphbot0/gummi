@@ -177,6 +177,10 @@ func TestFleetShape(t *testing.T) {
 			Blocks: []Span{{From: at, Stage: "implement"}}, Waits: []Span{{From: at, To: at}}, Gates: []time.Time{at},
 		}},
 		AllTimeCredits: 40, AllTimeCards: 5,
+		Curator: &FleetCurator{
+			Credits: 3, Runs: 1, Running: true, AllTimeCredits: 9, AllTimeRuns: 4,
+			Blocks: []Span{{From: at, To: at}, {From: at}},
+		},
 	}))
 }
 

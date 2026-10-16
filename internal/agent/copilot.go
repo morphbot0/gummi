@@ -70,7 +70,7 @@ func (c *Copilot) Name() string { return "copilot" }
 
 // Capabilities implements Agent. The Copilot SDK provides all of these.
 func (c *Copilot) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd, Images: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd, Images: true, SkillDirs: true}
 }
 
 // CreditRate implements Agent: Copilot self-reports per-model AI-credit
@@ -147,6 +147,11 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 		cfg.SystemMessage = &copilot.SystemMessageConfig{
 			Content: strings.Join(opts.SystemHints, "\n\n"),
 		}
+	}
+	// The workspace skill pack (DESIGN §23.2). The SDK field is additive:
+	// what the CLI discovers itself still loads beside it.
+	if len(opts.SkillDirs) > 0 {
+		cfg.SkillDirectories = opts.SkillDirs
 	}
 	// Allow-all is gummi's default (sandbox assumption). In guarded
 	// mode we leave OnPermissionRequest nil so requests surface as
@@ -251,6 +256,8 @@ func resumeConfigFrom(cfg *copilot.SessionConfig) *copilot.ResumeSessionConfig {
 		Tools:               cfg.Tools,
 		OnPermissionRequest: cfg.OnPermissionRequest,
 		SessionLimits:       cfg.SessionLimits,
+		// The pack a resumed conversation keeps reading (DESIGN §23.2).
+		SkillDirectories: cfg.SkillDirectories,
 	}
 }
 

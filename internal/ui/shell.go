@@ -51,8 +51,12 @@ const (
 // strings and are painted into their rects (the Crush hybrid pattern);
 // all IO runs in commands, never in Update or View.
 type Shell struct {
-	styles  *theme.Styles
-	version string
+	// curatorErr is the curator's last tick error, said once until it
+	// changes: a curator that cannot run is not a reason to repeat it on
+	// every poll, nor to hide what the schedules did.
+	curatorErr string
+	styles     *theme.Styles
+	version    string
 
 	width, height int
 	layout        layout.Layout
@@ -2083,6 +2087,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.updateSchedule(msg); ok {
 		return m, cmd
 	}
+	if cmd, ok := m.updateCurator(msg); ok {
+		return m, cmd
+	}
 	if cmd, ok := m.updateWsStats(msg); ok {
 		return m, cmd
 	}
@@ -3615,6 +3622,12 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		// person typing. The list is the only place the board shows them,
 		// so the key lives beside W's — another whole-board surface.
 		return m.openSchedules()
+	case "E":
+		// The skill pack and its curator (DESIGN §23): the one place a
+		// person checks, pins and reverts what reaches every session
+		// without them. K would read better, but the card page steps
+		// cards with J/K and lists the board's keys beside its own.
+		return m.openCurator()
 	case "C":
 		// The board-wide counterpart of c: c tidies one landed card, C
 		// closes out the session — walk what is ready to land, then sweep

@@ -1131,6 +1131,9 @@ type WebFleet struct {
 	// the page's "running now" is the header pill's count.
 	busy map[domain.FeatureID]bool
 	now  func() time.Time
+	// eng reads the skill curator's ledger (curatorRuns); nil on a board
+	// with no engine.
+	eng *engine.Engine
 }
 
 // WebFleet captures the board's rows for the fleet report.
@@ -1138,7 +1141,7 @@ func (m *Shell) WebFleet() (*WebFleet, error) {
 	if !m.attached() || m.store == nil {
 		return nil, ErrDetached
 	}
-	return &WebFleet{store: m.store, rows: append([]featureRow(nil), m.rows...), busy: m.boardBusy(), now: m.now}, nil
+	return &WebFleet{store: m.store, rows: append([]featureRow(nil), m.rows...), busy: m.boardBusy(), now: m.now, eng: m.engine}, nil
 }
 
 // FleetDefaultWindow is the window the fleet opens on when the page asks
@@ -1156,7 +1159,7 @@ func (w *WebFleet) Report(ctx context.Context, from, to time.Time) (webapi.Fleet
 	if !from.IsZero() && !from.Before(to) {
 		return webapi.Fleet{}, invalid("the window must start before it ends")
 	}
-	rep, err := buildFleetReport(ctx, w.store, w.rows, fleetrun.Window{From: from, To: to}, now, w.busy)
+	rep, err := buildFleetReport(ctx, w.store, w.rows, fleetrun.Window{From: from, To: to}, now, w.busy, curatorRuns(w.eng))
 	if err != nil {
 		return webapi.Fleet{}, err
 	}
@@ -1207,6 +1210,20 @@ func WebFleetReport(r fleetrun.Report) webapi.Fleet {
 			wl.Waits = append(wl.Waits, webapi.Span{From: sp.From, To: sp.To})
 		}
 		out.Lanes = append(out.Lanes, wl)
+	}
+	if cu := r.Curator; cu.AllTimeRuns > 0 {
+		out.Curator = &webapi.FleetCurator{
+			Credits: cu.Credits, Runs: cu.Runs, Running: cu.Running,
+			AllTimeCredits: cu.AllTimeCredits, AllTimeRuns: cu.AllTimeRuns,
+			Blocks: make([]webapi.Span, 0, len(cu.Blocks)),
+		}
+		for _, b := range cu.Blocks {
+			sp := webapi.Span{From: b.From, To: b.To}
+			if b.Open {
+				sp.To = time.Time{}
+			}
+			out.Curator.Blocks = append(out.Curator.Blocks, sp)
+		}
 	}
 	return out
 }

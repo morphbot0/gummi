@@ -72,6 +72,20 @@
 // parked on a question does not run at once with another, and an hour
 // in which one card waited on you is not the busiest hour.
 //
+// # The curator
+//
+// The workspace's skill curator (DESIGN §23.4) is a background job, not
+// a card, and its spend is never a card's. The fold takes its ledger as
+// plain runs (Input.Curator) and gives it a lane of its own
+// (Report.Curator) beside the cards' rather than among them: a run is
+// charged to the window it started in, the rule a pass follows, but it
+// is in no bucket, no top-cards list and no card count, and
+// Report.Credits — the figure the cards' lanes and buckets sum to —
+// leaves it out. Report.Spent is the two together. It stays out of the
+// window clock and the concurrency figures too: those measure cards'
+// lives and cards working at once, and a job that never waits on a
+// person has no share of either to give.
+//
 // # What running means
 //
 // "Running" is the board's word, not the record's. A session left open

@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -1695,5 +1696,69 @@ func TestSeededProfilesRunOnEveryBackend(t *testing.T) {
 		if bad := backendModelConflicts(backendInfo{name: backend}, p); bad != "" {
 			t.Errorf("%s: doctor flags the seeded template: %s", backend, bad)
 		}
+	}
+}
+
+// doctor reads the skill pack back without making it, reads a configured
+// curator back, and names each routed backend whose sessions run without
+// the pack (DESIGN §23.2) — advisory until there is a pack to miss.
+func TestDoctorSkillPackSection(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, headlessProfiles)
+	fakeAgentOnPath(t, "fakeagent")
+	t.Setenv("GUMMI_AGENT", "headless")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent --serve")
+	pack := skillpack.New(filepath.Join(repo, ".gummi"), filepath.Join(repo, ".gummi", "state"))
+
+	r := buildDoctorReport(repo, doctorOpts{})
+	if c := checkByName(r, "skills:pack"); c.Status != statusOK || !strings.Contains(c.Detail, "no skill pack yet") {
+		t.Errorf("skills:pack = %+v", c)
+	}
+	if pack.Exists() {
+		t.Fatal("doctor made the skill pack")
+	}
+	if c := checkByName(r, "skills:curator"); c.Status != statusOK || !strings.Contains(c.Detail, "no curator configured") {
+		t.Errorf("skills:curator = %+v", c)
+	}
+	if c := checkByName(r, "skills:headless"); c.Status != statusOK || !strings.Contains(c.Detail, "run without it") {
+		t.Errorf("with no pack, skills:headless = %+v, want an ok line", c)
+	}
+
+	// A published skill and a curator: the gap is now worth a warning.
+	ctx := context.Background()
+	if l, err := pack.Write(ctx, skillpack.Draft{
+		Name: "make-test", Description: "Use when running this repository's tests.", Body: "Run `make test`.",
+	}, nil, "write make-test"); err != nil || !l.OK() {
+		t.Fatalf("writing a skill: %v %s", err, l.String())
+	}
+	cfg := "curator:\n  backend: headless\n  model: qwen\n  budget: 50\n  monthly: 500\n  schedule: \"@weekly\"\n"
+	if err := os.WriteFile(filepath.Join(repo, ".gummi", "config.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r = buildDoctorReport(repo, doctorOpts{})
+	if c := checkByName(r, "skills:pack"); c.Status != statusOK || !strings.Contains(c.Detail, "1 skill published at "+pack.Published(ctx)[:12]) {
+		t.Errorf("skills:pack = %+v", c)
+	}
+	want := "curator on headless (qwen), 50 credits per run, 500 credits a month, schedule @weekly"
+	if c := checkByName(r, "skills:curator"); c.Status != statusOK || c.Detail != want {
+		t.Errorf("skills:curator = %+v, want %q", c, want)
+	}
+	c := checkByName(r, "skills:headless")
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "headless is not one of the backends gummi delivers the skill pack to, so its sessions run without it") ||
+		!strings.Contains(c.Detail, "thrifty/architect") || c.Remediation == "" {
+		t.Errorf("skills:headless = %+v, want a warning naming who routes there", c)
+	}
+	if !r.Ready {
+		t.Errorf("the skill section blocked readiness: %+v", r.Checks)
+	}
+
+	// A curator on a backend that cannot reach gummi's tools cannot curate.
+	defer agent.RegisterCapabilities("toolless", agent.Capabilities{})()
+	if c := curatorCheck(&config.Curator{Backend: "toolless", Budget: 10}); c.Status != statusWarn || !strings.Contains(c.Detail, "cannot curate") {
+		t.Errorf("a tool-less curator = %+v", c)
+	}
+	if c := curatorCheck(&config.Curator{Backend: "claude", Budget: 10, Schedule: "not a schedule"}); c.Status != statusWarn || !strings.Contains(c.Detail, "schedule does not compile") {
+		t.Errorf("a bad schedule = %+v", c)
 	}
 }

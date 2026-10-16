@@ -67,5 +67,21 @@
     }
   ],
   "allTimeCredits": 40,
-  "allTimeCards": 5
+  "allTimeCards": 5,
+  "curator": {
+    "credits": 3,
+    "runs": 1,
+    "running": true,
+    "allTimeCredits": 9,
+    "allTimeRuns": 4,
+    "blocks": [
+      {
+        "from": "2026-09-27T09:12:00Z",
+        "to": "2026-09-27T09:12:00Z"
+      },
+      {
+        "from": "2026-09-27T09:12:00Z"
+      }
+    ]
+  }
 }

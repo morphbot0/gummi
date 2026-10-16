@@ -31,6 +31,7 @@ import (
 	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/sandbox"
+	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/substrate"
@@ -238,6 +239,9 @@ type Config struct {
 	// Instructions are absolute paths to extra instruction files appended
 	// to the workspace environment card, in user-then-workspace order.
 	Instructions []string
+	// Curator is the skill curator's configuration (DESIGN §23.4); nil
+	// means no curator runs. The pack itself is delivered either way.
+	Curator *config.Curator
 }
 
 // Engine orchestrates all live sessions and the autonomous runs.
@@ -405,6 +409,18 @@ type Engine struct {
 	// empty is not recomputed on every session.
 	repoCardMu sync.Mutex
 	repoCards  map[string]string
+
+	// pack is the workspace skill pack (skillpack.go); curator holds the
+	// curator's run state (curator.go).
+	packOnce sync.Once
+	pack     *skillpack.Pack
+	// usageMu serializes the skill usage file's read-modify-write, and
+	// guards skillAsks.
+	usageMu sync.Mutex
+	// skillAsks is, per card, the pack skills its sessions used and
+	// whether its next turn has asked about each yet (skillstage.go).
+	skillAsks map[string]map[string]bool
+	curator   curatorState
 	// repoInstructions caches the managed repository's own instruction
 	// card (AGENTS.md/CLAUDE.md, quoted) per repository root, under the
 	// same mutex and with the same lifetime as repoCards.
@@ -1807,9 +1823,17 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// %% and VERDICT: text forms the stage hints already describe).
 	// A backend that reaches gummi's tools over MCP is told they exist the
 	// same way, so its stage sessions still receive the toolHint.
-	var tools []agent.ToolDef
+	var tools, skillTools []agent.ToolDef
 	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
 		tools = stageTools(f.Stage, flavor, e.decidingHeadings(&f))
+		// Every pass but a rebase may stage a change to the skill pack
+		// (§23.5), where the pack reaches this backend at all.
+		if flavor != flavorRebase {
+			if skillTools = e.cardSkillToolsFor(ag); len(skillTools) > 0 {
+				tools = append(tools, skillTools...)
+				hints = append(hints, skillStageHint)
+			}
+		}
 		// Every session that has the tools is told how to use them,
 		// research included. This used to skip a read-only session,
 		// because its surface had spec_replace_section stripped out from
@@ -1839,7 +1863,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// on start never races the bind. The teardown is returned for the caller
 	// to stash on the Session's lifecycle; on any failure below the endpoint
 	// is released here, so callers see a nil teardown alongside an error.
-	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor)
+	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor, skillTools...)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -1864,6 +1888,8 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		// Where a backend keeps its per-card home: never named to the
 		// session, so following the hint above cannot reach it.
 		AgentHomeDir: e.agentHomeDirFor(f.ID),
+		// The workspace skill pack at its published revision (§23.2).
+		SkillDirs: e.skillDirsFor(ctx, ag, &f, string(f.ID)+"/"+string(role)+"/"+flavorString(flavor), resumeID != ""),
 	})
 	if specErr != nil {
 		mcpTeardown()
@@ -2063,7 +2089,11 @@ func (e *Engine) SendTurn(ctx context.Context, id domain.FeatureID, msg string, 
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
-	if err := e.deliverTurn(ctx, s, msg, images); err != nil {
+	// the agent is also asked, once, whether the pack skills this card's
+	// sessions used held up (skillstage.go); the transcript keeps msg
+	note, asked := e.takeSkillAsk(id, s.Snapshot().AgentName)
+	if err := e.deliverTurn(ctx, s, withSkillAsk(msg, note), images); err != nil {
+		e.requeueSkillAsk(id, asked)
 		// The backend is the authority on whether it can take a turn, and
 		// it said no. Undo what this call consumed and recorded, so a
 		// refusal leaves the session exactly as it found it: the nudge
@@ -2753,6 +2783,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		kind = EventMessage
 	case agent.EventToolCall:
 		s.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
+		e.noteSkillUse(s.Feature.ID, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result == nil {
 			break

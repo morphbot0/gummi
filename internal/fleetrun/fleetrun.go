@@ -81,7 +81,51 @@ type Input struct {
 	// test); the fold then reads it off the record as best the record
 	// can: an open pass on a card with no decision standing open.
 	Busy map[domain.FeatureID]bool
+	// Curator is the workspace's skill curator's ledger (DESIGN §23.4),
+	// every run, oldest first or not: the fold does its own windowing.
+	// Nil where there is no curator, or no reader of its ledger.
+	Curator []CuratorRun
 }
+
+// CuratorRun is one run of the workspace's skill curator as the fold
+// reads it: when it ran and what it spent. The curator is a background
+// job and not a card (DESIGN §23.4), so it carries no feature, no stage
+// and no events — and a run is plain data here, not the engine's ledger
+// row, so this package stays a fold with nothing to import. A zero End
+// is a run still going: it is drawn to now, like an open pass.
+type CuratorRun struct {
+	Start, End time.Time
+	Credits    float64
+}
+
+// Curator is the curator's own lane and ledger. It sits beside the
+// cards rather than among them, because a curator's spend is never a
+// card's: it is in no bucket, no top-cards list and no card count, and
+// Report.Credits — what the window's cards spent — leaves it out.
+// Report.Spent is the two together, what the workspace spent.
+type Curator struct {
+	// Blocks are the window's runs, clipped to it, oldest first; Open
+	// marks a run still going. Their Stage is empty — a run is no stage.
+	Blocks []Block
+	// Runs and Credits are the runs that started in the window and what
+	// they spent: a run is charged to the window it started in, the
+	// rule a pass follows.
+	Runs    int
+	Credits float64
+	// Running is whether a run is going at the right edge.
+	Running bool
+	// Last is the lane's newest moment inside the window; zero when the
+	// curator did nothing there.
+	Last time.Time
+	// AllTimeRuns and AllTimeCredits are the whole ledger, the curator's
+	// side of the all-time column.
+	AllTimeRuns    int
+	AllTimeCredits float64
+}
+
+// Drawn reports whether the curator has a lane in the window: a run
+// that touched it, or spend charged to it.
+func (c Curator) Drawn() bool { return len(c.Blocks) > 0 || c.Credits > 0 }
 
 // Block is one session on a timeline lane, already clipped to the
 // window. Open marks a session the record has not closed — its block
@@ -259,12 +303,22 @@ type Report struct {
 	Top []Lane
 
 	AllTime AllTime
+
+	// Curator is the skill curator's lane and spend, beside the cards
+	// and never among them.
+	Curator Curator
 }
 
+// Spent is what the workspace spent in the window: its cards and its
+// curator together. Credits alone is the cards' share, the figure their
+// buckets and lanes sum to.
+func (r Report) Spent() float64 { return r.Credits + r.Curator.Credits }
+
 // Empty reports a report with nothing to draw: no lanes, no window
-// spend, and a board the all-time ledger cannot count either.
+// spend, a board the all-time ledger cannot count either, and a curator
+// that never ran.
 func (r Report) Empty() bool {
-	return len(r.Lanes) == 0 && r.Credits == 0 && r.AllTime.Cards == 0
+	return len(r.Lanes) == 0 && r.Credits == 0 && r.AllTime.Cards == 0 && r.Curator.AllTimeRuns == 0
 }
 
 // Fold is the workspace's fold, and it is a pure function: no store, no
@@ -312,7 +366,50 @@ func Fold(in Input) Report {
 	rep.PeakLanes, rep.Busiest, rep.BusiestLen, rep.BusiestAgent = concurrency(rep.Lanes, in.Window, rep.RateSpan, busiestLen(in.Window))
 	rep.Top = topCards(rep.Lanes, 3)
 	rep.AllTime = allTime(in.Rows)
+	rep.Curator = curatorLane(in.Curator, in.Window, in.Now)
 	return rep
+}
+
+// curatorLane folds the curator's ledger into its lane. Its spend is
+// charged to the window a run started in, as a pass's is. It stays out
+// of the window clock and the concurrency figures: those measure cards'
+// lives and cards working at once, and a background job is neither — it
+// never waits on a person, so it has no share of "on you" to give, and
+// counting it as a lane at once would make "peak 2 lanes" mean a card
+// and the curator.
+func curatorLane(runs []CuratorRun, w Window, now time.Time) Curator {
+	var c Curator
+	for _, r := range runs {
+		if r.Start.IsZero() {
+			continue
+		}
+		c.AllTimeRuns++
+		c.AllTimeCredits += r.Credits
+		from, to, open := r.Start, r.End, r.End.IsZero()
+		if open {
+			to = now
+		}
+		if from.Before(w.From) {
+			from = w.From
+		}
+		if to.After(w.To) {
+			to = w.To
+		}
+		if to.After(from) {
+			c.Blocks = append(c.Blocks, Block{From: from, To: to, Open: open})
+			c.Last = later(c.Last, to)
+		}
+		if open && !now.Before(r.Start) {
+			c.Running = true
+		}
+		if w.Contains(r.Start) {
+			c.Runs++
+			c.Credits += r.Credits
+			c.Last = later(c.Last, r.Start)
+		}
+	}
+	sort.SliceStable(c.Blocks, func(i, j int) bool { return c.Blocks[i].From.Before(c.Blocks[j].From) })
+	return c
 }
 
 // rateSpan resolves the horizon a burn rate is read over. A window with
@@ -338,6 +435,11 @@ func rateSpan(in Input) time.Duration {
 		for _, ch := range c.Run.Money.Charges {
 			note(ch.At)
 		}
+	}
+	// The curator's spend is in the rate too (Report.Spent), so its first
+	// run is history the rate is read over.
+	for _, r := range in.Curator {
+		note(r.Start)
 	}
 	if earliest.IsZero() || !earliest.Before(w.To) {
 		return 0

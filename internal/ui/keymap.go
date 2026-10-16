@@ -331,6 +331,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "C", label: "close out", help: "land what is ready, then sweep the worktrees landing left behind"},
 		{key: "W", label: "this week", help: "what the last seven days produced: endings, cost, rework"},
 		{key: "L", label: "schedules", help: "schedules and heartbeats — what comes back on a clock without a person typing"},
+		{key: "E", label: "skills", help: "the skill pack and its curator — pin, revert, run now"},
 		{key: "n", label: "new", help: "new card — feature, bug, research or goal, or paste an issue link to import one", bar: true},
 		{key: "f", label: "fold goal", help: "fold or unfold a goal's cards under it"},
 		{key: "P", label: "goal page", help: "a goal's page — done-when, cards, budget, lead's log"},

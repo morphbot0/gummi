@@ -57,7 +57,7 @@ request once).
 | `rail-filtered` | compact rail only: a filter still applies; opens the full rail |
 | `rail-foot`, `rail-new-session`, `rail-new-agent`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new-agent`, behind the button's arrow, the same draft as an agent's, `rail-new` the new-card form) |
 | `rail-group-agents` | the agents' own group, above the status groups |
-| `rail-more-menu`, `menu-goals`, `menu-stacks`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
+| `rail-more-menu`, `menu-goals`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
 ## Resume offer
 
@@ -297,8 +297,10 @@ own card its page), `card-stack` (opens the stacks view on the card's stack).
 `schedules-notice`; form `schedule-form` (create and edit — the same one),
 `schedule-form-name`, `schedule-form-kind-mint`/`-heartbeat`,
 `schedule-form-kind-fixed` (an edit's read-only kind),
-`schedule-form-target`, `schedule-form-repo`, `schedule-form-backend`,
-`schedule-form-model`, `schedule-form-envelope`, `schedule-form-every`,
+`schedule-form-target`, `schedule-form-repo`, `schedule-form-pair` (the
+agent and model: opens the composer's `model-picker`, its first row
+`model-blank` the profile's default; `data-backend`/`data-model` the pick),
+`schedule-form-envelope`, `schedule-form-every`,
 `schedule-form-cron`, `schedule-form-tz`, `schedule-form-prompt`,
 `schedule-form-preview` (`-cron`, `-fires`, `-error` and
 `schedule-form-envelope-hint` inside it), `schedule-form-error`,
@@ -309,6 +311,22 @@ One row: `schedule-<id>` (`data-enabled`), `schedule-<id>-state`,
 `schedule-<id>-rm`,
 `schedule-<id>-confirm` (`-yes`/`-no` via the shared strip),
 `schedule-<id>-result`.
+
+## Skills (`views/skills.js`)
+`skills-config`, `skills-spend`, `skills-next`, `skills-running`,
+`skills-published`, `skills-run`, `skills-run-confirm` (`-yes`/`-no` via the
+shared strip), `skills-notice`, `skills-error`, `skills-count`,
+`skills-empty`, `skills-table`. The curator's settings: `skills-configure`,
+`skills-form`, `skills-form-pair` (the agent and model, through the
+composer's `model-picker`; `data-backend`/`data-model` the pick),
+`skills-form-schedule`, `skills-form-budget`, `skills-form-monthly`,
+`skills-form-error`, `skills-form-save`, `skills-form-cancel`,
+`skills-form-off`, `skills-off-confirm`. One skill: `skill-<name>` (`data-owner`),
+`skill-<name>-owner`, `skill-<name>-standing`, `skill-<name>-pin` /
+`skill-<name>-unpin` (curator skills only). Runs: `curator-runs`,
+`curator-runs-empty`, one run `curator-run-<id>` (`data-outcome`),
+`curator-run-<id>-digest`, `curator-run-<id>-revert` (runs that changed the
+pack), `curator-run-<id>-confirm`.
 
 ## Tool views
 Shared by the views below: `view-error` (a refusal, as the server said it),
@@ -349,7 +367,9 @@ Fleet stats (`fleet`): `fleet`, `fleet-window` (the window switch),
 `fleet-stage-bars`, `fleet-by-model`, `fleet-model-bars`, `fleet-timeline`,
 `fleet-timeline-scroll`, `fleet-legend`, `fleet-lane-<ID>` (marks inside:
 `.blk.st-<stage>` a session, `.open` still running; `.wait` / `.wait.open`
-on you; `.gate`; `.land`), `fleet-tip`, `fleet-empty`, `fleet-error`.
+on you; `.gate`; `.land`), `fleet-lane-curator` (the skill curator's
+lane, above the cards'; `.blk.cur` a run), `fleet-curator-spent`,
+`fleet-tip`, `fleet-empty`, `fleet-error`.
 New card (`view-newcard`): `newcard-loading`, `newcard-form`, `newcard-kinds`,
 `newcard-kind-<value>` (`feature`, `bug`, `research`, `research-diagnosis`,
 `goal`, `freeform`), `newcard-about`, `newcard-title`, `newcard-desc`,
