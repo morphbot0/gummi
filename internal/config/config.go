@@ -121,10 +121,42 @@ type Curator struct {
 	Schedule string  `yaml:"schedule"`
 	Budget   float64 `yaml:"budget"`
 	Monthly  float64 `yaml:"monthly"`
+	// ReviewGap is the least time between the last run's start and a run a
+	// staged change starts (§23.4), a duration such as "6h"; "off" leaves
+	// staged changes to the schedule and empty means the default.
+	ReviewGap string `yaml:"review_gap"`
 }
 
 // DefaultCuratorSchedule is when a curator with no schedule runs.
 const DefaultCuratorSchedule = "@daily"
+
+// DefaultCuratorReviewGap is a curator's ReviewGap when it names none, and
+// MinCuratorReviewGap the shortest it may name: a change the curator left
+// undecided would otherwise start a run at nearly every tick.
+const (
+	DefaultCuratorReviewGap = 6 * time.Hour
+	MinCuratorReviewGap     = 30 * time.Minute
+)
+
+// CuratorReviewGap is how long c waits between runs a staged change
+// starts, or off when it starts none, or why its review_gap does not read.
+func CuratorReviewGap(c *Curator) (gap time.Duration, off bool, err error) {
+	v := strings.TrimSpace(c.ReviewGap)
+	switch v {
+	case "":
+		return DefaultCuratorReviewGap, false, nil
+	case "off":
+		return 0, true, nil
+	}
+	gap, err = time.ParseDuration(v)
+	if err != nil {
+		return 0, false, fmt.Errorf("review_gap %q is not a duration such as 6h, or off", v)
+	}
+	if gap < MinCuratorReviewGap {
+		return 0, false, fmt.Errorf("review_gap must be at least %s, or off", MinCuratorReviewGap)
+	}
+	return gap, false, nil
+}
 
 func validateCurator(path string, c *Curator) error {
 	if err := CheckCurator(c); err != nil {
@@ -150,6 +182,9 @@ func CheckCurator(c *Curator) error {
 	}
 	if _, err := CuratorCron(c); err != nil {
 		return fmt.Errorf("schedule does not compile: %w", err)
+	}
+	if _, _, err := CuratorReviewGap(c); err != nil {
+		return err
 	}
 	return nil
 }

@@ -27,11 +27,13 @@ func cardSkill(t *testing.T, e *Engine, card, tool string, args map[string]any) 
 }
 
 // A staged change starts a review-only run of its own once its session
-// has gone quiet, and not again within the gap after it.
+// has gone quiet, and not again within the curator's review gap after it;
+// a gap of off leaves it to the schedule.
 func TestAStagedChangeStartsAReview(t *testing.T) {
 	ctx := context.Background()
 	cf := newCuratorFake(nil)
-	e := curatorEngine(t, cf, &config.Curator{Budget: 100, Schedule: "@weekly"})
+	const gap = 2 * time.Hour
+	e := curatorEngine(t, cf, &config.Curator{Budget: 100, Schedule: "@weekly", ReviewGap: "2h"})
 	tick := func(at time.Time) bool {
 		t.Helper()
 		started, err := e.CuratorTick(ctx, at)
@@ -71,11 +73,16 @@ func TestAStagedChangeStartsAReview(t *testing.T) {
 	}
 	// The fake decided nothing, so the change still waits: the gap holds
 	// the next run off.
-	if tick(runs[0].Start.Add(stagedGap - time.Minute)) {
+	if tick(runs[0].Start.Add(gap - time.Minute)) {
 		t.Error("a second run started inside the gap")
 	}
-	if !tick(runs[0].Start.Add(stagedGap + time.Minute)) {
+	if !tick(runs[0].Start.Add(gap + time.Minute)) {
 		t.Error("the change still waiting after the gap started no run")
+	}
+	runs, _ = e.CuratorRuns()
+	e.SetCuratorConfig(&config.Curator{Budget: 100, Schedule: "@weekly", ReviewGap: "off"})
+	if tick(runs[len(runs)-1].Start.Add(gap + time.Minute)) {
+		t.Error("a staged change started a run with the review gap off")
 	}
 }
 

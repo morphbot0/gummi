@@ -47,14 +47,17 @@ type CuratorStaged struct {
 
 // CuratorConfig is the workspace's curator block: the agent it runs on,
 // its cadence and its two brakes, in credits. It is also PUT
-// /api/curator/config's body, where an empty model or schedule means the
-// backend's default model and @daily.
+// /api/curator/config's body, where an empty model, schedule or review
+// gap means the backend's default model, @daily and 6h.
 type CuratorConfig struct {
 	Backend  string  `json:"backend"`
 	Model    string  `json:"model,omitempty"`
 	Schedule string  `json:"schedule"`
 	Budget   float64 `json:"budget"`
 	Monthly  float64 `json:"monthly,omitempty"`
+	// ReviewGap is the least time between runs a staged change starts, a
+	// duration such as "6h", or "off" for none (§23.4).
+	ReviewGap string `json:"reviewGap,omitempty"`
 }
 
 // CuratorSkill is one skill in the pack and how it is standing.
@@ -85,7 +88,7 @@ type CuratorSkill struct {
 // CuratorRun is one curator run from the ledger.
 type CuratorRun struct {
 	ID      string    `json:"id"`
-	Why     string    `json:"why"` // "schedule" or "person"
+	Why     string    `json:"why"` // "schedule", "person" or "staged"
 	Start   time.Time `json:"start"`
 	End     time.Time `json:"end,omitzero"`
 	Backend string    `json:"backend"`

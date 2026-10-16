@@ -79,7 +79,11 @@ func webCuratorConfig(c *config.Curator) *webapi.CuratorConfig {
 	if sched == "" {
 		sched = config.DefaultCuratorSchedule
 	}
-	return &webapi.CuratorConfig{Backend: c.Backend, Model: c.Model, Schedule: sched, Budget: c.Budget, Monthly: c.Monthly}
+	gap := c.ReviewGap
+	if gap == "" {
+		gap = strings.TrimSuffix(strings.TrimSuffix(config.DefaultCuratorReviewGap.String(), "0s"), "0m")
+	}
+	return &webapi.CuratorConfig{Backend: c.Backend, Model: c.Model, Schedule: sched, Budget: c.Budget, Monthly: c.Monthly, ReviewGap: gap}
 }
 
 func webCuratorSkill(s skillpack.Status) webapi.CuratorSkill {
@@ -183,6 +187,7 @@ func (m *Shell) setCurator(c *config.Curator) error {
 	if c != nil {
 		t := *c
 		t.Backend, t.Model, t.Schedule = strings.TrimSpace(t.Backend), strings.TrimSpace(t.Model), strings.TrimSpace(t.Schedule)
+		t.ReviewGap = strings.TrimSpace(t.ReviewGap)
 		c = &t
 	}
 	if err := engine.CheckCurator(c); err != nil {
@@ -201,7 +206,7 @@ func (m *Shell) setCurator(c *config.Curator) error {
 func (b *Bridge) SetCurator(ctx context.Context, req *webapi.CuratorConfig) (webapi.Curator, error) {
 	var c *config.Curator
 	if req != nil {
-		c = &config.Curator{Backend: req.Backend, Model: req.Model, Schedule: req.Schedule, Budget: req.Budget, Monthly: req.Monthly}
+		c = &config.Curator{Backend: req.Backend, Model: req.Model, Schedule: req.Schedule, Budget: req.Budget, Monthly: req.Monthly, ReviewGap: req.ReviewGap}
 	}
 	// The model is checked against what the backend offers off the board's
 	// loop: asking a backend for its catalog can take seconds.

@@ -231,6 +231,7 @@ func TestCuratorConfigRoute(t *testing.T) {
 		{"backend": "claude", "budget": 0},
 		{"backend": "claude", "budget": 100, "monthly": 50},
 		{"backend": "claude", "budget": 100, "schedule": "not a schedule"},
+		{"backend": "claude", "budget": 100, "reviewGap": "5m"},
 	} {
 		if code := b.call(http.MethodPut, "/api/curator/config", bad, &out); code != http.StatusBadRequest {
 			t.Errorf("PUT %v = %d %v, want 400", bad, code, out)
@@ -247,16 +248,17 @@ func TestCuratorConfigRoute(t *testing.T) {
 			Schedule string  `json:"schedule"`
 			Budget   float64 `json:"budget"`
 			Monthly  float64 `json:"monthly"`
+			Gap      string  `json:"reviewGap"`
 		} `json:"config"`
 		Next time.Time `json:"next"`
 	}
 	b.must(http.StatusOK, http.MethodPut, "/api/curator/config",
-		map[string]any{"backend": " claude ", "model": "haiku", "schedule": "@weekly", "budget": 100, "monthly": 1000}, &got)
-	if c := got.Config; c == nil || c.Backend != "claude" || c.Model != "haiku" || c.Schedule != "@weekly" || c.Budget != 100 || c.Monthly != 1000 || got.Next.IsZero() {
+		map[string]any{"backend": " claude ", "model": "haiku", "schedule": "@weekly", "budget": 100, "monthly": 1000, "reviewGap": " 2h "}, &got)
+	if c := got.Config; c == nil || c.Backend != "claude" || c.Model != "haiku" || c.Schedule != "@weekly" || c.Budget != 100 || c.Monthly != 1000 || c.Gap != "2h" || got.Next.IsZero() {
 		t.Fatalf("after PUT the read is %+v (next %v)", c, got.Next)
 	}
 	raw, err := os.ReadFile(cfgPath)
-	if err != nil || !strings.Contains(string(raw), "curator:") || !strings.Contains(string(raw), "backend: claude") {
+	if err != nil || !strings.Contains(string(raw), "curator:") || !strings.Contains(string(raw), "backend: claude") || !strings.Contains(string(raw), "review_gap: 2h") {
 		t.Fatalf("config.yaml after PUT:\n%s (%v)", raw, err)
 	}
 	if c := b.eng.CuratorConfig(); c == nil || c.Backend != "claude" {

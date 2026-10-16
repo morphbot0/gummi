@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSetCuratorKeepsTheRestOfTheConfig: the curator block is written,
@@ -31,10 +32,10 @@ func TestSetCuratorKeepsTheRestOfTheConfig(t *testing.T) {
 		t.Fatalf("written:\n%s", raw)
 	}
 
-	if err := SetCurator(path, &Curator{Backend: "copilot", Model: "gpt-5", Schedule: "@weekly", Budget: 50, Monthly: 500}); err != nil {
+	if err := SetCurator(path, &Curator{Backend: "copilot", Model: "gpt-5", Schedule: "@weekly", Budget: 50, Monthly: 500, ReviewGap: "12h"}); err != nil {
 		t.Fatal(err)
 	}
-	if c, _ = Load(path); *c.Curator != (Curator{Backend: "copilot", Model: "gpt-5", Schedule: "@weekly", Budget: 50, Monthly: 500}) {
+	if c, _ = Load(path); *c.Curator != (Curator{Backend: "copilot", Model: "gpt-5", Schedule: "@weekly", Budget: 50, Monthly: 500, ReviewGap: "12h"}) {
 		t.Fatalf("rewritten to %+v", c.Curator)
 	}
 
@@ -90,5 +91,31 @@ func TestSetCuratorEditsOnlyItsOwnLines(t *testing.T) {
 	}
 	if raw, _ = os.ReadFile(path); string(raw) != orig {
 		t.Fatalf("after removing:\n%s\nwant:\n%s", raw, orig)
+	}
+}
+
+// TestCuratorReviewGapReads: empty is the default, off is none, and a gap
+// shorter than the floor or not a duration is refused, by Load as well.
+func TestCuratorReviewGapReads(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		gap  time.Duration
+		off  bool
+		fail bool
+	}{
+		{in: "", gap: DefaultCuratorReviewGap},
+		{in: " 90m ", gap: 90 * time.Minute},
+		{in: "off", off: true},
+		{in: "5m", fail: true},
+		{in: "daily", fail: true},
+	} {
+		c := &Curator{Backend: "claude", Budget: 100, ReviewGap: tc.in}
+		gap, off, err := CuratorReviewGap(c)
+		if (err != nil) != tc.fail || gap != tc.gap || off != tc.off {
+			t.Errorf("%q: gap %s off %v err %v", tc.in, gap, off, err)
+		}
+		if (CheckCurator(c) != nil) != tc.fail {
+			t.Errorf("%q: CheckCurator disagrees", tc.in)
+		}
 	}
 }

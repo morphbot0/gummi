@@ -103,7 +103,7 @@ registerView('skills', {
       const cfg = c
         ? h('div', { class: 'sk-config', testid: 'skills-config' },
             h('b', null, 'Curator'), ' ',
-            `${c.backend} on ${c.model || 'its default model'} · ${c.schedule} · ${cr(c.budget)} a run`)
+            `${c.backend} on ${c.model || 'its default model'} · ${c.schedule} · ${cr(c.budget)} a run · ${c.reviewGap === 'off' ? 'staged changes wait for the schedule' : `staged changes reviewed at most every ${c.reviewGap || '6h'}`}`)
         : h('div', { class: 'sk-config', testid: 'skills-config' },
             h('b', null, 'Curator off'), ' — set it up to have sessions’ lessons distilled into the pack. The pack still reaches sessions, and pin and revert still work.')
       const facts = h('div', { class: 'sk-facts' })
@@ -199,6 +199,7 @@ registerView('skills', {
       const sched = h('input', { type: 'text', testid: 'skills-form-schedule', placeholder: '@daily', value: c?.schedule || '' })
       const budget = h('input', { type: 'text', inputmode: 'decimal', testid: 'skills-form-budget', value: dollarsInput(c?.budget || 100) })
       const monthly = h('input', { type: 'text', inputmode: 'decimal', testid: 'skills-form-monthly', placeholder: 'no cap', value: c?.monthly ? dollarsInput(c.monthly) : '' })
+      const gap = h('input', { type: 'text', testid: 'skills-form-review-gap', placeholder: '6h', value: c?.reviewGap || '' })
       const err = h('div', { role: 'alert', testid: 'skills-form-error' })
 
       return h('form', {
@@ -220,7 +221,8 @@ registerView('skills', {
             model: pair.value().model || undefined,
             schedule: sched.value.trim() || undefined,
             budget: b.credits,
-            monthly: m.credits || undefined
+            monthly: m.credits || undefined,
+            reviewGap: gap.value.trim() || undefined
           }, err)
         }
       },
@@ -230,6 +232,8 @@ registerView('skills', {
         field('Schedule', sched, { hint: '@daily, @weekly, 6h, or a cron line' }),
         field('Budget per run (dollars)', budget, { hint: 'what one run may spend' }),
         field('Monthly cap (dollars)', monthly, { hint: 'across every run; empty for none' })),
+      h('div', { class: 'vrow' },
+        field('Review staged changes', gap, { hint: 'at most this often, e.g. 6h or 1h30m; off to wait for the schedule' })),
       err,
       h('div', { class: 'skc-foot' },
         c ? h('button', { class: 'btn danger', type: 'button', testid: 'skills-form-off', onclick: () => { v.form = null; v.asking = { what: 'off' }; draw() } }, 'Turn off') : null,
@@ -324,7 +328,7 @@ registerView('skills', {
           h('div', { class: 'sk-run-head' },
             h('span', { class: 'sk-when' }, clock(r.start)),
             h('span', { class: ['sk-outcome', outcomeClass(r.outcome)] }, OUTCOME[r.outcome] || r.outcome),
-            h('span', { class: 'mute' }, r.why === 'person' ? 'asked by a person' : 'on schedule'),
+            h('span', { class: 'mute' }, r.why === 'person' ? 'asked by a person' : r.why === 'staged' ? 'reviewing staged changes' : 'on schedule'),
             h('span', { class: 'mute' }, cr(r.credits)),
             h('span', { class: 'grow' }),
             r.revertable

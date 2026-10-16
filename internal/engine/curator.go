@@ -318,18 +318,20 @@ const curatorWhyStaged = "staged"
 
 // A staged change starts a review once its session has staged nothing
 // for stagedQuiet, so a session's few changes go to one run, and no
-// sooner than stagedGap after the last run began, so a busy board does
-// not run the curator all day.
-const (
-	stagedQuiet = 30 * time.Minute
-	stagedGap   = 6 * time.Hour
-)
+// sooner than the curator's review_gap after the last run began, so a
+// busy board does not run the curator all day.
+const stagedQuiet = 30 * time.Minute
 
 // stagedDue reports whether a change waits for review that a run should
 // be started for now: the newest has been quiet stagedQuiet, the last run
-// began stagedGap ago, and the month's budget can pay for a turn (a
-// paused run every stagedGap would only repeat that it is spent).
+// began review_gap ago, and the month's budget can pay for a turn (a
+// paused run every gap would only repeat that it is spent).
 func (e *Engine) stagedDue(now time.Time) bool {
+	c := e.CuratorConfig()
+	gap, off, err := config.CuratorReviewGap(c)
+	if err != nil || off {
+		return false
+	}
 	var newest time.Time
 	for _, list := range e.SkillPack().AllStaged() {
 		for _, s := range list {
@@ -345,10 +347,10 @@ func (e *Engine) stagedDue(now time.Time) bool {
 	if err != nil {
 		return false
 	}
-	if len(runs) > 0 && now.Sub(runs[len(runs)-1].Start) < stagedGap {
+	if len(runs) > 0 && now.Sub(runs[len(runs)-1].Start) < gap {
 		return false
 	}
-	return curatorBudget(e.CuratorConfig(), runs, now) >= e.turnReserve()
+	return curatorBudget(c, runs, now) >= e.turnReserve()
 }
 
 // curatorBudget is what a run starting now may spend: its own budget,

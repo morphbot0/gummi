@@ -5445,6 +5445,7 @@ curator:
   schedule: "@daily"     # cron, compiled by internal/schedule (§19.9)
   budget: 100            # credits per run
   monthly: 1500          # credits per calendar month, all runs (0: no cap)
+  review_gap: 6h         # least time between staged reviews (off: none)
 ```
 
 No `curator:` block, no curator: the pack is then a person's, and
@@ -5485,13 +5486,17 @@ each board's start), a fire while a run is still going is skipped. A person can 
 A staged change (§23.5) starts a run of its own rather than waiting a
 schedule out: once the newest pending change is 30 minutes old (so the
 few changes one session stages go to one run) and the last run began at
-least 6 hours ago (so a busy board does not curate all day), the next
+least `review_gap` ago (6h by default, so a busy board does not curate
+all day), the next
 tick starts one, unless the month's budget cannot pay for a turn. That
 run is review-only: its kickoff lists the staged changes and the pack,
 and it is not offered the memory or event reads, so it costs a review
-and not a curation. The scheduled run still does the rest. Both waits
-are fixed, not configured; the ledger records the run's reason as
-`staged`.
+and not a curation. The scheduled run still does the rest. The gap is
+a Go duration of at least 30 minutes, since a change the curator left
+undecided would otherwise start a run at nearly every tick; `off` leaves
+staged changes to the schedule. A person sets it from the skills view's
+settings like the rest of the block. The 30-minute quiet is fixed. The
+ledger records the run's reason as `staged`.
 
 **What it reads and writes is tools, not files.** Its session carries
 its own tool set on its own MCP endpoint:
