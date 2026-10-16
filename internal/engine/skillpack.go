@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -24,6 +25,7 @@ import (
 func (e *Engine) SkillPack() *skillpack.Pack {
 	e.packOnce.Do(func() {
 		e.pack = skillpack.New(e.cfg.Workspace.GummiDir(), e.cfg.Workspace.StateDir())
+		e.pack.Missing = e.missingOnBase
 	})
 	return e.pack
 }
@@ -44,6 +46,32 @@ func (e *Engine) skillDirsFor(ctx context.Context, ag agent.Agent, f *domain.Fea
 		return nil // `gummi curator status` and doctor show a pack that cannot be read
 	}
 	return skillpack.DirsFor(dir, f.Repo)
+}
+
+// missingOnBase is the grounding lint's read (§23.3): which of paths the
+// base branch of the repository scope names lacks. A repository gummi
+// cannot reach says nothing is missing; the lint is advice, not a gate.
+func (e *Engine) missingOnBase(ctx context.Context, scope string, paths []string) []string {
+	if e.cfg.Pool == nil || len(paths) == 0 {
+		return nil
+	}
+	name := scope
+	if scope == skillpack.ScopeDefault {
+		name = ""
+	}
+	m, err := e.cfg.Pool.ManagerForName(ctx, name)
+	if err != nil || m == nil {
+		return nil
+	}
+	base := m.BaseBranch(ctx)
+	var missing []string
+	for _, p := range paths {
+		cmd := exec.CommandContext(ctx, "git", "-C", m.RepoRoot(), "cat-file", "-e", base+":"+p) //nolint:gosec // git, with a path from the skill and a branch gummi read
+		if cmd.Run() != nil {
+			missing = append(missing, p)
+		}
+	}
+	return missing
 }
 
 // PackRepos names the repositories a skill's scope may name.
@@ -87,30 +115,39 @@ func (e *Engine) SkillUsage(context.Context) map[string]skillpack.Use {
 // packSkillPathRE matches a read of a pack skill's SKILL.md through any of
 // the places delivery puts it: the materialized revision copilot and
 // opencode read, claude's generated plugin, and agy's links.
+// packNamespace is the name claude gives the pack's generated plugin.
+const packNamespace = "gummi-skills"
+
 var packSkillPathRE = regexp.MustCompile(`(?:^|/)(?:skillpacks/[0-9a-f]{7,64}|gummi-skills/skills|\.gemini/config/skills)/([a-z0-9][a-z0-9-]{0,63})/SKILL\.md$`)
 
-// skillCalled names the skill a tool call used, or "": a backend's skill
-// invocation (bare, or namespaced as claude's gummi-skills:<name>), or a
-// read of a delivered SKILL.md by a backend that reads skills as files.
-func skillCalled(tool, detail string) string {
+// skillCalled names the pack skill a tool call used, or "", and whether
+// the call was a view: a backend's skill invocation, or (a view) a read of
+// a delivered SKILL.md by a backend that reads skills as files. A namespaced invocation counts only in the pack's
+// own namespace (claude's gummi-skills:<name>): another plugin's skill of
+// the same name is not the pack's. A bare name is counted, since copilot
+// and opencode say no more than that.
+func skillCalled(tool, detail string) (name string, view bool) {
 	detail = strings.TrimSpace(detail)
 	if strings.EqualFold(tool, "skill") {
-		if i := strings.LastIndex(detail, ":"); i >= 0 {
-			detail = detail[i+1:]
+		if ns, name, ok := strings.Cut(detail, ":"); ok {
+			if ns != packNamespace {
+				return "", false
+			}
+			detail = name
 		}
-		return detail
+		return detail, false
 	}
 	if m := packSkillPathRE.FindStringSubmatch(detail); m != nil {
-		return m[1]
+		return m[1], true
 	}
-	return ""
+	return "", false
 }
 
 // noteSkillUse counts one tool call toward the skill it used, if any. It
 // is called for every session's tool calls, stage and freeform alike; a
 // name the pack does not hold is counted harmlessly and never read.
 func (e *Engine) noteSkillUse(tool, detail string, at time.Time) {
-	name := skillCalled(tool, detail)
+	name, view := skillCalled(tool, detail)
 	if name == "" || e.cfg.Workspace.StateDir() == "" {
 		return
 	}
@@ -118,7 +155,11 @@ func (e *Engine) noteSkillUse(tool, detail string, at time.Time) {
 	defer e.usageMu.Unlock()
 	u := e.readSkillUsage()
 	use := u.Skills[name]
-	use.Count++
+	if view {
+		use.Views++
+	} else {
+		use.Count++
+	}
 	if at.After(use.Last) {
 		use.Last = at
 	}
@@ -146,7 +187,8 @@ func (e *Engine) PackStanding(ctx context.Context, now time.Time) ([]skillpack.S
 	for n := range skills {
 		names = append(names, n)
 	}
-	return skillpack.Standing(skills, pack.Born(ctx, names), e.SkillUsage(ctx), now), nil
+	born := pack.Born(ctx, names)
+	return skillpack.Standing(skills, born, pack.Edits(ctx, born), e.SkillUsage(ctx), now), nil
 }
 
 // SweepPack archives the curator skills the timers have come due on, in

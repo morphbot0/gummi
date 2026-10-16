@@ -103,7 +103,7 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: locating own executable: %w", err)
 	}
-	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, append(slices.Clone(opts.ExtraReadAllows), opts.SkillDirs...), opts.ReadOnly, opts.ScratchDir, opts.Permission, opts.SkillDirs...)
+	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, append(slices.Clone(opts.ExtraReadAllows), opts.SkillDirs...), opts.ReadOnly, opts.ScratchDir, opts.Permission)
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
 	}
@@ -136,6 +136,9 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	// server for the life of the session.
 	env := append(childEnvFor(opts.OutputTokenMax, opts.MCPSockPath, configPath),
 		"OPENCODE_SERVER_PASSWORD="+password)
+	if skills := opencodeSkillsContent(opts.WorkDir, opts.SkillDirs); skills != "" {
+		env = append(env, "OPENCODE_CONFIG_CONTENT="+skills)
+	}
 	proc, err := serveOpencode(context.Background(), o.bin, port, opts.WorkDir, env)
 	if err != nil {
 		cleanup()

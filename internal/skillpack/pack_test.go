@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -154,7 +155,7 @@ func TestStanding(t *testing.T) {
 	born := map[string]time.Time{"fresh": now.Add(-3 * day), "stale": now.Add(-20 * day), "due": old, "used": old, "pinned": old, "mine": old}
 	uses := map[string]Use{"used": {Count: 2, Last: now.Add(-day)}}
 	got := map[string]Status{}
-	for _, s := range Standing(skills, born, uses, now) {
+	for _, s := range Standing(skills, born, nil, uses, now) {
 		got[s.Name] = s
 	}
 	for name, want := range map[string][2]bool{
@@ -295,5 +296,135 @@ func TestDefaultScopeReachesTheDefaultRepository(t *testing.T) {
 	}
 	if l := LintDraft(draft("aa", ScopeDefault), nil, nil); !l.OK() {
 		t.Errorf("scope default refused: %s", l)
+	}
+}
+
+// Another process holding the pack (a CLI's pin beside a board's curator
+// write) makes a write wait for it rather than interleave with it.
+func TestAWriteWaitsForTheLock(t *testing.T) {
+	ctx := context.Background()
+	p := newPack(t)
+	if _, err := p.Write(ctx, draft("aa", ""), nil, "write aa"); err != nil {
+		t.Fatal(err)
+	}
+	release := flock(p.Dir + ".lock")
+	done := make(chan error, 1)
+	go func() { done <- p.Pin(ctx, "aa", true) }()
+	select {
+	case <-done:
+		t.Fatal("a pin went ahead while another holder had the pack")
+	case <-time.After(200 * time.Millisecond):
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// "because" and "user" contain "use"; neither says when to use a skill.
+func TestLintWantsWhenToUseIt(t *testing.T) {
+	for desc, warn := range map[string]bool{
+		"Use when running the Go tests.":             false,
+		"Run this before a release.":                 false,
+		"Fails because the user has no gh token.":    true,
+		"How the publish refusal rules are ordered.": true,
+	} {
+		d := draft("x", "")
+		d.Description = desc
+		got := strings.Contains(LintDraft(d, nil, nil).String(), "does not say when")
+		if got != warn {
+			t.Errorf("%q: warned %v, want %v", desc, got, warn)
+		}
+	}
+}
+
+// A merge is one commit: the new skill written, the ones it absorbs
+// archived. One it may not absorb refuses the whole write.
+func TestAMergeIsOneCommit(t *testing.T) {
+	ctx := context.Background()
+	p := newPack(t)
+	for _, n := range []string{"aa", "bb"} {
+		if _, err := p.Write(ctx, draft(n, ""), nil, "write "+n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := p.Head(ctx)
+	d := draft("cc", "")
+	d.Replaces = []string{"aa", "nope"}
+	if l, err := p.Write(ctx, d, nil, "merge"); err != nil || l.OK() {
+		t.Fatalf("a merge naming a missing skill was not refused: %v %s", err, l)
+	}
+	d.Replaces = []string{"aa", "bb"}
+	if l, err := p.Write(ctx, d, nil, "merge"); err != nil || !l.OK() {
+		t.Fatalf("merge: %v %s", err, l)
+	}
+	if n, _ := p.git(ctx, "rev-list", "--count", before+"..HEAD"); n != "1" {
+		t.Errorf("the merge took %s commits, want 1", n)
+	}
+	skills, _ := p.Skills(ctx, p.Published(ctx))
+	if _, ok := skills["cc"]; !ok || len(skills) != 1 {
+		t.Errorf("after the merge the pack holds %v, want cc alone", skills)
+	}
+	if st, _ := p.git(ctx, "status", "--porcelain"); st != "" {
+		t.Errorf("the pack is dirty:\n%s", st)
+	}
+}
+
+// Edits count the commits that changed a skill since it came into the
+// pack, not the write that added it.
+func TestEditsCountRewrites(t *testing.T) {
+	ctx := context.Background()
+	p := newPack(t)
+	t.Setenv("GIT_COMMITTER_DATE", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339))
+	if _, err := p.Write(ctx, draft("aa", ""), nil, "write aa"); err != nil {
+		t.Fatal(err)
+	}
+	for i, body := range []string{"Rule one.", "Rule two."} {
+		t.Setenv("GIT_COMMITTER_DATE", time.Date(2026, 9, 2+i, 0, 0, 0, 0, time.UTC).Format(time.RFC3339))
+		d := draft("aa", "")
+		d.Body = body
+		if _, err := p.Write(ctx, d, nil, "rewrite aa"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := p.Edits(ctx, p.Born(ctx, []string{"aa"}))["aa"]; got != 2 {
+		t.Errorf("edits = %d, want 2", got)
+	}
+}
+
+func TestRepoPaths(t *testing.T) {
+	body := "Edit `internal/engine/curator.go:120` and `docs/DESIGN.md`, run `make ci`, " +
+		"see `internal/web/` and `README.md`; not `go test ./...`, `/etc/hosts`, `*.go`, `https://x.io/a` or `$HOME/x`. " +
+		"`docs/DESIGN.md` again."
+	want := []string{"internal/engine/curator.go", "docs/DESIGN.md", "internal/web", "README.md"}
+	if got := RepoPaths(body); !slices.Equal(got, want) {
+		t.Errorf("RepoPaths = %v, want %v", got, want)
+	}
+}
+
+// A scoped skill naming a path its repository lacks is written with a
+// warning; a general one is not checked.
+func TestAScopedSkillIsGrounded(t *testing.T) {
+	ctx := context.Background()
+	p := newPack(t)
+	p.Missing = func(_ context.Context, scope string, paths []string) []string {
+		var out []string
+		for _, x := range paths {
+			if x != "Makefile.go" {
+				out = append(out, scope+":"+x)
+			}
+		}
+		return out
+	}
+	d := draft("aa", ScopeDefault)
+	d.Body = "Run `Makefile.go`, then read `docs/gone.md`."
+	l, err := p.Write(ctx, d, nil, "write aa")
+	if err != nil || !l.OK() || !strings.Contains(l.String(), "default:docs/gone.md") || strings.Contains(l.String(), "Makefile.go") {
+		t.Errorf("lint = %s, %v", l, err)
+	}
+	d = draft("bb", "")
+	d.Body = "Read `docs/gone.md`."
+	if l, _ := p.Write(ctx, d, nil, "write bb"); strings.Contains(l.String(), "gone") {
+		t.Errorf("a general skill was grounded: %s", l)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -144,6 +145,29 @@ func CheckCurator(c *config.Curator) error {
 		return fmt.Errorf("%s cannot reach gummi's tools, so it cannot curate", c.Backend)
 	}
 	return nil
+}
+
+// curatorCatalogWait bounds how long a check waits on a backend's model
+// catalog; a backend that cannot answer in time is not held against c.
+const curatorCatalogWait = 10 * time.Second
+
+// CheckCuratorModel is why c's model is not one its backend offers, or nil:
+// no model (the backend's default), or a backend that cannot say what it
+// offers, is accepted. It asks the backend, so it may take seconds.
+func (e *Engine) CheckCuratorModel(ctx context.Context, c *config.Curator) error {
+	if c == nil || strings.TrimSpace(c.Model) == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, curatorCatalogWait)
+	defer cancel()
+	if _, ok := e.SessionModelCatalog(ctx, c.Backend); !ok {
+		return nil
+	}
+	choices := e.SessionModelChoices(ctx, c.Backend)
+	if slices.Contains(choices, strings.TrimSpace(c.Model)) {
+		return nil
+	}
+	return fmt.Errorf("%s does not offer model %q (it offers %s)", c.Backend, c.Model, clip(strings.Join(choices, ", "), 400))
 }
 
 // CuratorRuns reads the ledger, oldest first: one row per run, its last.
@@ -741,6 +765,7 @@ func (ct *curatorTurn) tools() []agent.ToolDef {
 				"scope":       str("\"general\"; \"default\" for the workspace's own repository; or the name of one repository the skill is only for."),
 				"body":        str("The SKILL.md body, markdown: the rule and how to apply it, not the story of how it was learned."),
 				"files":       map[string]any{"type": "object", "description": "Optional files beside SKILL.md, by relative path (references/x.md).", "additionalProperties": map[string]any{"type": "string"}},
+				"replaces":    strs("Optional: curator skills this one merges. They are archived in the same commit as the write, so a merge is one change."),
 			}, "name", "description", "body"),
 		},
 		{
@@ -782,13 +807,18 @@ func (ct *curatorTurn) dispatch(ctx context.Context, name string, raw json.RawMe
 		var a struct {
 			Name, Description, Scope, Body string
 			Files                          map[string]string
+			Replaces                       []string
 		}
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return "", err
 		}
+		msg := curatorCommitPrefix(ct.run.ID) + "write " + a.Name
+		if len(a.Replaces) > 0 {
+			msg += ", merging " + strings.Join(a.Replaces, ", ")
+		}
 		l, err := e.SkillPack().Write(ctx, skillpack.Draft{
-			Name: a.Name, Description: a.Description, Scope: a.Scope, Body: a.Body, Files: a.Files,
-		}, e.PackRepos(), curatorCommitPrefix(ct.run.ID)+"write "+a.Name)
+			Name: a.Name, Description: a.Description, Scope: a.Scope, Body: a.Body, Files: a.Files, Replaces: a.Replaces,
+		}, e.PackRepos(), msg)
 		if err != nil {
 			return "", err
 		}
@@ -797,6 +827,7 @@ func (ct *curatorTurn) dispatch(ctx context.Context, name string, raw json.RawMe
 		}
 		ct.mu.Lock()
 		ct.run.Written = append(ct.run.Written, a.Name)
+		ct.run.Archived = append(ct.run.Archived, a.Replaces...)
 		ct.mu.Unlock()
 		ct.checkpoint(ctx)
 		return strings.TrimSpace("written and published\n" + l.String()), nil
@@ -911,7 +942,7 @@ func (ct *curatorTurn) inputs(ctx context.Context) string {
 		if scope == "" {
 			scope = skillpack.ScopeGeneral
 		}
-		fmt.Fprintf(&b, "- %s [%s, %s, used %d times", s.Name, scope, owner, s.Uses)
+		fmt.Fprintf(&b, "- %s [%s, %s, invoked %d, read %d, edited %d times", s.Name, scope, owner, s.Uses, s.Views, s.Edits)
 		if s.Stale {
 			b.WriteString(", stale")
 		}
@@ -1018,7 +1049,8 @@ first. A person can revert you afterwards. So:
 - The description is what a backend reads to decide when to use the skill:
   say what it does and when to use it, in one line.
 - Prefer updating or merging an existing curator skill over adding a near
-  duplicate; archive what you merged away. Never try to change a skill
+  duplicate. A merge is one skill_write naming the skills it absorbs in
+  replaces: they are archived in the same commit. Never try to change a skill
   owned by a person or pinned.
 - Scope a skill to a repository when it is only true there.
 - The pack is only what curator_inputs lists as published. Skills your

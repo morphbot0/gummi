@@ -63,3 +63,32 @@ func TestCheckCuratorCompilesTheSchedule(t *testing.T) {
 		t.Errorf("a cron schedule was refused: %v", err)
 	}
 }
+
+// The rest of the file is kept byte for byte: its comments, its four-space
+// indentation, its blank lines, and a comment after the curator's block.
+func TestSetCuratorEditsOnlyItsOwnLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	orig := "# top\nname: east   # the name\n\nrepos:\n    web: ../web    # sibling\n\n# about checks\nchecks:\n    default: []\n# trailing\n"
+	if err := os.WriteFile(path, []byte(orig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetCurator(path, &Curator{Backend: "claude", Budget: 100}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if want := orig + "curator:\n    backend: claude\n    budget: 100\n"; string(raw) != want {
+		t.Fatalf("written:\n%s\nwant:\n%s", raw, want)
+	}
+	if err := SetCurator(path, &Curator{Backend: "copilot", Budget: 50}); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ = os.ReadFile(path); !strings.HasPrefix(string(raw), orig) || !strings.Contains(string(raw), "backend: copilot") {
+		t.Fatalf("rewritten:\n%s", raw)
+	}
+	if err := SetCurator(path, nil); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ = os.ReadFile(path); string(raw) != orig {
+		t.Fatalf("after removing:\n%s\nwant:\n%s", raw, orig)
+	}
+}

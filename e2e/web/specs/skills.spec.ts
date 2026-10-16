@@ -25,7 +25,7 @@ async function seedCuratorRun(ws: Workspace) {
   await fs.promises.writeFile(path.join(pack, 'scoped-tests', 'SKILL.md'),
     '---\nname: scoped-tests\ndescription: Run the named tests and check they ran\nscope: general\nsource: curator\n---\n\nRun them, then count them.\n');
   await git('add', '-A');
-  await git('commit', '-q', '-m', 'curator: write scoped-tests');
+  await git('commit', '-q', '-m', 'curator cur-e2e: write scoped-tests');
   const after = await git('rev-parse', 'HEAD');
   await git('update-ref', 'refs/gummi/published', 'HEAD');
   const now = new Date();

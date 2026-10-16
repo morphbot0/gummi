@@ -105,6 +105,9 @@ type Draft struct {
 	Body        string
 	// Files sit beside SKILL.md, keyed by a relative path (references/x.md).
 	Files map[string]string
+	// Replaces names curator skills this one merges: they are archived in
+	// the same commit as the write.
+	Replaces []string
 }
 
 // Lint is a write's verdict. Refusals stop it; warnings travel with the
@@ -132,6 +135,10 @@ func (l Lint) String() string {
 // incidentRE matches prose that tells what happened rather than what to
 // do: a body that reads as a session's log, not a rule.
 var incidentRE = regexp.MustCompile(`(?i)\b(yesterday|today|this session|in this card|I tried|we tried|it turned out|earlier I|last time)\b|\b(FF|FD|BG|RS|GL)-\d+\b`)
+
+// whenRE matches a description that says when to use the skill: the
+// words themselves, not "because" or "user" that only contain them.
+var whenRE = regexp.MustCompile(`(?i)\b(use|using|when|whenever|before|after|if)\b`)
 
 // LintDraft checks d against the pack it would join. existing is the
 // pack's current skills by name; repos names the workspace's repositories
@@ -183,13 +190,46 @@ func LintDraft(d Draft, existing map[string]Meta, repos []string) Lint {
 		refuse("files beside SKILL.md are %d bytes, over %d", total, MaxFilesSize)
 	}
 
-	if desc != "" && !strings.Contains(strings.ToLower(desc), "use") && !strings.Contains(strings.ToLower(desc), "when") {
+	if desc != "" && !whenRE.MatchString(desc) {
 		warn("description does not say when to use the skill")
 	}
 	if m := incidentRE.FindString(body); m != "" {
 		warn("body reads as an incident log (%q); say the rule, not how it was learned", m)
 	}
 	return l
+}
+
+// pathRE matches a backticked span that reads as a path in a repository:
+// a slash or a file extension, no spaces, nothing that makes it a
+// command, a glob, a URL or a path outside a checkout.
+var (
+	codeSpanRE = regexp.MustCompile("`([^`\\s]+)`")
+	pathExtRE  = regexp.MustCompile(`\.(go|md|js|ts|tsx|css|html|yaml|yml|json|py|sh|rs|toml|sql|txt)$`)
+)
+
+// RepoPaths lists the repository paths body names in backticks, once
+// each, in order: what the grounding lint checks a scoped skill against.
+// A trailing :line and a trailing slash are dropped.
+func RepoPaths(body string) []string {
+	var out []string
+	for _, m := range codeSpanRE.FindAllStringSubmatch(body, -1) {
+		p := m[1]
+		if strings.ContainsAny(p, "*<>$~{}()=|;&'\"@") || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "-") ||
+			strings.HasPrefix(p, ".") || strings.Contains(p, "://") || strings.Contains(p, "..") {
+			continue
+		}
+		if i := strings.IndexByte(p, ':'); i >= 0 {
+			p = p[:i]
+		}
+		p = strings.TrimSuffix(p, "/")
+		if p == "" || (!strings.Contains(p, "/") && !pathExtRE.MatchString(p)) {
+			continue
+		}
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func scopeChoices(repos []string) string {

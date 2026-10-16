@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 // buildOpencodeConfig renders the per-session OPENCODE_CONFIG file content
@@ -55,7 +57,7 @@ import (
 // Every pattern map relies on opencode letting the LAST matching rule
 // win and on encoding/json writing keys sorted: "*" sorts before any
 // absolute path, so the catch-all deny lands first and each allow after.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, scratchDir string, permission Permission, skillDirs ...string) ([]byte, error) {
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, scratchDir string, permission Permission) ([]byte, error) {
 	worktreeOnly := worktreeCage(workdir)
 	var external any = "deny"
 	if scratchDir != "" {
@@ -96,13 +98,6 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	perm["question"] = "deny"
 
 	out := map[string]any{"permission": perm}
-	// The workspace skill pack (DESIGN §23.2). opencode merges this file
-	// over the operator's own config, so a `skills` key here replaces
-	// theirs: the operator's own paths are carried over first, and the
-	// pack's join them. With no pack there is no key at all.
-	if len(skillDirs) > 0 {
-		out["skills"] = map[string]any{"paths": append(operatorOpencodeSkillPaths(), skillDirs...)}
-	}
 	if mcpSock != "" && featureID != "" {
 		out["mcp"] = map[string]any{
 			"gummi": map[string]any{
@@ -137,21 +132,58 @@ func worktreeCage(workdir string) map[string]string {
 	}
 }
 
-// operatorOpencodeSkillPaths reads the `skills.paths` of the operator's
-// own opencode config, so a session config that carries the pack does not
-// take theirs away. Only plain JSON is read; a config opencode reads with
-// comments is left as it is, and its paths are then the ones lost.
-func operatorOpencodeSkillPaths() []string {
+// opencodeSkillsContent is the OPENCODE_CONFIG_CONTENT that carries the
+// workspace skill pack (DESIGN §23.2), or "" with no pack skills. It is
+// inline config rather than a key of the session file because opencode
+// loads a repository's own opencode.json(c) after OPENCODE_CONFIG and
+// the inline content after both, and a later `skills` key replaces an
+// earlier one: only the last word keeps the pack. So it carries every
+// path the configs it outranks name — the operator's global ones and the
+// repository's — and the pack's after them.
+func opencodeSkillsContent(workdir string, skillDirs []string) string {
+	if len(skillDirs) == 0 {
+		return ""
+	}
+	var paths []string
+	for _, p := range append(operatorOpencodeSkillPaths(workdir), skillDirs...) {
+		if !slices.Contains(paths, p) {
+			paths = append(paths, p)
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"skills": map[string]any{"paths": paths}})
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// operatorOpencodeSkillPaths reads the `skills.paths` every config
+// opencode loads before the inline content names: the operator's global
+// config.json, opencode.json and opencode.jsonc, then the repository's
+// opencode.json(c) and .opencode/opencode.json(c) at workdir. A
+// repository's relative path is made absolute against workdir, which is
+// where opencode resolves it.
+func operatorOpencodeSkillPaths(workdir string) []string {
+	var files []string
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, ".config")
 		}
-		dir = filepath.Join(home, ".config")
 	}
-	for _, name := range []string{"opencode.json", "config.json"} {
-		raw, err := os.ReadFile(filepath.Join(dir, "opencode", name)) //nolint:gosec // the operator's own config
+	if dir != "" {
+		for _, name := range []string{"config.json", "opencode.json", "opencode.jsonc"} {
+			files = append(files, filepath.Join(dir, "opencode", name))
+		}
+	}
+	if workdir != "" {
+		for _, name := range []string{"opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"} {
+			files = append(files, filepath.Join(workdir, filepath.FromSlash(name)))
+		}
+	}
+	var out []string
+	for _, f := range files {
+		raw, err := os.ReadFile(f) //nolint:gosec // the operator's or the repository's own config
 		if err != nil {
 			continue
 		}
@@ -160,9 +192,63 @@ func operatorOpencodeSkillPaths() []string {
 				Paths []string `json:"paths"`
 			} `json:"skills"`
 		}
-		if json.Unmarshal(raw, &cfg) == nil {
-			return cfg.Skills.Paths
+		if json.Unmarshal(stripJSONC(raw), &cfg) != nil {
+			continue
+		}
+		for _, p := range cfg.Skills.Paths {
+			if workdir != "" && strings.HasPrefix(f, workdir) && !filepath.IsAbs(p) && !strings.HasPrefix(p, "~/") {
+				p = filepath.Join(workdir, p)
+			}
+			out = append(out, p)
 		}
 	}
-	return nil
+	return out
+}
+
+// stripJSONC turns JSON with comments into JSON: // and /* */ comments
+// outside strings are dropped, and so is a comma before a closing } or ].
+func stripJSONC(in []byte) []byte {
+	var out []byte
+	inStr, esc := false, false
+	for i := 0; i < len(in); i++ {
+		c := in[i]
+		switch {
+		case inStr:
+			out = append(out, c)
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+			out = append(out, c)
+		case c == '/' && i+1 < len(in) && in[i+1] == '/':
+			for i < len(in) && in[i] != '\n' {
+				i++
+			}
+			out = append(out, '\n')
+		case c == '/' && i+1 < len(in) && in[i+1] == '*':
+			i += 2
+			for i+1 < len(in) && (in[i] != '*' || in[i+1] != '/') {
+				i++
+			}
+			i++
+		case c == '}' || c == ']':
+			j := len(out) - 1
+			for j >= 0 && (out[j] == ' ' || out[j] == '\t' || out[j] == '\n' || out[j] == '\r') {
+				j--
+			}
+			if j >= 0 && out[j] == ',' {
+				out = append(out[:j], out[j+1:]...)
+			}
+			out = append(out, c)
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
 }

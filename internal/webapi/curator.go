@@ -49,8 +49,12 @@ type CuratorSkill struct {
 	Owner  string `json:"owner"`
 	Pinned bool   `json:"pinned"`
 	// Pinnable is whether pin/unpin applies: a curator's skill.
-	Pinnable bool      `json:"pinnable"`
-	Uses     int       `json:"uses"`
+	Pinnable bool `json:"pinnable"`
+	Uses     int  `json:"uses"`
+	// Views are reads of its SKILL.md as a file, Edits the commits that
+	// changed it since it came into the pack.
+	Views    int       `json:"views,omitempty"`
+	Edits    int       `json:"edits,omitempty"`
 	LastUsed time.Time `json:"lastUsed,omitzero"`
 	Born     time.Time `json:"born,omitzero"`
 	Stale    bool      `json:"stale,omitempty"`

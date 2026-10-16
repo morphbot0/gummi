@@ -25,7 +25,7 @@ func TestCuratorShapes(t *testing.T) {
 			Skills: []CuratorSkill{{
 				Name: "go-scoped-test-run", Description: "Run named Go tests and confirm they ran",
 				Scope: "general", Owner: "curator", Pinnable: true,
-				Uses: 4, LastUsed: curatorAt.Add(-2 * time.Hour), Born: curatorAt.Add(-72 * time.Hour),
+				Uses: 4, Views: 2, Edits: 1, LastUsed: curatorAt.Add(-2 * time.Hour), Born: curatorAt.Add(-72 * time.Hour),
 			}, {
 				Name: "release-notes", Description: "How this team writes release notes",
 				Scope: "gummi", Owner: "person",

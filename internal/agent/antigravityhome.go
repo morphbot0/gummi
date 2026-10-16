@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -313,6 +314,15 @@ func (h *antigravityHome) writeMCPConfig(exe string) error {
 		return fmt.Errorf("antigravity adapter: writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// antigravitySkillDirs is what a card home links: the pack's skills, then
+// the operator's. Links are named by the skill's directory, and where two
+// share a name the first listed is linked, so the pack's wins: it is what
+// every other backend gets (DESIGN §23.2), and an operator skill of the
+// same name shadows it nowhere else.
+func antigravitySkillDirs(pack []string) []string {
+	return append(slices.Clone(pack), operatorAntigravitySkillDirs()...)
 }
 
 // operatorAntigravitySkillDirs lists the operator's own agy user skills —

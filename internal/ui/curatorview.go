@@ -319,6 +319,9 @@ func curatorSkillLine(s *theme.Styles, sk skillpack.Status, sel bool) string {
 	case sk.Uses > 1:
 		uses = fmt.Sprintf("%d uses", sk.Uses)
 	}
+	if sk.Views > 0 {
+		uses += fmt.Sprintf(", %d read", sk.Views)
+	}
 	if !sk.LastUsed.IsZero() {
 		uses += ", last " + sk.LastUsed.Format("Jan 2")
 	}

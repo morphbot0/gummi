@@ -204,9 +204,13 @@ registerView('skills', {
         onsubmit: (ev) => {
           ev.preventDefault()
           clear(err)
-          const b = parseDollars(budget.value)
+          // A field left as it was shown keeps its exact credits: a
+          // budget written by hand may be finer than a cent, and saving
+          // the form unchanged must not be refused for it.
+          const keep = (input, credits) => credits && input.value === dollarsInput(credits) ? { credits } : null
+          const b = keep(budget, c?.budget) || parseDollars(budget.value)
           if (b.err) { err.append(errorBox(b.err, 'skills-form-error-detail')); return }
-          const m = monthly.value.trim() === '' ? { credits: 0 } : parseDollars(monthly.value)
+          const m = monthly.value.trim() === '' ? { credits: 0 } : keep(monthly, c?.monthly) || parseDollars(monthly.value)
           if (m.err) { err.append(errorBox(m.err, 'skills-form-error-detail')); return }
           saveConfig({
             backend: pair.value().backend,
@@ -261,7 +265,7 @@ registerView('skills', {
         h('td', { class: 'sk-name' }, h('b', null, s.name), s.description ? h('div', { class: 'sk-desc' }, s.description) : null),
         h('td', null, s.scope),
         h('td', { testid: `skill-${s.name}-owner` }, OWNER[s.owner] || s.owner),
-        h('td', { class: 'num' }, String(s.uses || 0)),
+        h('td', { class: 'num', title: `invoked ${s.uses || 0}, read ${s.views || 0}, edited ${s.edits || 0} times` }, String((s.uses || 0) + (s.views || 0))),
         h('td', { class: [s.due || s.stale ? 'sk-stale' : 'mute'], testid: `skill-${s.name}-standing` }, standing),
         h('td', { class: 'sk-act' }, pin))
     }

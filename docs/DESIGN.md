@@ -5349,10 +5349,15 @@ the mechanism each already has:
 - **claude**: a generated plugin, `--plugin-dir`, its skills named
   `gummi-skills:<name>`.
 - **copilot**: the SDK's skill directories.
-- **opencode**: its config's skill paths, merged with the operator's
-  rather than replacing them.
+- **opencode**: skill paths in `OPENCODE_CONFIG_CONTENT`, the inline
+  config opencode loads after every file (global, gummi's session file,
+  the repository's own `opencode.json(c)`). A later `skills` key
+  replaces an earlier one, so the inline one carries every path the
+  files it outranks name (`.jsonc` comments and all), then the pack's.
 - **antigravity**: links in the card home's `.gemini/config/skills`,
-  beside the operator's own (§4.1a), told apart by name.
+  beside the operator's own (§4.1a). Links are named by the skill, so
+  where an operator skill shares a pack skill's name, the pack's is
+  linked: it is what every other backend gets.
 
 codex, pi and the headless adapter have no mechanism; a session on one
 of them runs without the pack and `doctor` says so once, not each turn.
@@ -5380,16 +5385,20 @@ costs nothing and runs whether or not the curator is configured:
   over the size bound, a `scope` naming no repository) is refused and
   the refusal goes back to the curator as the tool's answer. The shape
   checks are advisory and travel with the answer too: a body that reads
-  as an incident log rather than a rule, a description that does not
-  say when to use it, a path or symbol named in the body that does not
-  exist on the scoped repository's base branch.
+  as an incident log rather than a rule, a description with no word
+  saying when to use it, and, for a scoped skill, a repository path the
+  body names in backticks that the scoped repository's base branch does
+  not have. Symbols are not checked.
 - **Usage.** gummi counts each skill call as the engine sees it, in
   every session, stage and freeform alike, into
   `.gummi/state/skillusage.json`. It cannot fold the card-event log
   afterwards: a freeform card's calls never reach it (§19.3), and a
-  stage's call details are pruned when the stage ends. A backend's
-  skill invocation counts (`agent/tooldetail.go`), and so does a read of
-  a delivered `SKILL.md` by a backend that reads skills as files.
+  stage's call details are pruned when the stage ends. As Hermes does,
+  it keeps three counts apart: invocations (`agent/tooldetail.go`; a
+  namespaced one only in the pack's own `gummi-skills:` namespace),
+  views (a read of a delivered `SKILL.md` by a backend that reads skills
+  as files) and edits (the pack's own commits to the skill since it
+  came in). Either of the first two resets the timers.
 - **Timers.** A curator skill unused for 14 days is marked stale; for
   30, it is archived — moved under `archive/` in a commit, never
   deleted. A skill younger than its first 14 days is not stale for
@@ -5421,9 +5430,12 @@ into `config.yaml` with the rest of the file and its comments left
 alone, and live at the board's next tick without a restart. A run
 already going finishes on the block it started with. The page is
 refused, before anything is written, what `Load` would refuse and a
-curator that could not run: a schedule that does not compile, or a
+curator that could not run: a schedule that does not compile, a
 backend gummi does not know or that cannot reach its tools
-(`engine.CheckCurator`).
+(`engine.CheckCurator`), or a model the backend's own catalog does not
+offer (`CheckCuratorModel`; a backend that cannot say is not held
+against it). The block is written as text: only its own lines change,
+and the rest of the file keeps its comments and indentation.
 
 **Its budget is its own.** Each run starts with `budget`, capped by
 what is left of `monthly`, and gummi stops the turn when it is spent,
@@ -5452,11 +5464,15 @@ its own tool set on its own MCP endpoint:
   `ask_user` answers), the pack at `published` with each skill's usage
   and age;
 - writes: `skill_write` (create or replace one curator skill) and
-  `skill_archive`. Merging several skills into one is a write and some
-  archives in one call, which gummi commits as one commit.
+  `skill_archive`. Merging several skills into one is one `skill_write`
+  naming the skills it absorbs in `replaces`, which gummi commits, the
+  write and the archives together, as one commit.
 
 gummi does each write: lint, commit to the pack under gummi's identity
-with the run's id in the message, advance `published`. The curator
+with the run's id in the message, advance `published`. Every write to
+the pack (the curator's, the sweep's, a person's pin or revert from
+either face or the CLI) holds `.gummi/skills.lock`, so a CLI beside a
+running board waits its turn rather than interleaving. The curator
 never holds a path to the pack, so how its backend cages file writes
 does not matter, and no other session is offered these tools.
 

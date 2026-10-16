@@ -30,6 +30,10 @@ const PublishedRef = "refs/gummi/published"
 type Pack struct {
 	Dir   string // .gummi/skills
 	Cache string // .gummi/state/skillpacks
+	// Missing, when set, names the paths of paths that the base branch of
+	// the repository a scope names does not have: the grounding lint. A
+	// general skill names no repository and is not checked.
+	Missing func(ctx context.Context, scope string, paths []string) []string
 
 	mu sync.Mutex
 }
@@ -44,6 +48,18 @@ func New(gummiDir, stateDir string) *Pack {
 // home's: a machine with no git identity or a signing key that needs a
 // person can still keep a pack.
 var identity = []string{"-c", "user.name=gummi", "-c", "user.email=gummi@localhost", "-c", "commit.gpgsign=false"}
+
+// lock holds the pack for one write, against this process's other
+// goroutines and against every other gummi process on the workspace (a
+// board and a CLI's pin or revert), and returns its release.
+func (p *Pack) lock() func() {
+	p.mu.Lock()
+	release := flock(p.Dir + ".lock")
+	return func() {
+		release()
+		p.mu.Unlock()
+	}
+}
 
 func (p *Pack) git(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", p.Dir}, args...)...) //nolint:gosec // git, with arguments gummi builds
@@ -65,8 +81,7 @@ func (p *Pack) Exists() bool {
 // published. A .git that is a file (a repository somewhere else) is
 // refused, as an agent home's is.
 func (p *Pack) Ensure(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	defer p.lock()()
 	return p.ensure(ctx)
 }
 
@@ -166,8 +181,7 @@ func (p *Pack) Show(ctx context.Context, rev, name string) (string, error) {
 // skill's directory with it in one commit and publishes. The lint is
 // returned either way; a refused write changes nothing.
 func (p *Pack) Write(ctx context.Context, d Draft, repos []string, message string) (Lint, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	defer p.lock()()
 	if err := p.ensure(ctx); err != nil {
 		return Lint{}, err
 	}
@@ -176,8 +190,21 @@ func (p *Pack) Write(ctx context.Context, d Draft, repos []string, message strin
 		return Lint{}, err
 	}
 	l := LintDraft(d, existing, repos)
+	replaces := slices.Compact(slices.Sorted(slices.Values(d.Replaces)))
+	for _, name := range replaces {
+		if name == d.Name {
+			l.Refusals = append(l.Refusals, fmt.Sprintf("%q cannot replace itself; write it without replaces", name))
+		} else if err := archivable(existing, name); err != nil {
+			l.Refusals = append(l.Refusals, err.Error())
+		}
+	}
 	if !l.OK() {
 		return l, nil
+	}
+	if p.Missing != nil && d.Scope != "" && d.Scope != ScopeGeneral {
+		if missing := p.Missing(ctx, d.Scope, RepoPaths(d.Body)); len(missing) > 0 {
+			l.Warnings = append(l.Warnings, fmt.Sprintf("the %s repository's base branch has no %s; check the path is right", d.Scope, strings.Join(missing, ", ")))
+		}
 	}
 	dir := filepath.Join(p.Dir, d.Name)
 	if err := os.RemoveAll(dir); err != nil {
@@ -204,18 +231,58 @@ func (p *Pack) Write(ctx context.Context, d Draft, repos []string, message strin
 			return l, err
 		}
 	}
-	if err := p.commit(ctx, message, d.Name); err != nil {
-		p.restore(ctx, d.Name)
+	paths, err := p.moveToArchive(ctx, replaces)
+	paths = append(paths, d.Name)
+	if err != nil {
+		p.restore(ctx, paths...)
+		return l, err
+	}
+	if err := p.commit(ctx, message, paths...); err != nil {
+		p.restore(ctx, paths...)
 		return l, err
 	}
 	return l, nil
 }
 
+// archivable is why the curator may not archive name, or nil.
+func archivable(existing map[string]Meta, name string) error {
+	m, ok := existing[name]
+	switch {
+	case !ok:
+		return fmt.Errorf("no skill %q to archive", name)
+	case !m.Curated():
+		return fmt.Errorf("%q is a person's or pinned skill; the curator never archives one", name)
+	}
+	return nil
+}
+
+// moveToArchive stages each of names moved under archive/ and returns
+// every path it touched, the ones moved so far when it fails.
+func (p *Pack) moveToArchive(ctx context.Context, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	if err := os.MkdirAll(filepath.Join(p.Dir, archiveDir), 0o755); err != nil { //nolint:gosec // read by sessions
+		return nil, err
+	}
+	var paths []string
+	for _, name := range names {
+		dest := filepath.Join(archiveDir, name)
+		if _, err := os.Stat(filepath.Join(p.Dir, dest)); err == nil {
+			dest = filepath.Join(archiveDir, name+"-"+strconv.FormatInt(time.Now().Unix(), 10))
+		}
+		paths = append(paths, name, dest)
+		if _, err := p.git(ctx, "mv", name, dest); err != nil {
+			return paths, err
+		}
+	}
+	return paths, nil
+}
+
 // Archive moves curator skills under archive/ in one commit and
 // publishes. A person's or a pinned skill is refused; nothing is deleted.
 func (p *Pack) Archive(ctx context.Context, names []string, message string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	defer p.lock()()
 	if err := p.ensure(ctx); err != nil {
 		return err
 	}
@@ -227,28 +294,14 @@ func (p *Pack) Archive(ctx context.Context, names []string, message string) erro
 	// pack as it was, not with the names before it staged as moved.
 	names = slices.Compact(slices.Sorted(slices.Values(names)))
 	for _, name := range names {
-		m, ok := existing[name]
-		switch {
-		case !ok:
-			return fmt.Errorf("no skill %q to archive", name)
-		case !m.Curated():
-			return fmt.Errorf("%q is a person's or pinned skill; the curator never archives one", name)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(p.Dir, archiveDir), 0o755); err != nil { //nolint:gosec // read by sessions
-		return err
-	}
-	var paths []string
-	for _, name := range names {
-		dest := filepath.Join(archiveDir, name)
-		if _, err := os.Stat(filepath.Join(p.Dir, dest)); err == nil {
-			dest = filepath.Join(archiveDir, name+"-"+strconv.FormatInt(time.Now().Unix(), 10))
-		}
-		paths = append(paths, name, dest)
-		if _, err := p.git(ctx, "mv", name, dest); err != nil {
-			p.restore(ctx, paths...)
+		if err := archivable(existing, name); err != nil {
 			return err
 		}
+	}
+	paths, err := p.moveToArchive(ctx, names)
+	if err != nil {
+		p.restore(ctx, paths...)
+		return err
 	}
 	if err := p.commit(ctx, message, paths...); err != nil {
 		p.restore(ctx, paths...)
@@ -332,8 +385,7 @@ func (p *Pack) CommitsSince(ctx context.Context, from, prefix string) ([]string,
 // publishes. Reverting a run a later commit built on can conflict; the
 // pack is then left as it was.
 func (p *Pack) RevertCommits(ctx context.Context, commits []string, message string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	defer p.lock()()
 	if len(commits) == 0 {
 		return errors.New("nothing to revert")
 	}
@@ -382,8 +434,7 @@ func (p *Pack) laterTouching(ctx context.Context, commits []string) string {
 // Pin marks a skill pinned (or not), in a commit of the person's, and
 // publishes: the curator and the timers leave a pinned skill alone.
 func (p *Pack) Pin(ctx context.Context, name string, pinned bool) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	defer p.lock()()
 	path := filepath.Join(p.Dir, name, "SKILL.md")
 	md, err := os.ReadFile(path)
 	if err != nil || !nameRE.MatchString(name) {
@@ -482,23 +533,23 @@ func (p *Pack) writePins(pins map[string]revPin) error {
 // a new one is given the published revision, which it then keeps. "" is
 // a pack that has not been made.
 func (p *Pack) SessionDir(ctx context.Context, key, card string, continuing bool) (dir, rev string, err error) {
-	p.mu.Lock()
+	unlock := p.lock()
 	pins := p.readPins()
 	pin, ok := pins[key]
 	if !continuing || !ok || pin.Rev == "" {
 		if rev = p.Published(ctx); rev == "" {
-			p.mu.Unlock()
+			unlock()
 			return "", "", nil
 		}
 		pins[key] = revPin{Rev: rev, Card: card, At: time.Now()}
 		if err := p.writePins(pins); err != nil {
-			p.mu.Unlock()
+			unlock()
 			return "", "", err
 		}
 	} else {
 		rev = pin.Rev
 	}
-	p.mu.Unlock()
+	unlock()
 	dir, err = p.Materialize(ctx, rev)
 	return dir, rev, err
 }
@@ -508,8 +559,7 @@ func (p *Pack) SessionDir(ctx context.Context, key, card string, continuing bool
 // not published: a revision stays on disk exactly while a conversation
 // may still read it.
 func (p *Pack) Release(ctx context.Context, live func(card string) bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	defer p.lock()()
 	pins := p.readPins()
 	changed := false
 	for key, pin := range pins {
@@ -524,12 +574,27 @@ func (p *Pack) Release(ctx context.Context, live func(card string) bool) {
 	p.prune(ctx, pins)
 }
 
+// Edits counts, for each skill at HEAD, the commits that changed its
+// SKILL.md since it last came into the pack (Born), the add itself left out.
+func (p *Pack) Edits(ctx context.Context, born map[string]time.Time) map[string]int {
+	edits := map[string]int{}
+	for name, at := range born {
+		out, err := p.git(ctx, "log", "--no-renames", "--format=%ct", "--since="+strconv.FormatInt(at.Unix(), 10), "--", name+"/SKILL.md")
+		if err != nil {
+			continue
+		}
+		if n := len(strings.Fields(out)) - 1; n > 0 {
+			edits[name] = n
+		}
+	}
+	return edits
+}
+
 // Materialize extracts rev into Cache/<rev> once and returns that
 // directory. Revisions are immutable, so a session that started on one
 // keeps reading it while a curator run publishes the next.
 func (p *Pack) Materialize(ctx context.Context, rev string) (string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	defer p.lock()()
 	dest := filepath.Join(p.Cache, rev)
 	if _, err := os.Stat(dest); err == nil {
 		return dest, nil

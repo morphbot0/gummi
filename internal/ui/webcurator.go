@@ -91,7 +91,7 @@ func webCuratorSkill(s skillpack.Status) webapi.CuratorSkill {
 	return webapi.CuratorSkill{
 		Name: s.Name, Description: s.Description, Scope: scope,
 		Owner: owner, Pinned: s.Pinned, Pinnable: curators,
-		Uses: s.Uses, LastUsed: s.LastUsed, Born: s.Born, Stale: s.Stale, Due: s.Due,
+		Uses: s.Uses, Views: s.Views, Edits: s.Edits, LastUsed: s.LastUsed, Born: s.Born, Stale: s.Stale, Due: s.Due,
 	}
 }
 
@@ -195,6 +195,17 @@ func (b *Bridge) SetCurator(ctx context.Context, req *webapi.CuratorConfig) (web
 	var c *config.Curator
 	if req != nil {
 		c = &config.Curator{Backend: req.Backend, Model: req.Model, Schedule: req.Schedule, Budget: req.Budget, Monthly: req.Monthly}
+	}
+	// The model is checked against what the backend offers off the board's
+	// loop: asking a backend for its catalog can take seconds.
+	var eng *engine.Engine
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { eng = m.engine; return nil }); err != nil {
+		return webapi.Curator{}, err
+	}
+	if eng != nil {
+		if err := eng.CheckCuratorModel(ctx, c); err != nil {
+			return webapi.Curator{}, webErr(WebBadRequest, "%s", err.Error())
+		}
 	}
 	var refused error
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd { refused = m.setCurator(c); return nil }); err != nil {

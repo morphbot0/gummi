@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -34,32 +35,35 @@ func TestClaudeSkillPluginLinksEachSkill(t *testing.T) {
 	}
 }
 
+// The pack reaches opencode as inline config, which opencode reads last,
+// carrying the operator's global paths (a commented opencode.jsonc too)
+// and the repository's own before the pack's: a later skills key replaces
+// an earlier one, so every path it outranks has to be in it.
 func TestOpencodeSkillsKeepTheOperatorsPaths(t *testing.T) {
 	cfgHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfgHome)
 	if err := os.MkdirAll(filepath.Join(cfgHome, "opencode"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfgHome, "opencode", "opencode.json"), []byte(`{"skills":{"paths":["/mine"]}}`), 0o644); err != nil {
+	jsonc := "{\n  // mine\n  \"skills\": {\"paths\": [\"/mine\", /* old */ \"/x//y\",],},\n}\n"
+	if err := os.WriteFile(filepath.Join(cfgHome, "opencode", "opencode.jsonc"), []byte(jsonc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := buildOpencodeConfig("/wt", "", "", "/bin/gummi", nil, false, "", PermissionAllowAll, "/pack/make-test")
-	if err != nil {
+	wt := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wt, "opencode.json"), []byte(`{"skills":{"paths":["skills"]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var out struct {
 		Skills struct{ Paths []string } `json:"skills"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := json.Unmarshal([]byte(opencodeSkillsContent(wt, []string{"/pack/make-test"})), &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Skills.Paths) != 2 || out.Skills.Paths[0] != "/mine" || out.Skills.Paths[1] != "/pack/make-test" {
-		t.Errorf("skills.paths = %v", out.Skills.Paths)
+	want := []string{"/mine", "/x//y", filepath.Join(wt, "skills"), "/pack/make-test"}
+	if !slices.Equal(out.Skills.Paths, want) {
+		t.Errorf("skills.paths = %v, want %v", out.Skills.Paths, want)
 	}
-	raw, _ = buildOpencodeConfig("/wt", "", "", "/bin/gummi", nil, false, "", PermissionAllowAll)
-	var bare map[string]any
-	_ = json.Unmarshal(raw, &bare)
-	if _, ok := bare["skills"]; ok {
-		t.Error("a session with no pack skills still wrote a skills key over the operator's")
+	if got := opencodeSkillsContent(wt, nil); got != "" {
+		t.Errorf("a session with no pack skills still sets inline skills: %s", got)
 	}
 }

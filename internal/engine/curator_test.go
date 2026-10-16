@@ -16,6 +16,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // curatorFake answers the curator's one session with script's tool calls,
@@ -242,23 +243,27 @@ func TestSkillUsageCountsAFreeformSessionsCalls(t *testing.T) {
 	}
 	waitFreeformIdle(t, ff)
 	u := e.SkillUsage(ctx)
-	if u["make-test"].Count != 2 || len(u) != 1 {
-		t.Fatalf("usage = %+v, want make-test twice and nothing else", u)
+	if u["make-test"].Count != 1 || u["make-test"].Views != 1 || len(u) != 1 {
+		t.Fatalf("usage = %+v, want make-test invoked once and read once, nothing else", u)
 	}
 }
 
 func TestSkillCalled(t *testing.T) {
-	for _, c := range []struct{ tool, detail, want string }{
-		{"Skill", "gummi-skills:make-test", "make-test"},
-		{"skill", "make-test", "make-test"},
-		{"view", "/w/.gummi/state/skillpacks/0123abcd/make-test/SKILL.md", "make-test"},
-		{"Read", "/tmp/gummi-claude-skills-1/gummi-skills/skills/make-test/SKILL.md", "make-test"},
-		{"read_file", ".gemini/config/skills/make-test/SKILL.md", "make-test"},
-		{"Read", "docs/make-test/SKILL.md", ""},
-		{"Bash", "make test", ""},
+	for _, c := range []struct {
+		tool, detail, want string
+		view               bool
+	}{
+		{"Skill", "gummi-skills:make-test", "make-test", false},
+		{"skill", "make-test", "make-test", false},
+		{"Skill", "other-plugin:make-test", "", false},
+		{"view", "/w/.gummi/state/skillpacks/0123abcd/make-test/SKILL.md", "make-test", true},
+		{"Read", "/tmp/gummi-claude-skills-1/gummi-skills/skills/make-test/SKILL.md", "make-test", true},
+		{"read_file", ".gemini/config/skills/make-test/SKILL.md", "make-test", true},
+		{"Read", "docs/make-test/SKILL.md", "", false},
+		{"Bash", "make test", "", false},
 	} {
-		if got := skillCalled(c.tool, c.detail); got != c.want {
-			t.Errorf("skillCalled(%q, %q) = %q, want %q", c.tool, c.detail, got, c.want)
+		if got, view := skillCalled(c.tool, c.detail); got != c.want || view != c.view {
+			t.Errorf("skillCalled(%q, %q) = %q %v, want %q %v", c.tool, c.detail, got, view, c.want, c.view)
 		}
 	}
 }
@@ -551,5 +556,43 @@ func TestCuratorOffersEveryCardItHasNotRead(t *testing.T) {
 	}
 	if got := offered(); !slices.Equal(got, []string{"FF-2", "FF-3"}) {
 		t.Fatalf("a card written after its read is not offered again: %v", got)
+	}
+}
+
+// A curator model its backend does not offer is refused before it is
+// saved; one it offers, no model, and a backend that cannot say pass.
+func TestCheckCuratorModel(t *testing.T) {
+	ctx := context.Background()
+	ag := agent.NewFake("")
+	ag.Models = []string{"m-small", "m-large"}
+	e := curatorEngine(t, ag, nil)
+	if err := e.CheckCuratorModel(ctx, &config.Curator{Backend: ag.Name(), Model: "m-tiny", Budget: 100}); err == nil {
+		t.Error("a model the backend does not offer was accepted")
+	}
+	for _, model := range []string{"m-large", ""} {
+		if err := e.CheckCuratorModel(ctx, &config.Curator{Backend: ag.Name(), Model: model, Budget: 100}); err != nil {
+			t.Errorf("model %q refused: %v", model, err)
+		}
+	}
+	quiet := agent.NewFake("")
+	e = curatorEngine(t, quiet, nil)
+	if err := e.CheckCuratorModel(ctx, &config.Curator{Backend: quiet.Name(), Model: "anything", Budget: 100}); err != nil {
+		t.Errorf("a backend that cannot say refused a model: %v", err)
+	}
+}
+
+// The grounding lint reads the scoped repository's base branch.
+func TestMissingOnBase(t *testing.T) {
+	ctx := context.Background()
+	ws, store, _ := newRepo(t)
+	pool, err := worktree.NewPool(ctx, ws.Root, ws.Root, nil, store, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := New(Config{Agents: singleAgent(agent.NewFake("")), Store: store, Pool: pool, Workspace: ws})
+	t.Cleanup(func() { e.Close() })
+	got := e.missingOnBase(ctx, skillpack.ScopeDefault, []string{"README.md", "nope/x.go"})
+	if !slices.Equal(got, []string{"nope/x.go"}) {
+		t.Errorf("missing = %v, want only nope/x.go", got)
 	}
 }

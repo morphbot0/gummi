@@ -141,7 +141,7 @@ func standingLine(s skillpack.Status) string {
 	default:
 		parts = append(parts, "curator")
 	}
-	parts = append(parts, fmt.Sprintf("used %d", s.Uses))
+	parts = append(parts, fmt.Sprintf("used %d, read %d, edited %d", s.Uses, s.Views, s.Edits))
 	if s.Due {
 		parts = append(parts, "archived at the next sweep")
 	} else if s.Stale {
