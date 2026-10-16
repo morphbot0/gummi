@@ -23,6 +23,26 @@ type Curator struct {
 	Skills    []CuratorSkill `json:"skills"`
 	// Runs is the curator's ledger, newest first.
 	Runs []CuratorRun `json:"runs"`
+	// Staged is every change card sessions staged for the curator to
+	// review (§23.5), pending and rejected, by card then skill.
+	Staged []CuratorStaged `json:"staged"`
+}
+
+// CuratorStaged is one change a card's session staged: only that card's
+// sessions see it until the curator reviews it. A rejected one stays,
+// with the curator's reason, and reaches no session.
+type CuratorStaged struct {
+	Card string `json:"card"`
+	// CardName is the card's title, quoted and cut short, the way a person
+	// reads a card; empty when the card is gone.
+	CardName string `json:"cardName,omitempty"`
+	Name     string `json:"name"`
+	Op       string `json:"op"`     // "write" or "archive"
+	Status   string `json:"status"` // "pending" or "rejected"
+	// Why is an archive's reason, Verdict the curator's for a rejection.
+	Why     string    `json:"why,omitempty"`
+	Verdict string    `json:"verdict,omitempty"`
+	At      time.Time `json:"at,omitzero"`
 }
 
 // CuratorConfig is the workspace's curator block: the agent it runs on,
@@ -75,6 +95,10 @@ type CuratorRun struct {
 	Outcome  string   `json:"outcome"`
 	Written  []string `json:"written,omitempty"`
 	Archived []string `json:"archived,omitempty"`
+	// Accepted and Rejected are the staged changes the run reviewed, as
+	// card/name; an accepted one is in Written or Archived too.
+	Accepted []string `json:"accepted,omitempty"`
+	Rejected []string `json:"rejected,omitempty"`
 	Detail   string   `json:"detail,omitempty"`
 	// Digest is what the run did in one line, without the shell's undo
 	// hint: the page offers its own revert.

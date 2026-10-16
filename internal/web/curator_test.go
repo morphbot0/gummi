@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/skillpack"
 )
@@ -32,6 +33,15 @@ type curatorBody struct {
 		Revertable bool   `json:"revertable"`
 		Reverted   bool   `json:"reverted"`
 	} `json:"runs"`
+	Staged []struct {
+		Card     string `json:"card"`
+		CardName string `json:"cardName"`
+		Name     string `json:"name"`
+		Op       string `json:"op"`
+		Status   string `json:"status"`
+		Why      string `json:"why"`
+		Verdict  string `json:"verdict"`
+	} `json:"staged"`
 }
 
 // curatorWrote stands in for a curator run: one skill written to the
@@ -124,6 +134,47 @@ func TestCuratorRoutes(t *testing.T) {
 	}
 	if code := b.call(http.MethodPost, "/api/curator/runs/cur-1/revert", struct{}{}, &out); code != http.StatusConflict {
 		t.Errorf("a second revert = %d %v, want 409", code, out)
+	}
+}
+
+// TestCuratorRouteStaged: what card sessions staged reaches the page by
+// card title, a pending change with its reason and a rejected one with
+// the curator's.
+func TestCuratorRouteStaged(t *testing.T) {
+	b := newBoardHarness(t)
+	ctx := context.Background()
+	curatorWrote(t, b, "cur-1", "scoped-tests")
+	f := b.card(7, "rate limits", domain.StageImplement)
+	pack := b.eng.SkillPack()
+	if l, err := pack.StageWrite(ctx, string(f.ID), skillpack.Draft{
+		Name: "always-sleep", Description: "Sleep before a flaky assertion", Body: "Sleep a second first.\n",
+	}, nil); err != nil || !l.OK() {
+		t.Fatalf("stage write: %v %v", err, l.Refusals)
+	}
+	if err := pack.Reject(string(f.ID), "always-sleep", "a sleep hides the race"); err != nil {
+		t.Fatal(err)
+	}
+	if err := pack.StageArchive(ctx, string(f.ID), "scoped-tests", "the Makefile counts them now"); err != nil {
+		t.Fatal(err)
+	}
+
+	var got curatorBody
+	b.must(http.StatusOK, http.MethodGet, "/api/curator", nil, &got)
+	if len(got.Staged) != 2 {
+		t.Fatalf("staged = %+v; want the rejected write and the pending archive", got.Staged)
+	}
+	byName := map[string]int{}
+	for i, c := range got.Staged {
+		byName[c.Name] = i
+		if c.Card != string(f.ID) || c.CardName != f.Name() {
+			t.Errorf("staged %s names its card %q %q; want %s %q", c.Name, c.Card, c.CardName, f.ID, f.Name())
+		}
+	}
+	if c := got.Staged[byName["always-sleep"]]; c.Op != "write" || c.Status != "rejected" || c.Verdict != "a sleep hides the race" {
+		t.Errorf("the rejected write reads %+v", c)
+	}
+	if c := got.Staged[byName["scoped-tests"]]; c.Op != "archive" || c.Status != "pending" || c.Why != "the Makefile counts them now" || c.Verdict != "" {
+		t.Errorf("the pending archive reads %+v", c)
 	}
 }
 

@@ -54,12 +54,19 @@ func webCurator(v engine.CuratorView) webapi.Curator {
 		MonthSpent: v.MonthSpent, PackDir: v.PackDir, Published: v.Published,
 		Skills: make([]webapi.CuratorSkill, 0, len(v.Skills)),
 		Runs:   make([]webapi.CuratorRun, 0, len(v.Runs)),
+		Staged: make([]webapi.CuratorStaged, 0, len(v.Staged)),
 	}
 	for _, s := range v.Skills {
 		out.Skills = append(out.Skills, webCuratorSkill(s))
 	}
 	for _, r := range v.Runs {
 		out.Runs = append(out.Runs, webCuratorRun(r))
+	}
+	for _, c := range v.Staged {
+		out.Staged = append(out.Staged, webapi.CuratorStaged{
+			Card: c.Card, CardName: c.CardName, Name: c.Name, Op: c.Op, Status: c.Status,
+			Why: c.Why, Verdict: c.Verdict, At: c.At,
+		})
 	}
 	return out
 }
@@ -99,7 +106,7 @@ func webCuratorRun(r engine.CuratorRun) webapi.CuratorRun {
 	return webapi.CuratorRun{
 		ID: r.ID, Why: r.Why, Start: r.Start, End: r.End,
 		Backend: r.Backend, Model: r.Model, Credits: r.Credits, Outcome: r.Outcome,
-		Written: r.Written, Archived: r.Archived, Detail: r.Detail,
+		Written: r.Written, Archived: r.Archived, Accepted: r.Accepted, Rejected: r.Rejected, Detail: r.Detail,
 		Digest: r.Summary(), Revertable: r.Revertable(), Reverted: r.Reverted,
 	}
 }

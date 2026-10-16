@@ -50,10 +50,11 @@ registerView('skills', {
     const head = h('div', { class: 'sk-head' })
     const runs = h('div', { class: 'sk-sect' })
     const skills = h('div', { class: 'sk-sect' })
+    const staged = h('div', { class: 'sk-sect' })
     body.append(head,
       h('p', { class: 'vnote' },
         'The curator writes skills every session starts with; nothing waits on a person. Pin a curator skill to keep it as it is, or revert a run that changed the pack — the next session starts without it.'),
-      skills, runs)
+      skills, staged, runs)
 
     const load = refetcher(async () => {
       try {
@@ -86,12 +87,14 @@ registerView('skills', {
     function draw () {
       clear(head)
       clear(skills)
+      clear(staged)
       clear(runs)
       if (v.err) { head.append(errorBox(v.err, 'skills-error')); return }
       const d = v.data
       if (!d) { head.append(h('div', { class: 'vbusy' }, h('span', { class: 'spinner' }), 'Reading the skill pack…')); return }
       drawHead(d)
       drawSkills(d)
+      drawStaged(d)
       drawRuns(d)
     }
 
@@ -270,6 +273,44 @@ registerView('skills', {
         h('td', { class: 'sk-act' }, pin))
     }
 
+    // drawStaged lists what card sessions staged for the curator (§23.5):
+    // only that card's sessions see a pending change until the curator
+    // reviews it; a rejected one stays with the curator's reason.
+    function drawStaged (d) {
+      const rows = d.staged || []
+      const pending = rows.filter(c => c.status === 'pending')
+      const rejected = rows.filter(c => c.status === 'rejected')
+      staged.append(h('h3', { class: 'shead' }, 'Staged by sessions',
+        h('span', { testid: 'staged-count' }, `${pending.length} pending · ${rejected.length} rejected`)))
+      if (!rows.length) {
+        staged.append(h('div', { class: 'empty', testid: 'staged-empty' },
+          h('b', null, 'Nothing staged'),
+          'A session stages a skill it wrote or one it would archive; only its own card sees it until the curator reviews it.'))
+        return
+      }
+      const list = h('ul', { class: 'sk-staged', testid: 'staged' })
+      for (const c of [...pending, ...rejected]) {
+        list.append(h('li', { testid: `staged-${c.card}-${c.name}`, data: { status: c.status } },
+          h('div', { class: 'sk-staged-head' },
+            h('span', { class: 'sk-staged-op' }, c.op === 'archive' ? 'archive' : 'write'),
+            h('b', { class: 'sk-staged-name' }, c.name),
+            h('span', { class: 'mute', testid: `staged-${c.card}-${c.name}-card` }, `from ${c.cardName || c.card}`),
+            c.at ? h('span', { class: 'mute' }, clock(c.at)) : null,
+            h('span', { class: 'grow' }),
+            c.status === 'rejected'
+              ? h('span', { class: 't-err' }, 'rejected')
+              : h('span', { class: 't-warn' }, 'waiting for the curator')),
+          c.why ? h('div', { class: 'sk-staged-why' }, c.why) : null,
+          c.status === 'rejected' && c.verdict
+            ? h('div', { class: 'sk-staged-verdict', testid: `staged-${c.card}-${c.name}-verdict` }, `the curator: ${c.verdict}`)
+            : null))
+      }
+      staged.append(list)
+    }
+
+    // skillOf is a run's reviewed change, card/name, as its skill's name.
+    const skillOf = (ref) => ref.slice(ref.indexOf('/') + 1)
+
     function drawRuns (d) {
       const rows = d.runs || []
       runs.append(h('h3', { class: 'shead' }, 'Curator runs', h('span', null, plural(rows.length, 'run'))))
@@ -292,7 +333,12 @@ registerView('skills', {
                   onclick: () => { v.asking = { what: 'revert', id: r.id }; draw() }
                 }, 'Revert')
               : r.reverted ? h('span', { class: 'mute', testid: `curator-run-${r.id}-reverted` }, 'reverted') : null),
-          h('div', { class: 'sk-digest', testid: `curator-run-${r.id}-digest` }, r.digest))
+          h('div', { class: 'sk-digest', testid: `curator-run-${r.id}-digest` }, r.digest),
+          r.accepted?.length || r.rejected?.length
+            ? h('div', { class: 'sk-reviewed mute', testid: `curator-run-${r.id}-reviewed` },
+                [r.accepted?.length && `took ${r.accepted.map(skillOf).join(', ')}`,
+                  r.rejected?.length && `rejected ${r.rejected.map(skillOf).join(', ')}`].filter(Boolean).join(' · '))
+            : null)
         if (v.asking?.what === 'revert' && v.asking.id === r.id) {
           li.append(confirmStrip({
             question: 'Revert this curator run?',

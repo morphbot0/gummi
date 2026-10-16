@@ -15,9 +15,9 @@ import (
 )
 
 // curatorFixture is a configured curator mid-month with three skills —
-// a curator's that is due, a pinned one and a person's — and three runs
+// a curator's that is due, a pinned one and a person's — three runs
 // newest first: one that changed the pack, one that changed nothing and
-// one that failed.
+// one that failed — and two staged changes, one rejected and one pending.
 func curatorFixture() engine.CuratorView {
 	return engine.CuratorView{
 		Config: &config.Curator{
@@ -52,6 +52,14 @@ func curatorFixture() engine.CuratorView {
 			},
 			{ID: "CR-002", Start: fixedTime.Add(-26 * time.Hour), Credits: 0.4, Outcome: engine.CuratorDone, Before: "aaa", After: "aaa"},
 			{ID: "CR-001", Start: fixedTime.Add(-50 * time.Hour), Outcome: engine.CuratorFailed, Detail: "the backend would not start"},
+		},
+		Staged: []engine.StagedChange{
+			{Card: "FD-007", CardName: `"rate limits"`, Staged: skillpack.Staged{
+				Name: "always-sleep", Op: skillpack.OpWrite, Status: skillpack.StatusRejected, Verdict: "a sleep hides the race",
+			}},
+			{Card: "FF-021", CardName: `"tidy the lint config"`, Staged: skillpack.Staged{
+				Name: "old-flag", Op: skillpack.OpArchive, Status: skillpack.StatusPending, Why: "the flag is gone in v2",
+			}},
 		},
 	}
 }

@@ -9,7 +9,9 @@ package ui
 // nothing more — run the curator now, pin a curator skill so the curator
 // leaves it alone, and revert a run that changed the pack (which asks
 // first). Every read and write runs off the update loop and reports back
-// as a board notice, the way the schedules view does.
+// as a board notice, the way the schedules view does. What card sessions
+// staged for the curator to review (§23.5) is shown too, read-only: the
+// curator decides it, not the person.
 
 import (
 	"context"
@@ -247,6 +249,15 @@ func (d *curatorDialog) View(s *theme.Styles, w, _ int) string {
 	}
 	b.WriteString("\n")
 
+	line(&b, s.Subtle.Render("staged by sessions"))
+	if len(d.view.Staged) == 0 {
+		line(&b, "  "+s.Faint.Render("none — a session stages what it learned, and only its card sees it until the curator reviews it"))
+	}
+	for _, c := range curatorStagedOrder(d.view.Staged) {
+		line(&b, "  "+curatorStagedLine(s, c))
+	}
+	b.WriteString("\n")
+
 	line(&b, s.Subtle.Render("runs"))
 	if len(d.view.Runs) == 0 {
 		line(&b, "  "+s.Faint.Render("none yet"))
@@ -332,6 +343,46 @@ func curatorSkillLine(s *theme.Styles, sk skillpack.Status, sel bool) string {
 		out += "  " + s.Warning.Render("due — archived on the next sweep")
 	case sk.Stale:
 		out += "  " + s.Warning.Render("stale")
+	}
+	return out
+}
+
+// curatorStagedOrder puts the changes that still wait for the curator
+// before the ones it rejected, keeping the engine's order within each.
+func curatorStagedOrder(all []engine.StagedChange) []engine.StagedChange {
+	out := make([]engine.StagedChange, 0, len(all))
+	for _, c := range all {
+		if c.Pending() {
+			out = append(out, c)
+		}
+	}
+	for _, c := range all {
+		if !c.Pending() {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// curatorStagedLine is one staged change: what it does to which skill,
+// the card whose session staged it, and where it stands — waiting with
+// its reason, or rejected with the curator's.
+func curatorStagedLine(s *theme.Styles, c engine.StagedChange) string {
+	card := c.CardName
+	if card == "" {
+		card = c.Card
+	}
+	out := s.Base.Render(sanitize(c.Op)+" ") + s.Subtle.Render(sanitize(c.Name)) + "  " + s.Faint.Render("from "+sanitize(card))
+	if c.Pending() {
+		out += "  " + s.Warning.Render("waiting for the curator")
+		if c.Why != "" {
+			out += s.Faint.Render(" — " + sanitize(c.Why))
+		}
+		return out
+	}
+	out += "  " + s.Error.Render("rejected")
+	if c.Verdict != "" {
+		out += s.Faint.Render(" — " + sanitize(c.Verdict))
 	}
 	return out
 }

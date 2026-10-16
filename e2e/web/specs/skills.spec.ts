@@ -7,8 +7,9 @@ import type { Workspace } from '../fixtures/workspace';
 // The skills view against a real `gummi web`: a pack seeded the way a
 // curator run leaves it — one curator skill written in a commit of its
 // own, published, and the ledger row naming the pack's tip before and
-// after. A person pins and unpins the skill and reverts the run; with no
-// curator configured, Run now is off. A person sets the curator up from the
+// after, and a card session's staged changes beside it. A person pins
+// and unpins the skill and reverts the run; with no curator configured,
+// Run now is off. A person sets the curator up from the
 // view, changes it, and turns it off again.
 
 async function seedCuratorRun(ws: Workspace) {
@@ -35,6 +36,14 @@ async function seedCuratorRun(ws: Workspace) {
   };
   await fs.promises.mkdir(path.join(ws.repo, '.gummi', 'state'), { recursive: true });
   await fs.promises.writeFile(path.join(ws.repo, '.gummi', 'state', 'curator.jsonl'), JSON.stringify(row) + '\n');
+  // a card session's staged changes, as skill_manage leaves them: one
+  // waiting for the curator and one it rejected with its reason
+  const stage = path.join(ws.repo, '.gummi', 'state', 'skillstage', 'FF-900');
+  await fs.promises.mkdir(stage, { recursive: true });
+  await fs.promises.writeFile(path.join(stage, 'stage.json'), JSON.stringify([
+    { name: 'scoped-tests', op: 'archive', base: after, at: now.toISOString(), why: 'the Makefile counts them now', status: 'pending' },
+    { name: 'always-sleep', op: 'write', base: after, at: now.toISOString(), status: 'rejected', verdict: 'a sleep hides the race' },
+  ]));
 }
 
 test.use({ seed: { run: seedCuratorRun } });
@@ -58,6 +67,14 @@ test('a curator skill is pinned and unpinned, and its run reverted', async ({ pa
   await expect(skill).toHaveAttribute('data-owner', 'curator');
   await expect(page.getByTestId('skill-scoped-tests-owner')).toHaveText('curator');
   await expect(page.getByTestId('curator-run-cur-e2e-digest')).toContainText('wrote scoped-tests');
+
+  // what a session staged is shown, read-only: pending with its reason,
+  // rejected with the curator's
+  await expect(page.getByTestId('staged-count')).toHaveText('1 pending · 1 rejected');
+  await expect(page.getByTestId('staged-FF-900-scoped-tests')).toHaveAttribute('data-status', 'pending');
+  await expect(page.getByTestId('staged-FF-900-scoped-tests')).toContainText('the Makefile counts them now');
+  await expect(page.getByTestId('staged-FF-900-always-sleep')).toHaveAttribute('data-status', 'rejected');
+  await expect(page.getByTestId('staged-FF-900-always-sleep-verdict')).toContainText('a sleep hides the race');
 
   // pin, then unpin
   await page.getByTestId('skill-scoped-tests-pin').click();

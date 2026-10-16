@@ -5591,6 +5591,9 @@ Hermes's default, and the safety it relies on is Hermes's too:
   landed while it ran) or one skill, from either face or `gummi skills revert`; `published`
   moves with the commit, so the next session starts without it. A pin
   holds a skill the curator would otherwise rewrite or archive.
+  Reverting a run that accepted a staged change does not stage it again:
+  the person's revert is the rejection, and the card's own copy left
+  its stage when it was accepted.
 - **A digest, not a gate.** After each run that changed something, the
   board raises a notice listing what was written and archived and what
   it cost, with revert beside each line. Nothing waits on it.
@@ -5608,7 +5611,9 @@ at its work. It cannot remove the pass.
 person reverts a run and pins a skill from the TUI's skills view (`E`),
 the web page's Skills view, or `gummi curator revert|pin|unpin`; all
 three call the same engine acts over one read model
-(`engine.CuratorView`). The stats tab draws the curator as its own
+(`engine.CuratorView`). Both skills views also list what sessions
+staged (§23.5): each change's card, pending ones with their reason and
+rejected ones with the curator's, read-only. The stats tab draws the curator as its own
 lane and money line, outside the card figures and outside the clock
 and concurrency figures, which measure cards. `doctor` reports the
 pack, the curator and every routed backend that runs without the pack.
@@ -5624,9 +5629,6 @@ not a spec's reviewer threads.
   moves into a repository first.
 - **Delivery beyond claude, copilot and opencode** (§23.2). No skill
   index in the hints and no MCP fallback for the others.
-- **Staged changes in the faces.** The skills views list the pack and
-  the curator's runs; a card's staged changes and their verdicts are
-  read only through `skill_manage list` and the curator's inputs.
 - **Validation beyond Hermes's.** Usage and lint are the signals.
   Checking that a skill's lesson stops recurring, holding it back from
   a random share of sessions, or replaying a session with and without
