@@ -430,11 +430,13 @@ by name, rather than loading and quietly losing them.
 
 *Amended for the skill pack (§23.2).* gummi now adds one thing: the
 workspace's own skill pack, `.gummi/skills`, which its curator writes.
-It reaches every session on the four backends that can take a skill
-directory, scoped per repository, at the revision the session started
-with. The rest of this section stands: the operator's discovery is
-untouched, and `skills:` is still refused, because the pack is not
-user-configured forwarding.
+It reaches every session on claude, copilot and opencode, scoped per
+repository, at the revision the session started with. It is added
+beside what the backend discovers, never over it: no skill, plugin or
+MCP server the operator installed is switched off, and no pack skill
+takes an operator skill's name (§23.2). The rest of this section
+stands: the operator's discovery is untouched, and `skills:` is still
+refused, because the pack is not user-configured forwarding.
 
 **Where gummi still touches discovery, and why:**
 
@@ -444,8 +446,13 @@ user-configured forwarding.
   Only a read-only research session gets `--tools`, and that roster always
   names `Skill`, which `--tools` gates and every discovered skill is invoked
   through.
-- claude runs with `--strict-mcp-config`: a broken user-side MCP server
-  must not crash a stage. Skills and plugins are not affected.
+- claude's card sessions add gummi's MCP server to the operator's own
+  (`~/.claude.json`, a project `.mcp.json`, an installed plugin's) rather
+  than replacing them, decided 2026-10-16: a plugin that ships a server
+  is a plugin that works. The CLI marks a server that fails to start;
+  it does not fail the session. Only a read-only research session takes
+  `--strict-mcp-config`, because its roster is its cage and an
+  operator's server is a tool the roster does not name.
 - antigravity runs under a redirected `HOME`, because agy has no
   config-dir flag and gummi must not write into the operator's
   `~/.gemini`. That is isolation of writes, not of skills: the card home's
@@ -1967,8 +1974,8 @@ Decided in the design interview (2026-07-03):
     2026-10-15 (§23). Sessions record what they learned; a curator
     distils it into the workspace's skill pack, `.gummi/skills`; gummi
     lints each write, counts each skill's use, archives what goes
-    unused, and delivers the pack to every session on a backend that can
-    take it. Four rules bound it:
+    unused, and delivers the pack to every session on claude, copilot
+    and opencode, beside the operator's own skills and never over them. Four rules bound it:
     - **The curator is a background job, not a card.** Its backend,
       model, schedule and budget are config; its spend is its own ledger,
       shown on the stats tab. It acts on no card (§16).
@@ -5348,22 +5355,35 @@ the mechanism each already has:
 
 - **claude**: a generated plugin, `--plugin-dir`, its skills named
   `gummi-skills:<name>`.
-- **copilot**: the SDK's skill directories.
+- **copilot**: the SDK's skill directories, holding the pack's skills
+  renamed `gummi-<name>`.
 - **opencode**: skill paths in `OPENCODE_CONFIG_CONTENT`, the inline
   config opencode loads after every file (global, gummi's session file,
-  the repository's own `opencode.json(c)`). A later `skills` key
-  replaces an earlier one, so the inline one carries every path the
-  files it outranks name (`.jsonc` comments and all), then the pack's.
-- **antigravity**: links in the card home's `.gemini/config/skills`,
-  beside the operator's own (§4.1a). Links are named by the skill, so
-  where an operator skill shares a pack skill's name, the pack's is
-  linked: it is what every other backend gets.
+  the repository's own `opencode.json(c)`), to the same renamed copy. A
+  later `skills` key replaces an earlier one, so the inline one carries
+  every path the files it outranks name (`.jsonc` comments and all),
+  then the pack's.
 
-codex, pi and the headless adapter have no mechanism; a session on one
-of them runs without the pack and `doctor` says so once, not each turn.
-That gap is why the old `skills.forward` was dropped (§4.1a); it is
-accepted here because the pack is gummi's own learning, not a
-convenience over the operator's discovery.
+**Beside the operator's skills, never over them** (decided 2026-10-16).
+Each backend keeps its own discovery, the operator's installed plugins
+included (§4.1a), and gummi only adds. copilot and opencode let a skill
+directory they are handed win over the operator's skill of the same
+name (copilot's SDK says so; opencode was checked with `opencode debug
+skill`), so those two get the pack renamed, directory and frontmatter
+alike, in a copy beside the materialized revision
+(`skillpack.Prefixed`). claude needs no copy: the plugin is the
+namespace. A pack skill's name is held to 58 characters so the prefixed
+one stays within the agentskills limit. Usage counts only the pack's own
+names, `gummi-skills:<name>` and `gummi-<name>`; a bare name is an
+operator's or a repository's skill and is not counted.
+
+The pack reaches these three backends and no others, decided
+2026-10-16. antigravity, codex, pi and the headless adapter still run
+cards, without the pack: agy's card home links the operator's own skills
+only, and `doctor` says once, not each turn, that a routed backend runs
+without the pack. That narrowing is why the old `skills.forward` was
+dropped (§4.1a); it is accepted here because the pack is gummi's own
+learning, not a convenience over the operator's discovery.
 
 Every pass gets the pack: plan, implement, critique, verify, and
 freeform sessions. A conversation pins the revision it started with, so
@@ -5554,8 +5574,17 @@ not a spec's reviewer threads.
   history to revert from, and it is the tier a person curates (§19.3c).
   The distillation pass §19.7 lists stays open. When it comes, the file
   moves into a repository first.
-- **codex, pi and headless delivery**, until their CLIs take a skill
-  directory.
+- **Delivery beyond claude, copilot and opencode** (§23.2). No skill
+  index in the hints and no MCP fallback for the others.
+- **Sessions author, staged** (decided 2026-10-16, not built). A card's
+  session may create, patch and archive skills through a gummi tool,
+  into a staging area of that card's own that only its own sessions read,
+  layered over `published`. The curator reviews staged changes on its
+  schedule and accepts, merges or rejects each, as commits like its
+  own; a rejection keeps its reason for the card. That makes the curator
+  a reviewer rather than the only author, and amends §23.4 and Decision
+  26 when it is built. The curator also needs read access to each
+  repository's base and its `AGENTS.md`, to judge a staged claim.
 - **Validation beyond Hermes's.** Usage and lint are the signals.
   Checking that a skill's lesson stops recurring, holding it back from
   a random share of sessions, or replaying a session with and without

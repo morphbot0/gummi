@@ -115,14 +115,16 @@ review.
 Each backend keeps its own discovery of skills, plugins and extensions,
 at user and at repo scope, exactly as when you run that CLI yourself; no
 adapter disables `AGENTS.md`, `CLAUDE.md`, project skills or the
-operator's own skills and plugins. gummi adds none of its own either: a
+operator's own skills and plugins. Beyond its skill pack (DESIGN §23),
+gummi adds none: a
 skill reaches a card when the card's backend finds it — in the
 repository, or in your user directory for that agent. Which directories
 those are is each CLI's own business. See DESIGN §4.1a.
 
-The one operator-level thing gummi shadows is claude's MCP servers
-(`--strict-mcp-config`), so a broken user-side server cannot crash a
-stage, plus a scrubbed session env.
+Your MCP servers load too: claude's card sessions add gummi's server
+beside yours. Only a read-only research session on claude runs with
+`--strict-mcp-config`, since its tool roster is its cage. The session
+env is scrubbed.
 
 A card's **consult** (a question asked beside its stage) runs in the main
 checkout, not the card's worktree. On claude, opencode and pi it runs

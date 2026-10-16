@@ -93,10 +93,16 @@ func TestCuratorRunWritesThePackAndEverySessionGetsIt(t *testing.T) {
 	}
 
 	// Every later session on a backend that takes skill directories gets
-	// the published skill.
+	// the published skill: as gummi-make-test where the backend names
+	// skills bare, so it never shadows a person's make-test.
 	dirs := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false)
-	if len(dirs) != 1 || filepath.Base(dirs[0]) != "make-test" {
+	if len(dirs) != 1 || filepath.Base(dirs[0]) != "gummi-make-test" {
 		t.Fatalf("a session gets %v", dirs)
+	}
+	namespaced := agent.NewFake("")
+	namespaced.Caps = agent.Capabilities{SkillDirs: true, SkillNamespace: true}
+	if got := e.skillDirsFor(ctx, namespaced, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 1 || filepath.Base(got[0]) != "make-test" {
+		t.Errorf("a backend that namespaces the pack itself gets %v", got)
 	}
 	noSkills := agent.NewFake("")
 	noSkills.Caps = agent.Capabilities{}
@@ -254,11 +260,13 @@ func TestSkillCalled(t *testing.T) {
 		view               bool
 	}{
 		{"Skill", "gummi-skills:make-test", "make-test", false},
-		{"skill", "make-test", "make-test", false},
+		{"skill", "gummi-make-test", "make-test", false},
+		{"skill", "make-test", "", false}, // the person's own, on copilot or opencode
 		{"Skill", "other-plugin:make-test", "", false},
 		{"view", "/w/.gummi/state/skillpacks/0123abcd/make-test/SKILL.md", "make-test", true},
+		{"view", "/w/.gummi/state/skillpacks/0123abcd/.prefixed/gummi-make-test/SKILL.md", "make-test", true},
 		{"Read", "/tmp/gummi-claude-skills-1/gummi-skills/skills/make-test/SKILL.md", "make-test", true},
-		{"read_file", ".gemini/config/skills/make-test/SKILL.md", "make-test", true},
+		{"read_file", ".gemini/config/skills/make-test/SKILL.md", "", false},
 		{"Read", "docs/make-test/SKILL.md", "", false},
 		{"Bash", "make test", "", false},
 	} {

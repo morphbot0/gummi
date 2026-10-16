@@ -272,10 +272,16 @@ type Capabilities struct {
 	// SkillDirs reports that the adapter honors SessionOpts.SkillDirs: it
 	// can point the backend at skill directories outside WorkDir, in
 	// addition to what it discovers itself. copilot takes an SDK field,
-	// opencode a config key, claude a generated plugin (claude_skills.go)
-	// and antigravity links in its redirected home. codex, pi and headless
-	// have no mechanism.
+	// opencode a config key and claude a generated plugin
+	// (claude_skills.go). The pack reaches these three only (DESIGN
+	// §23.2); the others run cards without it.
 	SkillDirs bool
+	// SkillNamespace reports that the backend names the pack's skills
+	// apart from the person's own by itself: claude's plugin calls them
+	// gummi-skills:<name>. A backend without it is handed skills renamed
+	// gummi-<name> (skillpack.Prefixed), since copilot and opencode let a
+	// handed skill win over a person's skill of the same name.
+	SkillNamespace bool
 	// Images reports that the backend can take images natively with a
 	// turn — the session implements ImageSender and SendTurn actually
 	// reaches the model as multimodal input, not just a path the agent

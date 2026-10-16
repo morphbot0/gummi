@@ -45,6 +45,12 @@ func (e *Engine) skillDirsFor(ctx context.Context, ag agent.Agent, f *domain.Fea
 	if err != nil || dir == "" {
 		return nil // `gummi curator status` and doctor show a pack that cannot be read
 	}
+	if !ag.Capabilities().SkillNamespace {
+		// The pack sits beside the person's own skills, never over them.
+		if dir, err = skillpack.Prefixed(dir); err != nil {
+			return nil
+		}
+	}
 	return skillpack.DirsFor(dir, f.Repo)
 }
 
@@ -112,20 +118,19 @@ func (e *Engine) SkillUsage(context.Context) map[string]skillpack.Use {
 	return e.readSkillUsage().Skills
 }
 
-// packSkillPathRE matches a read of a pack skill's SKILL.md through any of
-// the places delivery puts it: the materialized revision copilot and
-// opencode read, claude's generated plugin, and agy's links.
 // packNamespace is the name claude gives the pack's generated plugin.
 const packNamespace = "gummi-skills"
 
-var packSkillPathRE = regexp.MustCompile(`(?:^|/)(?:skillpacks/[0-9a-f]{7,64}|gummi-skills/skills|\.gemini/config/skills)/([a-z0-9][a-z0-9-]{0,63})/SKILL\.md$`)
+// packSkillPathRE matches a read of a pack skill's SKILL.md through the
+// places delivery puts it: the materialized revision (its prefixed copy is
+// what copilot and opencode read) and claude's generated plugin.
+var packSkillPathRE = regexp.MustCompile(`(?:^|/)(?:skillpacks/[0-9a-f]{7,64}/(?:\.prefixed/gummi-)?|gummi-skills/skills/)([a-z0-9][a-z0-9-]{0,63})/SKILL\.md$`)
 
 // skillCalled names the pack skill a tool call used, or "", and whether
 // the call was a view: a backend's skill invocation, or (a view) a read of
-// a delivered SKILL.md by a backend that reads skills as files. A namespaced invocation counts only in the pack's
-// own namespace (claude's gummi-skills:<name>): another plugin's skill of
-// the same name is not the pack's. A bare name is counted, since copilot
-// and opencode say no more than that.
+// a delivered SKILL.md. A pack skill is called gummi-skills:<name> on
+// claude and gummi-<name> on copilot and opencode (§23.2); any other name
+// is a skill of the person's or the repository's, not the pack's.
 func skillCalled(tool, detail string) (name string, view bool) {
 	detail = strings.TrimSpace(detail)
 	if strings.EqualFold(tool, "skill") {
@@ -133,9 +138,12 @@ func skillCalled(tool, detail string) (name string, view bool) {
 			if ns != packNamespace {
 				return "", false
 			}
-			detail = name
+			return name, false
 		}
-		return detail, false
+		if name, ok := strings.CutPrefix(detail, skillpack.Prefix); ok {
+			return name, false
+		}
+		return "", false
 	}
 	if m := packSkillPathRE.FindStringSubmatch(detail); m != nil {
 		return m[1], true

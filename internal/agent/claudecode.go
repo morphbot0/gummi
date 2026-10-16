@@ -87,7 +87,7 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // replacement for the ask_user convention path, so flipping it would
 // silently disable that convention.
 func (c *ClaudeCode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, Images: true, NativeWatch: true, Compact: true, SkillDirs: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, Images: true, NativeWatch: true, Compact: true, SkillDirs: true, SkillNamespace: true}
 }
 
 // CreditRate implements Agent. The Claude Code CLI reports its own
@@ -245,20 +245,27 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	}
 	// With an MCP socket and a feature id to bind it to — the per-card
 	// stage session — hand claude the full MCP server config inline so its
-	// tool calls reach gummi's tools over stdio. --strict-mcp-config is
-	// unconditional when we do: it shadows operator-side servers in
-	// ~/.claude.json or a project .mcp.json for the session, so a broken
-	// user-side server can't crash a stage. A socket with no feature id
-	// still gets no MCP flags at all — that is the one case this gate
-	// must not change, since it's what a transient/unbound session has
-	// always gotten (mirrors opencode).
+	// tool calls reach gummi's tools over stdio. The config is added to
+	// the person's own servers (~/.claude.json, a project .mcp.json, an
+	// installed plugin's), not put in their place: a card session loads
+	// what the CLI run by hand would (DESIGN §4.1a), and the CLI marks a
+	// server that fails to start rather than failing the session. Only a
+	// ReadOnly research session takes --strict-mcp-config: its surface is
+	// structural (claudeReadOnlyRoster), and a person's server is a tool
+	// that roster does not name. A socket with no feature id still gets no
+	// MCP flags at all — that is the one case this gate must not change,
+	// since it's what a transient/unbound session has always gotten
+	// (mirrors opencode).
 	if opts.MCPSockPath != "" && opts.FeatureID != "" {
 		exe, err := claudeExecPath()
 		if err != nil {
 			return nil, fmt.Errorf("claude adapter: locating own executable: %w", err)
 		}
 		cfg := buildGummiMCPServerConfig(exe, opts.FeatureID, opts.MCPSockPath)
-		args = append(args, "--strict-mcp-config", "--mcp-config", string(cfg))
+		if opts.ReadOnly {
+			args = append(args, "--strict-mcp-config")
+		}
+		args = append(args, "--mcp-config", string(cfg))
 	}
 	// The workspace skill pack (DESIGN §23.2). The CLI can only be pointed
 	// at skills outside its own locations through a plugin, so gummi

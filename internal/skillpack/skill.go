@@ -39,7 +39,14 @@ const (
 // archiveDir holds archived skills, never deleted (§23.3).
 const archiveDir = "archive"
 
-var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+// Prefix is what a pack skill is called on a backend that names skills
+// bare (copilot, opencode): gummi-<name>. Those backends let a skill
+// directory gummi hands them win over the person's own skill of the same
+// name, so the prefix is what keeps the pack beside a person's skills
+// rather than over them (§23.2). A name stays short enough to take it.
+const Prefix = "gummi-"
+
+var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,57}$`)
 
 // Meta is a skill's frontmatter: the agentskills keys every backend
 // reads, and the three gummi adds.
@@ -150,7 +157,7 @@ func LintDraft(d Draft, existing map[string]Meta, repos []string) Lint {
 
 	switch {
 	case !nameRE.MatchString(d.Name):
-		refuse("name %q must be lowercase letters, digits and dashes, at most 64", d.Name)
+		refuse("name %q must be lowercase letters, digits and dashes, at most 58", d.Name)
 	case d.Name == archiveDir || d.Name == "gummi":
 		refuse("name %q is reserved", d.Name)
 	}

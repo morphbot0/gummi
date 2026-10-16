@@ -1721,7 +1721,7 @@ func TestDoctorSkillPackSection(t *testing.T) {
 	if c := checkByName(r, "skills:curator"); c.Status != statusOK || !strings.Contains(c.Detail, "no curator configured") {
 		t.Errorf("skills:curator = %+v", c)
 	}
-	if c := checkByName(r, "skills:headless"); c.Status != statusOK || !strings.Contains(c.Detail, "run without the skill pack") {
+	if c := checkByName(r, "skills:headless"); c.Status != statusOK || !strings.Contains(c.Detail, "run without it") {
 		t.Errorf("with no pack, skills:headless = %+v, want an ok line", c)
 	}
 
@@ -1745,7 +1745,7 @@ func TestDoctorSkillPackSection(t *testing.T) {
 		t.Errorf("skills:curator = %+v, want %q", c, want)
 	}
 	c := checkByName(r, "skills:headless")
-	if c.Status != statusWarn || !strings.Contains(c.Detail, "headless takes no skill directory, so its sessions run without the skill pack") ||
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "headless is not one of the backends gummi delivers the skill pack to, so its sessions run without it") ||
 		!strings.Contains(c.Detail, "thrifty/architect") || c.Remediation == "" {
 		t.Errorf("skills:headless = %+v, want a warning naming who routes there", c)
 	}

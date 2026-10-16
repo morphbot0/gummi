@@ -63,6 +63,28 @@ func TestWritePublishesAndMaterializesByScope(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "go-tests", "references", "why.md")); err != nil {
 		t.Errorf("a skill's files are not materialized: %v", err)
 	}
+	// The copy a backend that names skills bare reads: renamed in its
+	// directory and its frontmatter, files and scope kept.
+	pre, err := Prefixed(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(DirsFor(pre, "web")); got != "gummi-go-tests,gummi-web-only" {
+		t.Errorf("prefixed web session gets %q", got)
+	}
+	if got := names(DirsFor(dir, "web")); got != "go-tests,web-only" {
+		t.Errorf("the prefixed copy leaks into the plain view: %q", got)
+	}
+	pmd, _ := os.ReadFile(filepath.Join(pre, "gummi-go-tests", "SKILL.md"))
+	if pm, _, err := Parse(pmd); err != nil || pm.Name != "gummi-go-tests" {
+		t.Errorf("prefixed frontmatter = %+v, %v", pm, err)
+	}
+	if _, err := os.Stat(filepath.Join(pre, "gummi-go-tests", "references", "why.md")); err != nil {
+		t.Errorf("a prefixed skill lost its files: %v", err)
+	}
+	if again, err := Prefixed(dir); err != nil || again != pre {
+		t.Errorf("a second Prefixed = %q, %v", again, err)
+	}
 	md, _ := os.ReadFile(filepath.Join(dir, "go-tests", "SKILL.md"))
 	m, _, err := Parse(md)
 	if err != nil || m.Source != SourceCurator || m.Scope != ScopeGeneral {

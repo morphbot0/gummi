@@ -686,6 +686,86 @@ func untar(r io.Reader, dir string) error {
 	}
 }
 
+// prefixedDir is where Prefixed keeps a materialized revision's renamed
+// copy; DirsFor skips it, being a dot directory.
+const prefixedDir = ".prefixed"
+
+// Prefixed returns the copy of a materialized pack whose skills are named
+// Prefix+<name>, directory and frontmatter alike, for a backend that names
+// skills bare. A revision never changes, so the copy is made once, beside
+// it, and goes when the revision is pruned.
+func Prefixed(root string) (string, error) {
+	dest := filepath.Join(root, prefixedDir)
+	if _, err := os.Stat(dest); err == nil {
+		return dest, nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.MkdirTemp(root, ".tmp-prefixed-*")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == archiveDir || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if err := copyPrefixed(filepath.Join(root, e.Name()), filepath.Join(tmp, Prefix+e.Name())); err != nil {
+			return "", err
+		}
+	}
+	if err := os.Chmod(tmp, 0o755); err != nil { //nolint:gosec // read by sessions
+		return "", err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		if _, serr := os.Stat(dest); serr == nil {
+			return dest, nil // another session made it first
+		}
+		return "", err
+	}
+	return dest, nil
+}
+
+// copyPrefixed copies one skill directory, renaming the skill in its
+// SKILL.md. A directory with no readable SKILL.md is not a skill and is
+// left out.
+func copyPrefixed(src, dst string) error {
+	md, err := os.ReadFile(filepath.Join(src, "SKILL.md"))
+	if err != nil {
+		return nil
+	}
+	m, body, err := Parse(md)
+	if err != nil {
+		return nil
+	}
+	m.Name = Prefix + filepath.Base(src)
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dst, rel)
+		switch {
+		case d.IsDir():
+			return os.MkdirAll(out, 0o755) //nolint:gosec // read by sessions
+		case !d.Type().IsRegular():
+			return nil
+		case rel == "SKILL.md":
+			return os.WriteFile(out, Render(m, body), 0o644) //nolint:gosec // read by sessions
+		}
+		raw, err := os.ReadFile(path) //nolint:gosec // inside a materialized revision
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(out, raw, 0o644) //nolint:gosec // read by sessions
+	})
+}
+
 // DirsFor returns the skill directories of a materialized pack that reach
 // a session working in repo: every general skill, and repo's own.
 func DirsFor(root, repo string) []string {

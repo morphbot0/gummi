@@ -996,21 +996,3 @@ func TestAdoptLegacyAntigravityHome(t *testing.T) {
 		}
 	})
 }
-
-// A pack skill and an operator skill of the same name: the home links the
-// pack's, so agy reads what every other backend is given.
-func TestAPackSkillWinsItsNameOnAgy(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	writeSkill(t, filepath.Join(home, filepath.FromSlash(antigravitySkillsRelDir)), "make-test", "operator")
-	pack := t.TempDir()
-	writeSkill(t, pack, "make-test", "pack")
-	cardHome := t.TempDir()
-	if err := materializeAntigravitySkills(cardHome, antigravitySkillDirs([]string{filepath.Join(pack, "make-test")})); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(filepath.Join(cardHome, filepath.FromSlash(antigravitySkillsRelDir), "make-test", "SKILL.md"))
-	if !strings.Contains(string(b), "pack") {
-		t.Errorf("the card home links %q, want the pack's skill", b)
-	}
-}

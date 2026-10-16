@@ -651,7 +651,7 @@ func consultChecks(def string, profiles config.Profiles) []doctorCheck {
 // skillPackChecks reports the workspace skill pack (DESIGN §23): whether it
 // exists and what sessions read from it, whether a curator is configured
 // and can run, and — once, here rather than on every session — each
-// backend the profiles route to that takes no skill directory, whose
+// backend the profiles route to that the pack is not delivered to, whose
 // sessions run without the pack. It reads the pack and never makes it.
 func skillPackChecks(ctx context.Context, cfg config.Config, ws state.Workspace, backends []string, rolesByBackend map[string][]string) []doctorCheck {
 	var checks []doctorCheck
@@ -696,18 +696,18 @@ func skillPackChecks(ctx context.Context, cfg config.Config, ws state.Workspace,
 		checks = append(checks, curatorCheck(c))
 	}
 
-	// Sessions on a backend that cannot take a skill directory run without
+	// Sessions on a backend the pack is not delivered to (§23.2) run without
 	// the pack. Only worth a warning once there is a pack to miss.
 	for _, name := range backends {
 		caps, ok := agent.CapabilitiesFor(name)
 		if !ok || caps.SkillDirs {
 			continue
 		}
-		detail := name + " takes no skill directory, so its sessions run without the skill pack" + roleAttribution(rolesByBackend[name])
+		detail := name + " is not one of the backends gummi delivers the skill pack to, so its sessions run without it" + roleAttribution(rolesByBackend[name])
 		chk := doctorCheck{Name: "skills:" + name, Status: statusOK, Detail: detail}
 		if inUse {
 			chk.Status = statusWarn
-			chk.Remediation = "route those roles to claude, copilot, opencode or antigravity in .gummi/profiles.yaml for them to get the pack"
+			chk.Remediation = "route those roles to claude, copilot or opencode in .gummi/profiles.yaml for them to get the pack"
 		}
 		checks = append(checks, chk)
 	}

@@ -808,8 +808,9 @@ func TestClaudeCodeArgsMCPWiring(t *testing.T) {
 	if cfg == "" {
 		t.Fatalf("argv missing --mcp-config: %s", msg)
 	}
-	if !slicesContains(fields, "--strict-mcp-config") {
-		t.Errorf("argv missing --strict-mcp-config: %s", msg)
+	// The person's own servers load beside gummi's (DESIGN §4.1a).
+	if slicesContains(fields, "--strict-mcp-config") {
+		t.Errorf("a writing session must not shadow the person's MCP servers: %s", msg)
 	}
 
 	var parsed struct {
@@ -1061,6 +1062,20 @@ func TestClaudeCodeReadOnlyRoster(t *testing.T) {
 		if strings.Contains(roster, bad) {
 			t.Errorf("ReadOnly roster names %q: %s", bad, roster)
 		}
+	}
+}
+
+// A ReadOnly session shadows the person's MCP servers: its surface is the
+// roster, and their servers are tools the roster does not name.
+func TestClaudeCodeReadOnlyShadowsPersonsMCPServers(t *testing.T) {
+	prev := claudeExecPath
+	claudeExecPath = func() (string, error) { return "/opt/gummi-stub", nil }
+	t.Cleanup(func() { claudeExecPath = prev })
+	msg := claudeRosterArgv(t, claudeRosterHelpScript, SessionOpts{
+		ReadOnly: true, FeatureID: "RS-001", MCPSockPath: "/tmp/mcp/RS-001.sock",
+	})
+	if !strings.Contains(msg, "--strict-mcp-config --mcp-config") {
+		t.Errorf("a read-only session must take --strict-mcp-config: %s", msg)
 	}
 }
 

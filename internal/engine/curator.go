@@ -760,7 +760,7 @@ func (ct *curatorTurn) tools() []agent.ToolDef {
 				"publishes it to every later session; a refused write changes nothing and says why. " +
 				"A person's or pinned skill cannot be written.",
 			Parameters: obj(map[string]any{
-				"name":        str("lowercase-dashed, at most 64 characters"),
+				"name":        str("lowercase-dashed, at most 58 characters"),
 				"description": str("One line: what the skill does and when to use it. Backends read this to decide."),
 				"scope":       str("\"general\"; \"default\" for the workspace's own repository; or the name of one repository the skill is only for."),
 				"body":        str("The SKILL.md body, markdown: the rule and how to apply it, not the story of how it was learned."),
