@@ -5573,6 +5573,22 @@ rejected one stays with its reason, reaches no session, and may be
 staged again. A card that finishes keeps its pending changes for review:
 they are the lessons. The hourly sweep removes its composed views.
 
+**A skill that misled.** gummi counts a skill's uses, not whether
+following it worked, so the signal that a skill is wrong comes from
+the sessions, in three places. The staging hint asks a session to
+fix, before it finishes, a skill it followed into a failure. The next
+turn a person sends, to a freeform session or a stage session it
+steers, asks once whether each pack skill the card used held up. Each
+skill is asked about once per card, held in memory, so a restart may
+ask once more. The note reaches the agent but stays out of the
+transcript, and is only added on a backend with `skill_manage`. And a
+scheduled run's `curator_inputs` lists each curator skill named in a
+dead-end it has not read, with the cards that name it, and the
+kickoff sends it to those cards first. A bare one-word skill name is
+not counted, since "make" is prose as often as it is a skill. A
+review-only run is not given the list. It is a list of names, not
+verdicts: the curator reads the dead-end before it judges.
+
 **Capture without staging** is what sessions already do. A freeform session writes session
 memory and dead-ends (§19.3c), and its hints now say what the curator
 reads them for: a rule a later session should follow, said once, not

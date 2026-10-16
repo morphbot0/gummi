@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -200,4 +201,115 @@ func baseNames(dirs []string) string {
 		out = append(out, filepath.Base(d))
 	}
 	return strings.Join(out, ",")
+}
+
+// A session that used a pack skill is asked, on its next turn and only
+// that one, whether the skill held up; the transcript keeps the line as
+// typed, and a backend with no staging tools is never asked.
+func TestASessionIsAskedOnceWhetherASkillHeldUp(t *testing.T) {
+	var mu sync.Mutex
+	var heard []string
+	ag := agent.NewFake("")
+	ag.Caps = agent.Capabilities{ClientTools: true, SkillDirs: true}
+	defer agent.RegisterCapabilities("fake", ag.Caps)()
+	ag.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		heard = append(heard, msg)
+		first := len(heard) == 1
+		mu.Unlock()
+		var evs []agent.Event
+		if first {
+			evs = append(evs, agent.Event{Kind: agent.EventToolCall, Tool: "Skill", Detail: "gummi-skills:make-test", CallID: "1"})
+		}
+		return append(evs, agent.Event{Kind: agent.EventMessage, Text: "done"}, agent.Event{Kind: agent.EventIdle})
+	}
+	e := curatorEngine(t, ag, nil)
+	ctx := context.Background()
+	f := freeformCard(1, "uses a skill")
+	createFeature(t, e.cfg.Store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"one", "two", "three"} {
+		if err := ff.Send(ctx, line); err != nil {
+			t.Fatal(err)
+		}
+		waitFreeformIdle(t, ff)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(heard) != 3 {
+		t.Fatalf("heard %d turns, want 3: %q", len(heard), heard)
+	}
+	if strings.Contains(heard[0], "skill_manage") {
+		t.Errorf("the first turn asks about a skill not yet used:\n%s", heard[0])
+	}
+	if !strings.HasPrefix(heard[1], "two") || !strings.Contains(heard[1], "gummi-skills:make-test") || !strings.Contains(heard[1], "skill_manage") {
+		t.Errorf("the turn after the use does not ask about it:\n%s", heard[1])
+	}
+	if heard[2] != "three" {
+		t.Errorf("a skill already asked about is asked again:\n%s", heard[2])
+	}
+	for _, m := range ff.Snapshot().Transcript {
+		if strings.Contains(m.Content, "skill_manage") {
+			t.Errorf("the note reached the transcript: %q", m.Content)
+		}
+	}
+
+	e.countSkillUse("FF-9", "make-test", false)
+	if note, _ := e.takeSkillAsk("FF-9", "codex"); note != "" {
+		t.Errorf("a backend without the staging tools is asked: %s", note)
+	}
+	note, asked := e.takeSkillAsk("FF-9", "fake")
+	if note == "" {
+		t.Fatal("asking a backend that cannot act used up the question")
+	}
+	e.requeueSkillAsk("FF-9", asked)
+	if again, _ := e.takeSkillAsk("FF-9", "fake"); again != note {
+		t.Errorf("a turn that did not land lost its question: %q", again)
+	}
+}
+
+// The curator is told which of its published skills a dead-end it has
+// not read names, by any of the names a backend shows a skill under.
+func TestCuratorIsToldWhichSkillsADeadEndNames(t *testing.T) {
+	ctx := context.Background()
+	e := curatorEngine(t, newCuratorFake(nil), &config.Curator{Budget: 100})
+	for _, name := range []string{"make-test", "make", "run-e2e"} {
+		if l, err := e.SkillPack().Write(ctx, skillpack.Draft{Name: name, Description: "Use when " + name + ".", Body: "rule"}, nil, "add "+name); err != nil || !l.OK() {
+			t.Fatalf("write %s: %v %v", name, l, err)
+		}
+	}
+	dead := func(id, body string) {
+		t.Helper()
+		path, _ := memoryPath(e.cfg.Workspace, domain.FeatureID(id), memoryDeadEnds)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dead("FF-1", "- Following gummi-skills:make-test: `make test` is not a target here.")
+	dead("FF-2", "- gummi-make-test said run make; it hung.")
+	dead("FF-3", "- nothing about skills")
+
+	ct := &curatorTurn{e: e, run: &CuratorRun{}, seen: curatorSeenIn(nil)}
+	in := ct.inputs(ctx)
+	if !strings.Contains(in, "named in a dead-end") || !strings.Contains(in, "- make-test: FF-") {
+		t.Fatalf("the inputs do not list a named skill:\n%s", in)
+	}
+	for _, line := range strings.Split(in, "\n") {
+		if strings.HasPrefix(line, "- make-test: ") && (!strings.Contains(line, "FF-1") || !strings.Contains(line, "FF-2")) {
+			t.Errorf("make-test is not traced to both cards: %s", line)
+		}
+		if strings.HasPrefix(line, "- make: ") || strings.HasPrefix(line, "- run-e2e: ") || strings.Contains(line, "FF-3") && strings.Contains(line, "make") {
+			t.Errorf("a skill is listed by part of another's name, or a card that names none: %s", line)
+		}
+	}
+	ct.reviewOnly = true
+	if in := ct.inputs(ctx); strings.Contains(in, "named in a dead-end") {
+		t.Errorf("a review-only run is offered dead-ends:\n%s", in)
+	}
 }

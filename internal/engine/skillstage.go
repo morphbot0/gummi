@@ -80,10 +80,88 @@ a new skill, rewrite one that is wrong or stale, or archive one that
 misleads. Read a skill whole with skill_read before you rewrite it.
 What you change is staged for this card: its next session sees it, and
 skill_read sees it at once, while no other card does until gummi's
-curator reviews it. Stage a lesson only when a later session in this
-workspace would pay for it again — a command that must be run a certain
-way, a trap in this codebase or environment — and write the rule, not
-the story: no card ids, no dates, no "I tried". None of it is required.`
+curator reviews it. If a pack skill you followed turned out wrong — a
+command that fails, a path or name that moved, a step it misses — fix it
+with skill_manage before you finish what you were asked: every later
+session would follow it into the same failure. Stage a new lesson only
+when a later session in this workspace would pay for it again — a
+command that must be run a certain way, a trap in this codebase or
+environment — and write the rule, not the story: no card ids, no dates,
+no "I tried". A new skill is never required.`
+
+// noteSkillAskLocked records that card's session used the pack skill
+// name, for its next turn to ask about once. Called under usageMu.
+func (e *Engine) noteSkillAskLocked(card, name string) {
+	if card == "" || name == "" {
+		return
+	}
+	if e.skillAsks == nil {
+		e.skillAsks = map[string]map[string]bool{}
+	}
+	if e.skillAsks[card] == nil {
+		e.skillAsks[card] = map[string]bool{}
+	}
+	if _, seen := e.skillAsks[card][name]; !seen {
+		e.skillAsks[card][name] = false
+	}
+}
+
+// takeSkillAsk is the note a card's next turn carries about the pack
+// skills its sessions used since it was last asked, or "" when there are
+// none or the backend agentName has no skill_manage to act on it. Each
+// skill is asked about once per card: a session is not nagged every turn
+// about a skill it keeps using. The names it asked about are returned for
+// requeueSkillAsk, should the turn not land.
+func (e *Engine) takeSkillAsk(card domain.FeatureID, agentName string) (string, []string) {
+	if caps, ok := agent.CapabilitiesFor(agentName); !ok || !caps.SkillDirs || e.cfg.Workspace.Root == "" {
+		return "", nil
+	}
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	var names []string
+	for name, asked := range e.skillAsks[string(card)] {
+		if !asked {
+			names = append(names, name)
+			e.skillAsks[string(card)][name] = true
+		}
+	}
+	if len(names) == 0 {
+		return "", nil
+	}
+	sort.Strings(names)
+	return skillAskNote(names), names
+}
+
+// requeueSkillAsk puts back the names a turn that did not land asked about.
+func (e *Engine) requeueSkillAsk(card domain.FeatureID, names []string) {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	for _, n := range names {
+		if e.skillAsks[string(card)] != nil {
+			e.skillAsks[string(card)][n] = false
+		}
+	}
+}
+
+// skillAskNote asks a session whether the pack skills it used held up.
+func skillAskNote(names []string) string {
+	shown := make([]string, len(names))
+	for i, n := range names {
+		shown[i] = packNamespace + ":" + n
+	}
+	return "(gummi: earlier in this card you used the pack skill " + strings.Join(shown, ", ") +
+		". If what you did next showed one of them wrong, stale or missing a step, fix it with " +
+		"skill_manage — read it whole with skill_read first — as part of this turn. If it held up, " +
+		"carry on and do not mention this note.)"
+}
+
+// withSkillAsk appends note to a turn's text, if there is one.
+func withSkillAsk(msg, note string) string {
+	if note == "" {
+		return msg
+	}
+	return msg + "\n\n" + note
+}
 
 // handleSkillTool answers skill_read and skill_manage for a card session.
 func (e *Engine) handleSkillTool(s *Session, tc *agent.ToolCall) {

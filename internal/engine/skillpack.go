@@ -188,6 +188,7 @@ func (e *Engine) countSkillUseAt(card, name string, view bool, at time.Time) {
 	}
 	e.usageMu.Lock()
 	defer e.usageMu.Unlock()
+	e.noteSkillAskLocked(card, name)
 	u := e.readSkillUsage()
 	use := u.Skills[name]
 	switch {

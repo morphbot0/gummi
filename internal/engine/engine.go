@@ -414,9 +414,13 @@ type Engine struct {
 	// curator's run state (curator.go).
 	packOnce sync.Once
 	pack     *skillpack.Pack
-	// usageMu serializes the skill usage file's read-modify-write.
+	// usageMu serializes the skill usage file's read-modify-write, and
+	// guards skillAsks.
 	usageMu sync.Mutex
-	curator curatorState
+	// skillAsks is, per card, the pack skills its sessions used and
+	// whether its next turn has asked about each yet (skillstage.go).
+	skillAsks map[string]map[string]bool
+	curator   curatorState
 	// repoInstructions caches the managed repository's own instruction
 	// card (AGENTS.md/CLAUDE.md, quoted) per repository root, under the
 	// same mutex and with the same lifetime as repoCards.
@@ -2085,7 +2089,11 @@ func (e *Engine) SendTurn(ctx context.Context, id domain.FeatureID, msg string, 
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
-	if err := e.deliverTurn(ctx, s, msg, images); err != nil {
+	// the agent is also asked, once, whether the pack skills this card's
+	// sessions used held up (skillstage.go); the transcript keeps msg
+	note, asked := e.takeSkillAsk(id, s.Snapshot().AgentName)
+	if err := e.deliverTurn(ctx, s, withSkillAsk(msg, note), images); err != nil {
+		e.requeueSkillAsk(id, asked)
 		// The backend is the authority on whether it can take a turn, and
 		// it said no. Undo what this call consumed and recorded, so a
 		// refusal leaves the session exactly as it found it: the nudge

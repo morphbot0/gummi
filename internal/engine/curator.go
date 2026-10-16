@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -985,7 +986,71 @@ func (ct *curatorTurn) inputs(ctx context.Context) string {
 		ct.writeEventCards(ctx, &b)
 	}
 	ct.writePack(ctx, &b)
+	if !ct.reviewOnly {
+		ct.writeSuspectSkills(ctx, &b)
+	}
 	return b.String()
+}
+
+// writeSuspectSkills is curator_inputs' list of the curator's published
+// skills that a dead-end the curator has not read names: the one signal
+// gummi has that following a skill may have failed. It counts names, not
+// verdicts — the dead-end may say the skill was right — so the curator
+// reads before it judges.
+func (ct *curatorTurn) writeSuspectSkills(ctx context.Context, b *strings.Builder) {
+	rows, err := ct.e.PackStanding(ctx, time.Now())
+	if err != nil || len(rows) == 0 {
+		return
+	}
+	var names []string
+	for _, s := range rows {
+		if s.Source == skillpack.SourceCurator && !s.Pinned {
+			names = append(names, s.Name)
+		}
+	}
+	named := map[string][]string{}
+	for _, c := range ct.memoryCards() {
+		path, ok := memoryPath(ct.e.cfg.Workspace, domain.FeatureID(c.id), memoryDeadEnds)
+		if !ok {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, n := range skillsNamedIn(string(raw), names) {
+			named[n] = append(named[n], c.id)
+		}
+	}
+	if len(named) == 0 {
+		return
+	}
+	b.WriteString("\nYour published skills named in a dead-end you have not read (a session may have " +
+		"followed one into a failure; read those cards first and check the skill against the repository):\n")
+	for _, n := range names {
+		if cards := named[n]; len(cards) > 0 {
+			fmt.Fprintf(b, "- %s: %s\n", n, strings.Join(cards, ", "))
+		}
+	}
+}
+
+// skillsNamedIn is which of names text mentions as a whole name, as a
+// backend shows it (gummi-skills:<name>, gummi-<name>) or bare. A bare
+// one-word name is not counted: "make" or "lint" is prose as often as it
+// is a skill.
+func skillsNamedIn(text string, names []string) []string {
+	var out []string
+	for _, n := range names {
+		prefix := `(?:` + regexp.QuoteMeta(packNamespace) + `:|` + regexp.QuoteMeta(skillpack.Prefix) + `)`
+		if strings.Contains(n, "-") {
+			prefix += "?"
+		}
+		re := regexp.MustCompile(`(?:^|[^a-z0-9-])` + prefix + regexp.QuoteMeta(n) + `(?:$|[^a-z0-9-])`)
+		if re.MatchString(strings.ToLower(text)) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // writeMemoryCards is curator_inputs' list of cards whose session memory
@@ -1123,6 +1188,8 @@ func (ct *curatorTurn) kickoff(ctx context.Context) string {
 		"\nWork through the lists: first review every staged change with staged_read and decide it with " +
 		"staged_decide, then read every card's session memory with curator_read, newest first, " +
 		"then the event cards with curator_events, writing, merging or archiving skills as lessons recur. " +
+		"Where a skill of yours is listed as named in a dead-end, read those cards before the rest, and fix " +
+		"or archive the skill if it led the session wrong. " +
 		"Stop early only when your budget runs low; a card you leave unread is offered to the next run. " +
 		"When you are done, reply with one short paragraph saying what you changed and why, or that nothing " +
 		"was worth changing, and how many of the listed cards you read and left."
@@ -1171,7 +1238,8 @@ one-off, or a story rather than a rule, and say why: the card reads it.
 Check what a skill claims about a repository against that repository
 with repo_read and repo_grep (its AGENTS.md first: a skill must not
 repeat it, or contradict it). A published skill whose claims no longer
-hold is yours to fix or archive too.
+hold is yours to fix or archive too: a dead-end that names one of your
+skills is the likeliest place to learn that one does not.
 
 You act only through your tools: curator_inputs, curator_read,
 curator_events, skill_read, skill_write, skill_archive, staged_read,
