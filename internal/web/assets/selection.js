@@ -14,6 +14,10 @@ export async function loadBoard () {
   try {
     const b = await get('/api/board')
     readAt(b.eventId)
+    // most events move one card, or nothing this read can see: an answer
+    // the page already holds (bar the stream id it was read at) is not
+    // drawn again, so the rail keeps its scroll, hover and focus
+    if (state.board && same({ ...b, eventId: '' }, { ...state.board, eventId: '' })) return
     const patch = { board: b }
     if (Array.isArray(b.viewers) && b.viewers.length) patch.viewers = b.viewers
     set(patch)
@@ -24,6 +28,16 @@ export async function loadBoard () {
   } catch (err) {
     if (!state.board) set({ board: { repo: state.session?.repo || '', rows: [], counts: { needs: 0, running: 0 }, today: { spent: 0 }, viewers: [] } })
   }
+}
+
+// same says two answers of a route are the same answer. Every event is an
+// invalidation, and most leave what a route answers as it was: a
+// subscriber told about an equal answer redraws for nothing, and every
+// redraw costs the reader a fold, a scroll or a selection.
+export function same (a, b) {
+  if (a === b) return true
+  if (!a || !b) return false
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 const HEAD_FIELDS = ['stage', 'status', 'envelope', 'autopilot', 'landed', 'profile', 'repo', 'elsewhere']
@@ -88,6 +102,7 @@ export async function loadCard (id = state.sel) {
   try {
     const c = await get(cardPath(id))
     if (state.sel !== id) return c
+    if (!state.cardErr && same(c, state.card)) return state.card
     const patch = { card: c, cardErr: null }
     const n = c.decision?.options?.length || 0
     if (state.hi >= n) patch.hi = 0
@@ -107,8 +122,11 @@ export async function loadThread (id = state.sel, full = false) {
     if (state.sel !== id) return
     const items = after ? upsert(state.thread.items, t.items || []) : (t.items || [])
     const lastSeq = Math.max(t.lastSeq || 0, after)
-    set({ thread: { items, lastSeq } })
-    if (t.live !== undefined && !liveRoute) set({ live: liveOrNull(t.live) })
+    const was = state.thread
+    const moved = !was || was.err || was.gone || was.lastSeq !== lastSeq ||
+      (after ? (t.items || []).length > 0 : !same(items, was.items))
+    if (moved) set({ thread: { items, lastSeq } })
+    if (t.live !== undefined && !liveRoute) setLive(liveOrNull(t.live))
   } catch (err) {
     if (state.sel !== id) return
     set({ thread: { items: state.thread?.items || [], lastSeq: state.thread?.lastSeq || 0, unavailable: err.notBuilt, err } })
@@ -142,13 +160,20 @@ export async function loadLive (id = state.sel) {
   liveBusy = true
   try {
     const l = await get(cardPath(id, 'live'))
-    if (state.sel === id) set({ live: liveOrNull(l) })
+    if (state.sel === id) setLive(liveOrNull(l))
   } catch (err) {
     if (err.notBuilt) liveRoute = false
   } finally {
     liveBusy = false
     if (liveAgain) { liveAgain = false; loadLive() }
   }
+}
+
+// setLive stores the live block unless it is the one already held: a
+// "live" event is sent for a delta of any of the card's conversations, and
+// often for none the read can see.
+function setLive (l) {
+  if (!same(l, state.live)) set({ live: l })
 }
 
 // liveOrNull is the server's live block, or null when it says nothing is
