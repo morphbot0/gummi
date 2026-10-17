@@ -983,7 +983,7 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 			for i, c := range cmds {
 				names[i] = "/" + c.Name
 			}
-			return webapi.RouteMenu, "opens the card's menu — or finish a project command: " + strings.Join(names, " ")
+			return webapi.RouteMenu, "opens the card's menu — or finish a command: " + strings.Join(names, " ")
 		}
 		return webapi.RouteMenu, "opens the card's menu"
 	case verbCommand:
