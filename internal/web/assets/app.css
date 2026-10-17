@@ -1244,6 +1244,8 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .tools.activity summary.thead:hover{background:var(--sunk)}
 .tools.activity .thead .mark{width:18px;flex:none;text-align:center;font-family:var(--mono);font-size:11px;color:var(--fg3)}
 .tools.activity .thead b{font-weight:600;color:var(--fg);flex:none}
+.tools.activity li.by-sub{padding-left:14px}
+.tools.activity .thead .sub{flex:none;color:var(--fg3);font-family:var(--mono);font-size:11px}
 .tools.activity .thead .target{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg3);font-family:var(--mono);font-size:12px}
 .tools.activity .thead i.target{font-family:inherit}
 .tools.activity .thead .ms{margin-left:auto;flex:none;color:var(--fg3);font-family:var(--mono);font-size:11px}

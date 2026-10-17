@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -328,5 +329,21 @@ func TestDropDeletesPersistedSession(t *testing.T) {
 	}
 	if len(snaps) != 0 {
 		t.Errorf("Drop left a persisted session: %+v", snaps)
+	}
+}
+
+// TestToolEventsKeepTheSubagentParent: a subagent's call is mirrored with
+// the spawn that made it, and the thread fold hands that on, so a face
+// can tell it from the agent's own.
+func TestToolEventsKeepTheSubagentParent(t *testing.T) {
+	snap := Snapshot{Feature: domain.Feature{ID: "FF-001", Stage: domain.StageOpen}}
+	m := Message{Author: AuthorTool, Content: "Bash  ls /", Tool: "Bash", Detail: "ls /", CallID: "toolu_B", Parent: "toolu_A"}
+	evs := toolEvents(snap, m, "p", 0)
+	var p state.ToolPayload
+	if err := json.Unmarshal([]byte(evs[0].Payload), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Parent != "toolu_A" {
+		t.Errorf("mirrored parent = %q, want toolu_A", p.Parent)
 	}
 }

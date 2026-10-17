@@ -1302,7 +1302,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		// row is the only place a freeform card's conversation lives.
 		e.persist(sess)
 	case agent.EventToolCall:
-		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
+		sess.appendToolCall(ev.CallID, ev.Parent, toolLine(ev), ev.Tool, ev.Detail)
 		e.noteSkillUse(ff.id, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result != nil {
@@ -1429,7 +1429,7 @@ func (e *Engine) dispatchFreeformClientTool(ff *FreeformSession, sess *Session, 
 	if tc == nil {
 		return
 	}
-	sess.appendToolCall(tc.ID, tc.Name, tc.Name, "")
+	sess.appendToolCall(tc.ID, "", tc.Name, tc.Name, "")
 	e.handleClientTool(sess, tc)
 	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
 }

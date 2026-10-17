@@ -243,7 +243,7 @@ func webItem(it threadfold.Item, cmds map[string]string) webapi.Item {
 	}
 	for _, c := range it.Tools {
 		out.Tools = append(out.Tools, webapi.ToolCall{
-			Tool: c.Tool, Label: c.Label, Detail: c.Detail, Status: c.Status, Ms: c.MS, Output: c.Output,
+			Tool: c.Tool, Label: c.Label, Detail: c.Detail, Status: c.Status, Ms: c.MS, Output: c.Output, Parent: c.Parent,
 		})
 	}
 	if it.Receipt != nil {

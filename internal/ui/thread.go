@@ -1941,7 +1941,7 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		if status == "" && threadfold.WatchTool(tool) {
 			status = threadfold.StatusWatching
 		}
-		return eventMarker(s, status) + toolLineView(s, sanitize(p.Label), max(w-6, 8))
+		return subagentIndent(s, p.Parent) + eventMarker(s, status) + toolLineView(s, sanitize(p.Label), max(w-6-subagentIndentW(p.Parent), 8))
 	case state.EventMessage:
 		var p threadfold.MessagePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)

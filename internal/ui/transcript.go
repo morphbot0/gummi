@@ -60,8 +60,8 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 			if msg.Content == engine.AnswerCapturedNote && i > 0 && snap.Transcript[i-1].Author == engine.AuthorUser {
 				continue
 			}
-			lines = append(lines, "  "+toolMarker(s, msg.Tool, msg.ToolStatus)+
-				toolLineView(s, sanitize(msg.Content), max(w-6, 8)))
+			lines = append(lines, "  "+subagentIndent(s, msg.Parent)+toolMarker(s, msg.Tool, msg.ToolStatus)+
+				toolLineView(s, sanitize(msg.Content), max(w-6-subagentIndentW(msg.Parent), 8)))
 			lines = append(lines, toolOutputLines(s, msg.ToolStatus, msg.ToolOutput, w, showOutput)...)
 			if i+1 == len(snap.Transcript) || snap.Transcript[i+1].Author != engine.AuthorTool {
 				lines = append(lines, "")
@@ -332,6 +332,23 @@ func toolOutputLines(s *theme.Styles, status engine.ToolStatus, output string, w
 // reported outcome while it runs), or a neutral dot when the outcome is
 // genuinely unknown (notes and backends that don't report results) —
 // never a dishonest ✓.
+// subagentIndent sets a subagent's call in under the agent's own: the
+// call was made by an agent the session spawned, not by the session.
+func subagentIndent(s *theme.Styles, parent string) string {
+	if parent == "" {
+		return ""
+	}
+	return s.Faint.Render("↳ ")
+}
+
+// subagentIndentW is subagentIndent's width.
+func subagentIndentW(parent string) int {
+	if parent == "" {
+		return 0
+	}
+	return 2
+}
+
 func toolMarker(s *theme.Styles, tool string, st engine.ToolStatus) string {
 	switch st {
 	case engine.ToolOK:

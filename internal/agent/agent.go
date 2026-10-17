@@ -581,6 +581,7 @@ type Event struct {
 	Tool     string      // tool name for tool-call/permission events
 	Detail   string      // tool-call salient argument (command, path, …); may be empty
 	CallID   string      // backend tool-call id, pairing tool-result to tool-call
+	Parent   string      // tool-call/result: the CallID of the subagent spawn that made this call; empty for the agent's own
 	ToolCall *ToolCall   // populated for EventClientToolCall
 	Result   *ToolResult // populated for EventToolResult
 	Usage    Usage       // populated for EventUsage
