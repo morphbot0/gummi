@@ -74,8 +74,9 @@ func TestStackShape(t *testing.T) {
 
 func TestReposShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, struct {
-		List    Repos       `json:"list"`
-		Request RepoRequest `json:"request"`
+		List     Repos       `json:"list"`
+		Request  RepoRequest `json:"request"`
+		PushBase BasePush    `json:"pushBase"`
 	}{
 		List: Repos{
 			Discovered: true,
@@ -85,9 +86,10 @@ func TestReposShape(t *testing.T) {
 					Name: "gummi", Path: "git/gummi", Base: "main", Origin: "git@github.com:morphis/gummi.git",
 					Remote: true, Dirty: true, Fetched: at, Cards: 3,
 					Remotes: []RepoRemote{
-						{Name: "origin", URL: "git@github.com:morphis/gummi.git", Tracking: 2},
+						{Name: "origin", URL: "git@github.com:morphis/gummi.git", Tracking: 2, Close: "push"},
 						{Name: "fork", URL: "https://•••@github.com/simon/gummi.git", PushURL: "git@github.com:simon/gummi.git", Secret: true},
 					},
+					ClosePush:      "origin",
 					RemoteBranches: []string{"origin/main", "origin/release"},
 					Branches: []RepoBranch{
 						{Name: "main", Group: "base", SHA: "7f5dac70a1b2", Subject: "fix(web): keep the rail", At: at, Upstream: "origin/main", Remote: "origin", Ahead: 2, Behind: 3, Push: "git push origin main"},
@@ -102,6 +104,13 @@ func TestReposShape(t *testing.T) {
 		Request: RepoRequest{
 			Repo: "gummi", All: true, Branch: "wip/simon", Force: true,
 			Remote: "fork", NewName: "simon", URL: "git@github.com:simon/gummi.git", Upstream: "fork/wip/simon",
+			Close: "push", Card: "FD-012", Fingerprint: "0f3a9c21d4e5b6a7",
+		},
+		PushBase: BasePush{
+			Repo: "gummi", Remote: "origin", URL: "git@github.com:morphis/gummi.git", Base: "main",
+			Local: "9f3c21a0b1c2", RemoteTip: "d895f0740000", Card: "feat/loader", Hook: ".git/hooks/pre-push",
+			Commands:    []string{"git push origin 9f3c21a0b1c2:refs/heads/main", "git push origin --delete feat/loader"},
+			Fingerprint: "0f3a9c21d4e5b6a7",
 		},
 	}))
 }

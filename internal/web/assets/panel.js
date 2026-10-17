@@ -17,11 +17,12 @@ import { memoryTab } from './memory.js?v=__ASSET_V__'
 import { specTab } from './spec.js?v=__ASSET_V__'
 import { diffTab } from './diff.js?v=__ASSET_V__'
 import { logTab } from './log.js?v=__ASSET_V__'
+import { treeTab } from './tree.js?v=__ASSET_V__'
 import { prTab } from './pr.js?v=__ASSET_V__'
 import { statsTab } from './stats.js?v=__ASSET_V__'
 import { terminalTab } from './terminal.js?v=__ASSET_V__'
 
-const TABS = [memoryTab, specTab, diffTab, logTab, prTab, statsTab, terminalTab]
+const TABS = [memoryTab, specTab, diffTab, logTab, treeTab, prTab, statsTab, terminalTab]
 const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 
 // SURFACES is what the icons open. One with several tabs shows a switch
@@ -29,7 +30,7 @@ const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 const SURFACES = [
   { name: 'memory', label: 'Memory', icon: 'memory', tabs: [memoryTab] },
   { name: 'spec', label: 'Spec', icon: 'doc', tabs: [specTab] },
-  { name: 'changes', label: 'Changes', icon: 'branch', tabs: [diffTab, logTab, prTab], as: { diff: 'Files', log: 'Commits', pr: 'Pull request' } },
+  { name: 'changes', label: 'Changes', icon: 'branch', tabs: [diffTab, logTab, treeTab, prTab], as: { diff: 'Files', log: 'Commits', tree: 'Working tree', pr: 'Pull request' } },
   { name: 'run', label: 'Run', icon: 'fleet', tabs: [statsTab] },
   { name: 'terminal', label: 'Terminal', icon: 'terminal', tabs: [terminalTab] }
 ]

@@ -6,13 +6,17 @@
 // card's own clean action) and deletes a branch nobody holds. The
 // repository's remotes are listed and edited here too — add, rename,
 // point elsewhere, remove — along with which remote branch a local one
-// tracks: writes to the repository's own git config, and nothing more.
-// The view never pushes: a branch with unpushed commits shows the line to run.
+// tracks: writes to the repository's own git config. A remote may be set
+// to close cards by push (land, then push the base there); the one push
+// this view makes is that base push, confirmed against the facts the
+// server read (pushbase.js). Any other branch with unpushed commits shows
+// the line to run.
 
 import { h, clear, plural, icon, GLYPH, stageVar, ref, cardName } from '../dom.js?v=__ASSET_V__'
 import { registerView, openMenu } from '../views.js?v=__ASSET_V__'
 import { cardPath } from '../api.js?v=__ASSET_V__'
 import { errorBox, confirmStrip, refetcher, field, choose } from './kit.js?v=__ASSET_V__'
+import { openBasePush } from '../pushbase.js?v=__ASSET_V__'
 
 const GROUPS = [
   ['base', 'Base'],
@@ -91,7 +95,7 @@ registerView('repos', {
     const topAsk = h('div', { class: 'rp-top-ask' })
     body.append(
       h('div', { class: 'rp-bar' }, count, rescan, fetchAll, cleanAllBtn),
-      h('p', { class: 'rp-lede' }, 'Fetch reads the remotes; fast-forward moves a base up to what was fetched. Remotes, and the remote branch a local one tracks, are edited in the repository’s own git config. Nothing here pushes — a branch with unpushed commits shows the line to run.'),
+      h('p', { class: 'rp-lede' }, 'Fetch reads the remotes; fast-forward moves a base up to what was fetched. Remotes, the remote branch a local one tracks, and how cards close on a remote are edited in the repository’s own git config. The one push made here is a base to the remote its cards close on by push, after you confirm it.'),
       topAsk,
       list)
 
@@ -242,6 +246,9 @@ registerView('repos', {
         canFF
           ? h('button', { class: 'btn pri', type: 'button', testid: `repo-ff-${k}`, disabled: !!busy || repo.dirty, title: repo.dirty ? 'commit or stash the main checkout’s changes first' : `move ${base.name} up to ${base.upstream}`, onclick: () => write(k, 'fast-forwarding…', '/api/repos/fastforward', { repo: repo.name }) }, `Fast-forward ${base.name} ↓${base.behind}`)
           : null,
+        repo.closePush && repo.base
+          ? h('button', { class: 'btn', type: 'button', testid: `repo-pushbase-${k}`, disabled: !!busy, title: `push ${repo.base} to ${repo.closePush} as a fast-forward — cards here close by push`, onclick: () => openBasePush({ repo: repo.name, returnTo: `[data-testid="repo-pushbase-${k}"]`, done: () => load() }) }, `Push ${repo.base} → ${repo.closePush}`)
+          : null,
         cleanable.length
           ? h('button', { class: 'btn', type: 'button', testid: `repo-clean-${k}`, disabled: !!busy, onclick: () => ask({ kind: 'clean', repo: k, ids: cleanable }) }, `Clean up ${plural(cleanable.length, 'closed card')}`)
           : null)
@@ -340,11 +347,15 @@ registerView('repos', {
                 h('span', { class: 'rp-url mono', testid: `remote-url-${r.name}`, title: r.secret ? 'the URL carries a credential, which is not shown' : null }, r.url)),
               h('div', { class: 'rp-marks' },
                 r.secret ? h('span', { class: 'rp-mark t-mute' }, 'credential hidden') : null,
+                r.close === 'push' ? h('span', { class: 'rp-mark t-ok', testid: `remote-close-${r.name}`, title: `a landing here is followed by a push of ${repo.base || 'the base'} to ${r.name}` }, 'cards close by push') : null,
                 h('span', { class: 'rp-n' }, r.tracking ? `${plural(r.tracking, 'branch', 'branches')} ${r.tracking === 1 ? 'tracks' : 'track'} it` : 'no branch tracks it')),
               h('div', { class: 'rp-act' }, rowMenu('remote', r.name, [
                 { label: 'Fetch', hint: `git fetch --prune ${r.name}`, testid: `remote-fetch-${r.name}`, onClick: () => write(k, `fetching ${r.name}…`, '/api/repos/fetch', { repo: repo.name, remote: r.name }) },
                 { label: 'Rename…', testid: `remote-rename-${r.name}`, onClick: () => ask({ kind: 'remote-rename', repo: k, remote: r.name }) },
                 { label: 'Change URL…', testid: `remote-seturl-${r.name}`, onClick: () => ask({ kind: 'remote-url', repo: k, remote: r.name }) },
+                r.close === 'push'
+                  ? { label: 'Close cards by pull request', hint: 'land, then open a PR as before', testid: `remote-close-pr-${r.name}`, onClick: () => write(k, 'saving…', '/api/repos/remotes/close', { repo: repo.name, remote: r.name, close: 'pr' }) }
+                  : { label: `Close cards by push to ${repo.base || 'the base'}`, hint: `land locally, then push ${repo.base || 'the base'} to ${r.name} as a fast-forward`, testid: `remote-close-push-${r.name}`, onClick: () => write(k, 'saving…', '/api/repos/remotes/close', { repo: repo.name, remote: r.name, close: 'push' }) },
                 'sep',
                 { label: 'Remove…', danger: true, testid: `remote-remove-${r.name}`, onClick: () => ask({ kind: 'remote-remove', repo: k, remote: r.name }) }
               ], { busy, testid: `remote-menu-${r.name}` }))))

@@ -33,6 +33,9 @@ type Repo struct {
 	// Remote reports it has a remote to fetch from; Remotes lists them.
 	Remote  bool         `json:"remote,omitempty"`
 	Remotes []RepoRemote `json:"remotes,omitempty"`
+	// ClosePush names the remote its cards close on by push, "" when they
+	// close by pull request.
+	ClosePush string `json:"closePush,omitempty"`
 	// RemoteBranches are the remote branches as last fetched
 	// ("origin/main"): what a local branch may be set to track.
 	RemoteBranches []string `json:"remoteBranches,omitempty"`
@@ -58,6 +61,9 @@ type RepoRemote struct {
 	Secret  bool   `json:"secret,omitempty"`
 	// Tracking counts the local branches whose upstream is on it.
 	Tracking int `json:"tracking,omitempty"`
+	// Close is how cards close on it: "push" (land, then push the base
+	// here) or "pr", the default.
+	Close string `json:"close,omitempty"`
 }
 
 // RepoBranch is one local branch.
@@ -125,4 +131,30 @@ type RepoRequest struct {
 	NewName  string `json:"newName,omitempty"`
 	URL      string `json:"url,omitempty"`
 	Upstream string `json:"upstream,omitempty"`
+	// Close is a remote's close mode to set ("pr" or "push").
+	Close string `json:"close,omitempty"`
+	// Card names the card whose branch a base push deletes on the remote
+	// afterwards; Fingerprint is the base push's facts as confirmed.
+	Card        string `json:"card,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// BasePush is what pushing a repository's base to its push-close remote
+// would do (GET /api/repos/pushbase): the facts a person confirms, by
+// their fingerprint. Refusal, when set, is why it may not run now.
+type BasePush struct {
+	Repo   string `json:"repo"`
+	Remote string `json:"remote"`
+	URL    string `json:"url,omitempty"`
+	Base   string `json:"base"`
+	// Local is the base's tip here; RemoteTip the remote's, empty when the
+	// remote has no such branch.
+	Local     string `json:"local,omitempty"`
+	RemoteTip string `json:"remoteTip,omitempty"`
+	// Card is the card branch deleted on the remote afterwards.
+	Card        string   `json:"card,omitempty"`
+	Hook        string   `json:"hook,omitempty"`
+	Commands    []string `json:"commands"`
+	Refusal     string   `json:"refusal,omitempty"`
+	Fingerprint string   `json:"fingerprint"`
 }

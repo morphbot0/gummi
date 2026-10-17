@@ -5247,9 +5247,10 @@ decided from them.
   requirement excludes.
 - **Merging, retargeting on request, resolving threads** — still not
   gummi's.
-- **Staging, committing by hand, stash, branch switching.** The agent
-  commits on the person's behalf (§19), and a hand-staged area would
-  fight its checkpoints.
+- **Branch switching.** A card's worktree is its branch. Staging,
+  committing by hand and stash were deferred here too, for fear a
+  hand-staged index would fight the agent's checkpoints; §22.13 brings
+  them in, offered only between an agent's turns.
 - **Fetching and conflict surfacing** beyond what `ForkDriftError` and
   the rebase dialog already do, until publishing shows the need.
 
@@ -5292,6 +5293,74 @@ workflow card.
   this job's log" is the follow-up if the bounded end proves too short.
 - **Not followed.** gummi does not poll a PR's checks or raise attention
   when they turn red; that needs the per-card remote read §22.10 defers.
+
+### 22.12 Closing a card by push
+
+Some remotes take a push to the base directly — a team forge with no
+review step, a mirror, a personal repository — and a PR there is a
+detour. A remote may therefore be set to **close cards by push**: the
+card lands locally exactly as it always has (§7, the floors unmoved:
+`domain.Feature.MayLand`), and then the base is pushed to that remote.
+
+- The choice is a remote's, kept in the repository's own config as
+  `remote.<name>.gummi-close = push` beside `gh-resolved`, so it travels
+  with the clone and `git config` agrees with the board. Unset is `pr`,
+  today's behaviour. At most one remote of a repository closes by push:
+  setting one sets the others back (`worktree.Manager.SetCloseMode`).
+- The base push is a person's act with the shape of §22.1: the facts
+  (`ResolveBasePush`: the base and its tip, the remote's tip read with
+  `ls-remote`, the push URL, a pre-push hook and its content, the card
+  branch to delete there) are shown with the commands, and the confirm
+  carries their fingerprint; `PushBase` reads them again and runs only
+  if they digest the same. It pushes the tip shown, by SHA, as a
+  fast-forward or not at all — a remote whose base moved past ours is
+  refused, never forced — and then deletes the landed card's branch on
+  that remote with a lease on the tip shown. A remote with several push
+  URLs is refused. The stored SSH key is lent to it as to a publish push.
+- The landing dialogs offer it as their second half ("then push main to
+  internal", on by default where the repository closes by push;
+  `Action.PushTo`, `Option.PushTo`), and the repositories view offers it
+  on its own — which is also how a landing whose push failed is retried.
+- It is recorded in the card's thread (`EventPublish`, act `pushbase`).
+- It is not a stage, not autopilot's, not a goal's, and no MCP tool or
+  `run`/`resume` reaches it, exactly as for §22.7. It needs no `gh`: it
+  is git's push to whatever the remote is.
+
+### 22.13 The working tree by hand
+
+The web page's Changes surface has a **Working tree** tab
+(`worktree/tree.go`, `ui/webtree.go`, `assets/tree.js`): what is staged
+and what is not, staging a file, a hunk or some of a hunk's lines,
+discarding, committing or amending, the stashes made on the card's
+branch, a fetch, and the push of §22.1.
+
+- **Only between turns.** Every write is refused while an agent is
+  working in the tree (`WebDocs.busy`) or another gummi drives the card,
+  and runs under the card's lock; the tab says why it is read-only. This
+  is what answers §22.10's worry: the index is the person's only while no
+  agent is using it.
+- **Nothing unseen.** A hunk write names the digest of the diff it was
+  chosen from and is refused (`moved`) when the diff has changed; a path
+  write names only paths the tree lists. A line pick builds the patch git
+  would from `add -p`: an unpicked addition is dropped, an unpicked
+  removal kept as context.
+- **A person's commit.** It runs git's own `commit` in the worktree, so
+  the co-author hook and commit signing of §22.2 apply as they do to
+  every commit gummi's environment makes. An attribution line is refused
+  as it is in a rewrite. Amending is refused for a commit already on the
+  base or already on a remote. The commit is recorded in the card's
+  thread (act `commit`), which is how the agent's next turn and the
+  person reading later see it was made by hand.
+- **The stash stack is the repository's**, shared by every worktree: the
+  tab lists, applies and drops only entries made on the card's own
+  branch, found by commit rather than by position.
+- **A fetch names its remote.** Fetch takes the remote the branch pushes
+  to unless the person picks another of the repository's remotes, or all
+  of them (`git fetch --all --prune`); a name the repository lacks is
+  refused. A fetch writes only `refs/remotes`, so it is not held back by
+  a running agent either.
+- The TUI does not offer the tab yet; its diff view and the card's
+  terminal remain how a person works the tree there.
 
 ## 23. Self-improvement — the skill pack and its curator
 

@@ -131,6 +131,9 @@ type Option struct {
 	// "merge"), present only on a landing that may keep the branch's
 	// commits as a merge commit. The answer names one as AnswerRequest.Method.
 	Methods []string `json:"methods,omitempty"`
+	// PushTo names the remote a landing's base is pushed to afterwards,
+	// where the card's repository closes cards by push.
+	PushTo string `json:"pushTo,omitempty"`
 	// Relabel is the label to show once words have been typed, when the
 	// option reads differently with a note than without.
 	Relabel string `json:"relabel,omitempty"`
@@ -200,6 +203,9 @@ type Action struct {
 	// "merge"), present only on a landing that may keep the branch's
 	// commits as a merge commit. The request names one as ActionRequest.Method.
 	Methods []string `json:"methods,omitempty"`
+	// PushTo names the remote a landing's base is pushed to afterwards,
+	// where the card's repository closes cards by push.
+	PushTo string `json:"pushTo,omitempty"`
 	// Default is the input's suggested value: the landing message the
 	// verify gate drafted, the current envelope, the current dependencies
 	// (comma-separated ids).
