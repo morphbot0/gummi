@@ -84,6 +84,10 @@ type FreeformSession struct {
 	// compacts is the spawned backend's Capabilities.Compact: whether
 	// Commands offers /compact.
 	compacts bool
+	// agentCommands is the last list of slash commands a backend said it
+	// answers itself (agent.Commander), kept across a respawn of the same
+	// backend, which knows none until its first turn.
+	agentCommands []string
 	// compacting is set while a /compact turn on a backend without
 	// compaction of its own is in flight: its reply is the summary the
 	// conversation is replaced with when the turn ends (finishCompact).
@@ -695,9 +699,14 @@ func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []At
 	} else {
 		// a turn the person sent asks, once, whether the pack skills the
 		// session used held up (skillstage.go); the transcript keeps the
-		// line as typed
-		note, asked := ff.engine.takeSkillAsk(ff.id, sess.Snapshot().AgentName)
-		wire = withSkillAsk(wire, note)
+		// line as typed. Not on a line the backend runs itself: the note
+		// would reach the command as its arguments.
+		var asked []string
+		if !isBackendCommandLine(cmds, msg) {
+			var note string
+			note, asked = ff.engine.takeSkillAsk(ff.id, sess.Snapshot().AgentName)
+			wire = withSkillAsk(wire, note)
+		}
 		if len(images) > 0 {
 			sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: wire, Images: ff.engine.turnImages(images)})
 		} else {
@@ -754,7 +763,10 @@ func (ff *FreeformSession) enqueue(ctx context.Context, msg string, images []Att
 // now, read afresh each time so an edit to one is picked up by the next
 // turn, then the session's own commands (freeformbuiltins.go), offered on
 // every backend, a file of the same name winning over one. The files are
-// empty until the session's first backend has found its worktree.
+// empty until the session's first backend has found its worktree. Last
+// come the commands and skills the backend says it answers itself
+// (agent.Commander), sent to it as typed; a file or one of the session's
+// own of the same name wins over those too.
 func (ff *FreeformSession) Commands() []ProjectCommand {
 	cmds := LoadProjectCommands(ff.WorkDir())
 	files := len(cmds)
@@ -763,7 +775,48 @@ func (ff *FreeformSession) Commands() []ProjectCommand {
 			cmds = append(cmds, b)
 		}
 	}
+	backend, names := ff.backendCommands()
+	for _, n := range names {
+		if _, _, clash := FindProjectCommand(cmds, "/"+n); !clash {
+			cmds = append(cmds, ProjectCommand{
+				Name:        n,
+				Description: backend + "'s own command or skill — sent to it as typed",
+				Backend:     backend,
+			})
+		}
+	}
 	return cmds
+}
+
+// backendCommands is the backend's name and the slash commands it says it
+// answers itself. A respawned backend of the same kind knows none until
+// its first turn, so the last list heard stands in until then; one that
+// lists none at all (any but claude) clears it.
+func (ff *FreeformSession) backendCommands() (string, []string) {
+	ff.mu.Lock()
+	sess := ff.sess
+	ff.mu.Unlock()
+	if sess == nil {
+		return "", nil
+	}
+	a, name := sess.agent(), sess.backendName()
+	c, commander := a.(agent.Commander)
+	var heard []string
+	if commander {
+		heard = c.SlashCommands()
+	}
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	switch {
+	case len(heard) > 0:
+		ff.agentCommands = heard
+	case a != nil && !commander:
+		ff.agentCommands = nil
+	}
+	if len(ff.agentCommands) == 0 {
+		return "", nil
+	}
+	return name, ff.agentCommands
 }
 
 // WorkDir is the card's worktree, "" until a backend has spawned.

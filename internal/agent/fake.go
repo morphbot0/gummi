@@ -53,6 +53,10 @@ type Fake struct {
 	// models a backend that cannot enumerate — the picker then offers
 	// only what the workspace's profiles run and what is typed.
 	Models []string
+	// SlashCommands, when non-empty, is what every session answers as the
+	// commands its backend runs itself (Commander), as Claude Code lists
+	// them on its init line. Test aid.
+	SlashCommands []string
 
 	mu       sync.Mutex
 	sessions []*fakeSession
@@ -238,6 +242,9 @@ func (s *fakeSession) Compact(context.Context) error {
 	go s.Push(Event{Kind: EventMessage, Text: "compacted"}, Event{Kind: EventIdle})
 	return nil
 }
+
+// SlashCommands implements Commander: the Fake's SlashCommands. Test aid.
+func (s *fakeSession) SlashCommands() []string { return s.agent.SlashCommands }
 
 // CompactCount reports how many times Compact was called (test aid).
 func (s *fakeSession) CompactCount() int {

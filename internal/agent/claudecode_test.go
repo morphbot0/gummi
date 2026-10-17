@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1231,4 +1232,25 @@ func TestClaudeForegroundSubagentSettlesOnItsResult(t *testing.T) {
 	if len(evs) != 1 || evs[0].Result == nil || !evs[0].Result.OK {
 		t.Errorf("a foreground subagent = %+v, want settled ok", evs)
 	}
+}
+
+// TestClaudeSlashCommandsFromInit: each init line lists the commands and
+// skills the CLI answers itself; the session offers the latest list, each
+// name once and without its slash, and an init that lists none keeps it.
+func TestClaudeSlashCommandsFromInit(t *testing.T) {
+	s := &claudeSession{}
+	if got := s.SlashCommands(); len(got) != 0 {
+		t.Fatalf("before any init = %v, want none", got)
+	}
+	s.mapLine([]byte(`{"type":"system","subtype":"init","session_id":"x","model":"claude-haiku",` +
+		`"slash_commands":["compact","code-review","/review","bad name"],"skills":["code-review","pdf"]}`))
+	want := []string{"compact", "code-review", "review", "pdf"}
+	if got := s.SlashCommands(); !slices.Equal(got, want) {
+		t.Fatalf("after init = %v, want %v", got, want)
+	}
+	s.mapLine([]byte(`{"type":"system","subtype":"init","session_id":"x","model":"claude-haiku"}`))
+	if got := s.SlashCommands(); !slices.Equal(got, want) {
+		t.Errorf("an init listing none = %v, want the last list kept", got)
+	}
+	var _ Commander = s
 }

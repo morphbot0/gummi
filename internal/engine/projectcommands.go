@@ -28,6 +28,10 @@ type ProjectCommand struct {
 	// builtin marks a command gummi offers itself rather than a file's;
 	// it goes to the backend as typed.
 	builtin bool
+	// Backend names the backend that said it answers this command itself
+	// (agent.Commander): a built-in of its own or a skill it found. It
+	// goes to the backend as typed.
+	Backend string
 }
 
 // projectCommandDirs is where each backend keeps its command files, in
@@ -236,7 +240,7 @@ func expandProjectCommands(cmds []ProjectCommand, workDir, msg string) string {
 	}
 	parts := strings.Split(msg, "\n\n")
 	for i, p := range parts {
-		if c, args, ok := FindProjectCommand(cmds, p); ok && !c.builtin && !strings.Contains(strings.TrimSpace(p), "\n") {
+		if c, args, ok := FindProjectCommand(cmds, p); ok && !c.builtin && c.Backend == "" && !strings.Contains(strings.TrimSpace(p), "\n") {
 			parts[i] = c.expand(workDir, args)
 		}
 	}
@@ -265,4 +269,15 @@ func isCompactLine(cmds []ProjectCommand, msg string) bool {
 	}
 	c, _, ok := FindProjectCommand(cmds, msg)
 	return ok && c.builtin && strings.EqualFold(c.Name, compactCommand.Name)
+}
+
+// isBackendCommandLine reports whether msg is one line invoking a command
+// the backend answers itself (ProjectCommand.Backend), which it is sent
+// to as typed.
+func isBackendCommandLine(cmds []ProjectCommand, msg string) bool {
+	if strings.Contains(strings.TrimSpace(msg), "\n") {
+		return false
+	}
+	c, _, ok := FindProjectCommand(cmds, msg)
+	return ok && c.Backend != ""
 }

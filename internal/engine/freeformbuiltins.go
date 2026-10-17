@@ -181,12 +181,22 @@ func costReport(sess *Session) string {
 func helpReport(cmds []ProjectCommand) string {
 	var b strings.Builder
 	b.WriteString("Commands this session takes:\n")
+	var backend string
+	var names []string
 	for _, c := range cmds {
+		if c.Backend != "" {
+			backend = c.Backend
+			names = append(names, "/"+c.Name)
+			continue
+		}
 		fmt.Fprintf(&b, "  /%s — %s", c.Name, c.Description)
 		if c.Source != "" {
 			fmt.Fprintf(&b, " (%s)", c.Source)
 		}
 		b.WriteString("\n")
+	}
+	if len(names) > 0 {
+		fmt.Fprintf(&b, "%s's own commands and skills, sent to it as typed: %s\n", backend, strings.Join(names, " "))
 	}
 	b.WriteString("The card's own commands (/land, /close, /model…) are in its menu.")
 	return b.String()

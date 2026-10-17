@@ -274,8 +274,9 @@ type Completion struct {
 	Detail string `json:"detail,omitempty"`
 	// Group is what kind of command it is, for the picker's headings:
 	// "session" (the session's own, offered on every agent), "project" (a
-	// command file in the repository), "card" (the card's own actions) or
-	// "file".
+	// command file in the repository), "agent" (a command or skill the
+	// session's agent answers itself, sent to it as typed), "card" (the
+	// card's own actions) or "file".
 	Group string `json:"group,omitempty"`
 }
 
