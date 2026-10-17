@@ -5,7 +5,10 @@
 // divider before them; earlier stages fold into one line each and the
 // current one stays open. A foldable row a person has toggled keeps their
 // open state across those redraws: the toggle is remembered per card and
-// each builder re-applies it, for the page session only. The live block
+// each builder re-applies it, for the page session only. So does a row a
+// person unclamped ("show more", "+N more"). The thread follows its newest
+// line only while the reader is at it: scrolling up, or opening a row near
+// the bottom, lets go, and coming back down takes hold again. The live block
 // (streaming text, the tool in flight) sits under the items, outside the
 // polite live region, so a screen reader hears new items and not every
 // streamed token.
@@ -22,18 +25,28 @@ const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
 const folds = new Map() // '<card id> <row key>' -> the person's last-set open state
 const foldSet = new WeakMap() // details element -> the open state the page last set on it
+const unclamped = new Set() // '<card id> <row key>' the person asked to see whole
 let shownFor = null
+// following: the reader is at the newest line, and a redraw that adds to
+// the thread keeps them there. It is what the reader last did that says
+// so, not where a redraw finds the scroll: one redraw's growth would
+// otherwise read as the reader having scrolled away before the next.
+let following = true
 
 export function initThread () {
   on(['thread', 'sel', 'card', 'sessionDraft'], render)
   on(['live'], () => { if (state.thread && !state.thread.items.length) render() })
   on(['live', 'card', 'board'], renderLive)
-  $('#thread').addEventListener('toggle', (e) => recordFold(e.target), true)
-  // a thread scrolled up off its newest line offers the way back down
   const sc = $('#thread')
+  const follow = () => { following = atEnd(sc) }
+  // a row the person opened or unclamped near the bottom grew under them:
+  // they are reading it, and the next redraw must not scroll it away
+  $('#thread').addEventListener('toggle', (e) => { if (recordFold(e.target)) follow() }, true)
+  sc.addEventListener('click', (e) => { if (e.target.closest?.('button')) follow() })
+  // a thread scrolled up off its newest line offers the way back down
   const btn = $('#to-bottom')
   const showBtn = () => { btn.hidden = atBottom(sc) }
-  sc.addEventListener('scroll', showBtn, { passive: true })
+  sc.addEventListener('scroll', () => { follow(); showBtn() }, { passive: true })
   new ResizeObserver(showBtn).observe($('.thread-inner'))
   btn.addEventListener('click', () => {
     sc.scrollTo({ top: sc.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
@@ -62,29 +75,41 @@ function applyFold (el, key, def) {
   el.open = next
 }
 
-// recordFold is the toggle listener's writer. The page sets rows' open
+// recordFold is the toggle listener's writer, and says whether the toggle
+// was the person's. The page sets rows' open
 // state itself wherever it renders — a builder re-applying the memory, the
 // running stage's divider pinned open, a task list open while anything is
 // left — and notes what it set (foldSet): a toggle that matches it is the
 // page's own doing, not the person's, and is never recorded as their
 // choice.
 function recordFold (d) {
-  if (!d?.dataset?.fold) return
-  if (d.classList.contains('sg') && d.classList.contains('cur')) return // pinned open by rule
-  if (foldSet.get(d) === d.open) return
+  if (d?.tagName !== 'DETAILS') return false
+  if (foldSet.get(d) === d.open) return false
+  if (!d.dataset.fold) return true
+  if (d.classList.contains('sg') && d.classList.contains('cur')) return false // pinned open by rule
   foldSet.delete(d)
   folds.set(foldKey(d.dataset.fold), d.open)
+  return true
 }
 
+// atBottom is near enough the newest line not to offer the way back down;
+// atEnd is at it, which is what following takes.
 function atBottom (sc) { return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80 }
+function atEnd (sc) { return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 24 }
+
+// stickToEnd keeps a following reader at the newest line once a redraw
+// has laid out.
+function stickToEnd (sc) {
+  requestAnimationFrame(() => { if (following) sc.scrollTop = sc.scrollHeight })
+}
 
 function render () {
   const box = $('#thread-items')
   const sc = $('#thread')
-  const stick = shownFor !== state.sel || atBottom(sc)
   if (shownFor !== state.sel) {
     clear(box); nodes.clear(); groups.clear()
     shownFor = state.sel
+    following = true
     // the log falls quiet while another card's whole thread fills it (not
     // news to announce), and speaks again once that fill has landed
     box.setAttribute('aria-live', 'off')
@@ -171,7 +196,7 @@ function render () {
   while (box.children.length > gs.length) box.lastChild.remove()
   for (const k of [...groups.keys()]) if (!keepGroups.has(k)) groups.delete(k)
   for (const k of [...nodes.keys()]) if (!keepItems.has(k)) nodes.delete(k)
-  if (stick) requestAnimationFrame(() => { sc.scrollTop = sc.scrollHeight })
+  stickToEnd(sc)
 }
 
 function talking (l) {
@@ -217,12 +242,18 @@ function groupNode (grp, last) {
   // a freeform card's one conversation is headed as its live block is
   const stageName = st.stage === 'open' ? 'session' : st.stage
   const name = st.flavor && !/^(stage|work)$/.test(st.flavor) ? `${stageName} · ${st.flavor}` : stageName
-  clear(g.summary).append(h('div', { class: 'ev-stage' },
-    last ? null : h('span', { class: 'fold', 'aria-hidden': 'true' }, '▸'),
-    h('b', null, name),
-    st.outcome ? h('span', { class: st.outcome === 'ok' ? 'okc' : 'badc', 'aria-label': st.outcome === 'ok' ? 'passed' : 'failed' }, st.outcome === 'ok' ? '✓' : '✕') : null,
-    h('span', { class: 'sum' }, bits.join(' · '))))
-  g.summary.setAttribute('aria-label', `${name} stage${last ? '' : ', folded'}: ${bits.join(', ')}`)
+  // the summary is drawn again only when what it says moved: a summary
+  // rebuilt under the pointer or the focus loses both
+  const sig = JSON.stringify([name, bits, st.outcome || '', last])
+  if (g.sig !== sig) {
+    g.sig = sig
+    clear(g.summary).append(h('div', { class: 'ev-stage' },
+      last ? null : h('span', { class: 'fold', 'aria-hidden': 'true' }, '▸'),
+      h('b', null, name),
+      st.outcome ? h('span', { class: st.outcome === 'ok' ? 'okc' : 'badc', 'aria-label': st.outcome === 'ok' ? 'passed' : 'failed' }, st.outcome === 'ok' ? '✓' : '✕') : null,
+      h('span', { class: 'sum' }, bits.join(' · '))))
+    g.summary.setAttribute('aria-label', `${name} stage${last ? '' : ', folded'}: ${bits.join(', ')}`)
+  }
   g.el.classList.toggle('cur', last)
   if (last) {
     g.el.open = true // the running stage's divider is pinned open by rule
@@ -331,11 +362,22 @@ function copyButton (text, title, testid) {
 function you (it) {
   const who = it.by || 'you'
   const text = String(it.text || '')
-  // a long prompt is cut to a few lines, with a way to read it whole
+  // a long prompt is cut to a few lines, with a way to read it whole —
+  // which stays whole when the bubble is drawn again
   const long = text.split('\n').length > 12 || text.length > 900
-  const body = h('div', { class: ['body', long && 'clamped'] }, md(text))
+  const whole = long && !!it.key && unclamped.has(foldKey(it.key))
+  const body = h('div', { class: ['body', long && !whole && 'clamped'] }, md(text))
   const more = long
-    ? h('button', { type: 'button', class: 'more', testid: 'bubble-more', onclick: () => { more.textContent = body.classList.toggle('clamped') ? 'show more' : 'show less' } }, 'show more')
+    ? h('button', {
+        type: 'button',
+        class: 'more',
+        testid: 'bubble-more',
+        onclick: () => {
+          const clamped = body.classList.toggle('clamped')
+          more.textContent = clamped ? 'show more' : 'show less'
+          if (it.key) unclamped[clamped ? 'delete' : 'add'](foldKey(it.key))
+        }
+      }, whole ? 'show less' : 'show more')
     : null
   return h('div', { class: 'msg mine', testid: it.via === 'consult' ? 'thread-consult' : 'bubble' },
     h('div', { class: 'bubble' }, body, more, attachmentThumbs(it.attachments)),
@@ -444,10 +486,16 @@ export function activity (items, fold, live = false) {
     applyFold(d, fold && `${fold}#${n++}`, false)
     return [h('li', { class: 'tool thought', testid: 'thought-row' }, d)]
   })
-  const hidden = steps.length > ACTIVITY_SHOWN ? steps.slice(0, steps.length - ACTIVITY_SHOWN) : []
+  // the older steps a person asked for stay shown as the run grows
+  const all = !!fold && unclamped.has(foldKey(fold))
+  const hidden = !all && steps.length > ACTIVITY_SHOWN ? steps.slice(0, steps.length - ACTIVITY_SHOWN) : []
   const list = h('ol', { class: 'steps' }, ...steps.slice(hidden.length))
   if (hidden.length) {
-    const more = h('li', { class: 'more-steps' }, h('button', { type: 'button', testid: 'activity-more', onclick: () => more.replaceWith(...hidden) }, `+${hidden.length} more…`))
+    const more = h('li', { class: 'more-steps' }, h('button', {
+      type: 'button',
+      testid: 'activity-more',
+      onclick: () => { if (fold) unclamped.add(foldKey(fold)); more.replaceWith(...hidden) }
+    }, `+${hidden.length} more…`))
     list.prepend(more)
   }
   const el = h('details', { class: 'tools activity', testid: 'activity' },
@@ -518,8 +566,11 @@ function decision (it) {
 // What the card's log does not hold yet: the running stage session's
 // transcript (turns), the message still streaming, the tool in flight, and
 // the card's other conversations (consult, freeform), which never reach the
-// log. Settled turns keep their nodes between refetches, so a streaming
-// delta redraws only the tail.
+// log. Every part is kept by key and drawn again only when what it says
+// moved, and the block is reconciled in place rather than refilled: a
+// streaming delta redraws only the tail, and a board change elsewhere
+// redraws nothing — a part that was taken out and put back would lose the
+// reader's selection in it and the scroll of its output.
 const turnNodes = new Map()
 let turnsFor = null
 
@@ -535,23 +586,21 @@ function renderLive () {
     const stage = l?.stage || r.stage
     if (l?.elsewhere) {
       const e = l.elsewhere
-      parts.push(h('div', { class: 'live', testid: 'live-elsewhere' }, e.busy ? h('span', { class: 'spinner' }) : idleMark(),
-        h('span', null, e.note || `Another gummi (pid ${e.pid}) is running ${[e.stage, e.role].filter(Boolean).join(' · ')}; this board watches it.`)))
+      parts.push(cached('elsewhere', JSON.stringify(e), () => h('div', { class: 'live', testid: 'live-elsewhere' }, e.busy ? h('span', { class: 'spinner' }) : idleMark(),
+        h('span', null, e.note || `Another gummi (pid ${e.pid}) is running ${[e.stage, e.role].filter(Boolean).join(' · ')}; this board watches it.`))))
     } else if (!l && r.elsewhere) {
-      parts.push(h('div', { class: 'live', testid: 'live-elsewhere' }, idleMark(), h('span', null, 'Another gummi is driving this card; this board watches it.')))
+      parts.push(cached('elsewhere', '', () => h('div', { class: 'live', testid: 'live-elsewhere' }, idleMark(), h('span', null, 'Another gummi is driving this card; this board watches it.'))))
     }
     if (l) {
       parts.push(...conversation('stage', l, role, stage))
       if (l.busy) {
-        const words = [`${role} is ${l.verb || 'working'}`, l.tool ? String(l.tool.label || l.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
-        parts.push(h('div', { class: 'live', testid: 'live' },
-          h('span', { class: 'spinner' }),
-          h('span', { class: 'shimmer' }, words + (pausing ? ' · pauses after this turn' : '')),
-          l.spent ? h('span', { class: 'spent' }, cr(l.spent)) : null))
+        const words = [`${role} is ${l.verb || 'working'}`, l.tool ? String(l.tool.label || l.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ') +
+          (pausing ? ' · pauses after this turn' : '')
+        parts.push(busyLine('live', 'live', words, l.spent ? cr(l.spent) : null))
       }
       // a failure the pinned decision already states (a failed stage's
       // stop quotes it) is not said a second time under the thread
-      if (l.err && !String(state.card?.decision?.question || '').includes(l.err.trim())) parts.push(h('div', { class: 'live badc', testid: 'live-error' }, l.err))
+      if (l.err && !String(state.card?.decision?.question || '').includes(l.err.trim())) parts.push(cached('stage:err', l.err, () => h('div', { class: 'live badc', testid: 'live-error' }, l.err)))
       for (const k of ['consult', 'freeform']) {
         const c = l[k]
         if (!c || !(c.turns?.length || c.streaming || c.busy || c.sending || c.err)) continue
@@ -559,33 +608,52 @@ function renderLive () {
         // when the backend it runs on cannot confine it
         const label = k === 'freeform' ? 'session' : c.notice ? 'consult · not confined' : 'consult · read-only'
         // headed as the settled turns are: the conversation, then its agent
-        parts.push(h('div', { class: ['ev-stage', k === 'freeform' ? 'st-open' : 'st-todo'], testid: `live-${k}-head` }, h('b', null, label),
-          k === 'freeform' ? h('span', { class: 'sum' }, c.role || 'implementer') : null))
-        if (c.notice) parts.push(h('div', { class: 'live warnc', testid: `live-${k}-notice` }, c.notice))
+        const role = c.role || 'implementer'
+        parts.push(cached(`${k}:head`, `${label}|${role}`, () => h('div', { class: ['ev-stage', k === 'freeform' ? 'st-open' : 'st-todo'], testid: `live-${k}-head` }, h('b', null, label),
+          k === 'freeform' ? h('span', { class: 'sum' }, role) : null)))
+        if (c.notice) parts.push(cached(`${k}:notice`, c.notice, () => h('div', { class: 'live warnc', testid: `live-${k}-notice` }, c.notice)))
         parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null))
-        if (c.sending) parts.push(you({ text: c.sending, via: 'sending' }))
-        if (c.tasks?.length) parts.push(tasks(c.tasks, k))
-        if (k === 'freeform' && c.watches?.length) parts.push(watches(c.watches))
-        if (k === 'freeform' && c.objective) parts.push(objectiveStrip(state.sel, c.objective))
-        if (k === 'freeform' && c.queued?.length) parts.push(queued(state.sel, c.queued))
+        if (c.sending) parts.push(cached(`${k}:sending`, c.sending, () => you({ text: c.sending, via: 'sending' })))
+        if (c.tasks?.length) parts.push(cached(`${k}:tasks`, JSON.stringify(c.tasks), () => tasks(c.tasks, k)))
+        if (k === 'freeform' && c.watches?.length) parts.push(cached(`${k}:watches`, JSON.stringify(c.watches), () => watches(c.watches)))
+        if (k === 'freeform' && c.objective) parts.push(cached(`${k}:objective`, JSON.stringify(c.objective), () => objectiveStrip(state.sel, c.objective)))
+        if (k === 'freeform' && c.queued?.length) parts.push(cached(`${k}:queued`, JSON.stringify(c.queued), () => queued(state.sel, c.queued)))
         if (c.busy) {
           // the same line a stage run shows: what it is doing, the call in
           // flight, and what the session has cost and how full it is
           const words = [c.verb || 'thinking', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
           const ctx = c.context?.limit ? `${Math.round(100 * c.context.tokens / c.context.limit)}% context` : null
-          parts.push(h('div', { class: 'live', testid: `live-${k}` }, h('span', { class: 'spinner' }), h('span', { class: 'shimmer' }, words),
-            c.spent || ctx ? h('span', { class: 'spent' }, [c.spent ? cr(c.spent) : null, ctx].filter(Boolean).join(' · ')) : null))
+          parts.push(busyLine(`live-${k}`, `${k}:busy`, words, [c.spent ? cr(c.spent) : null, ctx].filter(Boolean).join(' · ') || null))
         }
-        if (c.err) parts.push(h('div', { class: 'live badc' }, c.err))
+        if (c.err) parts.push(cached(`${k}:err`, c.err, () => h('div', { class: 'live badc' }, c.err)))
       }
     } else if (r.status === 'running') {
-      parts.push(h('div', { class: 'live', testid: 'live' }, h('span', { class: 'spinner' }), h('span', { class: 'shimmer' }, `${ROLE[r.stage] || 'agent'} is ${r.running?.verb || 'working'}${pausing ? ' · pauses after this turn' : ''}`)))
+      parts.push(busyLine('live', 'run', `${ROLE[r.stage] || 'agent'} is ${r.running?.verb || 'working'}${pausing ? ' · pauses after this turn' : ''}`, null))
     }
   }
   const sc = $('#thread')
-  const stick = atBottom(sc)
-  box.replaceChildren(...parts)
-  if (stick) requestAnimationFrame(() => { sc.scrollTop = sc.scrollHeight })
+  reconcile(box, parts)
+  stickToEnd(sc)
+}
+
+// reconcile makes parent's children els, in order, moving or taking out
+// only the nodes that are not already where they belong.
+function reconcile (parent, els) {
+  els.forEach((el, i) => place(parent, el, i))
+  while (parent.children.length > els.length) parent.lastChild.remove()
+}
+
+// busyLine is a run's working line: a spinner, what it is doing, and what
+// it has cost. It keeps its node while it is busy, its words changed in
+// place, so the spinner does not start over on every delta.
+function busyLine (testid, key, words, spent) {
+  const el = cached(`${key}:line`, testid, () => h('div', { class: 'live', testid },
+    h('span', { class: 'spinner' }), h('span', { class: 'shimmer' }), h('span', { class: 'spent' })))
+  const [, w, sp] = el.children
+  if (w.textContent !== words) w.textContent = words
+  if (sp.textContent !== (spent || '')) sp.textContent = spent || ''
+  sp.hidden = !spent
+  return el
 }
 
 // idleMark stands where a spinner would for a watched run with nothing in
@@ -712,11 +780,16 @@ function conversation (kind, c, role, stage) {
       const asked = turns.slice(0, i).reverse().find(x => x.author === 'you')
       if (asked?.time) ms = Math.max(0, new Date(t.time) - new Date(asked.time))
     }
-    const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}|${back}|${c.model || ''}`
+    // back moves with every line sent after this one and with the busy
+    // flag: it is set on the bubble's button rather than drawing it again
+    const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}|${c.model || ''}`
     const mkey = `${kind}:${i}`
-    out.push(cached(mkey, sig, () => t.author === 'you'
-      ? you({ text: t.text, by: t.by, time: t.time, rewind: back ? () => rewind(state.sel, back) : null })
-      : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text, key: mkey, time: t.time, ms, model: t.author === 'gummi' ? null : c.model })))
+    const el = cached(mkey, sig, () => t.author === 'you'
+      ? you({ text: t.text, by: t.by, time: t.time, key: mkey, rewind: kind === 'freeform' ? (e) => rewind(state.sel, Number(e.currentTarget.dataset.back)) : null })
+      : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text, key: mkey, time: t.time, ms, model: t.author === 'gummi' ? null : c.model }))
+    const rw = t.author === 'you' ? el.querySelector('.rewind') : null
+    if (rw) { rw.hidden = !back; rw.dataset.back = String(back) }
+    out.push(el)
   })
   flush(!!c.busy && !c.streaming)
   if (c.streaming) {

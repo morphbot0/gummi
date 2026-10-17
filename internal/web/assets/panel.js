@@ -12,7 +12,7 @@
 import { $, h, clear, icon, isMobile, storage } from './dom.js?v=__ASSET_V__'
 import { on, set, state, shownTab } from './store.js?v=__ASSET_V__'
 import { write as writeHash } from './router.js?v=__ASSET_V__'
-import { rememberTab } from './selection.js?v=__ASSET_V__'
+import { rememberTab, same } from './selection.js?v=__ASSET_V__'
 import { memoryTab } from './memory.js?v=__ASSET_V__'
 import { specTab } from './spec.js?v=__ASSET_V__'
 import { diffTab } from './diff.js?v=__ASSET_V__'
@@ -90,8 +90,9 @@ export function initPanel (c) {
     prefetch()
     renderTabs()
     // the tab may have been drawn before the head arrived (its read can
-    // answer first): one drawn open for a card that has closed is redrawn
-    if (drawnClosed !== null && drawnClosed !== isClosed()) renderPane(true)
+    // answer first), or the head has moved what a tab draws from it (a
+    // card that closed, an action offered or taken away): it is redrawn
+    if (drawnClosed !== null && drawnKey !== paneKey(state.card)) renderPane(true)
   })
   on(['rightHidden'], applyHidden)
   // on a phone the row holds the card's Thread too, and says which is shown
@@ -180,8 +181,14 @@ function load (name, refresh = false) {
   if (e.loading || (!e.stale && !refresh)) { if (name === state.tab) renderPane(true); return }
   e.loading = true
   if (name === state.tab && !e.data && !e.err) renderPane(false)
+  // unchanged: a refetch that answered what the pane already shows draws
+  // nothing, so the reader's folds, scroll and selection stay where they
+  // are — unless the head it was drawn with moved (paneKey)
+  let unchanged = false
   tab.fetch(id).then((data) => {
     if (state.sel !== id) return
+    unchanged = refresh && !e.err && !!e.data && same(data, e.fresh || e.data)
+    if (unchanged) return
     if (refresh && e.data && tab.hold?.(e.data, data)) e.fresh = data
     else { e.data = data; e.fresh = null }
     e.err = null
@@ -193,8 +200,8 @@ function load (name, refresh = false) {
     if (state.sel !== id) return
     e.loading = false
     e.stale = false
-    renderTabs()
-    if (name === state.tab) renderPane(true)
+    if (!unchanged) renderTabs()
+    if (name === state.tab && (!unchanged || drawnKey !== paneKey(state.card))) renderPane(true)
     if (e.again) { e.again = false; load(name, true) }
   })
 }
@@ -349,6 +356,17 @@ function isClosed () { return state.card?.stage === 'done' || !!state.card?.land
 // drawnClosed is isClosed() as the pane last drew a tab, null when it drew
 // none
 let drawnClosed = null
+// paneKey is what the tabs read of the card's head besides their own
+// document — its stage, whether it landed, its title, its decision and its
+// actions (a tab's buttons are the card's own actions) — and drawnKey is
+// it as the pane was last drawn. A head that moved otherwise (what a run
+// spent, its busy word) leaves the pane as the reader has it.
+function paneKey (c) {
+  if (!c) return ''
+  return JSON.stringify([c.id, c.stage, !!c.landed, c.title, c.kind, !!c.scratch, !!c.home, c.terminal ?? null,
+    c.decision ? (c.decision.options || []).map(o => !!o.carriesComments) : null, c.actions || []])
+}
+let drawnKey = ''
 
 function renderPane (keepScroll) {
   const pane = $('#pane')
@@ -359,6 +377,7 @@ function renderPane (keepScroll) {
   const typing = pane.contains(a) && a.closest?.('[data-draft]') ? { key: a.closest('[data-draft]').dataset.draft, from: a.selectionStart, to: a.selectionEnd } : null
   clear(pane)
   drawnClosed = null
+  drawnKey = paneKey(state.card)
   pane.dataset.tab = state.tab
   const tab = byName[state.tab]
   const e = entry(state.tab)
