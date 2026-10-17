@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -453,6 +454,7 @@ type claudeSession struct {
 	// from whatever goroutine is persisting the session, so its write —
 	// and only its write — is taken under mu.
 	sessionID   string
+	commands    []string           // slash commands and skills from init, under mu too
 	mainModel   string             // resolved model id from init (modelUsage key)
 	reqModel    string             // model of the in-flight API request (message_start)
 	rate        float64            // realized USD per token, set at each result
@@ -577,6 +579,25 @@ func claudeProjectSlug(dir string) string {
 	return b.String()
 }
 
+// claudeCommands is the init line's slash_commands and skills as one
+// list, each name once, its slash dropped and in the order first listed. A
+// name that could not be typed as one word is left out.
+func claudeCommands(lists ...[]string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, l := range lists {
+		for _, n := range l {
+			n = strings.TrimPrefix(strings.TrimSpace(n), "/")
+			if n == "" || strings.ContainsAny(n, " \t\n") || seen[strings.ToLower(n)] {
+				continue
+			}
+			seen[strings.ToLower(n)] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // SessionID implements Identified: the CLI's own conversation id, learned
 // from the system/init line that opens every turn.
 //
@@ -590,6 +611,14 @@ func (s *claudeSession) SessionID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sessionID
+}
+
+// SlashCommands implements Commander: the commands and skills the CLI
+// listed in its latest system/init line, built-ins included.
+func (s *claudeSession) SlashCommands() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.commands)
 }
 
 func (s *claudeSession) Events() <-chan Event { return s.events }
@@ -667,12 +696,14 @@ func (s *claudeSession) read(stdout io.Reader) {
 
 // ccLine is one stdout line's envelope; only the fields the adapter reads.
 type ccLine struct {
-	Type      string `json:"type"`
-	Subtype   string `json:"subtype"`
-	SessionID string `json:"session_id"`
-	Model     string `json:"model"`       // system/init
-	ToolUseID string `json:"tool_use_id"` // system/task_notification
-	Status    string `json:"status"`      // system/task_notification
+	Type      string   `json:"type"`
+	Subtype   string   `json:"subtype"`
+	SessionID string   `json:"session_id"`
+	Model     string   `json:"model"`          // system/init
+	Commands  []string `json:"slash_commands"` // system/init
+	Skills    []string `json:"skills"`         // system/init
+	ToolUseID string   `json:"tool_use_id"`    // system/task_notification
+	Status    string   `json:"status"`         // system/task_notification
 	// ParentToolUseID is set on a subagent's own assistant and user
 	// lines: the id of the Agent call that spawned it.
 	ParentToolUseID string `json:"parent_tool_use_id"`
@@ -770,6 +801,13 @@ func (s *claudeSession) mapLine(line []byte) []Event {
 			}
 			if s.mainModel == "" {
 				s.mainModel = claudeModelKey(l.Model)
+			}
+			// every init lists them afresh, so a skill added mid-session
+			// is offered from the turn after
+			if cmds := claudeCommands(l.Commands, l.Skills); len(cmds) > 0 {
+				s.mu.Lock()
+				s.commands = cmds
+				s.mu.Unlock()
 			}
 			// an init with no Send unanswered is a turn the CLI started by
 			// itself: a Monitor event woke the agent after its last result.

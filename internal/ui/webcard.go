@@ -863,15 +863,21 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 	// not a word still being completed
 	if word, ok := strings.CutPrefix(strings.TrimLeft(text, " \t\n"), "/"); ok {
 		// the session's own commands first, then the repository's files
-		var session, project []webapi.Completion
-		for _, c := range m.projectCommandsPrefixed(r, word, 16) {
-			if c.Source == "" {
+		// and last the backend's own commands and skills
+		var session, project, backend []webapi.Completion
+		for _, c := range m.projectCommandsPrefixed(r, word, 64) {
+			switch {
+			case c.Backend != "":
+				if len(backend) < 8 {
+					backend = append(backend, webapi.Completion{Text: "/" + c.Name + " ", Detail: c.Description, Group: "agent"})
+				}
+			case c.Source == "":
 				session = append(session, webapi.Completion{Text: "/" + c.Name + " ", Detail: c.Description, Group: "session"})
-			} else if len(project) < 8 {
+			case len(project) < 8:
 				project = append(project, webapi.Completion{Text: "/" + c.Name + " ", Detail: c.Description, Group: "project"})
 			}
 		}
-		out.Completions = append(session, project...)
+		out.Completions = append(append(session, project...), backend...)
 		// gummi's own words, while the word is still being typed — a
 		// completed one is a line for the server to route, not a picker
 		if !strings.ContainsAny(word, " \t\n") {
@@ -945,6 +951,9 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 		return webapi.RouteGoalNote, "a note for the goal's lead — it reads it next turn"
 	case lineFreeformTurn:
 		if cmd, ok := m.projectCommandFor(r, text); ok {
+			if cmd.Backend != "" {
+				return webapi.RouteFreeform, "runs " + cmd.Backend + "'s own /" + cmd.Name + " — sent as typed"
+			}
 			if cmd.Source == "" { // gummi's own /compact, not a file's
 				return webapi.RouteFreeform, "/" + cmd.Name + " — " + cmd.Description
 			}
@@ -974,7 +983,7 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 			for i, c := range cmds {
 				names[i] = "/" + c.Name
 			}
-			return webapi.RouteMenu, "opens the card's menu — or finish a project command: " + strings.Join(names, " ")
+			return webapi.RouteMenu, "opens the card's menu — or finish a command: " + strings.Join(names, " ")
 		}
 		return webapi.RouteMenu, "opens the card's menu"
 	case verbCommand:

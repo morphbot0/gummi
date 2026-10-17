@@ -684,6 +684,14 @@ func (s *Session) setState(st SessionState) {
 	s.live.Emit(livelog.Record{Kind: livelog.KindState, State: string(st)})
 }
 
+// backendName is the backend running the session — Snapshot's AgentName,
+// without copying the transcript.
+func (s *Session) backendName() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentName
+}
+
 // agent returns the session's agent session (nil until the backend attaches).
 
 func (s *Session) agent() agent.Session {

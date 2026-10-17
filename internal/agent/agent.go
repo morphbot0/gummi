@@ -460,6 +460,16 @@ type Compactor interface {
 	Compact(ctx context.Context) error
 }
 
+// Commander is implemented by sessions whose backend says which slash
+// commands it answers itself — its built-ins and the skills it found,
+// home and plugin ones included. A line naming one is sent as typed and
+// the backend runs it. The names come without their slash, and the list is
+// empty until the backend has said: Claude Code says so in the system/init
+// line that opens each turn, so nothing is known before the first one.
+type Commander interface {
+	SlashCommands() []string
+}
+
 // ErrImagesUnsupported is the refusal a Turn carrying images gets when
 // the session cannot deliver them — not an ImageSender, a capability that
 // reports false, or (copilot) a model reported without vision support. A

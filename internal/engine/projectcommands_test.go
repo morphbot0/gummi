@@ -147,3 +147,48 @@ func TestAFreeformTurnExpandsAProjectCommand(t *testing.T) {
 		t.Errorf("transcript users = %q, want the line as typed", users)
 	}
 }
+
+// TestAFreeformTurnSendsABackendCommandAsTyped: a command or skill the
+// backend says it runs itself (agent.Commander) is offered and sent as
+// typed, with nothing appended for the command to take as arguments; a
+// command file and the session's own commands win a clash with one.
+func TestAFreeformTurnSendsABackendCommandAsTyped(t *testing.T) {
+	var heard []string
+	ag := &agent.Fake{SlashCommands: []string{"code-review", "compact", "review"}, Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		heard = append(heard, msg)
+		return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+	f := freeformCard(1, "tidy the parser")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	writeCommandFile(t, ff.workDir, ".claude/commands/review.md", "Review $ARGUMENTS for leaks.")
+
+	c, _, ok := FindProjectCommand(ff.Commands(), "/code-review")
+	if !ok || c.Backend != "fake" {
+		t.Fatalf("/code-review = %+v (offered %v), want the backend's", c, ok)
+	}
+	if c, _, _ := FindProjectCommand(ff.Commands(), "/compact"); c.Backend != "" {
+		t.Errorf("/compact = %+v, want the session's own", c)
+	}
+	if c, _, _ := FindProjectCommand(ff.Commands(), "/review"); c.Source == "" {
+		t.Errorf("/review = %+v, want the command file", c)
+	}
+	if err := ff.Send(ctx, "/code-review the parser"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if len(heard) != 2 || heard[1] != "/code-review the parser" {
+		t.Errorf("agent heard %q, want the line as typed second", heard)
+	}
+}
