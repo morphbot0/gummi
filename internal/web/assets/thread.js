@@ -472,9 +472,10 @@ export function activity (items, fold, live = false) {
   if (calls.length) parts.push(plural(calls.length, 'tool call'))
   if (fails) parts.push(h('span', { class: 'fails' }, `${fails} failed`))
   if (thoughts) parts.push(plural(thoughts, 'thought'))
+  // a call in flight is said once, by the run's working line under the
+  // thread (and its own row, spinning): the summary does not repeat it
   if (watching) parts.push(h('span', { class: 'watching' }, 'watching'))
-  else if (inFlight) parts.push(h('span', { class: 'shimmer' }, String(inFlight.label || inFlight.tool).replace(/\s+/g, ' ').trim()))
-  else if (calls.length) parts.push(h('span', { class: 'last', testid: 'activity-last' }, lastStep(calls[calls.length - 1])))
+  else if (!inFlight && calls.length) parts.push(h('span', { class: 'last', testid: 'activity-last' }, lastStep(calls[calls.length - 1])))
   // each step's fold is keyed by its place in the run, which only grows
   let n = 0
   const steps = items.flatMap(it => {
