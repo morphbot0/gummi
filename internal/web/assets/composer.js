@@ -351,6 +351,7 @@ async function submitDraft (text, atts = []) {
   renderSays()
   try {
     await startSession(text, atts)
+    clearSent(text, atts)
     setNote('')
   } catch (err) {
     setNote(sentence(err.data?.error || err.message), 'err')
@@ -382,7 +383,7 @@ async function submit ({ asLine = false, confirm = '' } = {}) {
   if (d && !text) { answer(); return }
   if (attachments.some((a) => a.pending)) { setNote('Still uploading an image — wait a moment and send again.', 'info'); return }
   if (attachments.some((a) => a.error)) { setNote('Remove the failed attachment before sending.', 'err'); return }
-  if (state.sessionDraft) return submitDraft(text, [...attachments])
+  if (state.sessionDraft) return submitDraft(text, attachments.map((a) => a.id))
   // the button's own rule: no card on screen (deleted, or not loaded
   // yet), nothing to send it to — the line stays where it is
   if (!text || !state.sel || !state.card) return
