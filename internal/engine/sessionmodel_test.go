@@ -13,6 +13,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/agentcli"
+	"github.com/morphis/gummi/internal/attachment"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -631,5 +632,41 @@ func TestSessionModelCatalogAsksClaudeWithoutStartingIt(t *testing.T) {
 	}
 	if starts.Load() != 0 {
 		t.Errorf("the probe started a backend to ask it")
+	}
+}
+
+// TestASessionOpeningCarriesItsAttachedImage: an image attached to a
+// session's first message rides that turn natively and shows on the user's
+// line in the thread.
+func TestASessionOpeningCarriesItsAttachedImage(t *testing.T) {
+	r := recordingAgent()
+	r.Caps.Images = true
+	unregister := agent.RegisterCapabilities("fake", r.Caps)
+	defer unregister()
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(r), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	ref := putTestImage(t, e)
+	opening := "What is wrong here?\n\n" + attachment.Link(attachment.Ref{ID: ref.ID, Name: ref.Name, MediaType: ref.MediaType, Size: ref.Size})
+	f := freeformCard(8, "What is wrong here?")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.KickoffWith(ctx, opening); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	var got []AttachmentRef
+	for _, m := range ff.Snapshot().Transcript {
+		if m.Author == AuthorUser {
+			got = m.Images
+		}
+	}
+	if len(got) != 1 || got[0].ID != ref.ID {
+		t.Fatalf("the opening line's images = %+v, want %+v", got, ref)
 	}
 }
