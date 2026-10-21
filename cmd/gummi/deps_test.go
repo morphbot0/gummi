@@ -65,7 +65,7 @@ func depsFixture(t *testing.T) *state.Store {
 	return store
 }
 
-// resolveDepsID accepts a canonical id, a title, or a slug, and falls back
+// resolveCardID accepts a canonical id, a title, or a slug, and falls back
 // to the first match in number order on duplicate titles.
 func TestResolveDepsID(t *testing.T) {
 	store := depsFixture(t)
@@ -78,9 +78,9 @@ func TestResolveDepsID(t *testing.T) {
 		{"Retries", "FD-002"}, // title
 		{"retries", "FD-002"}, // slug
 	} {
-		id, err := resolveDepsID(ctx, store, tc.arg)
+		id, err := resolveCardID(ctx, store, tc.arg)
 		if err != nil || id != tc.want {
-			t.Errorf("resolveDepsID(%q) = %s, %v; want %s", tc.arg, id, err, tc.want)
+			t.Errorf("resolveCardID(%q) = %s, %v; want %s", tc.arg, id, err, tc.want)
 		}
 	}
 	// a second card with a duplicate title resolves to the first (lowest number).
@@ -91,11 +91,11 @@ func TestResolveDepsID(t *testing.T) {
 	if err := store.CreateFeature(ctx, &dup); err != nil {
 		t.Fatal(err)
 	}
-	if id, err := resolveDepsID(ctx, store, "Retries"); err != nil || id != "FD-002" {
+	if id, err := resolveCardID(ctx, store, "Retries"); err != nil || id != "FD-002" {
 		t.Errorf("duplicate title resolved to %s, %v; want first FD-002", id, err)
 	}
 	// an arg that is neither an id nor a title/slug errors.
-	if _, err := resolveDepsID(ctx, store, "nope"); err == nil {
+	if _, err := resolveCardID(ctx, store, "nope"); err == nil {
 		t.Error("resolved an arg that names nothing")
 	}
 }

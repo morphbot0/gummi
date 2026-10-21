@@ -15,7 +15,7 @@ import (
 )
 
 // prEnv bundles the store/worktree wiring the `gummi pr` verbs share —
-// mirroring openDepsEnv's headless wiring (deps.go). Linking/unlinking/
+// mirroring openCardEnv's headless wiring (deps.go). Linking/unlinking/
 // status are deterministic store + gh operations, so no engine or agent is
 // constructed.
 type prEnv struct {
