@@ -54,10 +54,6 @@ const (
 	// the session machinery — a goal's lead — so no other Event would
 	// ever cover it. A UI surface should reload rows.
 	EventCardCreated EventKind = "card_created"
-	// EventDelegateCreated fires when a freeform session created a card
-	// under its delegation (Feature is the new card). The driving loop
-	// starts it on autopilot, the way a goal's start does for its cards.
-	EventDelegateCreated EventKind = "delegate_created"
 	// EventCrew fires when something a crew's conductor reads changed: a
 	// node's turn ended, a decision was answered, the planner finished.
 	// The driving loop ticks the session's crew on it (Engine.CrewTick).

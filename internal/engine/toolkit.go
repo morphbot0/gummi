@@ -41,13 +41,6 @@ func strs(desc string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
 }
 
-func shortSHA(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
-}
-
 // resolve answers a client-tool call on a raw session (best-effort; a
 // backend without ToolResolver simply drops it).
 func resolve(ctx context.Context, sess agent.Session, callID, result string) {

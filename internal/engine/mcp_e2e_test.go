@@ -334,28 +334,3 @@ func TestMCPEndToEndUnknownMethod(t *testing.T) {
 		t.Fatalf("error code = %v, want -32601", er["code"])
 	}
 }
-
-// mcpE2EReadonlySetup builds a live in-test engine with a read-only
-// autonomous research investigate session (fake advertises
-// ReadOnlyEnforce so the engine admits it), binding the MCP socket, and
-// returns the engine, the socket path, and the session.
-func mcpE2EReadonlySetup(t *testing.T) (*Engine, string, *Session) {
-	t.Helper()
-	fk := agent.NewFake("ack")
-	fk.Caps.ReadOnlyEnforce = true
-	e := newEngine(t, &fakeNoTools{fk})
-	f := feature(1, "rs investigate", domain.StageImplement)
-	f.ID = domain.FeatureID("RS-001")
-	f.Kind = domain.KindResearch
-	seedDraft(t, e, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	s := e.Get("RS-001")
-	if s == nil {
-		t.Fatal("no session for research investigate")
-	}
-	socket := mcpSockPath(e.cfg.Workspace, f.ID)
-	t.Cleanup(func() { s.stop() })
-	return e, socket, s
-}

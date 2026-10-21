@@ -16,7 +16,6 @@ func (s *Server) cardRoutes() {
 	s.api("POST /api/cards/{id}/send", s.handleSend)
 	s.api("POST /api/cards/{id}/queue/{n}/take", s.handleUnqueue)
 	s.api("POST /api/cards/{id}/rewind", s.handleRewind)
-	s.api("POST /api/cards/{id}/delegation", s.handleDelegation)
 	s.api("POST /api/cards/{id}/actions/{action}", s.handleAction)
 }
 
@@ -103,20 +102,6 @@ func (s *Server) handleUnqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
-}
-
-// handleDelegation is POST /api/cards/{id}/delegation.
-func (s *Server) handleDelegation(w http.ResponseWriter, r *http.Request) {
-	var body webapi.DelegationRequest
-	if err := readJSON(w, r, &body); err != nil || body.Budget < 0 {
-		writeError(w, http.StatusBadRequest, "expected {\"budget\": credits ≥ 0, \"confirm_all\": bool}")
-		return
-	}
-	if err := s.opt.Board.SetDelegation(r.Context(), r.PathValue("id"), body); err != nil {
-		s.fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, webapi.OK{OK: true})
 }
 
 // handleRewind is POST /api/cards/{id}/rewind.

@@ -168,17 +168,17 @@ func TestWebAnswerRejectsUnknownMethod(t *testing.T) {
 	}
 }
 
-// TestWebLandingRefusesMergeForDelegatedCard: a dialog that offers only
+// TestWebLandingRefusesMergeForCrewCard: a dialog that offers only
 // squash refuses a merge-commit request before any git mutation.
-func TestWebLandingRefusesMergeForDelegatedCard(t *testing.T) {
+func TestWebLandingRefusesMergeForCrewCard(t *testing.T) {
 	var landed bool
-	d := newCommitMsgDialog(domain.Feature{ID: "FD-002", Slug: "x", ParentID: "FF-001"}, func(_ string, _ domain.LandMethod) tea.Cmd {
+	d := newCommitMsgDialog(domain.Feature{ID: "FF-002", Slug: "x", ParentID: "FF-001", Crew: domain.CrewLink{Of: "FF-001", Seq: 1}}, func(_ string, _ domain.LandMethod) tea.Cmd {
 		landed = true
 		return nil
 	}, nil)
-	res := d.webAnswer(nil, &webInput{land: true, message: "FD-002: land it", method: domain.LandMerge})
+	res := d.webAnswer(nil, &webInput{land: true, message: "FF-002: land it", method: domain.LandMerge})
 	if res.refused == "" {
-		t.Fatal("a delegated card accepted a merge-commit landing")
+		t.Fatal("a crew card accepted a merge-commit landing")
 	}
 	if landed {
 		t.Fatal("the refused landing still submitted")
@@ -213,8 +213,8 @@ func TestWebLandMethodsOfferedOnlyWhereChosen(t *testing.T) {
 	if got := webLandMethods(domain.Feature{ID: "FD-001"}); strings.Join(got, ",") != "squash,merge" {
 		t.Errorf("plain card methods = %v, want squash,merge", got)
 	}
-	if got := webLandMethods(domain.Feature{ID: "FD-002", ParentID: "FF-001"}); got != nil {
-		t.Errorf("delegated card methods = %v, want none", got)
+	if got := webLandMethods(domain.Feature{ID: "FF-002", ParentID: "FF-001", Crew: domain.CrewLink{Of: "FF-001", Seq: 1}}); got != nil {
+		t.Errorf("crew card methods = %v, want none", got)
 	}
 }
 

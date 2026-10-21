@@ -95,12 +95,9 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 			return o.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
 		}
 		if f.IsFreeform() {
-			cards, err := o.Store.DelegatedCards(ctx, id)
-			if err != nil {
-				return o.fail(ctx, string(id), err)
-			}
-			if open := domain.UnlandedDelegates(cards); len(open) > 0 {
-				return o.fail(ctx, string(id), fmt.Errorf("%s: %w (%v)", id, domain.ErrUnlandedDelegates, open))
+			// a session's open crew is still working on its branch
+			if why := o.Eng.CrewHolds(ctx, id); why != "" {
+				return o.fail(ctx, string(id), fmt.Errorf("%s: %s", id, why))
 			}
 		}
 		// Two floors, one predicate: a card in the workflow lands on a
@@ -141,9 +138,9 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 	// reason before any git mutation.
 	// the branch this card actually lands on, read off the manager it
 	// resolved to rather than written as the literal "main": a `master`
-	// repo is one case, and a card a session delegated — whose manager is
-	// rooted at the parent's worktree, so it lands on the parent's branch —
-	// is the other.
+	// repo is one case, and a crew's card — whose manager is rooted at its
+	// session's worktree, so it lands on the session's branch — is the
+	// other.
 	base := wt.BaseBranch(ctx)
 	if dirty, err := wt.MainTrackedDirty(ctx); err != nil {
 		return o.fail(ctx, string(id), err)

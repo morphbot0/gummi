@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
@@ -152,25 +151,4 @@ func (e *Engine) openDiffCommentsBlockingGate(ctx context.Context, f domain.Feat
 		}
 	}
 	return n
-}
-
-// describeAdvance is a gate refusal in a few words.
-func describeAdvance(adv AdvanceResult) string {
-	switch adv.Status {
-	case StatusBlockedQuestions:
-		return fmt.Sprintf("%d open comment thread(s)", adv.Blockers)
-	case StatusBlockedDiff:
-		return fmt.Sprintf("%d open diff comment(s)", adv.Blockers)
-	case StatusBlockedDependency:
-		var ids []string
-		for _, d := range adv.BlockingDeps {
-			ids = append(ids, d.String())
-		}
-		return "unmet dependencies " + strings.Join(ids, ", ")
-	case StatusBlockedUndrafted:
-		return "undrafted " + strings.Join(adv.Undrafted, ", ")
-	case StatusBlockedOmission:
-		return adv.Reason
-	}
-	return "status " + fmt.Sprint(adv.Status)
 }

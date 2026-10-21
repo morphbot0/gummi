@@ -948,29 +948,6 @@ func TestReadOnlyResearchKeepsItsDocumentTools(t *testing.T) {
 	}
 }
 
-// researchReadonlySession builds a live read-only research investigate
-// session (fake advertises ReadOnlyEnforce so the engine admits it) for
-// testing the read-only client-tool refusal path directly.
-func researchReadonlySession(t *testing.T) (*Engine, *Session) {
-	t.Helper()
-	fk := agent.NewFake("ack")
-	fk.Caps.ReadOnlyEnforce = true
-	e := newEngine(t, &fakeNoTools{fk})
-	f := feature(1, "rs investigate", domain.StageImplement)
-	f.ID = domain.FeatureID("RS-001")
-	f.Kind = domain.KindResearch
-	seedDraft(t, e, f)
-	if err := e.Run(f); err != nil {
-		t.Fatalf("run research investigate: %v", err)
-	}
-	s := e.Get("RS-001")
-	if s == nil {
-		t.Fatal("no session for research investigate")
-	}
-	t.Cleanup(func() { s.stop() })
-	return e, s
-}
-
 func TestArchitectToolHintMentionsSpecTools(t *testing.T) {
 	hint := toolHint(domain.StagePlan, flavorStage)
 	for _, want := range []string{"spec_view", "spec_replace_section"} {

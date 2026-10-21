@@ -139,14 +139,15 @@ func TestLandMergeContentAlreadyOnMainUndone(t *testing.T) {
 	}
 }
 
-func TestLandMergeRefusedForDelegatedCard(t *testing.T) {
+func TestLandMergeRefusedForCrewCard(t *testing.T) {
 	root := newRepo(t)
 	m, f, _ := committedFeature(t, root)
 	f.ParentID = "FF-001"
+	f.Crew = domain.CrewLink{Of: "FF-001", Seq: 1}
 	mainHead := mustGit(t, root, "rev-parse", "HEAD")
 
 	if _, err := m.Land(ctx, f, "FD-009: land me", domain.LandMerge); err == nil {
-		t.Fatal("delegated card landed as a merge commit")
+		t.Fatal("a crew card landed as a merge commit")
 	}
 	if got := mustGit(t, root, "rev-parse", "HEAD"); got != mainHead {
 		t.Errorf("main HEAD moved by refused landing: %s -> %s", mainHead, got)

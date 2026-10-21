@@ -26,10 +26,10 @@ func ParseLandMethod(s string) (LandMethod, error) {
 	return "", fmt.Errorf("unknown landing method %q (want %q or %q)", s, LandSquash, LandMerge)
 }
 
-// LandMethods lists the methods a local landing of f may use. A card a
-// freeform session created lands on the freeform branch as a squash only.
+// LandMethods lists the methods a local landing of f may use. A card with a
+// parent session (a crew's) lands on the session's branch as a squash only.
 func (f *Feature) LandMethods() []LandMethod {
-	if f.Delegated() {
+	if f.ParentID != "" {
 		return []LandMethod{LandSquash}
 	}
 	return []LandMethod{LandSquash, LandMerge}

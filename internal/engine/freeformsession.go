@@ -378,14 +378,6 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			tools = append(tools, skill...)
 			hints = append(hints, skillStageHint)
 		}
-		// The card tools (delegate.go) only once the person has given the
-		// card a delegation budget: a session that is never shown them
-		// cannot decide to file a card for every change.
-		if f.Delegate.Enabled() {
-			extra = append(extra, delegateTools()...)
-			tools = append(tools, delegateTools()...)
-			hints = append(hints, freeformDelegateHint)
-		}
 		// A session's spec and crew tools (DESIGN §24): every session
 		// has them; a crew's own nodes do not.
 		if !f.InCrew() {

@@ -181,16 +181,3 @@ func firstWorkStageRound(h *harness) int {
 	}
 	return -1
 }
-
-// investigateStageRound returns the round of the investigate stage event
-// in the stream, or -1 if none was emitted.
-func investigateStageRound(h *harness) int {
-	for _, e := range h.events() {
-		if e["event"] == "stage" && e["stage"] == "implement" {
-			if r, ok := e["round"].(float64); ok {
-				return int(r)
-			}
-		}
-	}
-	return -1
-}

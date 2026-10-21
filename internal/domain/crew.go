@@ -233,6 +233,30 @@ type CrewLink struct {
 // Such a card is never on the board: its session's Crew tab is its face.
 func (f *Feature) InCrew() bool { return f.Crew.Seq > 0 }
 
+// validateParent checks a card's ParentID. Only a crew's own card and its
+// nodes' carry one now: a hidden freeform child of a session, routed on its
+// parent (worktree.Pool.ManagerFor, DESIGN §24.3). A parented card outside a
+// crew is a legacy delegated card — a workflow card a session created
+// before crews replaced delegation — read-only, never run.
+func (f *Feature) validateParent() error {
+	if f.ParentID == "" {
+		return nil
+	}
+	if _, err := ParseFeatureID(string(f.ParentID)); err != nil || f.ParentID.Kind() != KindFreeform {
+		return fmt.Errorf("feature %s: parent %q is not a freeform card", f.ID, f.ParentID)
+	}
+	switch {
+	case f.InCrew():
+		if f.kind() != KindFreeform || f.Crew.Of == "" || (f.Crew.Node != "" && !ValidNodeID(f.Crew.Node)) {
+			return fmt.Errorf("feature %s: a crew's card is a freeform child of a session, with a node id of the form t<k>", f.ID)
+		}
+		return nil
+	case f.kind() == KindFreeform || f.kind() == KindGoal:
+		return fmt.Errorf("feature %s: a %s card with a parent must belong to a crew", f.ID, f.kind())
+	}
+	return nil
+}
+
 // CrewDecisionKind is what a crew asks its person.
 type CrewDecisionKind string
 

@@ -7,7 +7,7 @@ import { $, h, icon, clear, append, kindTag, typeName, STAGES, cr, ctxMeter, isM
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
-import { draftHead, writeSpecButton, delegateButton, openDelegate } from './session.js?v=__ASSET_V__'
+import { draftHead, writeSpecButton } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
 import { crewMarkEl, landCrewButton, crewWord } from './crew.js?v=__ASSET_V__'
 
@@ -75,7 +75,6 @@ function render () {
         foldAt(9, landCrewButton(state.card)),
         foldAt(3, landButton(c, actions)),
         foldAt(0, writeSpecButton(state.card)),
-        foldAt(0, delegateButton(state.card)),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, data: { fold: '2' }, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
         menuBtn)),
     h('div', { class: 'subline' },
@@ -156,12 +155,9 @@ export function openActions (line = '') {
   const items = list.map(a => ({
     label: a.label, danger: a.danger, testid: `action-${a.id}`, hint: a.detail, onClick: () => runAction(state.card, a)
   }))
-  // the delegate button is the page's own, not a menu action: its entry
-  // here is where it is reached once the head has folded it away
-  if (delegateButton(state.card)) {
-    items.push({ label: 'Delegate to cards…', testid: 'action-delegate', hint: 'Let this session create workflow cards under a budget', onClick: () => openDelegate(state.card) })
-  }
-  // so is landing a crew that has ended (DESIGN §24.3)
+  // landing a crew that has ended is the page's own button, not a menu
+  // action: its entry here is where it is reached once the head has folded
+  // it away (DESIGN §24.3)
   const crewLand = landCrewButton(state.card)
   if (crewLand) items.unshift({ label: 'Land crew', testid: 'action-crew-land', hint: crewLand.title, onClick: () => crewLand.click() })
   openMenu(btn, items, { testid: 'card-actions-menu' })

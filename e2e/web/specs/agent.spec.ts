@@ -27,5 +27,4 @@ test('an agent starts in a home of its own and has no branch surfaces', async ({
   await expect(page.getByTestId('tab-stats')).toBeVisible();
   for (const t of ['diff', 'memory']) await expect(page.getByTestId(`tab-${t}`)).toHaveCount(0);
   await expect(page.getByTestId('session-land')).toHaveCount(0);
-  await expect(page.getByTestId('delegate')).toHaveCount(0);
 });

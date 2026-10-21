@@ -409,18 +409,13 @@ type Feature struct {
 	// just sent it to. MayLandAfterAll refuses it. Freeform-only, and set
 	// once, on the hand-off that continued it.
 	ContinuedAs FeatureID
-	// ParentID is the freeform card whose session created this card under
-	// its delegation, empty for every other card. Like a goal's card, a
-	// delegated card's branch forks from the freeform card's branch and
-	// lands back on it, so its work reaches main only through the person's
-	// read of the freeform card's diff. It never also belongs to a goal:
-	// two budgets would hold the same credits.
+	// ParentID is the session (a freeform card) whose crew this card
+	// belongs to, empty for every other card. A crew's card forks from the
+	// session's branch and lands back on it (worktree.Pool.ManagerFor), so
+	// its work reaches main only through the person's read of the
+	// session's diff. A legacy card a session once created under its
+	// delegation carries one too.
 	ParentID FeatureID
-	// Delegate is a freeform card's delegation: what its session may give
-	// cards it creates. Zero on every other card, and on a freeform card
-	// whose person has not opted in — the session is then not offered the
-	// card tools at all.
-	Delegate Delegation
 	// Crew marks a crew's own card or one of its nodes' (DESIGN §24): a
 	// hidden freeform child no person works. Zero on every other card.
 	Crew CrewLink
@@ -1081,7 +1076,7 @@ func (f *Feature) Validate() error {
 			return fmt.Errorf("feature %s: an agent is in no repository, but names %q", f.ID, f.Repo)
 		}
 		if f.ParentID != "" {
-			return fmt.Errorf("feature %s: an agent is nobody's delegated card", f.ID)
+			return fmt.Errorf("feature %s: an agent is nobody's child card", f.ID)
 		}
 	}
 	if f.Budget.Envelope < 0 {
@@ -1111,7 +1106,7 @@ func (f *Feature) Validate() error {
 			return fmt.Errorf("feature %s: %w", f.ID, err)
 		}
 	}
-	if err := f.validateDelegation(); err != nil {
+	if err := f.validateParent(); err != nil {
 		return err
 	}
 	if f.FoundBy != "" {

@@ -901,9 +901,9 @@ var migrations = []string{
 	// written from it (domain.Feature.ContinuedAs). Empty is every other
 	// card, and every session closed before the column existed.
 	`ALTER TABLE features ADD COLUMN continued_as TEXT NOT NULL DEFAULT ''`,
-	// A freeform card's delegation (domain.Delegation) and the freeform
-	// card a delegated card belongs to (domain.Feature.ParentID). Every
-	// empty default reads as "no delegation", so no row needs a value.
+	// The session a child card belongs to (domain.Feature.ParentID), and
+	// the vestigial delegate_* columns of the retired delegation (no
+	// longer read or written). Every empty default reads as "no parent".
 	`ALTER TABLE features ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN delegate_budget INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN delegate_all INTEGER NOT NULL DEFAULT 0`,
@@ -953,9 +953,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			research_mode,
 			base, branch_scheme, branch, stack_id, stack_pos,
 			session_backend, session_model, main_checkout, home,
-			parent_id, delegate_budget, delegate_all,
+			parent_id,
 			crew_of, crew_seq, crew_node)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -970,7 +970,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		string(f.Mode),
 		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
 		f.SessionBackend, f.SessionModel, f.MainCheckout, f.Home,
-		string(f.ParentID), f.Delegate.Budget, f.Delegate.ConfirmAll,
+		// delegate_budget/delegate_all are vestigial: delegation is gone
+		string(f.ParentID),
 		string(f.Crew.Of), f.Crew.Seq, f.Crew.Node)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
@@ -998,7 +999,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
 	session_backend, session_model, main_checkout, home, verified_rev, continued_as,
-	parent_id, delegate_budget, delegate_all,
+	parent_id,
 	crew_of, crew_seq, crew_node`
 
 // writtenFeatureColumns returns the set of feature columns the store
@@ -1041,7 +1042,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
 		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.Home, &f.VerifiedRev, &continuedAs,
-		&parentID, &f.Delegate.Budget, &f.Delegate.ConfirmAll,
+		&parentID,
 		&crewOf, &f.Crew.Seq, &f.Crew.Node)
 	if err != nil {
 		return f, err

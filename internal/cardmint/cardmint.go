@@ -159,7 +159,7 @@ type Input struct {
 	GateApproval string
 	// Workflow lets a caller that still runs cards through the stage graph
 	// mint a workflow kind (feature, bug, research): the headless driver's
-	// `gummi run`, a session's delegation, a session's "write a spec", the
+	// `gummi run`, a session's "write a spec", the
 	// bug import and the web API's explicit kind. Without it only a
 	// freeform card — a session, or an agent — is minted; every person-
 	// facing creation surface leaves it unset.
@@ -172,10 +172,6 @@ type Input struct {
 	// never sets it: the fix is a word in the title, and the person
 	// should be the one to type it.
 	Unattended bool
-	// Parent mints the card under a freeform card's delegation: its branch
-	// forks from the freeform branch and lands back on it, and its envelope
-	// is carved out of that card's delegation budget.
-	Parent domain.FeatureID
 	// FoundBy records the card that filed this one: a finished card whose
 	// follow-up this is. Provenance only — it blocks and schedules nothing.
 	FoundBy domain.FeatureID
@@ -415,7 +411,6 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if in.Kind == domain.KindBug {
 		f.Severity = in.Severity
 	}
-	f.ParentID = in.Parent
 	f.FoundBy = in.FoundBy
 	if in.Kind != domain.KindFreeform &&
 		(seed != "" || in.Acceptance != "" || in.Adopt != "" || (in.Kind == domain.KindBug && in.Discussion != "")) {

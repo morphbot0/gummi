@@ -789,6 +789,16 @@ func (m *Shell) repoBaseBranch(f domain.Feature) string {
 	return worktree.DefaultBaseBranchName
 }
 
+// rowIndex is the index of card id in m.rows, -1 when it is not loaded.
+func (m *Shell) rowIndex(id domain.FeatureID) int {
+	for i, r := range m.rows {
+		if r.F.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 // parentBranchOf names the branch f lands on when that is not its
 // repository's trunk: a card a freeform session created forks from and
 // lands on that card's branch while it is open (worktree.Pool.ManagerFor).
@@ -1670,12 +1680,6 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// something a session's crew conducts on changed: tick it, and
 		// reload so the squares and its decision are current
 		return tea.Batch(m.crewTickCmd(ev.Feature), m.loadRows)
-	case engine.EventDelegateCreated:
-		// a freeform session created a card under its delegation: it was
-		// minted on autopilot, and the board starts it the way a goal's
-		// start does — the session that asked for it is not the one to
-		// drive it.
-		return tea.Batch(m.loadRows, m.delegateStartCmd(ev.Feature))
 	case engine.EventCardCreated:
 		// a card was minted or filed onto the open board by a caller that
 		// touches no session machinery — a goal's lead — the only
@@ -1988,8 +1992,8 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if cmd, ok := m.updateDelegate(msg); ok {
-		return m, cmd
+	if msg, ok := msg.(statsLoadedMsg); ok {
+		return m, m.statsLoaded(msg)
 	}
 	if cmd, ok := m.updateCrew(msg); ok {
 		return m, cmd
