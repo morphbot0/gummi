@@ -306,6 +306,9 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		startedAt:   time.Now(),
 	}
 	sess.setSpawnInfo(ag.Name(), rc.Model, ag.Capabilities().ClientTools)
+	if !f.InCrew() {
+		sess.setSpecPath(e.SessionSpecPath(f))
+	}
 	sess.setByokRate(ag.CreditRate(rc.Model))
 	if len(seed) > 0 {
 		sess.transcript = append(sess.transcript, seed...)
@@ -384,6 +387,14 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			extra = append(extra, delegateTools()...)
 			tools = append(tools, delegateTools()...)
 			hints = append(hints, freeformDelegateHint)
+		}
+		// A session's spec and crew tools (DESIGN §24): every session
+		// has them; a crew's own nodes do not.
+		if !f.InCrew() {
+			own := append(sessionSpecTools(), crewTools()...)
+			extra = append(extra, own...)
+			tools = append(tools, own...)
+			hints = append(hints, sessionCrewHint)
 		}
 		path, teardown, merr := e.startMCPEndpoint(ctx, f, flavorStage, extra...)
 		if merr != nil {
@@ -895,8 +906,10 @@ func (ff *FreeformSession) drainQueue(sess *Session) {
 	b, ok := ff.takeQueue(sess)
 	if !ok {
 		// nothing the person said is waiting: the objective, if one is
-		// running, decides whether gummi sends the next turn
+		// running, decides whether gummi sends the next turn — and a
+		// crew's node hands its turn to its checks and review
 		ff.advanceObjective(sess)
+		ff.crewNodeTurnEnded(sess)
 		return
 	}
 	go func() {
@@ -1454,6 +1467,9 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 func (e *Engine) exhaustFreeform(ff *FreeformSession, sess *Session) {
 	if !sess.markExhausted() {
 		return
+	}
+	if sess.Feature.Crew.Node != "" {
+		e.crewNodeExhausted(sess.Feature)
 	}
 	sess.appendSystem("this card has spent its envelope — its work is left as it is in its worktree; " +
 		"raise the envelope to carry on")

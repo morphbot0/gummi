@@ -306,6 +306,9 @@ type Engine struct {
 	// holds its card's worktree, its per-card lock and its envelope (see
 	// freeformsession.go).
 	freeform map[domain.FeatureID]*FreeformSession
+	// crews is the crews' runtime state (crew.go), made on first use.
+	crewOnce sync.Once
+	crews    *crewRuntime
 	// freeformClosed keeps the conversation of each freeform card whose
 	// session ended (FreeformHistory), so a closed card still shows what
 	// was said on it.

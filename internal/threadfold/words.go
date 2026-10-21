@@ -380,8 +380,11 @@ func ActorWord(actor string) string {
 // the terminal's own (drawn as "you"), and "gummi" for a turn gummi sent
 // for a session's objective (DESIGN §19.11) — never drawn as the person's.
 func TurnBy(by string) string {
-	if by == state.ActorObjective {
+	switch by {
+	case state.ActorObjective:
 		return "gummi"
+	case state.ActorCrew:
+		return "crew"
 	}
 	return state.PersonName(by)
 }

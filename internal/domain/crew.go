@@ -315,3 +315,89 @@ type SpecRevision struct {
 	By      string
 	At      time.Time
 }
+
+// Handoff is what a node says it did, in the fixed grammar every node
+// ends with (§24.6): DONE: what it did, DECISION: a choice the brief did
+// not make for it, OPEN: what it left.
+type Handoff struct {
+	Done      []string
+	Decisions []string
+	Open      []string
+}
+
+// ParseHandoff reads a node's last reply. Lines are matched after any
+// list marker, case-insensitively on the label.
+func ParseHandoff(text string) Handoff {
+	var h Handoff
+	for _, line := range strings.Split(text, "\n") {
+		l := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-*• "))
+		label, rest, ok := strings.Cut(l, ":")
+		if !ok {
+			continue
+		}
+		rest = strings.TrimSpace(rest)
+		if rest == "" {
+			continue
+		}
+		switch strings.ToUpper(strings.TrimSpace(label)) {
+		case "DONE":
+			h.Done = append(h.Done, rest)
+		case "DECISION":
+			h.Decisions = append(h.Decisions, rest)
+		case "OPEN":
+			h.Open = append(h.Open, rest)
+		}
+	}
+	return h
+}
+
+// Empty reports whether the reply carried no handoff at all.
+func (h Handoff) Empty() bool { return len(h.Done)+len(h.Decisions)+len(h.Open) == 0 }
+
+// String renders the handoff back in its grammar.
+func (h Handoff) String() string {
+	var b strings.Builder
+	for _, p := range []struct {
+		label string
+		lines []string
+	}{{"DONE", h.Done}, {"DECISION", h.Decisions}, {"OPEN", h.Open}} {
+		for _, l := range p.lines {
+			b.WriteString(p.label + ": " + l + "\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// CrewReview is a crew reviewer's answer: VERDICT: pass or changes, and
+// one FINDING: line per thing to fix.
+type CrewReview struct {
+	Pass     bool
+	Parsed   bool
+	Findings []string
+}
+
+// ParseCrewReview reads a reviewer's reply. The last VERDICT: line wins;
+// a reply with none does not pass, because a review that did not say
+// pass has not passed.
+func ParseCrewReview(text string) CrewReview {
+	var r CrewReview
+	for _, line := range strings.Split(text, "\n") {
+		l := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-*• "))
+		label, rest, ok := strings.Cut(l, ":")
+		if !ok {
+			continue
+		}
+		rest = strings.TrimSpace(rest)
+		switch strings.ToUpper(strings.TrimSpace(label)) {
+		case "VERDICT":
+			r.Parsed = true
+			word, _, _ := strings.Cut(strings.ToLower(rest), " ")
+			r.Pass = strings.Trim(word, ".,;") == "pass"
+		case "FINDING":
+			if rest != "" {
+				r.Findings = append(r.Findings, rest)
+			}
+		}
+	}
+	return r
+}

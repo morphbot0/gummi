@@ -58,6 +58,10 @@ const (
 	// under its delegation (Feature is the new card). The driving loop
 	// starts it on autopilot, the way a goal's start does for its cards.
 	EventDelegateCreated EventKind = "delegate_created"
+	// EventCrew fires when something a crew's conductor reads changed: a
+	// node's turn ended, a decision was answered, the planner finished.
+	// The driving loop ticks the session's crew on it (Engine.CrewTick).
+	EventCrew EventKind = "crew"
 	// EventGoal asks the driving loop to tick a goal (Feature is the goal):
 	// it has work to conduct — it just entered implement, you added a note,
 	// it was sent back or stopped.

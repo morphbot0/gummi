@@ -658,6 +658,10 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleMemoryTool(s, tc)
 	case cardCreateToolName, cardListToolName, cardLandToolName:
 		e.handleDelegateTool(s, tc)
+	case specStartToolName:
+		e.handleSpecStart(s, tc)
+	case crewStartToolName, crewStatusToolName, crewSteerToolName, crewStopToolName, crewLandToolName:
+		e.handleCrewTool(s, tc)
 	case skillReadTool, skillManageTool:
 		e.handleSkillTool(s, tc)
 	default:
@@ -802,6 +806,11 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 		e.bounceAsk(s, tc.ID, reason)
 		return
 	}
+	// a crew node's question goes to its planner first (DESIGN §24.6)
+	if s.Feature.Crew.Node != "" {
+		e.crewNodeAsk(s, tc.ID, ask)
+		return
+	}
 	e.installAsk(s, tc.ID, ask)
 }
 
@@ -910,6 +919,7 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 	}
 	s.appendActivity("annotated spec: " + a.Note)
 	e.persist(s)
+	e.noteSessionSpecWrite(s)
 	e.resolveNow(s, tc.ID, "annotation added to the spec")
 }
 
@@ -925,6 +935,10 @@ func (e *Engine) handleSpecView(s *Session, tc *agent.ToolCall) {
 	_ = json.Unmarshal(tc.Args, &a)
 	raw, err := os.ReadFile(s.SpecPath())
 	if err != nil {
+		if s.Feature.IsFreeform() && !s.Feature.InCrew() {
+			e.resolveNow(s, tc.ID, "this session has no spec yet; spec_start creates one")
+			return
+		}
 		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
 		return
 	}
@@ -973,6 +987,7 @@ func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 	note := "updated " + matchedTitle + " section"
 	s.appendActivity(note)
 	e.persist(s)
+	e.noteSessionSpecWrite(s)
 	e.resolveNow(s, tc.ID, note)
 }
 

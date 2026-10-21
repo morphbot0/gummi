@@ -43,3 +43,8 @@ func PersonName(actor string) string {
 // card's objective (DESIGN §19.11): not a person, so a thread draws them
 // as gummi's and never as the person's.
 const ActorObjective = "objective"
+
+// ActorCrew is the actor of the turns a crew sends (DESIGN §24): a node's
+// brief and reworks, and the report its session gets. A thread draws them
+// as the crew's.
+const ActorCrew = "crew"
