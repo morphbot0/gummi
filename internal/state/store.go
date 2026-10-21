@@ -103,9 +103,63 @@ CREATE TABLE IF NOT EXISTS features (
 	continued_as    TEXT NOT NULL DEFAULT '',
 	parent_id       TEXT NOT NULL DEFAULT '',
 	delegate_budget INTEGER NOT NULL DEFAULT 0,
-	delegate_all    INTEGER NOT NULL DEFAULT 0
+	delegate_all    INTEGER NOT NULL DEFAULT 0,
+	crew_of         TEXT NOT NULL DEFAULT '',
+	crew_seq        INTEGER NOT NULL DEFAULT 0,
+	crew_node       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
+-- A crew (DESIGN §24) and its nodes. The crew's own card is a hidden
+-- freeform child of its session (features.crew_of); the plan, the
+-- approved plan and the open decision are JSON, read back whole.
+CREATE TABLE IF NOT EXISTS crews (
+	id             TEXT PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+	session_id     TEXT NOT NULL,
+	seq            INTEGER NOT NULL,
+	state          TEXT NOT NULL,
+	brief          TEXT NOT NULL DEFAULT '',
+	spec_rev       INTEGER NOT NULL DEFAULT 0,
+	budget         INTEGER NOT NULL DEFAULT 0,
+	approved       TEXT NOT NULL DEFAULT '{}',
+	approved_items TEXT NOT NULL DEFAULT '[]',
+	plan           TEXT NOT NULL DEFAULT '{}',
+	items          TEXT NOT NULL DEFAULT '[]',
+	pending        TEXT NOT NULL DEFAULT '',
+	wake           TEXT NOT NULL DEFAULT '[]',
+	own_spent      REAL NOT NULL DEFAULT 0,
+	stopping       INTEGER NOT NULL DEFAULT 0,
+	report         TEXT NOT NULL DEFAULT '',
+	verified_sha   TEXT NOT NULL DEFAULT '',
+	created_at     TEXT NOT NULL,
+	updated_at     TEXT NOT NULL,
+	UNIQUE(session_id, seq)
+);
+CREATE TABLE IF NOT EXISTS crew_nodes (
+	crew_id       TEXT NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
+	node          TEXT NOT NULL,
+	card_id       TEXT NOT NULL DEFAULT '',
+	state         TEXT NOT NULL,
+	planner_tries INTEGER NOT NULL DEFAULT 0,
+	reason        TEXT NOT NULL DEFAULT '',
+	reworks       INTEGER NOT NULL DEFAULT 0,
+	envelope      INTEGER NOT NULL DEFAULT 0,
+	handoff       TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (crew_id, node)
+);
+CREATE TABLE IF NOT EXISTS crew_preauth (
+	feature_id TEXT PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+	credits    INTEGER NOT NULL DEFAULT 0
+);
+-- Every saved state of a session's spec (DESIGN §24.2): a crew freezes
+-- one, and the Spec tab lists them.
+CREATE TABLE IF NOT EXISTS spec_revisions (
+	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	rev        INTEGER NOT NULL,
+	content    TEXT NOT NULL,
+	by         TEXT NOT NULL DEFAULT '',
+	at         TEXT NOT NULL,
+	PRIMARY KEY (feature_id, rev)
+);
 -- features_stack is created by the column migrations, not here: this
 -- block runs against pre-existing databases too, where stack_id does
 -- not exist until the ALTER TABLE below has run. features_goal is
@@ -853,6 +907,12 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN delegate_budget INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN delegate_all INTEGER NOT NULL DEFAULT 0`,
 	`CREATE INDEX IF NOT EXISTS features_parent ON features(parent_id)`,
+	// A crew's own card and its nodes' cards (DESIGN §24): the session
+	// they belong to, the crew's number on it, and the node id. Empty on
+	// every card a person works, which is every card before crews.
+	`ALTER TABLE features ADD COLUMN crew_of TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN crew_seq INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN crew_node TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -891,8 +951,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			research_mode,
 			base, branch_scheme, branch, stack_id, stack_pos,
 			session_backend, session_model, main_checkout, home,
-			parent_id, delegate_budget, delegate_all)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			parent_id, delegate_budget, delegate_all,
+			crew_of, crew_seq, crew_node)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -907,7 +968,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		string(f.Mode),
 		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
 		f.SessionBackend, f.SessionModel, f.MainCheckout, f.Home,
-		string(f.ParentID), f.Delegate.Budget, f.Delegate.ConfirmAll)
+		string(f.ParentID), f.Delegate.Budget, f.Delegate.ConfirmAll,
+		string(f.Crew.Of), f.Crew.Seq, f.Crew.Node)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -934,7 +996,8 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
 	session_backend, session_model, main_checkout, home, verified_rev, continued_as,
-	parent_id, delegate_budget, delegate_all`
+	parent_id, delegate_budget, delegate_all,
+	crew_of, crew_seq, crew_node`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -958,7 +1021,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
 	var goalID, goalDropped, foundBy, goalWrapUp, mode string
-	var stackID, continuedAs, parentID string
+	var stackID, continuedAs, parentID, crewOf string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
@@ -976,13 +1039,15 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
 		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.Home, &f.VerifiedRev, &continuedAs,
-		&parentID, &f.Delegate.Budget, &f.Delegate.ConfirmAll)
+		&parentID, &f.Delegate.Budget, &f.Delegate.ConfirmAll,
+		&crewOf, &f.Crew.Seq, &f.Crew.Node)
 	if err != nil {
 		return f, err
 	}
 	f.StackID = domain.StackID(stackID)
 	f.ContinuedAs = domain.FeatureID(continuedAs)
 	f.ParentID = domain.FeatureID(parentID)
+	f.Crew.Of = domain.FeatureID(crewOf)
 	f.Mode = domain.ResearchMode(mode)
 	f.GoalID = domain.FeatureID(goalID)
 	f.FoundBy = domain.FeatureID(foundBy)

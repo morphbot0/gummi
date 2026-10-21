@@ -48,6 +48,13 @@ func (f *Feature) validateDelegation() error {
 		return fmt.Errorf("feature %s: parent %q is not a freeform card", f.ID, f.ParentID)
 	}
 	switch {
+	case f.InCrew():
+		// a crew's card or a node's: a hidden freeform child, routed on its
+		// parent exactly as a delegated card is (DESIGN §24.3)
+		if f.kind() != KindFreeform || f.Crew.Of == "" || (f.Crew.Node != "" && !ValidNodeID(f.Crew.Node)) {
+			return fmt.Errorf("feature %s: a crew's card is a freeform child of a session, with a node id of the form t<k>", f.ID)
+		}
+		return nil
 	case f.kind() == KindFreeform || f.kind() == KindGoal:
 		return fmt.Errorf("feature %s: a %s card cannot be delegated", f.ID, f.kind())
 	case f.GoalID != "":

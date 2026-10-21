@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // A crew (DESIGN §24) is a planned piece of a session's work: a planner's
@@ -217,4 +218,100 @@ func CrewBranch(slug string, n int) string { return fmt.Sprintf("crew/%s/%d", sl
 // CrewNodeBranch is one node's branch under CrewBranch.
 func CrewNodeBranch(slug string, n int, node string) string {
 	return CrewBranch(slug, n) + "." + node
+}
+
+// CrewLink is what makes a card a crew's: the session it belongs to, the
+// crew's number on that session, and — on a node's card — the node id.
+// The card's slug is the session's, so its branch is spelled from both.
+type CrewLink struct {
+	Of   FeatureID
+	Seq  int
+	Node string
+}
+
+// InCrew reports whether the card is a crew's own or one of its nodes'.
+// Such a card is never on the board: its session's Crew tab is its face.
+func (f *Feature) InCrew() bool { return f.Crew.Seq > 0 }
+
+// CrewDecisionKind is what a crew asks its person.
+type CrewDecisionKind string
+
+const (
+	// CrewDecidePlan: run this plan?
+	CrewDecidePlan CrewDecisionKind = "plan"
+	// CrewDecideWiden: the planner's revision widens the approved plan.
+	CrewDecideWiden CrewDecisionKind = "widen"
+	// CrewDecideQuestion: a node asked what the frozen spec does not settle.
+	CrewDecideQuestion CrewDecisionKind = "question"
+)
+
+// CrewDecision is a crew's one open question to its person. A crew holds
+// at most one; the rest wait their turn behind it.
+type CrewDecision struct {
+	ID       string           `json:"id"`
+	Kind     CrewDecisionKind `json:"kind"`
+	Question string           `json:"question"`
+	Options  []string         `json:"options,omitempty"`
+	// Node and CallID are a question's: the node that asked and the call
+	// blocked on the answer.
+	Node   string `json:"node,omitempty"`
+	CallID string `json:"call_id,omitempty"`
+	// Plan, Items and Reasons are a plan's or a widening's: what would run,
+	// and for a widening why it needs the person.
+	Plan    *CrewPlan  `json:"plan,omitempty"`
+	Items   []DoneWhen `json:"items,omitempty"`
+	Reasons []string   `json:"reasons,omitempty"`
+}
+
+// Crew is one crew's record.
+type Crew struct {
+	ID      FeatureID // the crew's own card
+	Session FeatureID
+	Seq     int
+	State   CrewState
+	Brief   string
+	// SpecRev is the session spec's revision the crew is judged against.
+	SpecRev int
+	Budget  int
+	// Approved and ApprovedItems are what the person approved; Plan and
+	// Items are what runs now (equal to the approved until a revision).
+	Approved      CrewPlan
+	ApprovedItems []DoneWhen
+	Plan          CrewPlan
+	Items         []DoneWhen
+	Pending       *CrewDecision
+	// Wake holds the planner's pending wake reasons.
+	Wake     []string
+	OwnSpent float64
+	Stopping bool
+	// Report is the crew's report once it ended; VerifiedSHA the session
+	// commit whose done-when checks passed when it landed (§24.8).
+	Report      string
+	VerifiedSHA string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// CrewNodeRun is one node's progress.
+type CrewNodeRun struct {
+	Crew         FeatureID
+	Node         string
+	Card         FeatureID // empty until the node starts
+	State        NodeState
+	PlannerTries int
+	Reason       string
+	Reworks      int
+	// Envelope is the node's envelope, the plan's until the planner raises it.
+	Envelope int
+	Spent    float64
+	// Handoff is the node's last DONE:/DECISION:/OPEN: lines.
+	Handoff string
+}
+
+// SpecRevision is one saved state of a session's spec.
+type SpecRevision struct {
+	Rev     int
+	Content string
+	By      string
+	At      time.Time
 }

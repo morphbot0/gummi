@@ -423,6 +423,9 @@ type Feature struct {
 	// whose person has not opted in — the session is then not offered the
 	// card tools at all.
 	Delegate Delegation
+	// Crew marks a crew's own card or one of its nodes' (DESIGN §24): a
+	// hidden freeform child no person works. Zero on every other card.
+	Crew CrewLink
 	// GateApproval is who crosses this card's gates on an unattended
 	// resume: GateAttended (default) or GateAutopilot.
 	// Persisted at creation so a `resume` that doesn't re-pass
@@ -1041,6 +1044,12 @@ func (f *Feature) Ending(landedOnBase bool) Ending {
 func (f *Feature) BranchName() string {
 	if f.BranchScheme == BranchSchemeAdopted {
 		return f.Branch
+	}
+	if f.Crew.Seq > 0 {
+		if f.Crew.Node != "" {
+			return CrewNodeBranch(f.Slug, f.Crew.Seq, f.Crew.Node)
+		}
+		return CrewBranch(f.Slug, f.Crew.Seq)
 	}
 	if f.BranchScheme == BranchSchemeKind {
 		return f.kind().branchPrefix() + "/" + f.Slug
