@@ -253,6 +253,9 @@ type Shell struct {
 	stackRows     map[domain.FeatureID]stackRow
 	goalTicking   map[domain.FeatureID]bool
 	goalTickAgain map[domain.FeatureID]bool
+	// crewTicking and crewTickAgain coalesce crew ticks (crewloop.go).
+	crewTicking   map[domain.FeatureID]bool
+	crewTickAgain map[domain.FeatureID]bool
 	// sizedFor is how many landed rows worktreeSizeText was measured
 	// against, so a reload that did not change the set does not re-walk
 	// every worktree on disk. -1 until the first measurement.
@@ -1645,7 +1648,7 @@ func (m *Shell) Init() tea.Cmd {
 		// badges them (and withholds the actions that would fight them)
 		// instead of presenting a card it cannot touch as idle.
 		cmds = append(cmds, foreignTick())
-		cmds = append(cmds, goalPollTick())
+		cmds = append(cmds, goalPollTick(), crewPollTick())
 		// The stats tab's own slow refresh. It reads the record rather
 		// than the event stream, so nothing wakes it when a running lane
 		// grows or a wait is answered — a tick does, only while the tab
@@ -1752,6 +1755,10 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			}
 		}
 		return m.loadRows
+	case engine.EventCrew:
+		// something a session's crew conducts on changed: tick it, and
+		// reload so the squares and its decision are current
+		return tea.Batch(m.crewTickCmd(ev.Feature), m.loadRows)
 	case engine.EventDelegateCreated:
 		// a freeform session created a card under its delegation: it was
 		// minted on autopilot, and the board starts it the way a goal's
@@ -2079,6 +2086,9 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.updateGoal(msg); ok {
+		return m, cmd
+	}
+	if cmd, ok := m.updateCrew(msg); ok {
 		return m, cmd
 	}
 	if cmd, ok := m.updateStack(msg); ok {

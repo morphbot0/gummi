@@ -26,7 +26,12 @@ import (
 // featureRow is one board entry: the stored feature plus the bits of
 // derived filesystem state the board displays.
 type featureRow struct {
-	F           domain.Feature
+	F domain.Feature
+	// Crew is a session's latest crew (DESIGN §24) and CrewNodes its
+	// nodes, read at load so the board's squares and the open decision
+	// cost the render nothing. Nil on every card that never ran one.
+	Crew        *domain.Crew
+	CrewNodes   []domain.CrewNodeRun
 	HasWorktree bool
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	// Head is the branch tip of a verified card waiting at verify, read at
@@ -342,9 +347,24 @@ func (m *Shell) loadRows() tea.Msg {
 			openSessions[f.ID] = f.BranchName()
 		}
 	}
+	crews := map[domain.FeatureID]*domain.Crew{}
+	if all, err := m.store.AllCrews(ctx); err == nil {
+		for i := range all {
+			crews[all[i].Session] = &all[i] // ordered by seq: the last wins
+		}
+	}
 	rows := make([]featureRow, 0, len(feats))
 	for _, f := range feats {
+		// a crew's own card and its nodes' are never on the board: the
+		// session's Crew tab is their face (DESIGN §24)
+		if f.InCrew() {
+			continue
+		}
 		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f)}
+		if c := crews[f.ID]; c != nil {
+			row.Crew = c
+			row.CrewNodes, _ = m.store.CrewNodes(ctx, c.ID)
+		}
 		if f.Base != "" && (f.StackID == "" || f.StackPos == 0) {
 			// a card cut from a chosen base forks from it and lands on
 			// it (§18.2), so the words on its verbs name that branch. A
