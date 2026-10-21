@@ -9,6 +9,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -457,13 +458,17 @@ func (e *Engine) landNode(ctx context.Context, crewID domain.FeatureID, nodeID s
 		return
 	}
 	node, _ := c.Plan.Node(nodeID)
-	msg := fmt.Sprintf("%s (crew %d %s)\n\n%s", node.Title, c.Seq, nodeID, n.Handoff)
-	sha, err := e.pool.SquashMerge(ctx, &card, msg)
+	var sha string
+	if node.Role.Writes() {
+		msg := fmt.Sprintf("%s (crew %d %s)\n\n%s", node.Title, c.Seq, nodeID, n.Handoff)
+		sha, err = e.pool.SquashMerge(ctx, &card, msg)
+	}
 	var conflict *worktree.MergeConflictError
 	switch {
 	case err == nil:
-	case strings.Contains(err.Error(), "nothing to"):
-		// a scout, or a node whose work was already there
+		// a scout writes nothing, so it lands with nothing to merge
+	case errors.Is(err, worktree.ErrNothingToLand):
+		// a node whose work was already there
 	case asConflict(err, &conflict):
 		// the node is the integrator of its own work: it merges the crew's
 		// branch into its own and resolves what conflicts

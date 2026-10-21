@@ -41,6 +41,8 @@ type crewFake struct {
 	nodeRuns int
 	sessionT []string
 	review   func(n int) string
+	// plan replaces crewTestPlan when set
+	plan string
 }
 
 func newCrewFake() *crewFake {
@@ -56,8 +58,12 @@ func newCrewFake() *crewFake {
 			if !strings.Contains(msg, "Write the plan now") {
 				return []agent.Event{usage, {Kind: agent.EventMessage, Text: "nothing to change"}, {Kind: agent.EventIdle}}
 			}
+			plan := crewTestPlan
+			if cf.plan != "" {
+				plan = cf.plan
+			}
 			return []agent.Event{
-				toolCall("p1", "plan_write", map[string]any{"plan": crewTestPlan}), usage,
+				toolCall("p1", "plan_write", map[string]any{"plan": plan}), usage,
 				{Kind: agent.EventMessage, Text: "planned"},
 				{Kind: agent.EventIdle},
 			}
@@ -71,7 +77,10 @@ func newCrewFake() *crewFake {
 				verdict = cf.review(n)
 			}
 			return []agent.Event{usage, {Kind: agent.EventMessage, Text: verdict}, {Kind: agent.EventIdle}}
-		case strings.Contains(msg, "You are node t1") || strings.Contains(msg, "Your work was sent back"):
+		case strings.Contains(msg, "You change no files"):
+			// a scout: it reads and reports, and writes nothing
+			return []agent.Event{usage, {Kind: agent.EventMessage, Text: "Mapped it.\nDONE: mapped where crew.txt goes"}, {Kind: agent.EventIdle}}
+		case strings.Contains(msg, "You are node t") || strings.Contains(msg, "Your work was sent back"):
 			cf.mu.Lock()
 			cf.nodeRuns++
 			cf.mu.Unlock()
@@ -219,6 +228,49 @@ func TestACrewRunsFromPlanToLanding(t *testing.T) {
 	for _, x := range all {
 		if x.InCrew() && x.Stage != domain.StageDone {
 			t.Fatalf("crew card %s left open", x.ID)
+		}
+	}
+}
+
+// TestAScoutLandsWithNothingToMerge: a scout owns nothing and commits
+// nothing, so its branch has no commits of its own. That is its whole
+// job, not a failed landing: it must land, and the node that needs it
+// must run, or every plan that starts with a scout ends partial.
+func TestAScoutLandsWithNothingToMerge(t *testing.T) {
+	cf := newCrewFake()
+	cf.plan = `lanes: 1
+budget: 400
+nodes:
+  - id: t1
+    role: scout
+    title: map where crew.txt goes
+    envelope: 40
+  - id: t2
+    role: implementer
+    title: write crew.txt
+    needs: [t1]
+    owns: [crew.txt]
+    serves: [DW-1]
+    checks: ["test -f crew.txt"]
+    envelope: 100
+`
+	e, store, f, _ := crewEngine(t, cf)
+	ctx := context.Background()
+	if _, err := e.CrewStart(ctx, f.ID, "make the file", 400, ActorAgent); err != nil {
+		t.Fatal(err)
+	}
+	c := tickUntil(t, e, f.ID, "proposed", func(c *domain.Crew) bool { return c.Pending != nil })
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewRunPlan, "user"); err != nil {
+		t.Fatal(err)
+	}
+	c = tickUntil(t, e, f.ID, "reported", func(c *domain.Crew) bool { return c.State.Ended() })
+	if c.State != domain.CrewFinished {
+		t.Fatalf("crew ended %s:\n%s", c.State, e.CrewDoc(c))
+	}
+	nodes, _ := store.CrewNodes(ctx, c.ID)
+	for _, n := range nodes {
+		if n.State != domain.NodeLanded {
+			t.Fatalf("%s ended %s (%s)", n.Node, n.State, n.Reason)
 		}
 	}
 }

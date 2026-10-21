@@ -896,7 +896,7 @@ func (e *Engine) CrewLand(ctx context.Context, session domain.FeatureID, by stri
 	case errors.As(err, &conflict):
 		return "", fmt.Errorf("the crew's branch conflicts with the session's in %s: resolve it in the session, then land again",
 			strings.Join(conflict.Files, ", "))
-	case err != nil && strings.Contains(err.Error(), "nothing to"):
+	case errors.Is(err, worktree.ErrNothingToLand):
 		sha, err = smgr.Head(ctx, &sess)
 		if err != nil {
 			return "", err

@@ -1725,7 +1725,7 @@ func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, m
 	if n, err := runGit(ctx, m.repo, "rev-list", "--count", forkBase+".."+branch); err != nil {
 		return "", err
 	} else if n == "0" {
-		return "", fmt.Errorf("branch %s has no commits to merge", branch)
+		return "", nothingToLand(fmt.Sprintf("branch %s has no commits to merge", branch))
 	}
 	// A merge landing writes MERGE_HEAD, so it is undone with merge --abort;
 	// a squash writes none and only reset --merge can undo it.
@@ -1754,7 +1754,7 @@ func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, m
 				return "", fmt.Errorf("%s found nothing to commit AND reset failed, main checkout needs manual attention: %w", verb, resetErr)
 			}
 		}
-		return "", fmt.Errorf("nothing to merge — %s already landed on main", branch)
+		return "", nothingToLand(fmt.Sprintf("nothing to merge — %s already landed on main", branch))
 	}
 	commitArgs := []string{"commit", "-m", WithCoAuthors(message)}
 	if strings.TrimSpace(message) == "" {
@@ -2504,3 +2504,18 @@ func trackedChanges(ctx context.Context, dir string) ([]string, error) {
 	}
 	return paths, nil
 }
+
+// ErrNothingToLand is what a landing returns, through errors.Is, when the
+// branch brings nothing: no commits of its own, or content already on the
+// base. A caller for whom that is no failure — a crew node that wrote
+// nothing, a crew whose work was already there — tests for it instead of
+// reading the sentence.
+var ErrNothingToLand = errors.New("nothing to land")
+
+type nothingToLandError string
+
+func nothingToLand(msg string) error { return nothingToLandError(msg) }
+
+func (e nothingToLandError) Error() string { return string(e) }
+
+func (e nothingToLandError) Is(target error) bool { return target == ErrNothingToLand }
