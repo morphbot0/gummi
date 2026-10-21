@@ -41,8 +41,6 @@ func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "print the version and exit")
 
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(ingestCmd)
-	rootCmd.AddCommand(bugsCmd)
 	rootCmd.AddCommand(depsCmd)
 	rootCmd.AddCommand(stackCmd)
 	rootCmd.AddCommand(scheduleCmd)

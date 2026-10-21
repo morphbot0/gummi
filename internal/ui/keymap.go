@@ -72,14 +72,8 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "diff", m.withCardTabsIf(m.cardOpen, m.diff.bindings())
 	case live && m.logv != nil:
 		return "log", m.withCardTabsIf(m.cardOpen, m.logv.bindings())
-	case live && m.ingest != nil:
-		return "ingest", m.ingest.bindings()
-	case live && m.bugIngest != nil:
-		return "import bugs", m.bugIngest.bindings()
 	case live && m.deps != nil:
 		return "dependencies", m.deps.bindings()
-	case live && m.ingestRun != nil && !m.ingestRun.hidden:
-		return "ingest", ingestRunBindings
 	// the inbox owns the main pane whenever it's active. It has its own
 	// table now (inboxview.go), not a placeholder.
 	case m.tab == TabStats:
@@ -333,8 +327,6 @@ func (m *Shell) boardBindings() []binding {
 		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
 		{key: "f", label: "fold archive", help: "fold or unfold the archive of cards that settled a while ago"},
 		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},
-		{key: "I", label: "ingest", help: "split a document into cards"},
-		{key: "G", label: "import", help: "same screen as n, straight to importing a bug from a GitHub issue — browse the repo's issues"},
 		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},
 		{key: "D", label: "delete", help: "delete card (uppercase: it destroys work)"},
 		{key: "?", label: "help", bar: true},
@@ -420,17 +412,8 @@ func (m *Shell) splashBindings() []binding {
 	return []binding{
 		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
 		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
-		{key: "I", label: "ingest", help: "split a document into cards"},
-		{key: "G", label: "import", help: "same screen as n, straight to importing a bug from a GitHub issue — browse the repo's issues"},
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit", bar: true},
 	}
 }
 
-// ingestRunBindings is the live ingest feed's table. The feed is
-// watch-only; these keys background and re-foreground it.
-var ingestRunBindings = []binding{
-	{key: "esc", label: "board", help: "background the feed — the pass keeps running", bar: true},
-	{key: "I", label: "ingest feed", help: "bring the backgrounded feed forward", bar: true},
-	{key: "?", label: "help", bar: true},
-}

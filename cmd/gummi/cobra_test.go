@@ -215,15 +215,3 @@ func TestInitCmdRegistered(t *testing.T) {
 	}
 }
 
-// bugs help lists its ingest/new subcommands.
-func TestCobraBugsHelp(t *testing.T) {
-	out := captureStdout(t, func() {
-		rootCmd.SetArgs([]string{"bugs", "--help"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("Execute(bugs --help): %v", err)
-		}
-	})
-	if !strings.Contains(out, "ingest") || !strings.Contains(out, "new") {
-		t.Fatalf("bugs help missing subcommands:\n%s", out)
-	}
-}

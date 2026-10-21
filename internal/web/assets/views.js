@@ -1,7 +1,7 @@
 // views.js — the page's overlays, and a registry other surfaces plug into.
 //
 //   registerView(name, { title, wide, css, mount(body, ctx), unmount() })
-//     adds a surface (new card, stacks, ingest, bugs, doctor, fleet)
+//     adds a surface (new card, stacks, doctor, fleet)
 //     that the rail foot, the palette and the keys can open by
 //     name. mount may return a cleanup function. ctx carries what a view
 //     needs from the page: { params, close, api, select, toast, state,
@@ -25,8 +25,6 @@ export const VIEW_LABELS = {
   repos: 'Repositories',
   schedules: 'Schedules',
   skills: 'Skills',
-  ingest: 'Import spec',
-  bugs: 'Import bugs',
   doctor: 'Doctor',
   settings: 'Settings'
 }

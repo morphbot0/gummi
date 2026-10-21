@@ -44,10 +44,6 @@ const (
 	ChangeToast ChangeKind = "toast"
 	// ChangeViewers: who is looking at the board changed. Carries Viewers.
 	ChangeViewers ChangeKind = "viewers"
-	// ChangeIngest: the board's ingest run moved (ID is the run) — a step,
-	// its proposals, a review edit, its approval. Refetch
-	// GET /api/ingest/{run}.
-	ChangeIngest ChangeKind = "ingest"
 	// ChangePairing: a device asked to be let in, or was let in, turned
 	// away or unpaired while it waited (ID is the device). A page at the
 	// board refetches GET /api/devices/pending; the page of the device it
@@ -74,8 +70,7 @@ const EventResync = "resync"
 type Change struct {
 	Kind ChangeKind `json:"kind"`
 	// ID is the card the change is about: set for card and live, and for
-	// a toast about one card; the run, for ingest; empty for board and
-	// viewers.
+	// a toast about one card; empty for board and viewers.
 	ID string `json:"id,omitempty"`
 	// Gone marks a card change whose card has left the board (it was
 	// deleted): there is nothing left to refetch, and a page showing it
@@ -101,7 +96,7 @@ type Change struct {
 // Toasts never coalesce with each other, since each says something.
 func (c Change) Key() string {
 	switch c.Kind {
-	case ChangeCard, ChangeLive, ChangeIngest, ChangePairing, ChangeWork:
+	case ChangeCard, ChangeLive, ChangePairing, ChangeWork:
 		return string(c.Kind) + ":" + c.ID
 	case ChangeToast:
 		return ""

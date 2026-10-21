@@ -396,9 +396,6 @@ function renderFoot (unpair, newSession) {
       item('schedules', 'Schedules', 'clock'),
       item('skills', 'Skills', 'skill'),
       'sep',
-      item('ingest', 'Import spec', 'import'),
-      item('bugs', 'Import bugs', 'bug'),
-      'sep',
       item('doctor', 'Doctor', 'doctor'),
       item('settings', 'Settings', 'settings')
     ]
@@ -407,12 +404,10 @@ function renderFoot (unpair, newSession) {
     openMenu(more, items, { up: true, testid: 'rail-more-menu' })
   })
   // what else can be started, behind the one button's arrow
-  const other = h('button', { class: 'split-more', testid: 'rail-new-menu', title: 'New agent, the full form, or import', 'aria-label': 'New agent, the full form, or import', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('chevron'))
+  const other = h('button', { class: 'split-more', testid: 'rail-new-menu', title: 'New agent, or the full form', 'aria-label': 'New agent, or the full form', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('chevron'))
   other.addEventListener('click', () => openMenu(other, [
     { label: 'New agent', icon: 'home', testid: 'rail-new-agent', hint: 'A session with a home of its own, in no repository', onClick: () => newSession?.({ home: true }) },
-    { label: 'New session…', icon: 'plus', testid: 'rail-new', hint: 'The full form: budget, profile, repository, base', onClick: () => openView('newcard') },
-    { ...item('ingest', 'Import spec', 'import'), testid: 'rail-new-ingest' },
-    { ...item('bugs', 'Import bugs', 'bug'), testid: 'rail-new-bugs' }
+    { label: 'New session…', icon: 'plus', testid: 'rail-new', hint: 'The full form: budget, profile, repository, base', onClick: () => openView('newcard') }
   ], { up: true, testid: 'rail-new-menu-list' }))
   foot.append(
     h('div', { class: 'split' },

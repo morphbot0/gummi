@@ -21,9 +21,9 @@ async function menu(page: Page, action: string) {
 
 const phone = (info: { project: { name: string } }) => info.project.name === 'phone';
 
-test.describe('a backlog', () => {
+test.describe('a session', () => {
   let ids: string[];
-  test.use({ seed: { run: async (ws) => { ids = await ws.seedBacklog(['Add a shrug helper', 'Add a nod helper', 'Add a bow helper']); } } });
+  test.use({ seed: { run: async (ws) => { ids = await ws.seedSessions(['Add a shrug helper', 'Add a nod helper']); } } });
 
   test('the budget is raised from the number it is now', async ({ pairedPage: page, server, api }, info) => {
     await open(page, server, ids[0], phone(info));
@@ -36,24 +36,6 @@ test.describe('a backlog', () => {
     await expect(page.getByTestId('action-dialog')).toHaveCount(0);
     await expect(page.getByTestId('card-spend')).toContainText('/ $25.00');
     expect((await api('GET', `/api/cards/${ids[0]}`)).json.envelope).toBe(2500);
-  });
-
-  test('a cycle is refused in the dialog, in the board’s words', async ({ pairedPage: page, server, api }, info) => {
-    const [a, b] = ids;
-    expect((await api('POST', `/api/cards/${b}/actions/deps`, { cards: [a] })).status).toBe(200);
-    await open(page, server, a, phone(info));
-    await menu(page, 'deps');
-    await page.getByTestId(`action-card-${b}`).check();
-    await page.getByTestId('action-confirm').click();
-    await expect(page.getByTestId('action-error')).toBeVisible();
-    await expect(page.getByTestId('action-dialog')).toBeVisible();
-    // said once, in the dialog: the board's broadcast of the same refusal
-    // does not stand over it as a toast as well
-    // (the dialog capitalises the board's line: compare past its first letter)
-    const said = (await page.getByTestId('action-error').textContent())!.trim().slice(1, 30);
-    await page.waitForTimeout(1000);
-    expect(await page.getByTestId('toast').filter({ hasText: said }).count()).toBe(0);
-    await shot(page, info, 'action-refused');
   });
 
   test('a budget that is not a dollar amount is said in the dialog, not sent', async ({ pairedPage: page, server }, info) => {
@@ -69,21 +51,6 @@ test.describe('a backlog', () => {
       await expect(page.getByTestId('action-dialog')).toBeVisible();
     }
     expect(sent).toEqual([]);
-  });
-
-  test('handing a card to autopilot asks first, in the overlay\'s words', async ({ pairedPage: page, server, api }, info) => {
-    const id = ids[2];
-    await open(page, server, id, phone(info));
-    await menu(page, 'gate');
-    // it loosens control: sent bare, the server asks back what autopilot
-    // will do with this card, and nothing changes until that is a yes
-    await expect(page.getByTestId('action-question')).toContainText(/Hand “.+” to autopilot\?/);
-    await expect(page.getByTestId('action-question')).toContainText('never lands on');
-    expect(((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeFalsy();
-    await shot(page, info, 'action-autopilot');
-    await page.getByTestId('action-confirm').click();
-    await expect(page.getByTestId('action-dialog')).toHaveCount(0);
-    await expect.poll(async () => ((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeTruthy();
   });
 
   test('delete asks first, then the card is gone', async ({ pairedPage: page, server, api }, info) => {
@@ -118,9 +85,47 @@ test.describe('a backlog', () => {
   });
 });
 
+test.describe('a backlog', () => {
+  let ids: string[];
+  test.use({ seed: { run: async (ws) => { ids = await ws.seedTodo(['Add a shrug helper', 'Add a nod helper', 'Add a bow helper']); } } });
+
+  test('a cycle is refused in the dialog, in the board’s words', async ({ pairedPage: page, server, api }, info) => {
+    const [a, b] = ids;
+    expect((await api('POST', `/api/cards/${b}/actions/deps`, { cards: [a] })).status).toBe(200);
+    await open(page, server, a, phone(info));
+    await menu(page, 'deps');
+    await page.getByTestId(`action-card-${b}`).check();
+    await page.getByTestId('action-confirm').click();
+    await expect(page.getByTestId('action-error')).toBeVisible();
+    await expect(page.getByTestId('action-dialog')).toBeVisible();
+    // said once, in the dialog: the board's broadcast of the same refusal
+    // does not stand over it as a toast as well
+    // (the dialog capitalises the board's line: compare past its first letter)
+    const said = (await page.getByTestId('action-error').textContent())!.trim().slice(1, 30);
+    await page.waitForTimeout(1000);
+    expect(await page.getByTestId('toast').filter({ hasText: said }).count()).toBe(0);
+    await shot(page, info, 'action-refused');
+  });
+
+  test('handing a card to autopilot asks first, in the overlay\'s words', async ({ pairedPage: page, server, api }, info) => {
+    const id = ids[2];
+    await open(page, server, id, phone(info));
+    await menu(page, 'gate');
+    // it loosens control: sent bare, the server asks back what autopilot
+    // will do with this card, and nothing changes until that is a yes
+    await expect(page.getByTestId('action-question')).toContainText(/Hand “.+” to autopilot\?/);
+    await expect(page.getByTestId('action-question')).toContainText('never lands on');
+    expect(((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeFalsy();
+    await shot(page, info, 'action-autopilot');
+    await page.getByTestId('action-confirm').click();
+    await expect(page.getByTestId('action-dialog')).toHaveCount(0);
+    await expect.poll(async () => ((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeTruthy();
+  });
+});
+
 test.describe('a card in its design stage', () => {
   let ids: string[];
-  test.use({ seed: { run: async (ws) => { ids = await ws.seedBacklog(['Add a shrug helper', 'Add a nod helper', 'Add a bow helper']); } } });
+  test.use({ seed: { run: async (ws) => { ids = await ws.seedTodo(['Add a shrug helper', 'Add a nod helper', 'Add a bow helper']); } } });
 
   test('dependencies are ticked from the board, and cleared the same way', async ({ pairedPage: page, server, api }, info) => {
     const [a, b, c] = ids;

@@ -20,10 +20,10 @@ func TestSpinnerLifecycle(t *testing.T) {
 		t.Fatal("spinner started with nothing animating")
 	}
 
-	// activity appears (an ingest pass is decomposing): the next update
+	// activity appears (a landing is being prepared): the next update
 	// starts exactly one tick loop
-	m.ingestRun = newIngestRunView("spec.md")
-	_, cmd = m.Update(noticeMsg{text: "ingesting"})
+	m.mergePrep = map[domain.FeatureID]bool{"FF-001": true}
+	_, cmd = m.Update(noticeMsg{text: "merging"})
 	if !m.spinning || cmd == nil {
 		t.Fatal("spinner did not start when activity appeared")
 	}
@@ -43,7 +43,7 @@ func TestSpinnerLifecycle(t *testing.T) {
 	}
 
 	// activity ends: the next tick stops the loop without advancing
-	m.ingestRun = nil
+	m.mergePrep = nil
 	frame := m.frame
 	_, cmd = m.Update(spinnerTickMsg{})
 	if m.spinning || cmd != nil {
@@ -54,7 +54,7 @@ func TestSpinnerLifecycle(t *testing.T) {
 	}
 
 	// activity returns: the clock restarts
-	m.ingestRun = newIngestRunView("spec.md")
+	m.mergePrep = map[domain.FeatureID]bool{"FF-001": true}
 	_, cmd = m.Update(noticeMsg{text: "back"})
 	if !m.spinning || cmd == nil {
 		t.Fatal("spinner did not restart on new activity")
@@ -113,9 +113,9 @@ func TestSpinnerActiveForeignRow(t *testing.T) {
 func TestSpinnerMotionOff(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.SetMotion(false)
-	m.ingestRun = newIngestRunView("spec.md")
+	m.mergePrep = map[domain.FeatureID]bool{"FF-001": true}
 
-	_, cmd := m.Update(noticeMsg{text: "ingesting"})
+	_, cmd := m.Update(noticeMsg{text: "merging"})
 	if m.spinning || cmd != nil {
 		t.Fatal("spinner started with motion disabled")
 	}

@@ -116,10 +116,6 @@ func TestDialogsFitTheDrawArea(t *testing.T) {
 				checkFits(t, "new card", form.View(s, area.w, area.h), area.w, area.h)
 			}
 		}
-		ingest := newIngestForm(nil, repos, false, nil)
-		ingest.errText = repoUnchosenErr
-		checkFits(t, "ingest spec", ingest.View(s, area.w, area.h), area.w, area.h)
-
 		picker := newRepoPickerDialog(domain.Feature{ID: "FD-001"}, repos, nil)
 		checkFits(t, "repo picker", picker.View(s, area.w, area.h), area.w, area.h)
 	}
@@ -548,23 +544,6 @@ func TestCardFormFullReferenceNeedsNoRepoOrigin(t *testing.T) {
 	form.failImport(errors.New("gh: not found"))
 	if form.fetching || !strings.Contains(form.errText, "not found") {
 		t.Errorf("failImport: fetching=%v err=%q", form.fetching, form.errText)
-	}
-}
-
-// TestCardFormAltGBrowsesWithoutAReference: alt+g on ordinary text opens
-// the picker, popping the form; with no repo chosen it asks for one.
-func TestCardFormAltGBrowsesWithoutAReference(t *testing.T) {
-	browsed := ""
-	form := newCardForm(domain.CardType{Kind: domain.KindBug}, nil, []string{"lxd", "incus"}, false, "", nil, 2400, nil)
-	form.onBrowse = func(repo string) tea.Cmd { browsed = repo; return nil }
-	form.setFocus(cardStopText)
-	form.HandleKey(altG)
-	if browsed != "" || form.focus != cardStopRepo {
-		t.Fatalf("browse with no repo: browsed=%q focus=%d", browsed, form.focus)
-	}
-	form.HandleKey(doorKey('2'))
-	if done, _ := form.HandleKey(altG); !done || browsed != "incus" {
-		t.Errorf("browse: done=%v repo=%q", done, browsed)
 	}
 }
 

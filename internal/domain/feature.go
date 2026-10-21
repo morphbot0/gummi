@@ -331,11 +331,9 @@ type Spend struct {
 	InputTokens      int64
 	OutputTokens     int64
 
-	// Decompose* mirror Credits/InputTokens/OutputTokens but count only
-	// the FD-081 decompose pass's own spend, so it stays distinguishable
-	// in reporting. Store.AddDecomposeSpend increments the pair (overall,
-	// decompose) together, so DecomposeCreditEquivalentAt(rate) can never
-	// exceed CreditEquivalentAt(rate) at any rate.
+	// Decompose* are the part of Credits/InputTokens/OutputTokens a
+	// research card's decompose pass spent, read back from rows written
+	// before decomposition was retired; nothing books them any more.
 	DecomposeCredits      float64
 	DecomposeInputTokens  int64
 	DecomposeOutputTokens int64

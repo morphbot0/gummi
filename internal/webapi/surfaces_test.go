@@ -74,41 +74,6 @@ func TestReposShape(t *testing.T) {
 	}))
 }
 
-func TestIngestShape(t *testing.T) {
-	golden.RequireEqual(t, marshal(t, struct {
-		Request IngestRequest     `json:"request"`
-		Run     IngestRun         `json:"run"`
-		Edit    IngestEditRequest `json:"edit"`
-	}{
-		Request: IngestRequest{Markdown: "# PRD\n", Name: "prd.md", Profile: "balanced"},
-		Run: IngestRun{
-			ID: "1", State: IngestReview, Source: ".gummi/ingest/prd.md", Profile: "balanced", Envelope: 2000,
-			Steps:     []IngestStep{{Kind: "note", Text: "architect reading prd.md"}, {Kind: "tool", Text: "read prd.md"}},
-			Proposals: []IngestProposal{{Index: 0, Kind: "feature", Title: "Loader", OneLiner: "load rows", SourceRefs: []string{"§2"}, OpenQuestions: []string{"cache?"}}},
-			Coverage:  &IngestCoverage{Mapped: 3, OutOfScope: 1, Unmapped: 1},
-			Unmapped:  []string{"offline mode — not covered"},
-			Created:   []CardRef{{ID: "FD-020", Title: "Loader", Stage: "todo"}},
-		},
-		Edit: IngestEditRequest{Index: 0, Op: IngestEditRename, Title: "Row loader"},
-	}))
-}
-
-func TestBugsShape(t *testing.T) {
-	golden.RequireEqual(t, marshal(t, struct {
-		List    Bugs        `json:"list"`
-		Request BugsRequest `json:"request"`
-		Created BugsCreated `json:"created"`
-	}{
-		List: Bugs{
-			Source:    "github",
-			Proposals: []BugProposal{{Ref: "https://github.com/o/r/issues/7", Number: 7, Title: "Crash on empty board", Severity: "high", State: "open", Labels: []string{"bug"}, Author: "octo"}},
-			Skipped:   []BugSkipped{{Ref: "https://github.com/o/r/issues/3", Card: "BG-001", Title: "Old crash"}},
-		},
-		Request: BugsRequest{Repo: "o/r", Label: "bug", Limit: 80, Refs: []string{"https://github.com/o/r/issues/7"}},
-		Created: BugsCreated{Created: []CardRef{{ID: "BG-002", Title: "Crash on empty board", Stage: "todo"}}},
-	}))
-}
-
 // TestSessionModelsShape: what a session's model picker is offered, and
 // the pair a session card reports it runs on (DESIGN §19.8).
 func TestSessionModelsShape(t *testing.T) {

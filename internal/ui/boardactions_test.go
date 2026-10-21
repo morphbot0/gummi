@@ -102,33 +102,6 @@ func TestRunCommandRoutesGlobalKeys(t *testing.T) {
 	}
 }
 
-// TestQuitConfirmsWithUnsavedProposals: an ingest pass is not an engine
-// session, so liveSessions never saw it — and ctrl+c, hoisted above the
-// overlay, was one keystroke from discarding a paid architect pass that
-// esc already confirms before discarding.
-func TestQuitConfirmsWithUnsavedProposals(t *testing.T) {
-	m := populatedShell(100, 30)
-	m.ingest = &ingestView{source: "prd.md", props: []ingestProposal{{}, {}}}
-	if cmd := m.quitCmd(); cmd != nil {
-		t.Fatal("quit returned a command instead of asking first")
-	}
-	if !m.Overlay.Contains("confirm-quit") {
-		t.Fatal("quit did not confirm with unsaved proposals on screen")
-	}
-}
-
-// TestQuitConfirmsDuringDecompose: same for a pass still running.
-func TestQuitConfirmsDuringDecompose(t *testing.T) {
-	m := populatedShell(100, 30)
-	m.ingestRun = newIngestRunView("prd.md")
-	if cmd := m.quitCmd(); cmd != nil {
-		t.Fatal("quit returned a command instead of asking first")
-	}
-	if !m.Overlay.Contains("confirm-quit") {
-		t.Fatal("quit did not confirm while a decompose was running")
-	}
-}
-
 // TestQuitIdleStillOneKeypress: the confirm must not become the default.
 func TestQuitIdleStillOneKeypress(t *testing.T) {
 	m := populatedShell(100, 30)

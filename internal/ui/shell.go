@@ -146,14 +146,9 @@ type Shell struct {
 	inboxSel    int      // cursor into m.inbox.list(), the inbox tab's own selection
 	sortMode    SortMode // todo-column ordering toggle (ephemeral, not persisted)
 	notice      noticeMsg
-	spec        *specView      // non-nil while the spec surface is open
-	diff        *diffView      // non-nil while the diff surface is open
-	ingest      *ingestView    // non-nil while the ingest review surface is open
-	ingestRun   *ingestRunView // non-nil while an ingest pass is decomposing (one at a time)
-	deps        *depPicker     // non-nil while the dependency picker is open
-
-	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
-	bugIngesting bool           // a bug import is fetching (one at a time)
+	spec        *specView  // non-nil while the spec surface is open
+	diff        *diffView  // non-nil while the diff surface is open
+	deps        *depPicker // non-nil while the dependency picker is open
 
 	mergePrep map[domain.FeatureID]bool // cards whose landing preconditions are being checked (one landing per card at a time)
 	// ghWork is what the board is waiting on GitHub for, per card
@@ -445,14 +440,11 @@ type Shell struct {
 	profileNames []string     // profile names for the new-card dialog
 	repoNames    []string     // configured managed-repo names for the new-card dialog
 	// lastRepo is the repository the last card was created in: the
-	// new-card dialog's preselect. pendingCard is a dialog parked while
-	// the issue picker it opened is up (carddoor.go).
-	lastRepo    string
-	pendingCard *cardForm
+	// new-card dialog's preselect.
+	lastRepo string
 	// ghIssue and remoteOrigin are the new-card dialog's GitHub and git
 	// seams; nil uses gh and git. Tests stub both.
 	ghIssue      func(ctx context.Context, dir, ownerRepo string, n int) (domain.BugProposal, error)
-	ghIssues     func(ctx context.Context, src engine.GitHubSource) (engine.BugIngestResult, error)
 	remoteOrigin func(dir string) string
 	envelope     int              // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier // bell/desktop hook for needs-attention events
@@ -536,8 +528,6 @@ type Shell struct {
 	// webWatching is the same for a freeform card's open watch: the turn
 	// that starts or settles one moves the board row's "watching" word too.
 	webWatching map[domain.FeatureID]bool
-	// webIngest is the ingest run as the web face names it (webingest.go).
-	webIngest webIngestState
 }
 
 // roundKey is the fast-path round-counter map's key: one entry per
@@ -2689,42 +2679,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case ingestStepMsg:
-		// live progress from the running pass; keep listening on the same
-		// stream (a finished/discarded run just drains silently).
-		if m.ingestRun != nil {
-			m.ingestRun.apply(msg.step)
-		}
-		return m, listenIngestSteps(msg.ch)
-
-	case ingestStreamClosedMsg:
-		return m, nil
-
-	case ingestLoadedMsg:
-		m.ingestRun = nil
-		if msg.err != nil {
-			m.notice = noticeMsg{text: "ingest: " + sanitize(msg.err.Error()), isErr: true}
-			return m, nil
-		}
-		// the user explicitly asked for this decomposition and has been
-		// waiting on it, so it takes the foreground: the review surface
-		// installs over whatever the board tab held.
-		m.spec, m.diff = nil, nil
-		if msg.decomposeFor != "" && len(msg.res.Proposals) == 0 {
-			// every `## Slices` row is already settled (or there were none) —
-			// mirrors the headless auto-trigger's zero-slice no-op instead of
-			// opening a review surface with nothing to approve.
-			m.notice = noticeMsg{text: m.cardName(msg.decomposeFor) + ": nothing unsettled to decompose"}
-			return m, nil
-		}
-		if msg.decomposeFor != "" {
-			m.ingest = newDecomposeReviewView(msg.res, msg.decomposeFor)
-		} else {
-			m.ingest = newIngestView(msg.res, msg.profile, msg.envelope, msg.repo)
-		}
-		m.notice = noticeMsg{text: "proposed " + strconv.Itoa(len(msg.res.Proposals)) + " feature(s) — review & approve"}
-		return m, nil
-
 	case depsLoadedMsg:
 		if msg.err != nil {
 			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
@@ -2746,23 +2700,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// reading, which the open message doesn't carry).
 		m.deps = &depPicker{f: msg.f, cands: msg.cands, removeOnly: msg.removeOnly}
 		m.deps.setCursor(0)
-		return m, nil
-
-	case bugIngestLoadedMsg:
-		m.bugIngesting = false
-		if msg.err != nil {
-			m.notice = noticeMsg{text: "import: " + sanitize(msg.err.Error()), isErr: true}
-			m.restorePendingCard()
-			return m, nil
-		}
-		if len(msg.res.Proposals) == 0 && len(msg.res.Skipped) == 0 {
-			m.notice = noticeMsg{text: "no issues to import"}
-			m.restorePendingCard()
-			return m, nil
-		}
-		m.spec, m.diff, m.ingest = nil, nil, nil
-		m.bugIngest = newBugIngestView(msg.res, msg.params)
-		m.notice = noticeMsg{text: "fetched " + strconv.Itoa(len(msg.res.Proposals)) + " issue(s) — enter fills the form"}
 		return m, nil
 
 	case weekReportMsg:
@@ -2934,10 +2871,6 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	if m.boardSurfacesLive() && m.cardOpen && m.threadInput.Focused() {
 		return m.handleThreadPaste(msg)
 	}
-	if bv := m.bugIngest; bv != nil && bv.filtering {
-		bv.filter, _ = bv.filter.Update(msg)
-		bv.setCursor(bv.cursor) // reclamp: the visible set may have shrunk
-	}
 	return nil
 }
 
@@ -2973,22 +2906,6 @@ func (m *Shell) quitCmd() tea.Cmd {
 	case len(plainLive) > 0:
 		question = "quit with live sessions " + strings.Join(plainLive, ", ") + "?"
 		detail = "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk; reopening offers to pick them back up"
-	// an ingest or bug-import pass is not an engine session, so
-	// liveAutopilotSplit never saw it. Both cost a paid architect pass,
-	// and esc already confirms before discarding one — quitting past
-	// that silently would make the confirm theatre.
-	case m.ingestRun != nil:
-		question = "quit while a decompose is running?"
-		detail = "the architect pass is paid for and its proposals are not written anywhere yet — quitting loses them"
-	case m.ingest != nil:
-		question = fmt.Sprintf("quit with %d unsaved proposal(s)?", len(m.ingest.props))
-		detail = "they came from a paid architect pass over " + m.ingest.source + " and nothing has been created yet"
-	case m.bugIngesting:
-		question = "quit while a bug import is fetching?"
-		detail = "the fetch is in flight — quitting drops it"
-	case m.bugIngest != nil && m.bugIngest.edited:
-		question = "quit with unsaved import edits?"
-		detail = "your renamed titles and one-liners are not kept — re-importing fetches the issues as they are on GitHub"
 	default:
 		return m.quitNow()
 	}
@@ -3151,12 +3068,6 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.clearTransientNotice()
 			return m.handleDiffKey(key)
 		}
-		if m.ingest != nil {
-			return m.handleIngestKey(key)
-		}
-		if m.bugIngest != nil {
-			return m.handleBugIngestKey(msg)
-		}
 		if m.deps != nil {
 			return m.handleDepsKey(key)
 		}
@@ -3264,10 +3175,7 @@ func (m *Shell) textEntry() bool {
 	// from someone typing prose", and that reason does not hold when a
 	// review surface, not the composer, is what the user is actually
 	// looking at and typing into.
-	if m.cardOpen && m.threadInput.Focused() && m.spec == nil && m.diff == nil {
-		return true
-	}
-	return m.bugIngest != nil && m.bugIngest.filtering
+	return m.cardOpen && m.threadInput.Focused() && m.spec == nil && m.diff == nil
 }
 
 // boardKey answers the board's keys. It is split out from handleKey so
@@ -3524,51 +3432,8 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		// what landing left behind. Uppercase for the bigger act, and the
 		// pair is the mnemonic.
 		return m.openCloseOut()
-	case "I":
-		if m.engine == nil {
-			m.notice = noticeMsg{text: m.noAgent(" — ingestion needs one"), isErr: true}
-			return nil
-		}
-		if m.ingestRun != nil {
-			// one pass at a time; I brings a backgrounded feed forward
-			m.ingestRun.hidden = false
-			m.notice = noticeMsg{text: "an ingest is already decomposing — showing its progress"}
-			return nil
-		}
-		m.Overlay.Push(newIngestForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.startIngest))
-	case "esc":
-		if m.ingestRun != nil && !m.ingestRun.hidden {
-			// background the feed; the pass keeps running and the review
-			// surface still takes the foreground when it lands.
-			m.ingestRun.hidden = true
-		}
-	case "G":
-		if m.engine == nil {
-			m.notice = noticeMsg{text: m.noAgent(" — bug import needs the engine"), isErr: true}
-			return nil
-		}
-		if m.bugIngesting {
-			m.notice = noticeMsg{text: "an import is already running — wait for it", isErr: true}
-			return nil
-		}
-		// the door with bug preset, then straight into browse: the form
-		// parks while the picker is up and comes back filled.
-		d := m.openCardForm(domain.CardType{Kind: domain.KindBug})
-		if d.repo.needsChoice() {
-			d.errText = "choose a repository to browse its issues"
-			d.setFocus(cardStopRepo)
-			m.Overlay.Push(d)
-			return nil
-		}
-		return m.browseIssues(d, d.repo.name())
 	case "g":
 		if r, ok := m.selected(); ok {
-			if r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {
-				// FD-081: a done RS card has nothing left to advance — g
-				// re-runs decompose instead, the board-key counterpart to
-				// the headless --request-changes re-run.
-				return m.startDecomposeReRun(r.F)
-			}
 			return m.advanceStage(r.F.ID)
 		}
 	case "b":
@@ -3946,8 +3811,7 @@ func (m *Shell) boardPaneFocused() bool {
 	if m.actionFocused {
 		return false
 	}
-	return m.spec == nil && m.diff == nil && m.ingest == nil &&
-		m.bugIngest == nil && m.deps == nil && (m.ingestRun == nil || m.ingestRun.hidden)
+	return m.spec == nil && m.diff == nil && m.deps == nil
 }
 
 // View implements tea.Model: compute the buffer, paint the panes, the
@@ -4612,17 +4476,8 @@ func (m *Shell) mainView(w, h int) string {
 			}
 			return m.logViewRender(w, h)
 		}
-		if m.ingest != nil {
-			return m.ingestViewRender(w, h)
-		}
-		if m.bugIngest != nil {
-			return m.bugIngestViewRender(w, h)
-		}
 		if m.deps != nil {
 			return m.depPickerView(w, h)
-		}
-		if m.ingestRun != nil && !m.ingestRun.hidden {
-			return m.ingestRunRender(w, h)
 		}
 	}
 	switch m.tab {
@@ -4660,9 +4515,6 @@ func (m *Shell) statusView(w int) string {
 			kind = statusbar.KindAlert
 		}
 		pills = append(pills, statusbar.Pill{Text: m.copilot.pill(), Kind: kind})
-	}
-	if m.ingestRun != nil {
-		pills = append(pills, statusbar.Pill{Text: m.spinner() + " ingest", Kind: statusbar.KindNeutral})
 	}
 	if len(m.mergePrep) > 0 {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " merging", Kind: statusbar.KindNeutral})

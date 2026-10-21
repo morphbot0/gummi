@@ -443,8 +443,7 @@ func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
 // mint needs, for any kind. The description's first line is the card's
 // title; the lines past it seed the artifact (cardmint decides how, per
 // kind). After names dependency edges written once the card exists;
-// Start opens the autopilot dialog on it; FromPicker sends the person
-// back to the browse picker instead of the board.
+// Start opens the autopilot dialog on it.
 type formResult struct {
 	Kind        domain.Kind         // "" reads as feature
 	Mode        domain.ResearchMode // research only: "" is the survey, "diagnosis" the other contract
@@ -469,7 +468,6 @@ type formResult struct {
 	StackOnto  domain.FeatureID
 	StackInto  domain.StackID
 	Start      bool
-	FromPicker bool
 	// SessionBackend and SessionModel are the agent and model a freeform
 	// card's session runs on when the person picked them (DESIGN §19.8);
 	// both empty is the profile's implementer. Only the web face's session
@@ -488,11 +486,10 @@ type formResult struct {
 
 // cardCreatedMsg is createCard's success: the shell reloads rows, keeps
 // the repo as the next dialog's preselect, and does what the result
-// asked for next (autopilot dialog, back to the picker).
+// asked for next (the autopilot dialog).
 type cardCreatedMsg struct {
 	f          domain.Feature
 	start      bool
-	fromPicker bool
 	// stack is the stack the new card joined, empty when standalone. The
 	// shell ticks it so the card's branch is cut on the right base.
 	stack domain.StackID
@@ -571,7 +568,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			}
 		}
 		created := cardCreatedMsg{
-			f: f, start: res.Start, fromPicker: res.FromPicker,
+			f: f, start: res.Start,
 			stack: stacked, warn: strings.Join(warn, "; "),
 		}
 		if f.IsFreeform() {

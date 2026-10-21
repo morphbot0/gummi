@@ -60,7 +60,7 @@ import (
 // milestones. Nothing session-shaped (messages, tool calls, critiques)
 // is hooked — that volume belongs to `run --verbose`'s NDJSON stream.
 const (
-	// EventCardCreated: a card was minted (creation, ingest, bugs import).
+	// EventCardCreated: a card was minted (the new-card form, a schedule, a crew).
 	EventCardCreated = "card.created"
 	// EventStageEnter: a card crossed a stage edge (forward or rerun);
 	// from/to/actor name the edge.

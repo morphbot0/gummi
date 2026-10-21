@@ -265,7 +265,6 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 	if m.changeHook == nil {
 		return
 	}
-	m.syncWebIngest(msg)
 	// whatever the message was, a card whose busy word, session state or
 	// chip moved is reported (freshness.go): the whitelist below covers
 	// what a message says, this covers what it did

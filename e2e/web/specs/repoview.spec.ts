@@ -13,7 +13,7 @@ import { shot } from '../fixtures/shots';
 test.use({
   seed: {
     run: async (ws) => {
-      await ws.seedBacklog(['Add a shrug helper']);
+      await ws.seedSessions(['Add a shrug helper']);
       const sh = (script: string, cwd = ws.repo) => ws.exec('sh', ['-ec', script], { cwd });
       const bare = path.join(ws.root, 'tmp', 'origin.git');
       const other = path.join(ws.root, 'tmp', 'other');

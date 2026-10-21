@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -18,8 +17,7 @@ import (
 
 // openCardForm builds the door for a card type with everything the board knows:
 // profiles, repositories, the repo chosen last time, the cards the after
-// row may name, and the seams for GitHub. It does not push it — presets
-// decide whether the form opens or goes straight to browse.
+// row may name, and the seams for GitHub. It does not push it.
 func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
 	d := newCardForm(ct, m.profileNames, m.repoNames, m.repoHasDefault(), m.lastRepo, m.afterCands(), m.envelopePrefill(), m.createCard)
 	// Offer the branches the chosen repo actually has, with the one it
@@ -30,7 +28,6 @@ func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
 	}
 	d.setStackCands(m.stackCands())
 	d.onImport = func(ref domain.IssueRef, repo string) tea.Cmd { return m.fetchIssue(d, ref, repo) }
-	d.onBrowse = func(repo string) tea.Cmd { return m.browseIssues(d, repo) }
 	return d
 }
 
@@ -138,36 +135,6 @@ func (m *Shell) fetchIssue(d *cardForm, ref domain.IssueRef, repo string) tea.Cm
 	}
 }
 
-// browseIssues opens the issue picker for repo. The form is popped by
-// its own HandleKey (done=true) and parked here until the picker fills
-// it or is left.
-func (m *Shell) browseIssues(d *cardForm, repo string) tea.Cmd {
-	m.pendingCard = d
-	o := repoOrigin{}
-	if m.wt != nil {
-		o = m.repoOriginFor(repo)
-	}
-	params := bugIngestParams{repo: repo, ownerRepo: o.ownerRepo, label: "bug", state: "open"}
-	if !o.github() {
-		// no origin to list from: ask for one, then browse
-		m.Overlay.Push(newTextPrompt("browse issues of", "", "owner/repo", nil, func(s string) tea.Cmd {
-			params.ownerRepo = strings.TrimSpace(s)
-			return m.startBugIngest(params)
-		}))
-		return nil
-	}
-	return m.startBugIngest(params)
-}
-
-// restorePendingCard pushes a form parked for browsing back onto the
-// stack, if there is one.
-func (m *Shell) restorePendingCard() {
-	if d := m.pendingCard; d != nil {
-		m.pendingCard = nil
-		m.Overlay.Push(d)
-	}
-}
-
 // cardCreated is what the shell does once a card exists.
 func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 	// an agent names no repository: it is not the one the next card wants
@@ -179,9 +146,6 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 		text += " — dependency not recorded: " + msg.warn
 	}
 	m.notice = noticeMsg{text: text, isErr: msg.warn != ""}
-	if msg.fromPicker && m.bugIngest != nil {
-		m.bugIngest.markOnBoard(msg.f.ExternalRef, msg.f.ID)
-	}
 	if msg.open {
 		m.openOnLoad = msg.f.ID
 	}

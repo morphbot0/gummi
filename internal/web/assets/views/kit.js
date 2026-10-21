@@ -1,9 +1,9 @@
-// views/kit.js — the small form pieces the tool surfaces (ingest, bug
-// import, doctor, fleet) share: a labelled field, a select
+// views/kit.js — the small form pieces the tool surfaces (doctor, fleet,
+// settings) share: a labelled field, a select
 // from plain strings, a segmented control, an inline confirm strip, and
 // the one way they show a server's refusal.
 
-import { h, clear, ref } from '../dom.js?v=__ASSET_V__'
+import { h, clear } from '../dom.js?v=__ASSET_V__'
 
 // field wraps a control in a label with its words above it.
 export function field (label, control, { hint, testid, cls } = {}) {
@@ -68,20 +68,6 @@ export function confirmStrip ({ question, detail, yes, no = 'Cancel', danger, te
   // a question asked below the fold is brought into view
   requestAnimationFrame(() => { if (strip.isConnected) strip.scrollIntoView({ block: 'nearest' }) })
   return strip
-}
-
-// cardLinks lists cards a write made; clicking one opens it.
-export function cardLinks (cards, ctx, testid = 'created') {
-  return h('ul', { class: 'vcards', testid },
-    cards.map(c => h('li', null,
-      h('button', {
-        type: 'button',
-        class: 'link',
-        testid: `${testid}-${c.id}`,
-        onclick: () => { ctx.close(); ctx.select(c.id) }
-      }, ref(c.id)),
-      h('span', { class: 't' }, c.title || ''),
-      c.stage ? h('span', { class: 'st' }, c.stage) : null)))
 }
 
 // debounced refetch: one request in flight, one queued behind it.

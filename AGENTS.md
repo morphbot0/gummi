@@ -92,8 +92,7 @@ leaf services.
 | `decisions` | Pure rules for a card's open decisions: which one a card shows (`Rank`), its attention lane, how an `ask_user` question is offered as options, and what an answer says. Both faces read it. |
 | `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to a live stage session's tools (`--feature <id>`). |
 
-`cmd/gummi` holds `main.go` plus the board's supporting subcommands: `ingest`
-(spec decomposition), `bugs` (GitHub issue import / manual add), and the
+`cmd/gummi` holds `main.go` plus the board's supporting subcommands and the
 headless driver surface — `run`, `resume`, `status` (`--stats` reports where a
 card's money and hours went), `spec`, `diff`, `verify`,
 `merge`, `clean`, `deps`, `stack`, `doctor`, `skill`. See `docs/HEADLESS.md`

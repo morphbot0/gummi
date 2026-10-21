@@ -125,8 +125,6 @@ func (m *Shell) globalCommands() []command {
 		// word itself is in the vocabulary — a reader who knows what they
 		// want types "/freeform".
 		{id: "new-freeform", name: "freeform", label: "New freeform card — no workflow, its own branch", key: "", available: attached},
-		{id: "I", name: "ingest", label: "Split a document into cards", key: "I", available: attached && m.engine != nil},
-		{id: "G", name: "import", label: "Import a GitHub issue as a bug", key: "G", available: attached && m.engine != nil},
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "L", name: "schedules", label: "Schedules and heartbeats", key: "L", available: attached},
 		{id: "E", name: "skills", label: "Skill pack and its curator", key: "E", available: attached},

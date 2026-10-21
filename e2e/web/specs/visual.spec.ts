@@ -132,22 +132,20 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await expect(page.getByTestId('live')).toBeVisible();
     await L.snap('running-thread');
 
-    // landed, backlog with a dependency, a bug, freeform, a stack
+    // landed, sessions, a stack
     await L.open(b.landed);
     await L.snap('landed-thread');
     await L.tab('stats');
     await L.snap('landed-stats');
-    await L.open(b.backlog[1]);
-    await L.snap('backlog-thread');
-    await L.open(b.bug);
-    await L.snap('bug-thread');
+    await L.open(b.sessions[1]);
+    await L.snap('session-thread');
     await L.open(b.freeform!);
     await L.snap('freeform-thread');
     await L.open(b.stacked[0]);
     await L.snap('stacked-thread');
 
     // the card's menu and one of its dialogs
-    await L.open(b.backlog[0]);
+    await L.open(b.sessions[0]);
     await page.getByTestId('card-actions').click();
     await expect(page.getByTestId('card-actions-menu')).toBeVisible();
     await L.snap('card-menu');
@@ -188,8 +186,6 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     // the board's other surfaces
     await L.view('newcard', async () => { await L.rail(); await page.getByTestId('rail-new-menu').click(); await page.getByTestId('rail-new').click(); });
     await L.view('stacks', () => L.more('stacks'));
-    await L.view('ingest', () => L.more('ingest'));
-    await L.view('bugs', () => L.more('bugs'));
     await L.view('doctor', () => L.more('doctor'));
     await L.view('fleet', async () => { await L.rail(); await page.getByTestId('rail-fleet').click(); });
   }

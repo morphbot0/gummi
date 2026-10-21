@@ -188,11 +188,6 @@ func (m *Shell) actionsOwnArrows() bool {
 // verbs (g, v, m, …) keep working from the list exactly as they do on
 // the card page.
 func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
-	// the ingest feed takes the foreground over the board; its own keys
-	// (esc backgrounds it) must reach boardVerb unintercepted.
-	if m.ingestRun != nil && !m.ingestRun.hidden {
-		return nil, false
-	}
 	if !m.cardOpen {
 		switch key {
 		case "f":

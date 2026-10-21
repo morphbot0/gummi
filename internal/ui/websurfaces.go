@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -158,54 +156,6 @@ func (m *Shell) webRowFor(id string) (featureRow, error) {
 		return featureRow{}, webErr(WebNotFound, "no card %s on this board", id)
 	}
 	return r, nil
-}
-
-// webWorkspaceFile resolves a path a page named — relative to the
-// workspace root, or absolute — to a regular file inside the workspace.
-// A page is a person at the board, but it is a person on another device,
-// and "a file in the repo" is what the surfaces that read one promise.
-func (m *Shell) webWorkspaceFile(p string) (string, error) {
-	p = strings.TrimSpace(p)
-	if p == "" {
-		return "", webErr(WebBadRequest, "name a file")
-	}
-	root := m.ws.Root
-	if root == "" {
-		return "", webErr(WebUnavailable, "this board has no workspace")
-	}
-	root, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", webErr(WebUnavailable, "reading the workspace: %v", err)
-	}
-	// One answer for every refusal — missing, outside, a directory, gummi's
-	// own state — and never the resolved path: a page must not learn what
-	// exists on this machine by asking about it.
-	refuse := webErr(WebBadRequest, "%q is not a readable file in this workspace", p)
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(root, p)
-	}
-	real, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return "", refuse
-	}
-	rel, err := filepath.Rel(root, real)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", refuse
-	}
-	// .gummi holds the board's machinery — the web server's admin token,
-	// the paired devices, the push key, the tailnet identity — and .git
-	// the repository's own (its config, credentials a helper left there):
-	// none of it a document to hand a model.
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		if strings.EqualFold(part, ".gummi") || strings.EqualFold(part, ".git") {
-			return "", refuse
-		}
-	}
-	fi, err := os.Stat(real)
-	if err != nil || !fi.Mode().IsRegular() {
-		return "", refuse
-	}
-	return real, nil
 }
 
 // IsWebError reports whether err is a board refusal, and which.

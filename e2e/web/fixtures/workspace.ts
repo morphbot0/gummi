@@ -15,14 +15,14 @@ import { agentScript, fakeGh, fakeGhData, fakeSsh, gummiBin } from './paths';
  *   repo/    the git repository and its .gummi workspace (cwd of every gummi)
  *   tmp/     TMPDIR for gummi and everything it runs
  *   gh/      this workspace's copy of fixtures/gh — fake-gh's answers
- *   bin/gh   a symlink to fake-gh, first on PATH (bug import runs plain `gh`)
+ *   bin/gh   a symlink to fake-gh, first on PATH (for anything that runs plain `gh`)
  *   logs/    agent.log (every protocol frame), gh.log (every gh argv),
  *            server logs
  *   config/  XDG_CONFIG_HOME, so the user's own gummi config never leaks in
  *
- * Seeding helpers drive the real CLI (`gummi run`, `resume`,
- * `merge`, `ingest`, `bugs`), so a seeded card is in exactly the state the
- * product puts it in. They need no web server and are safe to call while
+ * Seeding helpers drive the real CLI (`gummi run`, `resume`, `merge`) or,
+ * where there is no verb, a board of their own (viaBoard), so a seeded card
+ * is in exactly the state the product puts it in. They need no web server and are safe to call while
  * one runs (the CLI takes only per-card locks), though a running board
  * picks the change up on its own schedule.
  */
@@ -279,37 +279,63 @@ export class Workspace {
   }
 
   /**
-   * Feature cards in the backlog (stage todo), minted through `gummi ingest`
-   * of a document with one `## ` heading per title — the scripted architect
-   * proposes one feature per heading.
+   * Sessions (freeform cards), one per title, each with its title as its
+   * opening turn and that turn answered. A session has no CLI verb of its
+   * own yet, so this mints them through a board of its own (viaBoard).
+   * `extra` is sent with each card (e.g. `{ repo: 'lxd' }`).
    */
-  async seedBacklog(titles: string[]): Promise<string[]> {
-    const doc = path.join(this.root, 'tmp', `backlog-${Date.now()}.md`);
-    await fs.promises.writeFile(doc, `# Backlog\n\n${titles.map((t) => `## ${t}\n\nDo ${t.toLowerCase()}.\n`).join('\n')}`);
-    const r = await this.gummiOK(['ingest', '--yes', doc]);
-    return mintedIds(r.stdout, 'FD');
-  }
-
-  /** A bug card in the backlog (stage todo), made by hand with `gummi bugs new`. */
-  async seedBug(title: string, opts: { severity?: string; desc?: string } = {}): Promise<string> {
-    const r = await this.gummiOK([
-      'bugs', 'new', '--yes', '--title', title,
-      '--one-liner', title.toLowerCase(),
-      '--severity', opts.severity ?? 'medium',
-      '--desc', opts.desc ?? `${title}.`,
-    ]);
-    return mintedIds(r.stdout, 'BG')[0];
+  async seedSessions(titles: string[], extra: Record<string, unknown> = {}): Promise<string[]> {
+    return this.viaBoard(titles.map((title) => ({ kind: 'freeform', title, ...extra })));
   }
 
   /**
-   * Bug cards imported from fake-gh's issues.json (open issues labelled
-   * "bug": #101 and #102 by default) with `gummi bugs ingest`.
+   * Feature cards in the backlog (stage todo), for the specs about what
+   * only a workflow card has (its dependencies, its autopilot). Nothing
+   * mints a workflow card any more but the web API's explicit kind, so
+   * these go through a board of their own (viaBoard) too.
    */
-  async importBugs(opts: { comments?: boolean } = {}): Promise<string[]> {
-    const args = ['bugs', 'ingest', '--repo', 'e2e/tiny', '--yes'];
-    if (opts.comments) args.push('--comments');
-    const r = await this.gummiOK(args);
-    return mintedIds(r.stdout, 'BG');
+  async seedTodo(titles: string[]): Promise<string[]> {
+    return this.viaBoard(titles.map((title) => ({ kind: 'feature', title })));
+  }
+
+  /**
+   * Make cards through `POST /api/cards`, as the new-card form does, on a
+   * board started for it on a free port with no pairing; wait for every
+   * card's opening turn (a session's) to settle; stop the board again.
+   * Call it before the test's server starts (a seed's run), never beside
+   * it: the board's instance lock admits one.
+   */
+  private async viaBoard(cards: Array<Record<string, unknown>>): Promise<string[]> {
+    const { GummiServer } = await import('./server');
+    const server = await GummiServer.start(this, { args: ['--no-pairing'] });
+    try {
+      const call = async (method: string, pathname: string, body?: unknown) => {
+        const res = await fetch(server.url + pathname, {
+          method,
+          headers: { Origin: server.url, 'Content-Type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`${method} ${pathname} → ${res.status}: ${text}`);
+        return text ? JSON.parse(text) : undefined;
+      };
+      const ids: string[] = [];
+      for (const card of cards) {
+        const c = await call('POST', '/api/cards', card);
+        ids.push(String(c?.id ?? c?.card?.id));
+      }
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        const rows: Array<{ id: string; status: string }> = (await call('GET', '/api/board')).rows;
+        const busy = ids.filter((id) => rows.find((r) => r.id === id)?.status === 'running');
+        if (busy.length === 0) break;
+        if (Date.now() > deadline) throw new Error(`cards still running their opening turn: ${busy.join(', ')}`);
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return ids;
+    } finally {
+      await server.stop();
+    }
   }
 
   /** Approve a design gate and drive on to a verified branch (or the next stop). */
@@ -433,11 +459,6 @@ function expectEvent(r: DriveResult, name: string): DriverEvent {
   const e = r.events.findLast((ev) => ev.event === name);
   if (!e) throw new Error(`expected a "${name}" event from ${r.id}, got:\n${r.stdout}\n${r.stderr}`);
   return e;
-}
-
-/** Card ids from the "  FD-008  Title" lines ingest/bugs print. */
-function mintedIds(stdout: string, prefix: string): string[] {
-  return [...stdout.matchAll(new RegExp(`^\\s+(${prefix}-\\d+)\\s{2,}`, 'gm'))].map((m) => m[1]);
 }
 
 function readIfExists(p: string): string {

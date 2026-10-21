@@ -73,14 +73,17 @@ test('a landed card is done and on main', async ({ workspace: ws }) => {
   expect(await ws.git('log', '-1', '--format=%s', 'main')).toContain('feat: add a nod helper');
 });
 
-test('backlog and bug cards', async ({ workspace: ws }) => {
-  const backlog = await ws.seedBacklog(['Add a wave helper', 'Add a shrug helper']);
-  expect(backlog).toHaveLength(2);
-  const bug = await ws.seedBug('Greet panics on an empty name', { severity: 'high' });
-  for (const id of [...backlog, bug]) expect((await ws.status(id)).stage).toBe('todo');
+test('session cards', async ({ workspace: ws }) => {
+  const sessions = await ws.seedSessions(['Add a wave helper', 'Add a shrug helper']);
+  expect(sessions).toHaveLength(2);
+  for (const id of sessions) {
+    const st = await ws.status(id);
+    expect(st.kind).toBe('freeform');
+    expect(st.running).toBe(false);
+  }
 });
 
-test('fake gh answers pr link/status/comments and bug import', async ({ workspace: ws }) => {
+test('fake gh answers pr link/status/comments', async ({ workspace: ws }) => {
   const id = await ws.seedVerified('Add a farewell helper');
   await ws.linkPR(id, 7);
   const status = await ws.gummiOK(['pr', 'status', id]);
@@ -92,11 +95,8 @@ test('fake gh answers pr link/status/comments and bug import', async ({ workspac
   expect(threads.threads).toHaveLength(1); // the resolved one is dropped
   expect(threads.threads[0].root_body_first_line).toBe('Should this helper take a name?');
 
-  const bugs = await ws.importBugs({ comments: true });
-  expect(bugs).toHaveLength(2); // #103 is closed
-
   const calls = ws.ghCalls().map((c) => c.slice(0, 2).join(' '));
-  expect(calls).toEqual(expect.arrayContaining(['pr view', 'api repos/e2e/tiny', 'api graphql', 'issue list', 'issue view']));
+  expect(calls).toEqual(expect.arrayContaining(['pr view', 'api repos/e2e/tiny', 'api graphql']));
 
   // a test can swap an answer for its own workspace
   await ws.setGh('repo.json', { allow_squash_merge: false });

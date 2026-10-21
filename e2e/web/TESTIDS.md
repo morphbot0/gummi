@@ -57,7 +57,7 @@ request once).
 | `rail-filtered` | compact rail only: a filter still applies; opens the full rail |
 | `rail-foot`, `rail-new-session`, `rail-new-agent`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new-agent`, behind the button's arrow, the same draft as an agent's, `rail-new` the new-card form) |
 | `rail-group-agents` | the agents' own group, above the status groups |
-| `rail-more-menu`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
+| `rail-more-menu`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
 ## Resume offer
 
@@ -258,7 +258,7 @@ first answer as one button, while the bar is folded),
 | `keys-help` | the `?` sheet |
 | `menu` | a popup menu opened with `openMenu` (its `testid` option overrides `menu`, e.g. `rail-more-menu`, `card-actions-menu`) |
 | `modal`, `modal-close` | a dialog opened with `openModal` (its `testid` option overrides `modal`) |
-| `view-<name>`, `view-<name>-body` | a registered view (`newcard`, `fleet`, `stacks`, `ingest`, `bugs`, `doctor`) |
+| `view-<name>`, `view-<name>-body` | a registered view (`newcard`, `fleet`, `stacks`, `doctor`) |
 | `not-available` | body of a view nobody registered yet |
 | `unpair-dialog`, `unpair-confirm` | unpairing |
 
@@ -321,30 +321,7 @@ pack), `curator-run-<id>-confirm`.
 ## Tool views
 Shared by the views below: `view-error` (a refusal, as the server said it),
 `<prefix>-confirm`, `<prefix>-confirm-yes`, `<prefix>-confirm-no` (an inline
-confirm strip), `<prefix>-<ID>` on each card link a write made — the list itself
-is `<prefix>` (`ingest-created`, `bugs-created`), `created` / `created-<ID>` when
-a view names no prefix.
-Import spec (`ingest`): `ingest-form`, `ingest-source` (the paste/path
-switch), `ingest-source-paste`,
-`ingest-source-path`, `ingest-name`, `ingest-markdown`, `ingest-path`,
-`ingest-profile`, `ingest-repo` (only with more than one repository),
-`ingest-envelope`, `ingest-start`; running: `ingest-running`, `ingest-steps`,
-`ingest-step`, `ingest-busy`; review: `ingest-review`, `ingest-kept` ("N
-kept"), `ingest-coverage`, `ingest-unmapped-count`, `ingest-unmapped`,
-`ingest-proposals`, `ingest-proposal-<i>` (`data-dropped`), `ingest-title`,
-`ingest-rename-<i>`, `ingest-oneliner-<i>`, `ingest-merge-<i>` (not on the
-first), `ingest-drop-<i>`, `ingest-undrop-<i>`, `ingest-edit-rename`,
-`ingest-edit-oneLiner`, `ingest-edit-save`, `ingest-approve`,
-`ingest-confirm` (+ `-yes`/`-no`), `ingest-confirm-unmapped`,
-`ingest-discard`, `ingest-discard-confirm`; after: `ingest-done`
-(`data-state`), `ingest-failed`, `ingest-created`, `ingest-created-<ID>`,
-`ingest-again`.
-Import bugs (`bugs`): `bugs-filters`, `bugs-repo`, `bugs-label`,
-`bugs-state`, `bugs-limit`, `bugs-fetch`, `bugs-loading`, `bugs-gh-error`
-(gh's own failure), `bugs-empty`, `bugs-all`, `bugs-list`,
-`bugs-issue-<number>`, `bugs-pick-<number>`, `bug-author` (who opened it),
-`bugs-onboard-<number>` (already on the board), `bugs-import`, `bugs-result`, `bugs-created`,
-`bugs-created-<ID>`, `bugs-missing`.
+confirm strip).
 Doctor (`doctor`): `doctor-ready` (`data-ready`), `doctor-rerun`,
 `doctor-deep`, `doctor-deep-confirm` (+ `-yes`/`-no`), `doctor-checks`,
 `doctor-check-<name>` (`data-status` = `ok` | `warn` | `fail` | `unknown`),

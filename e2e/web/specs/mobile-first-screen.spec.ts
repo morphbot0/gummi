@@ -7,14 +7,14 @@ import { shot } from '../fixtures/shots';
 // auto-pick. A deep link still opens the card it names; one naming an id
 // that is not on this board falls back to the cards list and says so.
 
-let ids: { gate: string; backlog: string[] };
+let ids: { gate: string; sessions: string[] };
 
 test.use({
   seed: {
     run: async (ws) => {
       ids = {
         gate: await ws.seedDesignGate('Add a wave helper'),
-        backlog: await ws.seedBacklog(['Add a shrug helper', 'Add a nod helper']),
+        sessions: await ws.seedSessions(['Add a shrug helper', 'Add a nod helper']),
       };
     },
   },

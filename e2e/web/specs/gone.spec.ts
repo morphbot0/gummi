@@ -10,7 +10,7 @@ let verified: string;
 let doomed: string;
 test.use({ seed: { run: async (ws) => {
   verified = await ws.seedVerified('Add a finished helper');
-  [doomed] = await ws.seedBacklog(['Add a doomed helper']);
+  [doomed] = await ws.seedSessions(['Add a doomed helper']);
 } } });
 
 test('a card deleted elsewhere stays gone where it was open', async ({ pairedPage: page, server, api }, info) => {

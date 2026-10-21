@@ -1104,27 +1104,6 @@ func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits, esti
 	return nil
 }
 
-// AddDecomposeSpend accumulates a decompose-pass usage sample (FD-081)
-// onto both a feature's overall running total and its decompose-only
-// bucket, in one UPDATE — so DecomposeCreditEquivalentAt(rate) can never
-// exceed CreditEquivalentAt(rate) at any rate, hosted or BYOK, and spend
-// reporting can distinguish what decomposition cost from the rest.
-func (s *Store) AddDecomposeSpend(ctx context.Context, id domain.FeatureID, credits float64, in, out int64) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE features SET
-			spend_credits = spend_credits + ?,
-			spend_in = spend_in + ?,
-			spend_out = spend_out + ?,
-			spend_decompose_credits = spend_decompose_credits + ?,
-			spend_decompose_in = spend_decompose_in + ?,
-			spend_decompose_out = spend_decompose_out + ?
-		WHERE id = ?`, credits, in, out, credits, in, out, string(id))
-	if err != nil {
-		return fmt.Errorf("metering decompose spend for %s: %w", id, err)
-	}
-	return nil
-}
-
 // SetVerifiedAt stamps when a feature's verify gate passed and its branch
 // became ready to land — the marker behind status's `verified` field and the
 // headless driver's stop-at-verified terminal state. Like AddSpend it is a

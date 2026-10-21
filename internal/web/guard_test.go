@@ -2,9 +2,7 @@ package web
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -13,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/morphis/gummi/internal/webapi"
 )
 
 // DNS rebinding: a page on another name, re-pointed at this server, is
@@ -191,26 +187,6 @@ func TestASlowBodyIsCutOffButASlowHandlerIsNot(t *testing.T) {
 
 func contextWithLocalAddr(r *http.Request, addr net.Addr) context.Context {
 	return context.WithValue(r.Context(), http.LocalAddrContextKey, addr)
-}
-
-// A pasted document up to the ingest limit fits a JSON body, past the
-// 1 MiB every other JSON body is held to.
-func TestIngestJSONTakesADocument(t *testing.T) {
-	read := func(markdown string) error {
-		body, err := json.Marshal(webapi.IngestRequest{Markdown: markdown})
-		if err != nil {
-			t.Fatal(err)
-		}
-		r := httptest.NewRequest(http.MethodPost, "/api/ingest", bytes.NewReader(body))
-		var req webapi.IngestRequest
-		return readIngestJSON(httptest.NewRecorder(), r, &req)
-	}
-	if err := read(strings.Repeat("spec ", (3<<20)/5)); err != nil {
-		t.Errorf("a 3 MiB document = %v, want it read", err)
-	}
-	if err := read(strings.Repeat("x", maxIngestDocument+1)); err == nil {
-		t.Error("a document past the limit was read")
-	}
 }
 
 // An endpoint on this machine or its network is refused at subscribe

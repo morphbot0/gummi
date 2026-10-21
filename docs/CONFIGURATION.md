@@ -188,7 +188,7 @@ The event vocabulary (closed; a config typo is rejected at load):
 
 | event | fires when |
 |---|---|
-| `card.created` | a card was minted (creation, ingest, bugs import) |
+| `card.created` | a card was minted (the new-card form, a schedule, a crew) |
 | `stage.enter` | a card crossed a stage edge (`from`/`to`/`actor` name it) |
 | `card.verified` | the verify gate passed and the branch is ready to land — where gummi's job ends, so it fires **there**, not at a later merge that may never come |
 | `card.parked` | the card stopped and waits (`reason`: needs-you, gave-up, blocked, quit) |

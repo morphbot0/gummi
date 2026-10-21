@@ -326,22 +326,17 @@ func TestARepoChoiceSurvivesARescan(t *testing.T) {
 	})
 }
 
-// TestIngestAndScheduleReofferAClone: the ingest and schedule dialogs, open
-// when a clone lands, offer that clone.
-func TestIngestAndScheduleReofferAClone(t *testing.T) {
+// TestScheduleReoffersAClone: the schedule dialog, open when a clone
+// lands, offers that clone.
+func TestScheduleReoffersAClone(t *testing.T) {
 	m, root, _ := discoveringShell(t)
 	initTestRepo(t, filepath.Join(root, "git", "a"))
 	m = pump(t, m, m.rescanRepos(""))
-	m.Overlay.Push(newIngestForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.startIngest))
 	m.Overlay.Push(newScheduleForm(m, nil))
 
 	initTestRepo(t, filepath.Join(root, "git", "d"))
 	m = pump(t, m, m.rescanRepos(""))
-	ingest, ok := m.Overlay.At(0).(*ingestForm)
-	if !ok || !slices.Contains(ingest.repo.options(), "d") {
-		t.Errorf("ingest form repo options = %v, want d re-offered", ingest.repo.options())
-	}
-	sched, ok := m.Overlay.At(1).(*scheduleForm)
+	sched, ok := m.Overlay.At(0).(*scheduleForm)
 	if !ok || !slices.Contains(sched.repo.options(), "d") {
 		t.Errorf("schedule form repo options = %v, want d re-offered", sched.repo.options())
 	}

@@ -69,8 +69,6 @@ carry the full id. One flag still wants the id itself:
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link a card to a PR you opened, or read its status and review comments |
 | `gummi push <id>`, `gummi pr create\|update\|ready\|draft <id> [flags]` | a person publishes a card: push its branch, open or update its PR, mark it ready or draft. Prints the facts and commands and asks at the terminal; without one, `--yes=<fingerprint>` of facts already printed. Refused inside a gummi-spawned session (DESIGN §22) |
 | `gummi deps add\|rm <dependent> <depends-on>`, `gummi deps list <id>` | dependency edges between cards |
-| `gummi ingest [flags] <spec-file>` | decompose a spec into feature proposals and materialize them |
-| `gummi bugs ingest [flags]`, `gummi bugs new [flags]` | import bugs from GitHub issues, or add one by hand |
 | `gummi init` | create and seed the `.gummi` workspace without opening the board |
 | `gummi doctor [--json] [--deep]` | readiness: repo, backend, auth, profile, envelope, lock, per-role reach |
 | `gummi skill show\|install\|list` | the calling-agent skill |

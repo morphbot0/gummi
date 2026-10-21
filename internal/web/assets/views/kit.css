@@ -2,7 +2,7 @@
    surfaces. Each surface's own sheet imports this one first. */
 
 /* a view body is a scrolling column: its parts keep their height */
-.vingest > *,.vbugs > *,.vdoctor > *,.vfleet > *{flex-shrink:0}
+.vdoctor > *,.vfleet > *{flex-shrink:0}
 .vrow{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
 .vrow > .btn{align-self:flex-end}
 .vrow > .field{flex:1 1 160px;min-width:0}
@@ -29,12 +29,6 @@
 .vconfirm .d{margin-top:2px;font-size:12.5px;color:var(--fg3);overflow-wrap:anywhere}
 .vconfirm .d .loud{color:var(--err);font-weight:600}
 .vconfirm .acts{display:flex;gap:8px;margin-left:auto}
-.vcards{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.vcards li{display:flex;align-items:baseline;gap:10px;padding:7px 12px;border-top:1px solid var(--line);font-size:13px}
-.vcards li:first-child{border-top:0}
-.vcards .link{font-family:var(--mono);font-size:12.5px}
-.vcards .t{flex:1;min-width:0;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vcards .st{font-size:11.5px;color:var(--fg3)}
 .vfoot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;padding-top:4px}
 .vfoot .grow{flex:1}
 .vsteps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12.5px}

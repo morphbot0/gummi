@@ -128,9 +128,6 @@ type cardForm struct {
 	// once alt+g has accepted an offer; fetching marks the round trip.
 	imported *importedIssue
 	fetching bool
-	// fromPicker marks a form filled from the browse picker: Create then
-	// returns to the picker rather than the board.
-	fromPicker bool
 
 	focus   int // a cardStop, always one of stops()
 	errText string
@@ -139,10 +136,8 @@ type cardForm struct {
 	onSubmit func(formResult) tea.Cmd
 	// onImport fetches ref (never bare: the caller resolved it against the
 	// chosen repo's origin) and delivers the result back through
-	// applyIssue. onBrowse opens the issue picker for the chosen repo; the
-	// form is popped while it is open and pushed back when it returns.
+	// applyIssue.
 	onImport func(ref domain.IssueRef, repo string) tea.Cmd
-	onBrowse func(repo string) tea.Cmd
 	// onCancel runs when the form is abandoned — esc, or the Cancel
 	// button. Nil for the plain new-card door, where abandoning it loses
 	// nothing that was not typed into it. It is set by the caller that
@@ -697,9 +692,10 @@ func (d *cardForm) afterVisible() []afterCand {
 	return append(mine, others...)
 }
 
-// github is alt+g: refetch an import, import the offered reference, or
-// browse — whichever the form's state calls for. Every branch that needs
-// a repository and has none moves focus to the repo row and says so.
+// github is alt+g: refetch an import or import the offered reference,
+// whichever the form's state calls for; with no reference in the box it
+// does nothing. A bare reference with no repository chosen moves focus
+// to the repo row and says so.
 func (d *cardForm) github() (bool, tea.Cmd) {
 	if d.fetching {
 		return false, nil
@@ -717,15 +713,7 @@ func (d *cardForm) github() (bool, tea.Cmd) {
 	}
 	ref, ok := d.reference()
 	if !ok {
-		if d.repo.needsChoice() {
-			d.errText = "choose a repository to browse its issues"
-			d.setFocus(cardStopRepo)
-			return false, nil
-		}
-		if d.onBrowse == nil {
-			return false, nil
-		}
-		return true, d.onBrowse(d.repo.name())
+		return false, nil
 	}
 	if ref.Bare() {
 		if d.repo.needsChoice() {
@@ -788,18 +776,6 @@ func (d *cardForm) applyIssue(p domain.BugProposal, ref domain.IssueRef) {
 			}
 		}
 	}
-}
-
-// fill is the browse picker's landing: the same as an import, with the
-// form marked so Create returns to the picker.
-func (d *cardForm) fill(p domain.BugProposal) {
-	ref, _ := domain.ParseIssueRef(p.ExternalRef)
-	if ref.Number == 0 {
-		ref.Number = p.Number
-	}
-	d.applyIssue(p, ref)
-	d.fromPicker = true
-	d.setFocus(cardStopText)
 }
 
 // failImport is the import's other landing.
@@ -875,7 +851,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		Kind: d.ct.Kind, Mode: d.ct.Mode, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
 		Base: d.base, Adopt: d.adopt, StackOnto: d.stackOnto, StackInto: d.stackInto,
-		Start: start, FromPicker: d.fromPicker,
+		Start:          start,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
 		MainCheckout: d.mainCheckout, Home: d.home,
 	}
@@ -1530,16 +1506,16 @@ func (d *cardForm) hint() string {
 	case cardStopRepo:
 		return "←/→ or 1–9 choose a repo · typing goes to the text · tab next · esc cancel"
 	case cardStopText:
-		g := "alt+g browse issues"
+		g := ""
 		if d.imported != nil {
-			g = "alt+g refetch"
+			g = "alt+g refetch · "
 		} else if _, ok := d.reference(); ok {
-			g = "alt+g import"
+			g = "alt+g import · "
 		}
 		// shift+tab is named here, not just tab: the rows above the
 		// composer are one shift+tab away and several tabs the other way
 		// round the cycle.
-		return "tab/shift+tab rows · " + g + " · alt+o options · alt+enter newline · enter create · esc cancel"
+		return "tab/shift+tab rows · " + g + "alt+o options · alt+enter newline · enter create · esc cancel"
 	case cardStopEnvelope:
 		return "type a dollar amount · alt+o collapse · tab next · esc cancel"
 	case cardStopProfile:

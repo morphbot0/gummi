@@ -2,7 +2,6 @@ package driver
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -304,22 +303,6 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 			return d.fail(ctx, string(id), fmt.Errorf("raising envelope: %w", err))
 		}
 		d.out.Emit(envelopeRaisedEvent{Event: "envelope", ID: string(id), From: from, To: f.Budget.Envelope})
-	}
-
-	// A done RS card has no gate left to cross — --approve/--request-changes
-	// here resolve the FD-081 decompose checkpoint instead of the ordinary
-	// gate switch below (which assumes an in-flight stage). Never calls
-	// Store.Transition, so the card cannot leave StageDone through either
-	// verb; a bare Resume with neither flag falls through to drive's
-	// terminal-stage check and just re-reports done.
-	if f.Kind == domain.KindResearch && f.Stage == domain.StageDone {
-		switch {
-		case in.Approve:
-			return d.approveDecompose(ctx, f)
-		case in.RequestChanges != nil:
-			return d.decomposeGate(ctx, f, *in.RequestChanges)
-		}
-		return d.drive(ctx, id)
 	}
 
 	switch {
@@ -1170,9 +1153,6 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 			d.discoverAndBaselineChecks(ctx, res.Feature, res.From)
 		}
 		if res.To == domain.StageDone {
-			if res.Feature.Kind == domain.KindResearch {
-				return d.decomposeGate(ctx, res.Feature, "")
-			}
 			return d.done(ctx, res.Feature)
 		}
 		// the todo→first-stage kickoff is "start", not an approval, so it
@@ -1364,114 +1344,6 @@ func unprovenPaths(f domain.Feature) []string {
 		out = append(out, u.Path)
 	}
 	return out
-}
-
-// decomposeGate runs the FD-081 decompose side-effect off an RS card's
-// verify→done crossing (auto-trigger, note "") or a manual
-// --request-changes re-run (note carries the operator's feedback). No
-// decompose exit — success, question, exhaustion, or a hard error — moves
-// the card off done: a failure is swallowed into a decompose_failed
-// escalation, and a successful pass only ever checkpoints as a `question`
-// for a later --approve, never auto-mints.
-func (d *Driver) decomposeGate(ctx context.Context, f domain.Feature, note string) (Outcome, error) {
-	if note != "" {
-		// the caller sent the previous decompose checkpoint back: its
-		// answer closes that decision before the pass re-runs and opens a
-		// fresh one.
-		d.answerDecomposeDecision(ctx, f, "changes requested: "+note)
-	}
-	res, err := d.eng.DecomposeForCard(ctx, f.ID, note)
-	if err != nil {
-		d.out.Emit(escalationEvent{
-			Event: "decompose_failed", ID: string(f.ID), Stage: string(f.Stage), Reason: err.Error(),
-			Resume: string(f.ID), Next: d.resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
-		})
-		return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
-	}
-	if len(res.Proposals) == 0 {
-		// nothing unsettled — a zero-slice RS, or every row already carries
-		// an id (including a doc hand-edited settled since the last pass).
-		return d.done(ctx, f)
-	}
-	if err := d.eng.SavePendingDecompose(f.ID, res); err != nil {
-		d.out.Emit(escalationEvent{
-			Event: "decompose_failed", ID: string(f.ID), Stage: string(f.Stage), Reason: err.Error(),
-			Resume: string(f.ID), Next: d.resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
-		})
-		return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
-	}
-	d.logPark(f, state.ParkReasonNeedsYou, fmt.Sprintf("decompose — %d proposal(s) ready for your review.", len(res.Proposals)))
-	d.out.Emit(decomposeQuestionEvent{
-		Event: "question", ID: string(f.ID),
-		Decision:  d.openDecision(f, state.DecisionKindGate, "decompose — review the proposals and mint them, or send the pass back with a note."),
-		Proposals: wireDecomposeProposals(res), Coverage: wireDecomposeCoverage(res),
-		Resume: string(f.ID), Next: d.resumeCmd(string(f.ID), "--approve"),
-	})
-	return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
-}
-
-// answerDecomposeDecision records the caller's answer to the newest open
-// decision on a decompose checkpoint: the ask-shaped round trip whose id
-// closes that decision (an approve, or a request-changes note). Without
-// it the decision would read open forever — decompose never moves the
-// card, so no gate crossing would ever close it (R3's closure rule).
-func (d *Driver) answerDecomposeDecision(ctx context.Context, f domain.Feature, answer string) {
-	open := d.newestOpenDecision(ctx, f.ID)
-	if open == nil {
-		return
-	}
-	if d.store == nil {
-		return
-	}
-	payload, err := json.Marshal(state.AskPayload{
-		Question: "decompose — review the proposals",
-		Answer:   answer,
-		Actor:    state.ActorUser, By: state.ActorUser,
-		ID: open.ID,
-	})
-	if err != nil {
-		return
-	}
-	_ = d.store.AppendEvent(context.Background(), state.CardEvent{
-		Feature: f.ID, Stage: f.Stage, Kind: state.EventAsk, At: time.Now(),
-		Payload: string(payload), Dedupe: "decision:" + open.ID,
-	})
-}
-
-// approveDecompose mints a done RS card's pending decompose proposals
-// (`resume <RS-id> --approve`). A clean mint clears the pending file and
-// reports done with the minted ids; a partial-mint failure still clears
-// the pending file (the doc's `## Slices` rows are authoritative — a
-// re-run's unsettledSliceRows naturally excludes the already-settled
-// prefix) and escalates with the ids that did land — per the never-un-
-// approve invariant, the RS card stays at done either way.
-func (d *Driver) approveDecompose(ctx context.Context, f domain.Feature) (Outcome, error) {
-	res, ok, err := d.eng.LoadPendingDecompose(f.ID)
-	if err != nil {
-		return d.fail(ctx, string(f.ID), err)
-	}
-	if !ok {
-		return d.fail(ctx, string(f.ID), fmt.Errorf("%s: no pending decomposition to approve", f.ID))
-	}
-	minted, mintErr := d.eng.MintProposals(ctx, f.ID, res)
-	_ = d.eng.ClearPendingDecompose(f.ID)
-	// the caller's answer closes the checkpoint's decision whether or not
-	// the mint fully landed: the pending file is cleared above either way,
-	// and the card never leaves done.
-	d.answerDecomposeDecision(ctx, f, fmt.Sprintf("approved — %d minted", len(minted)))
-	ids := make([]string, len(minted))
-	for i, m := range minted {
-		ids[i] = string(m.ID)
-	}
-	if mintErr != nil {
-		d.out.Emit(escalationEvent{
-			Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: mintErr.Error(),
-			MintedIDs: ids, Resume: string(f.ID), Next: d.resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
-		})
-		return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
-	}
-	d.out.Emit(decomposeMintedEvent{Event: "decompose_minted", ID: string(f.ID), FeatureIDs: ids})
-	return d.done(ctx, f)
 }
 
 func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool) Outcome {

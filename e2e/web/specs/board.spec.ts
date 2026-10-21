@@ -7,15 +7,14 @@ import { shot } from '../fixtures/shots';
 // the keyboard. Routes the server does not answer yet (501) must leave a
 // quiet "not available yet", never a broken page.
 
-let ids: { gate: string; backlog: string[]; bug: string };
+let ids: { gate: string; session: string; others: string[] };
 
 test.use({
   seed: {
     run: async (ws) => {
       const gate = await ws.seedDesignGate('Add a wave helper');
-      const backlog = await ws.seedBacklog(['Add a shrug helper', 'Add a nod helper']);
-      const bug = await ws.seedBug('Greet panics on an empty name', { severity: 'high' });
-      ids = { gate, backlog, bug };
+      const [session, ...others] = await ws.seedSessions(['Greet panics on an empty name', 'Add a shrug helper', 'Add a nod helper']);
+      ids = { gate, session, others };
     },
   },
 });
@@ -45,15 +44,15 @@ test('the rail shows the seeded cards and a card opens with its head', async ({ 
     await expect(page).toHaveURL(/#/);
     await page.reload();
   }
-  for (const id of [ids.gate, ...ids.backlog, ids.bug]) {
+  for (const id of [ids.gate, ids.session, ...ids.others]) {
     await expect(page.getByTestId(`rail-row-${id}`)).toBeVisible();
   }
   await expect(page.getByTestId(`rail-row-${ids.gate}`)).toHaveAttribute('data-status', 'needs');
   await expect(page.getByTestId('rail-group-needs')).toBeVisible();
-  await page.getByTestId(`rail-row-${ids.bug}`).click();
+  await page.getByTestId(`rail-row-${ids.session}`).click();
   await expect(page.getByTestId('card-title')).toHaveText('Greet panics on an empty name');
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
-  await expect(page).toHaveURL(new RegExp(`#${ids.bug}`));
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.session);
+  await expect(page).toHaveURL(new RegExp(`#${ids.session}`));
   await expect(page.getByTestId('thread')).toBeVisible();
   await shot(page, info, 'board');
   if (info.project.name === 'phone') await page.getByTestId('card-back').click();
@@ -65,14 +64,14 @@ test('the rail shows the seeded cards and a card opens with its head', async ({ 
 });
 
 test('a deep link opens the card and the tab it names', async ({ pairedPage: page, server }) => {
-  await page.goto(`${server.url}/#${ids.bug}/stats`);
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
+  await page.goto(`${server.url}/#${ids.session}/stats`);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.session);
   await expect(page.getByTestId('tab-stats')).toHaveAttribute('aria-selected', 'true');
 });
 
 test('the panel tabs switch, and 501 routes read as not available yet', async ({ pairedPage: page }, info) => {
   // the tabs sit on a card's screen on a phone: enter one first
-  if (info.project.name === 'phone') await page.getByTestId(`rail-row-${ids.bug}`).click();
+  if (info.project.name === 'phone') await page.getByTestId(`rail-row-${ids.session}`).click();
   for (const tab of ['diff', 'pr', 'stats', 'spec']) {
     await showTab(page, tab);
     await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
@@ -133,16 +132,16 @@ test('the phone opens on the cards, and a card opens from them with its screen n
   await expect(page.getByTestId('conversation')).toBeHidden();
   await expect(page.getByTestId('mobile-card')).toBeHidden();
   await shot(page, info, 'cards');
-  await page.getByTestId(`rail-row-${ids.bug}`).click();
+  await page.getByTestId(`rail-row-${ids.session}`).click();
   await expect(page.getByTestId('conversation')).toBeVisible();
   await expect(page.getByTestId('rail')).toBeHidden();
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.session);
   await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
   await showTab(page, 'diff');
   await expect(page.getByTestId('panel')).toBeVisible();
   await expect(page.getByTestId('rail')).toBeHidden();
   // the documents say whose they are
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.session);
   await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'false');
   await shot(page, info, 'panel');
@@ -177,9 +176,9 @@ test('j and k walk the rail, ? lists the keys, ⌘K jumps', async ({ pairedPage:
   await expect(page.getByTestId('keys-help')).toBeHidden();
   await page.keyboard.press('Control+k');
   await expect(page.getByTestId('palette')).toBeVisible();
-  await page.getByTestId('palette-input').fill(ids.bug);
+  await page.getByTestId('palette-input').fill(ids.session);
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.bug);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', ids.session);
 });
 
 test('a surface that is not built yet says so', async ({ pairedPage: page }) => {
@@ -236,33 +235,33 @@ test('the rail filters from one menu, names what applies, and matches a status i
   await page.getByTestId('rail-filters').click();
   await expect(page.getByTestId('rail-group-by-repo')).toHaveCount(0);
   // a kind says how many cards it has, and ticking it leaves the menu open
-  await expect(page.getByTestId('rail-kind-BG')).toContainText('1');
-  await page.getByTestId('rail-kind-BG').click();
-  await expect(page.getByTestId('rail-kind-BG')).toHaveAttribute('aria-checked', 'true');
-  await expect(row(ids.bug)).toBeVisible();
+  await expect(page.getByTestId('rail-kind-FF')).toContainText('3');
+  await page.getByTestId('rail-kind-FF').click();
+  await expect(page.getByTestId('rail-kind-FF')).toHaveAttribute('aria-checked', 'true');
+  await expect(row(ids.session)).toBeVisible();
   await expect(row(ids.gate)).toHaveCount(0);
   await page.getByTestId('rail-kind-FD').click();
   await page.getByTestId('rail-status-needs').click();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('rail-filters')).toBeFocused();
-  // bugs and features that need you: the gate and nothing else
+  // sessions and features that need you: the gate and nothing else
   await expect(row(ids.gate)).toBeVisible();
-  await expect(row(ids.bug)).toHaveCount(0);
-  await expect(row(ids.backlog[0])).toHaveCount(0);
+  await expect(row(ids.session)).toHaveCount(0);
+  await expect(row(ids.others[0])).toHaveCount(0);
   await expect(page.getByTestId('rail-filters')).toContainText('3');
   // each filter is named under the box with its own way off
   await page.getByTestId('rail-token-status-needs').getByRole('button').click();
-  await expect(row(ids.bug)).toBeVisible();
-  await expect(row(ids.backlog[0])).toBeVisible();
+  await expect(row(ids.session)).toBeVisible();
+  await expect(row(ids.others[0])).toBeVisible();
   await page.getByTestId('rail-tokens-clear').click();
   await expect(page.getByTestId('rail-tokens')).toBeHidden();
   // the box matches what a row says, not only its title
   await page.getByTestId('rail-filter').fill('design gate');
   await expect(row(ids.gate)).toBeVisible();
-  await expect(row(ids.bug)).toHaveCount(0);
+  await expect(row(ids.session)).toHaveCount(0);
   await page.getByTestId('rail-filter').fill('no such card');
   await page.getByTestId('rail-empty-clear').click();
   await expect(page.getByTestId('rail-filter')).toHaveValue('');
-  await expect(row(ids.bug)).toBeVisible();
+  await expect(row(ids.session)).toBeVisible();
   expect(errors).toEqual([]);
 });

@@ -39,14 +39,14 @@ test.beforeEach(async ({}, info) => {
   test.skip(info.project.name !== 'desktop', 'console noise does not depend on the viewport');
 });
 
-test.describe('two verified cards and a backlog', () => {
-  let landing: string, handoff: string, backlog: string[];
+test.describe('two verified cards and a session', () => {
+  let landing: string, handoff: string, sessions: string[];
   test.use({
     seed: {
       run: async (ws) => {
         landing = await ws.seedVerified('Add a farewell helper');
         handoff = await ws.seedVerified('Add a parting helper');
-        backlog = await ws.seedBacklog(['Add a shrug helper']);
+        sessions = await ws.seedSessions(['Add a shrug helper']);
       },
     },
   });
@@ -76,12 +76,12 @@ test.describe('two verified cards and a backlog', () => {
 
     // a delete from the menu stops at the board's own question
     const mid = questions.length;
-    await open(page, server, backlog[0]);
+    await open(page, server, sessions[0]);
     await page.getByTestId('card-actions').click();
     await page.getByTestId('action-delete').click();
     await expect(page.getByTestId('action-question')).toContainText(/Delete “.+”\?/);
     await page.getByTestId('action-confirm').click();
-    await expect.poll(async () => (await api('GET', `/api/cards/${backlog[0]}`)).status).toBe(404);
+    await expect.poll(async () => (await api('GET', `/api/cards/${sessions[0]}`)).status).toBe(404);
     expect(failed, 'failed loads logged to the console').toEqual([]);
     expect(questions.length, 'the delete asked first').toBeGreaterThan(mid);
   });

@@ -97,10 +97,6 @@ var (
 	// bodyReadTimeout is how long a request may take to send its body.
 	// Every JSON body here is small.
 	bodyReadTimeout = 30 * time.Second
-	// uploadReadTimeout is the same for a document upload (spec ingest),
-	// which may be megabytes over a phone's connection. Only a paired
-	// device gets it: the route extends the deadline after authenticating.
-	uploadReadTimeout = 3 * time.Minute
 )
 
 // readDeadline puts bodyReadTimeout on reading a request's body. A request
@@ -116,11 +112,6 @@ func readDeadline(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// extendReadDeadline gives the rest of a request's body d to arrive.
-func extendReadDeadline(w http.ResponseWriter, d time.Duration) {
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(d))
 }
 
 // deadlineBody lifts the read deadline once the body is read to its end.

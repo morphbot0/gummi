@@ -151,37 +151,6 @@ var initCmd = &cobra.Command{
 	RunE:  func(_ *cobra.Command, _ []string) error { return runInit() },
 }
 
-// ingestCmd implements `gummi ingest [flags] <spec-file>`.
-var ingestCmd = &cobra.Command{
-	Use:   "ingest [flags] <spec-file>",
-	Short: "Split a document into cards",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runIngest(cmdFlags(cmd), args)
-	},
-}
-
-// bugsCmd groups bug ingestion (ingest) and manual entry (new).
-var bugsCmd = &cobra.Command{
-	Use:   "bugs",
-	Short: "Ingest and manage bugs",
-}
-
-var bugsIngestCmd = &cobra.Command{
-	Use:   "ingest",
-	Short: "Import open bugs from a GitHub repo",
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		return runBugIngest(cmdFlags(cmd))
-	},
-}
-
-var bugsNewCmd = &cobra.Command{
-	Use:   "new",
-	Short: "Create one bug by hand",
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		return runBugNew(cmdFlags(cmd))
-	},
-}
-
 // depsCmd groups the dependency-edge operations (add/rm/list).
 var depsCmd = &cobra.Command{
 	Use:   "deps",
@@ -516,9 +485,6 @@ func init() {
 	bindStatusFlags(statusCmd.Flags())
 	bindWatchFlags(watchCmd.Flags())
 	bindDoctorFlags(doctorCmd.Flags())
-	bindIngestFlags(ingestCmd.Flags())
-	bindBugsIngestFlags(bugsIngestCmd.Flags())
-	bindBugsNewFlags(bugsNewCmd.Flags())
 	bindStackNewFlags(stackNewCmd.Flags())
 	bindStackAddFlags(stackAddCmd.Flags())
 	bindScheduleAddFlags(scheduleAddCmd.Flags())
@@ -541,7 +507,6 @@ func init() {
 	jsonFlag(webDevicesCmd.Flags(), "emit the paired devices as JSON")
 	webUnpairCmd.Flags().Bool("all", false, "unpair every device")
 
-	bugsCmd.AddCommand(bugsIngestCmd, bugsNewCmd)
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
 	stackCmd.AddCommand(stackNewCmd, stackAddCmd, stackRmCmd, stackMvCmd, stackListCmd, stackRestackCmd)
 	scheduleCmd.AddCommand(scheduleListCmd, scheduleAddCmd, scheduleEnableCmd, scheduleDisableCmd, scheduleRunNowCmd, scheduleRmCmd)
@@ -632,41 +597,6 @@ func bindWatchFlags(fs *pflag.FlagSet) {
 func bindDoctorFlags(fs *pflag.FlagSet) {
 	jsonFlag(fs, "emit the readiness checklist as JSON (the skill's setup path)")
 	fs.Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)")
-}
-
-func bindIngestFlags(fs *pflag.FlagSet) {
-	fs.String("profile", "", "profile the new features adopt (default: first configured)")
-	envelopeFlag(fs, "spend budget per card, in dollars (0 = uncapped; falls back to GUMMI_ENVELOPE)")
-	fs.String("repo", "", "managed repository to create the cards in (a configured repos: name; required when repos: is configured)")
-	fs.Bool("yes", false, "materialize without the confirmation prompt")
-}
-
-func bindBugsIngestFlags(fs *pflag.FlagSet) {
-	fs.String("repo", "", "owner/repo to import from (default: this repo's origin remote)")
-	fs.String("target-repo", "", "managed repository to create the bugs in (a configured repos: name; required when repos: is configured)")
-	fs.String("label", "bug", `issue label filter ("" imports all issues)`)
-	fs.String("state", "open", "issue state: open|closed|all")
-	fs.String("profile", "", "profile the new bugs adopt (default: first configured)")
-	envelopeFlag(fs, "spend budget per bug, in dollars (0 = uncapped; falls back to GUMMI_ENVELOPE)")
-	fs.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)")
-	fs.Bool("comments", false, "fetch issue comments into the report's Discussion section")
-	fs.Bool("yes", false, "materialize without the confirmation prompt")
-}
-
-func bindBugsNewFlags(fs *pflag.FlagSet) {
-	fs.String("title", "", "bug title (required)")
-	fs.String("one-liner", "", "short one-line summary")
-	fs.String("severity", "", "severity: critical|high|medium|low")
-	fs.String("repro", "", "reproduction steps")
-	fs.String("expected", "", "expected behavior")
-	fs.String("actual", "", "actual behavior")
-	fs.String("env", "", "environment (versions, OS, config)")
-	fs.String("desc", "", "summary of what's broken")
-	fs.String("profile", "", "profile the bug adopts (default: first configured)")
-	envelopeFlag(fs, "spend budget, in dollars (0 = uncapped; falls back to GUMMI_ENVELOPE)")
-	fs.String("repo", "", "managed repository to create the bug in (a configured repos: name; required when repos: is configured)")
-	fs.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)")
-	fs.Bool("yes", false, "create without the confirmation prompt")
 }
 
 func bindStackNewFlags(fs *pflag.FlagSet) {

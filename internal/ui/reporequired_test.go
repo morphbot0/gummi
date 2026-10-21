@@ -173,8 +173,7 @@ func TestSingleRepoFormsSubmitUnprompted(t *testing.T) {
 func TestSingleNamedRepoStillRenders(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	views := map[string]string{
-		"card":   ansi.Strip(newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"lxd"}, false, "", nil, 0, nil).View(s, 80, 24)),
-		"ingest": ansi.Strip(newIngestForm(nil, []string{"lxd"}, false, nil).View(s, 80, 24)),
+		"card": ansi.Strip(newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"lxd"}, false, "", nil, 0, nil).View(s, 80, 24)),
 	}
 	for name, view := range views {
 		if !strings.Contains(view, "repo") || !strings.Contains(view, "lxd") {
@@ -189,8 +188,7 @@ func TestSingleNamedRepoStillRenders(t *testing.T) {
 func TestLoneWorkspaceDefaultRendersNoRepoRow(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	views := map[string]string{
-		"card":   ansi.Strip(newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, nil, true, "", nil, 0, nil).View(s, 80, 24)),
-		"ingest": ansi.Strip(newIngestForm(nil, nil, true, nil).View(s, 80, 24)),
+		"card": ansi.Strip(newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, nil, true, "", nil, 0, nil).View(s, 80, 24)),
 	}
 	for name, view := range views {
 		if strings.Contains(view, "repo ") || strings.Contains(view, "repo:") {

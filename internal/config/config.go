@@ -710,7 +710,7 @@ permissions: allow-all
 # is never managed (in this layout it is just the parent of the checkouts).
 # The creation dialogs make you pick before they will create a card, the
 # board's o key retargets a card that has no worktree yet, and
-# run/bugs new/ingest take --repo <name>.
+# run takes --repo <name>.
 # repos:
 #   lxd: git/lxd
 #   incus: git/incus

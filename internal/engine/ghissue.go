@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -18,64 +17,19 @@ import (
 	"github.com/morphis/gummi/internal/pr"
 )
 
-// A BugSource yields candidate bugs to ingest. gummi ships GitHub and
-// manual sources; the interface is the seam for future ones (Sentry,
-// Linear, …). Sources are deterministic and agent-free — they structure
-// what already exists; per-bug reproduction and root-cause enrichment is
-// the triage/diagnose stages' job, not the source's (DESIGN §11's "tool
-// owns mechanics, model owns content", applied to bugs).
-type BugSource interface {
-	// Name identifies the source in provenance and prompts ("github").
-	Name() string
-	// Fetch returns the source's current candidate bugs.
-	Fetch(ctx context.Context) ([]domain.BugProposal, error)
-}
-
-// ManualSource is a single hand-entered bug. It carries a prepared
-// proposal so the same materialize path serves manual entry and imports.
-type ManualSource struct{ Bug domain.BugProposal }
-
-func (m ManualSource) Name() string { return "manual" }
-
-func (m ManualSource) Fetch(context.Context) ([]domain.BugProposal, error) {
-	b := m.Bug
-	b.Source = "manual"
-	if strings.TrimSpace(b.Title) == "" {
-		return nil, fmt.Errorf("a manual bug needs a title")
-	}
-	return []domain.BugProposal{b}, nil
-}
-
-// ghDefaultLimit bounds a single issue fetch; GitHub bug ingestion is a
-// review-gated batch, not an exhaustive mirror, so a high-but-finite cap
-// keeps one run bounded. A truncated fetch is surfaced by the caller.
-const ghDefaultLimit = 200
-
-// GitHubSource imports open issues from a repository via the `gh` CLI.
-// The target defaults to the repo gummi runs in (gh auto-detects the
-// origin remote from Dir); Repo overrides it to any "owner/repo". Label
-// filters to triaged bugs; State defaults to open. FetchComments pulls
-// each issue's top-level comments into the report's Discussion section.
+// GitHubSource reads one issue from a repository via the `gh` CLI, for
+// the new-card dialog's import of a pasted reference. The target defaults
+// to the repo gummi runs in (gh auto-detects the origin remote from Dir);
+// Repo overrides it to any "owner/repo".
 type GitHubSource struct {
-	Repo  string // "owner/repo"; empty = auto-detect from Dir's remote
-	Label string // filter to this label; empty = no label filter
-	State string // open|closed|all; empty = open
-	Dir   string // working directory for gh (the repo root)
-	Limit int    // max issues; 0 = ghDefaultLimit
-
-	// FetchComments fetches each issue's comments via `gh issue view` and
-	// appends them to the report's Discussion section. Opt-in (default
-	// false) so the common no-comments import stays a single gh call.
-	FetchComments bool
+	Repo string // "owner/repo"; empty = auto-detect from Dir's remote
+	Dir  string // working directory for gh (the repo root)
 
 	// run executes gh and returns stdout; injectable so tests never shell
 	// out. nil uses the real gh CLI.
 	run func(ctx context.Context, dir string, args ...string) ([]byte, error)
 }
 
-func (g GitHubSource) Name() string { return "github" }
-
-// ghIssue is the subset of `gh issue list --json` output we consume.
 type ghIssue struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
@@ -88,8 +42,8 @@ type ghIssue struct {
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	// Comments is populated only by FetchIssue's `gh issue view`; a list
-	// fetch never asks for it (fetchComments does that per issue, opt-in).
+	// Comments come with the same `gh issue view` call, so an import is
+	// one round trip.
 	Comments []ghComment `json:"comments"`
 }
 
@@ -100,68 +54,6 @@ type ghComment struct {
 	} `json:"author"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"createdAt"`
-}
-
-// Fetch lists issues from the target repo and maps each to a proposal.
-// Only issues are imported (gh issue list excludes pull requests). The
-// body is split into the report's symptom sections by parseBodySections;
-// when FetchComments is on, each issue's top-level comments are appended
-// to Discussion. The import stays deterministic — no coding agent is
-// involved.
-func (g GitHubSource) Fetch(ctx context.Context) ([]domain.BugProposal, error) {
-	limit := g.Limit
-	if limit <= 0 {
-		limit = ghDefaultLimit
-	}
-	state := g.State
-	if state == "" {
-		state = "open"
-	}
-	args := []string{
-		"issue", "list",
-		"--state", state,
-		"--limit", fmt.Sprintf("%d", limit),
-		"--json", "number,title,body,url,state,labels,author",
-	}
-	if g.Repo != "" {
-		args = append(args, "--repo", g.Repo)
-	}
-	if g.Label != "" {
-		args = append(args, "--label", g.Label)
-	}
-
-	run := g.run
-	if run == nil {
-		run = execGH
-	}
-	out, err := run(ctx, g.Dir, args...)
-	if err != nil {
-		return nil, err
-	}
-	var issues []ghIssue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing gh output: %w", err)
-	}
-	proposals := make([]domain.BugProposal, 0, len(issues))
-	for _, is := range issues {
-		p, ok := proposalFor(is)
-		if !ok {
-			continue // unusable: no title to slug, or no ref to dedup on
-		}
-		if g.FetchComments {
-			discussion, err := g.fetchComments(ctx, g.Dir, is.Number, g.Repo)
-			if err != nil {
-				// Comments are bonus signal; a transient gh failure (network,
-				// auth, deleted issue) must not drop the issue — import it with
-				// parsed body but no Discussion.
-				log.Printf("fetching comments for issue #%d: %v", is.Number, err)
-			} else {
-				p.Report.Discussion = discussion
-			}
-		}
-		proposals = append(proposals, p)
-	}
-	return proposals, nil
 }
 
 // FetchIssue fetches exactly one issue by number — the new-card dialog's
@@ -228,38 +120,6 @@ const (
 	maxComments     = 5
 	maxCommentChars = 2000
 )
-
-// ghIssueComments is the subset of `gh issue view --json comments` we
-// consume: top-level comments only, oldest first.
-type ghIssueComments struct {
-	Comments []ghComment `json:"comments"`
-}
-
-// fetchComments pulls a single issue's comments and joins them into a
-// Discussion block, newest-last. Each comment is prefixed with its
-// author's login and truncated to maxCommentChars; at most maxComments
-// are kept. repo is threaded through to `gh issue view --repo` when set,
-// matching the `gh issue list` conditional in Fetch.
-func (g GitHubSource) fetchComments(ctx context.Context, dir string, issueNum int, repo string) (string, error) {
-	args := []string{"issue", "view", strconv.Itoa(issueNum)}
-	if repo != "" {
-		args = append(args, "--repo", repo)
-	}
-	args = append(args, "--json", "comments")
-	run := g.run
-	if run == nil {
-		run = execGH
-	}
-	out, err := run(ctx, dir, args...)
-	if err != nil {
-		return "", err
-	}
-	var data ghIssueComments
-	if err := json.Unmarshal(out, &data); err != nil {
-		return "", fmt.Errorf("parsing gh comments output: %w", err)
-	}
-	return joinComments(data.Comments), nil
-}
 
 // joinComments renders comments into one Discussion block, oldest first,
 // each prefixed with its author's login and truncated to maxCommentChars;

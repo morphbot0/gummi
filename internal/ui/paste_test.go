@@ -66,46 +66,6 @@ func TestPasteIntoBugForm(t *testing.T) {
 	}
 }
 
-func TestPasteIntoTextPrompt(t *testing.T) {
-	m, _ := newWorkspace(t)
-	m = pump(t, m, m.Init())
-	m = openFeatureForm(t, m)
-	m = typeString(t, m, "Dark mode")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	// rename via the text prompt, pasting the new title
-	m.Overlay.Push(newTextPrompt("rename", "", "title",
-		func(s string) error { _, err := domain.Slugify(s); return err },
-		func(s string) tea.Cmd { return nil }))
-	m = paste(t, m, "Bright mode")
-	d := m.Overlay.Top().(*textPromptDialog)
-	if got := d.input.Value(); got != "Bright mode" {
-		t.Fatalf("prompt value = %q", got)
-	}
-}
-
-func TestPasteIntoBugIngestFilter(t *testing.T) {
-	m := &Shell{}
-	m.bugIngest = samplePicker()
-
-	// the picker opens with the filter already focused, so a paste lands
-	// directly in it.
-	m.Update(tea.PasteMsg{Content: "crash"})
-	if got := m.bugIngest.filter.Value(); got != "crash" {
-		t.Fatalf("filter value = %q", got)
-	}
-	if len(m.bugIngest.visible()) != 1 {
-		t.Fatalf("visible after pasted filter = %d, want 1", len(m.bugIngest.visible()))
-	}
-
-	// esc leaves the filter for the list; a paste there is dropped.
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	m.Update(tea.PasteMsg{Content: "stray"})
-	if got := m.bugIngest.filter.Value(); got != "crash" {
-		t.Fatalf("paste landed in the filter while list-focused: %q", got)
-	}
-}
-
 func TestPasteIntoComposer(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("Two options."))
 	m = openAndAttach(t, m)

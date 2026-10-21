@@ -60,11 +60,6 @@ func (w Workspace) BugsDir() string { return filepath.Join(w.GummiDir(), "bugs")
 // WorktreesDir holds the nested per-feature git worktrees.
 func (w Workspace) WorktreesDir() string { return filepath.Join(w.GummiDir(), "worktrees") }
 
-// IngestDir holds source documents an ingest pass decomposed into
-// features (DESIGN §11): committed with the repo, so a seeded draft's
-// provenance pointer stays resolvable.
-func (w Workspace) IngestDir() string { return filepath.Join(w.GummiDir(), "ingest") }
-
 // AttachmentsDir holds uploaded images, content-addressed by sha256
 // (internal/attachment). Workspace content, never committed — the same
 // `.gummi/attachments/<id>.<ext>` path a spec-anchored link names, always
@@ -343,7 +338,6 @@ func Init(ws, repo string) (Workspace, error) {
 		{w.SpecsDir(), 0o750},
 		{w.BugsDir(), 0o750},
 		{w.WorktreesDir(), 0o750},
-		{w.IngestDir(), 0o750},
 	}
 	for _, d := range dirs {
 		if err := MkdirChecked(d.path, d.perm); err != nil {
