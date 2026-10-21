@@ -318,7 +318,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	// the card has left, so a long conversation's later backends are
 	// capped by what is actually still there rather than by what was left
 	// when it opened. This is the one floor a freeform card keeps.
-	budget := e.stageBudget(f, sess.rate())
+	budget := e.sessionBudget(f, sess.rate())
 	sess.setBudget(budget)
 	e.seedCardSpend(sess)
 
@@ -562,7 +562,7 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 		if ferr != nil {
 			return nil, ferr
 		}
-		if ff.engine.stageBudget(f, sess.rate()) <= 0 {
+		if ff.engine.sessionBudget(f, sess.rate()) <= 0 {
 			return nil, fmt.Errorf("%s has spent its budget of %s; raise it to carry on", ff.id, domain.FormatDollars(float64(f.Budget.Envelope)))
 		}
 	}

@@ -230,7 +230,7 @@ type Config struct {
 	// headroom); the model is told its budget and nudged at thresholds.
 	// It is the fallback for features without a budget envelope; a
 	// feature with an envelope draws every stage from what's left of it
-	// (§5.1 layer 3, see stageBudget).
+	// (§5.1 layer 3, see sessionBudget).
 	StageBudget float64
 	// TurnReserve is one agent turn's worth of credits, the floor for
 	// every envelope-derived budget (0 = domain.TurnReserveCredits).
@@ -1008,7 +1008,7 @@ func (e *Engine) startAutonomous(s *Session) {
 	s.setByokRate(rate)
 	// compute the stage budget once so the enforced cap, the budget-aware
 	// hint, and the session's own budget all agree.
-	budget := e.stageBudget(s.Feature, rate)
+	budget := e.sessionBudget(s.Feature, rate)
 	// the same row the budget was just derived from, kept live on the
 	// session so displays stop reading a snapshot taken before the run
 	// (the masthead's "credits left" was frozen at spawn-time spend).
@@ -1794,7 +1794,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	var maxCredits float64
 	// autonomous stages get a budget cap + budget-aware hint (interactive
 	// chat is human-paced, so it isn't capped). Envelope-derived budgets
-	// arrive already floored at one turn's reserve (stageBudget), so the
+	// arrive already floored at one turn's reserve (sessionBudget), so the
 	// enforced cap is never an un-holdable sliver.
 	if budget > 0 && !attached {
 		maxCredits = budget * capHeadroom

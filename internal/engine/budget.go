@@ -17,7 +17,7 @@ const capHeadroom = 0.90
 // (DESIGN §5.1 layer 2). 100% is the exhaustion checkpoint.
 var budgetThresholds = []int{50, 80, 95}
 
-// stageBudget returns the credit budget for a feature's current stage:
+// sessionBudget returns the credit budget for a card's current session:
 // what's left of its envelope (layer 3), or the flat config value for a
 // feature without one (layer 1/2 behavior). Every stage draws from the
 // same envelope — there are no per-stage allocations. Review and verify
@@ -30,7 +30,7 @@ var budgetThresholds = []int{50, 80, 95}
 // smaller cap cannot be held anyway — the turn overshoots it either way.
 // Exhaustion semantics are unchanged: an envelope with nothing left
 // still returns 0 and gates.
-func (e *Engine) stageBudget(f domain.Feature, creditRate float64) float64 {
+func (e *Engine) sessionBudget(f domain.Feature, creditRate float64) float64 {
 	if f.Budget.Envelope > 0 {
 		cur := e.currentFeature(f)
 		// RS cards (FD-081) reserve a decompose floor upfront: a
@@ -93,7 +93,7 @@ func (e *Engine) currentFeature(f domain.Feature) domain.Feature {
 
 // seedCardSpend stamps a spawning session with the card's spend as the
 // store holds it right now, priced at the session's own adapter rate —
-// the same figure stageBudget just subtracted from the envelope. From
+// the same figure sessionBudget just subtracted from the envelope. From
 // here recordUsage moves it by each booked sample, so a render path has
 // the store's running total without a read of its own (Session.cardSpent).
 func (e *Engine) seedCardSpend(s *Session) {

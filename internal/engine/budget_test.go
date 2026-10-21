@@ -660,8 +660,8 @@ func TestStageBudgetRSReserveFloorHoldsUnderTurnReserveFloorUp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := e.stageBudget(f, 0); got != 5 {
-		t.Errorf("stageBudget = %v, want 5 (100 envelope - 65 spent - 30 reserve, not floored to turnReserve=30)", got)
+	if got := e.sessionBudget(f, 0); got != 5 {
+		t.Errorf("sessionBudget = %v, want 5 (100 envelope - 65 spent - 30 reserve, not floored to turnReserve=30)", got)
 	}
 }
 
@@ -686,8 +686,8 @@ func TestStageBudgetRSReserveUnderByok(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := e.stageBudget(f, rate); got != 0 {
-		t.Errorf("stageBudget = %v, want 0 (BYOK Shape spend already at the reserve boundary)", got)
+	if got := e.sessionBudget(f, rate); got != 0 {
+		t.Errorf("sessionBudget = %v, want 0 (BYOK Shape spend already at the reserve boundary)", got)
 	}
 }
 

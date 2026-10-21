@@ -109,7 +109,7 @@ func (e *Engine) DecomposeForCard(ctx context.Context, cardID domain.FeatureID, 
 
 	// The decompose pass draws down the RS card's own protected reserve
 	// (domain.DecomposeReserveCredits, floored off from non-decompose
-	// stages by stageBudget's KindResearch branch), not the general
+	// stages by sessionBudget's KindResearch branch), not the general
 	// stage-budget ceiling: remaining shrinks by every credit (hosted or
 	// BYOK-equivalent) a prior decompose session actually spent, so
 	// re-runs admit a smaller cap each time and eventually admit none.

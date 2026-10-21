@@ -139,7 +139,7 @@ const TurnReserveCredits = 30
 
 // DecomposeReserveCredits (FD-081) is the credit floor an RS card's
 // envelope reserves upfront for its decompose pass. Non-decompose stages
-// cannot spend into it (see Engine.stageBudget's KindResearch branch);
+// cannot spend into it (see Engine.sessionBudget's KindResearch branch);
 // the decompose pass itself debits from it via
 // Spend.DecomposeCreditEquivalentAt, and an insufficient remainder exits
 // exhausted with no partial mint rather than spending past it. Sized the
