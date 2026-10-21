@@ -26,7 +26,6 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/verdict"
 )
 
 // StageEnterPayload, StageExitPayload and MessagePayload mirror the JSON
@@ -188,15 +187,15 @@ func (seg Segment) Outcome() string {
 	switch seg.Role {
 	case string(agent.RoleReviewer):
 		// a critique and a verify carry a real pass/changes/fail/blocked
-		// verdict (internal/verdict); only a resolved "pass" earns ✓, and
+		// verdict (a legacy workflow card's); only a resolved "pass" earns ✓, and
 		// only "fail" earns ✗ — anything else (including "", the shape
 		// left behind by a session that exited without ever calling
 		// submit_verdict) stays neutral rather than defaulting to a pass
 		// that was never recorded.
 		switch seg.Verdict {
-		case verdict.Pass.String():
+		case "pass":
 			return state.StatusOK
-		case verdict.Fail.String():
+		case "fail":
 			return state.StatusFail
 		}
 		return ""

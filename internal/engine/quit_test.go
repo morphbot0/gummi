@@ -128,7 +128,7 @@ func assertQuitParked(t *testing.T, e *Engine, store *state.Store, id domain.Fea
 // TestQuitStoppedCardsAfterRestore is the round trip StopForQuit exists
 // for: one engine stops a card on the way out, a second engine sharing
 // the same store restores it on the way back in, and QuitStoppedCards
-// offers it with the corrective rounds already spent.
+// offers it with when it was parked.
 func TestQuitStoppedCardsAfterRestore(t *testing.T) {
 	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
@@ -150,12 +150,6 @@ func TestQuitStoppedCardsAfterRestore(t *testing.T) {
 	waitState(t, e1, "FD-001", StateRunning)
 
 	ctx := context.Background()
-	for range 2 {
-		if err := store.IncrementRounds(ctx, "FD-001", domain.RoundKindCorrective); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	e1.StopForQuit(ctx)
 	close(release)
 	if err := e1.Close(); err != nil {
@@ -177,9 +171,6 @@ func TestQuitStoppedCardsAfterRestore(t *testing.T) {
 	c := cards[0]
 	if c.Feature.ID != "FD-001" || c.Feature.Stage != domain.StageImplement {
 		t.Errorf("card feature = %+v, want FD-001 at implement", c.Feature)
-	}
-	if c.Corrective != 2 {
-		t.Errorf("Corrective = %d, want 2", c.Corrective)
 	}
 	if c.ParkedAt.IsZero() {
 		t.Error("ParkedAt is zero, want the park event's timestamp")

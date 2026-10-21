@@ -65,7 +65,7 @@ func TestCardActionsForOrdering(t *testing.T) {
 	// (spec, diff) and plumbing (verify, attach, the autopilot switch)
 	// are in the tail now rather than ranked among the answers — they are
 	// the card page's tabs and its inventory, not answers to "what now".
-	tail := "run deps spec diff verify envelope gate ask inbox attach rebase handoff merge squash prlink duplicate delete"
+	tail := "run deps spec diff verify envelope ask inbox attach rebase handoff merge squash prlink duplicate delete"
 	want := "bounce advance " + tail
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)

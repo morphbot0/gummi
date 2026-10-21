@@ -12,7 +12,6 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/reentry"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -293,16 +292,6 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.scrollThread(msg.String() == "pgup")
 		return nil
 	}
-	// A chip up owns enter, y and esc, swallows the picker's keys, and
-	// is withdrawn by anything that types (chip.go).
-	if cmd, handled := m.chipKey(r, msg); handled {
-		return cmd
-	}
-	// A read still out owns enter and esc, and is withdrawn by anything
-	// that types (chip.go's readingKey).
-	if m.readingKey(r, msg) {
-		return nil
-	}
 	switch msg.String() {
 	case "esc":
 		if m.threadFreeForm {
@@ -532,30 +521,19 @@ const (
 	// lineAskAnswer: prose (or the armed channel) at an open ask is its
 	// answer.
 	lineAskAnswer
-	// lineChat: a conversation in progress stays one.
-	lineChat
-	// lineChatReentry: the conversation's leading word asks for a send-back.
-	lineChatReentry
-	// lineChatIntent: the conversation's leading word is itself the reading.
-	lineChatIntent
-	// lineReentry: prose at a stop is read, then routed.
-	lineReentry
+	// lineWords: prose at a stop goes with the answer that takes words —
+	// the follow-up session, a legacy card's re-run or send-back.
+	lineWords
 	// lineInput: no decision claims the line — verbs, or a message.
 	lineInput
 )
 
 // lineClass is a classified line: its route, the decision that claimed
-// it, and what the route needs to carry it out.
+// it, and for lineWords the answer that takes the words.
 type lineClass struct {
-	route lineRoute
-	d     *threadDecision
-	// consumer is the decision's word-eating option, -1 when none;
-	// fallback is its id — the route a send-back declares for itself.
+	route    lineRoute
+	d        *threadDecision
 	consumer int
-	fallback string
-	// intent and rest are a conversation's leading word, read.
-	intent reentry.Intent
-	rest   string
 }
 
 // classifyThreadLine decides where a line goes, reading the model and
@@ -564,7 +542,7 @@ type lineClass struct {
 // order the routing has always asked in.
 func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *threadDecision) lineClass {
 	if r.DrivenAbroad {
-		return lineClass{route: lineConsult, consumer: -1}
+		return lineClass{route: lineConsult}
 	}
 	prose := parseInput(text).Kind == verbNone
 	// EVERY PROSE LINE ON A FREEFORM CARD IS A TURN. It must not reach the
@@ -591,20 +569,20 @@ func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *thr
 	if r.F.IsFreeform() && (prose || m.isProjectCommand(r, text)) {
 		if prose {
 			if d := decide(); d != nil && d.ask != nil {
-				return lineClass{route: lineAskAnswer, d: d, consumer: -1}
+				return lineClass{route: lineAskAnswer, d: d}
 			}
 		}
-		return lineClass{route: lineFreeformTurn, consumer: -1}
+		return lineClass{route: lineFreeformTurn}
 	}
 	d := decide()
 	if d == nil {
-		return lineClass{route: lineInput, consumer: -1}
+		return lineClass{route: lineInput}
 	}
 	// routeThreadLine syncs the decision before routing, and a decision
 	// the composer has not been looking at drops the channel armed for
 	// the last one and the conversation held against it (syncDecision).
 	fresh := d.key != m.decisionKey
-	c := lineClass{d: d, consumer: -1}
+	c := lineClass{d: d}
 	if m.threadFreeForm && !fresh && d.ask != nil {
 		c.route = lineAskAnswer
 		return c
@@ -627,34 +605,40 @@ func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *thr
 		c.route = lineAskAnswer
 		return c
 	}
-	// EVERY PROSE LINE AT A STOP IS READ. Not only one aimed at "send it
-	// back": the row the highlight happened to sit on used to take the
-	// line — a bug report typed above "run verify" became that run's
-	// kickoff note — and the reader never picked that row. The read
-	// decides what the line means; the fallback, for a card with no
-	// reader, is still the highlighted word-consumer, which is what it
-	// always was.
-	if i := d.wordConsumer(); i >= 0 {
-		c.consumer, c.fallback = i, d.actions[i].id
-	}
-	// A conversation in progress stays one (chat.go): no read, unless the
-	// line leads with a vocabulary word asking for a move — then the word
-	// is the reading and the rest is read.
-	if m.inChat(r.F.ID) && !fresh {
-		intent, rest, exit := chatExit(text)
-		c.intent, c.rest = intent, rest
-		switch {
-		case !exit:
-			c.route = lineChat
-		case intent == "":
-			c.route = lineChatReentry
-		default:
-			c.route = lineChatIntent
-		}
+	// Prose at a stop goes with the answer that takes words, when the
+	// stop offers one; otherwise it is a message to the card's agent. A
+	// live session is a conversation, and a line typed into one is the
+	// next thing said in it.
+	if sess := m.sessionFor(r.F.ID); sess != nil && sess.Live() {
+		c.route = lineInput
 		return c
 	}
-	c.route = lineReentry
+	if i := d.wordConsumer(); i >= 0 {
+		c.route, c.consumer = lineWords, i
+		return c
+	}
+	c.route = lineInput
 	return c
+}
+
+// deliverWords carries a line to the answer that takes words: the
+// follow-up session, and a legacy workflow card's re-run, send-back or
+// change note.
+func (m *Shell) deliverWords(r featureRow, id, note string) tea.Cmd {
+	switch id {
+	case "bounce":
+		return m.bounceStage(r.F.ID, note)
+	case "run":
+		return m.runStageWithNote(r.F, note)
+	case "changes":
+		if note == "" {
+			return nil
+		}
+		return m.sendThreadMessage(r.F, note)
+	case "newbug":
+		return m.bugFromLine(r, note)
+	}
+	return nil
 }
 
 // routeThreadLine carries a line where classifyThreadLine sends it.
@@ -662,7 +646,7 @@ func (m *Shell) routeThreadLine(r featureRow, text string, decide func() *thread
 	c := m.classifyThreadLine(r, text, decide)
 	if c.d != nil {
 		m.syncDecision(c.d)
-		if c.consumer >= 0 && c.route >= lineChat && c.route <= lineReentry {
+		if c.route == lineWords {
 			m.decisionCursor = c.consumer
 		}
 	}
@@ -673,18 +657,8 @@ func (m *Shell) routeThreadLine(r featureRow, text string, decide func() *thread
 		return m.sendThreadMessage(r.F, text)
 	case lineAskAnswer:
 		return m.answerAskWith(r, text)
-	case lineChat:
-		return m.sendThreadMessage(r.F, text)
-	case lineChatReentry:
-		return m.routeReentry(r, c.fallback, c.rest)
-	case lineChatIntent:
-		note := c.rest
-		if note == "" {
-			note = text
-		}
-		return m.applyReentry(reentryClassifiedMsg{f: r.F, note: note, fallback: c.fallback, intent: c.intent})
-	case lineReentry:
-		return m.routeReentry(r, c.fallback, text)
+	case lineWords:
+		return m.deliverWords(r, c.d.actions[c.consumer].id, text)
 	}
 	return m.submitThreadInput(r)
 }
@@ -713,10 +687,8 @@ func (m *Shell) submitThreadInput(r featureRow) tea.Cmd {
 	parsed := parseInput(text)
 	switch parsed.Kind {
 	case verbMenu:
-		m.endChat(r.F.ID)
 		return m.openCommandMenu(parsed.Remainder)
 	case verbCommand:
-		m.endChat(r.F.ID)
 		// ON SCREEN = ACTIONABLE. A verb naming an option the card is
 		// actually offering fires; every other verb degrades to the menu
 		// with itself typed into the filter, one enter from running.
@@ -808,17 +780,16 @@ var verbActionIDs = map[string]string{
 	// above the composer. The word is not "handoff": on a freeform card
 	// that is the session's own command (engine's freeformbuiltins.go),
 	// and a verb is parsed first, so it would shadow it.
-	"close": "handoff",
-	"changes":   "changes",
-	"bounce":    "bounce",
-	"park":      "pause",
-	"verify":    "verify",
-	"rebase":    "rebase",
-	"squash":    "squash",
-	"clean":     "clean",
-	"autopilot": "gate",
-	"spec":      "spec",
-	"diff":      "diff",
+	"close":   "handoff",
+	"changes": "changes",
+	"bounce":  "bounce",
+	"park":    "pause",
+	"verify":  "verify",
+	"rebase":  "rebase",
+	"squash":  "squash",
+	"clean":   "clean",
+	"spec":    "spec",
+	"diff":    "diff",
 }
 
 // verbDegrades reports whether a verb should open the "/" menu instead
@@ -948,15 +919,15 @@ func (m *Shell) routeVerb(f domain.Feature, verb, remainder string) tea.Cmd {
 // "park" below to reach exactly that action and nothing else (parkVerb,
 // shell.go), rather than routing through the ambiguous key.
 var verbKeys = map[string]string{
-	"approve":   "g",
-	"diff":      "d",
-	"spec":      "s",
-	"verify":    "v",
-	"land":      "m",
-	"close":     "h",
-	"rebase":    "r",
-	"clean":     "c",
-	"squash":    "z",
+	"approve": "g",
+	"diff":    "d",
+	"spec":    "s",
+	"verify":  "v",
+	"land":    "m",
+	"close":   "h",
+	"rebase":  "r",
+	"clean":   "c",
+	"squash":  "z",
 }
 
 // fireVerb performs a parsed verb's action: routes to the same key
@@ -972,16 +943,11 @@ func (m *Shell) fireVerb(verb, remainder string) tea.Cmd {
 	if key, ok := verbKeys[verb]; ok {
 		return m.boardVerb(key)
 	}
-	// The two "send it back" verbs. They reach here only when the answer
-	// set is actually offering that answer (submitThreadInput's on-screen
-	// rule), so each performs the same delivery the highlighted row
-	// performs — deliverDecisionWords' own two cases — rather than
-	// reporting that the word is not wired to anything, which is what
-	// both used to do.
-	//
-	// The remainder is the point of typing the verb instead of pressing
-	// the row: it is what is wrong, and it rides along. Typed bare, each
-	// says what it wants rather than sending an empty complaint.
+	// The two "send it back" verbs reach here only when the answer set
+	// offers that answer (submitThreadInput's on-screen rule), so each
+	// performs the delivery the highlighted row performs. The remainder is
+	// what is wrong, and it rides along; typed bare, each says what it
+	// wants rather than sending an empty complaint.
 	switch verb {
 	case "bounce", "changes":
 		if remainder == "" {
@@ -989,11 +955,7 @@ func (m *Shell) fireVerb(verb, remainder string) tea.Cmd {
 			return nil
 		}
 		if r, ok := m.selected(); ok {
-			// The same router the highlighted row takes, deliberately:
-			// /bounce and picking "send it back" are one answer typed two
-			// ways, and a sentence that reaches plan through the row must
-			// not stop at implement through the verb.
-			return m.routeReentry(r, verb, remainder)
+			return m.deliverWords(r, verb, remainder)
 		}
 		return nil
 	}
@@ -1003,11 +965,7 @@ func (m *Shell) fireVerb(verb, remainder string) tea.Cmd {
 // notWiredVerb is the floor under fireVerb: a verb in the vocabulary
 // that reached here with no key, no special case and no route.
 //
-// Nothing in today's vocabulary lands on it. changes and bounce are
-// routed above; autopilot names a card SETTING rather than a workflow
-// answer, so it is never in the answer set and the on-screen rule always
-// sends it to the "/" menu, where the card's own inventory carries it
-// (cardCommands' gate row). The floor stays because a vocabulary that
+// The floor stays because a vocabulary that
 // silently swallows a word is worse than one that admits it has nowhere
 // to put it — and the next verb added gets a legible failure instead of
 // a no-op while it is being wired.
@@ -1335,12 +1293,6 @@ func (m *Shell) threadInputBindings() []binding {
 		})
 	}
 	if r, ok := m.selected(); ok {
-		if p := m.chip(r.F.ID); p != nil {
-			return m.chipBindings(p)
-		}
-		if p := m.reentryRead; p != nil && p.id == r.F.ID {
-			return m.readingBindings()
-		}
 		if d := m.visibleDecision(r); d != nil {
 			aim := m.wordAim(d)
 			text := strings.TrimSpace(m.threadInput.Value())

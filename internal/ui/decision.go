@@ -571,27 +571,12 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		m.decisionKey, m.decisionCursor, m.decisionPicked = "", 0, nil
 		m.decisionAimed = false
 		m.threadFreeForm = false
-		if r, ok := m.selected(); ok {
-			m.dropChip(r.F.ID)
-		}
 		return
 	}
 	if d.key != m.decisionKey {
 		m.decisionKey = d.key
 		m.decisionCursor = 0
 		m.decisionPicked = map[int]bool{}
-		// a reading was of a stop that is gone — the card moved under it,
-		// and so has the conversation the stop was in. A read still out is
-		// withdrawn for the same reason, and cancelled with it: it would
-		// come back a reading of a stop nobody is looking at any more.
-		// Only this card's: a web board answers several cards at once, and
-		// a line sent on one must not take another card's chip, read or
-		// conversation with it.
-		m.dropChip(d.card)
-		if p := m.reentryRead; p != nil && p.id == d.card {
-			m.withdrawRead()
-		}
-		delete(m.chatting, d.card)
 		m.decisionAimed = false
 		// a different question invalidates the armed free-form channel —
 		// it belonged to the answer that is gone
@@ -625,52 +610,9 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	if d == nil {
 		return nil
 	}
-	if p := m.reentryRead; p != nil && p.id == r.F.ID && d.ask == nil {
-		// The reader already answered: enter committed the line to the row
-		// it was aimed at, and what is happening now is that answer being
-		// carried out. Rows that are no longer waiting on anybody must not
-		// go on standing there as though they were — the question comes
-		// back only if the answer does not, which is a stopped read. The
-		// act itself is reported where the card reports every act in
-		// progress: in the conversation (thread.go's reading marker).
-		//
-		// An open ask is the exception and keeps its picker: it is the
-		// agent's own question, not this stop's, and a re-entry reached
-		// through a verb while one is up has not answered it.
-		return nil
-	}
-	if p := m.chip(r.F.ID); p != nil && d.ask == nil {
-		// the chip stands where the picker stood, under the same
-		// narration; the picker comes back the moment the chip goes
-		width := max(w-2, 10)
-		narr := m.narrationBlock(s, d, r, width)
-		rows := maxRows
-		if maxRows > 0 {
-			narr = fitNarration(narr, maxRows-2-1)
-			rows = max(maxRows-len(narr), 2)
-		}
-		return append(narr, m.chipLines(s, r, p, width, rows)...)
-	}
 	title := "gummi"
 	options := make([]decisions.Option, 0, len(d.actions))
 	multi := false
-	// A decision autopilot has taken renders open, with its options,
-	// saying whose it is — never a countdown. The answer runs in a
-	// command, so there is a real interval where the question is on
-	// screen and already spoken for, and the honest thing is to name the
-	// answerer rather than let it read as waiting for you. It collapses
-	// when the answer event lands, not on a timer: a timer would make the
-	// same decision behave differently depending on whether a human
-	// happened to be looking, and would diverge the TUI from the driver,
-	// which answers immediately. esc keeps its two meanings (blur the
-	// composer, close the card) — the take-it-back gesture belonged to
-	// the countdown that was cut.
-	//
-	// The flag, not autopilotAnswers: the rule table says which decisions
-	// this card's mode MAY take, and a card sitting idle on gates is one
-	// nothing is going to move — marking it from the table would put a
-	// standing claim on screen that no answer was ever coming to honour.
-	autopilots := m.autopilotAnswering[r.F.ID]
 	if d.ask != nil {
 		title = r.F.Name() + " asks"
 		if m.threadFreeForm || m.proseAnswersAsk() {
@@ -696,13 +638,6 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 				Label: label, Detail: action.detail, Danger: action.danger,
 			})
 		}
-	}
-	if autopilots {
-		// on the title, not a row of its own: the pinned region's height
-		// is load-bearing at 36×9, where a spent row costs an option, and
-		// the free-form arming above already set the precedent that who
-		// owns the answer is said on the title.
-		title += " · autopilot is taking this one"
 	}
 	armed := m.decisionArmed(d)
 	width := max(w-2, 10)
@@ -1023,7 +958,6 @@ func (m *Shell) answerDecisionAt(r featureRow, d *threadDecision, cursor int, pi
 	}
 	action := d.actions[cursor]
 	m.clearTransientNotice()
-	m.endChat(r.F.ID) // a row picked is the way out of a conversation
 	return m.runCardAction(cardAction{
 		id: action.id, key: action.key, label: action.label,
 		why: action.detail, danger: action.danger,

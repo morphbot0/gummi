@@ -142,9 +142,7 @@ func TestRoundsMigrationIdempotentOnReopen(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetPlanRounds(ctx, f.ID, 2); err != nil {
-		t.Fatal(err)
-	}
+	seedRounds(t, s, f.ID, domain.RoundKindPlan, 2)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}

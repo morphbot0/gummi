@@ -83,11 +83,6 @@ func TestClosingParagraphNamesTheCommitAndTheCost(t *testing.T) {
 	if !strings.Contains(plainClaims(closingClaims(in)), "clean up removes both") {
 		t.Fatal("a landed card still holding a worktree must say so — that is the cleanup ask")
 	}
-
-	in.corrective = 2
-	if got := plainClaims(closingClaims(in)); !strings.Contains(got, "2 rounds redone") {
-		t.Fatalf("rework is the number worth reading beside the total: %q", got)
-	}
 }
 
 func TestClosingParagraphNamesTheOtherTwoEndings(t *testing.T) {

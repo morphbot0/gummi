@@ -22,7 +22,6 @@ import (
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/publish"
-	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/threadfold"
@@ -220,18 +219,6 @@ type Shell struct {
 	// a follow-up question doesn't need retyping `ask`. Reset by blur,
 	// the same as threadFreeForm.
 	threadAsk bool
-	// autopilotAnswering names the cards whose open decision autopilot has
-	// already taken and is in the middle of delivering — the interval
-	// between dispatching the answer and the answer event landing. It is
-	// what the pinned decision marks itself with (decision.go).
-	//
-	// Deliberately not "this card's mode would answer a decision of this
-	// kind": a card sitting idle on gates is not being taken by anyone —
-	// autopilot only ever starts a stage it crossed into itself — so
-	// marking it from the rule table alone would be a standing lie about
-	// a card nothing is going to move.
-	autopilotAnswering map[domain.FeatureID]bool
-
 	// stackTickQueue is the same seam for stacks (stackboard.go): a card
 	// whose branch moved wakes its stack, and the engine replays the
 	// cards above it. Coalesced per stack, drained by Update.
@@ -307,7 +294,6 @@ type Shell struct {
 	// put on screen: the passes that fail together (discovery and the
 	// landing draft) say it once, not twice.
 	scribeWarned map[domain.FeatureID]bool
-	rounds       map[roundKey]int // automatic loop round counters, keyed by (id, round_kind)
 	// cardEvents caches the card-event log (state.CardEvent, card_events
 	// table) per feature, loaded lazily by loadCardEvents and applied to
 	// the selected row's featureRow.Events at render time (msgs.go). It is
@@ -410,19 +396,6 @@ type Shell struct {
 	// (thread.go's anchorTo makes the same argument for the third).
 	specJump string
 	diffJump diffTarget
-	// chips are the chips up, one per card: a typed line the card has read
-	// whose reading is an act, waiting for the reader to take it or take
-	// the line back (chip.go). Withdrawn by esc, by any edit to the
-	// composer, and by the card moving under it. Per card, because a web
-	// board is answering several cards at once and one card's chip is
-	// never another's to take or lose.
-	chips map[domain.FeatureID]*reentryReading
-	// reentryRead is the moment before that one: a line that has been
-	// sent out to be read and has not come back yet (reentry.go). It
-	// holds the chip's own slot while it waits, so the seconds a model
-	// call takes are seconds the screen accounts for rather than seconds
-	// the reader spends wondering whether enter registered.
-	reentryRead *reentryRead
 	// consultSending holds, per card, a line handed to the consult session
 	// and not yet delivered — opening a session is a model call, and the
 	// thread says so for as long as it runs (consultBlock). Cleared by
@@ -430,15 +403,9 @@ type Shell struct {
 	consultSending map[domain.FeatureID]string
 	// rewound is the line alt+z last put back in a freeform card's composer:
 	// pressed again over it, rewind goes one message further back.
-	rewound map[domain.FeatureID]string
-	// chatting marks a card whose thread's newest exchange is a consult
-	// answer: a line typed next continues that conversation and is not
-	// read again (chat.go). Ended by a row picked, a verb, the card
-	// moving, or leaving the page.
-	chatting     map[domain.FeatureID]bool
-	roundStore   rounds.Store // persistence seam for rounds (defaults to store)
-	profileNames []string     // profile names for the new-card dialog
-	repoNames    []string     // configured managed-repo names for the new-card dialog
+	rewound      map[domain.FeatureID]string
+	profileNames []string // profile names for the new-card dialog
+	repoNames    []string // configured managed-repo names for the new-card dialog
 	// lastRepo is the repository the last card was created in: the
 	// new-card dialog's preselect.
 	lastRepo string
@@ -530,23 +497,6 @@ type Shell struct {
 	webWatching map[domain.FeatureID]bool
 }
 
-// roundKey is the fast-path round-counter map's key: one entry per
-// (feature, round kind), matching the keyed store row.
-type roundKey struct {
-	id   domain.FeatureID
-	kind domain.RoundKind
-}
-
-// round reads the fast-path count for (id, kind), defaulting to 0.
-func (m *Shell) round(id domain.FeatureID, kind domain.RoundKind) int {
-	return m.rounds[roundKey{id, kind}]
-}
-
-// setRound writes the fast-path count for (id, kind).
-func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
-	m.rounds[roundKey{id, kind}] = n
-}
-
 // NewShell builds a detached shell (splash + empty board).
 func NewShell(t theme.Theme, version string) *Shell {
 	styles := theme.New(t)
@@ -559,7 +509,6 @@ func NewShell(t theme.Theme, version string) *Shell {
 		scribing:       map[domain.FeatureID]int{},
 		scribeWarned:   map[domain.FeatureID]bool{},
 		consultSending: map[domain.FeatureID]string{},
-		rounds:         map[roundKey]int{},
 		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
 		excusedChecks:  map[domain.FeatureID][]string{},
 		excusedOn:      map[domain.FeatureID]string{},
@@ -590,9 +539,6 @@ func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace
 	m.store, m.wt, m.ws = store, wt, ws
 	m.loadName()
 	m.resolveBaseBranches()
-	// the rounds persistence seam defaults to the real store; tests may
-	// swap in a failing store to prove the fail-closed path.
-	m.roundStore = store
 }
 
 // repoSnapshot is one read of the workspace's repositories: the names a
@@ -1048,8 +994,7 @@ func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
 // openDecisionsMsg handler) did not: a card driven by a pre-decision
 // binary, or one whose stop predates this change. Derived from durable
 // session state: a failed run (paused with a stored error) → failure; a
-// settled autonomous stage → a budget park if its activity recorded an
-// exhaustion, else a review-&-advance gate.
+// settled autonomous stage that recorded an exhaustion → a budget park.
 //
 // Every add here goes through seed, not add/put: it must not clobber a
 // feature the decision seeding (or a live engine event racing it) already
@@ -1068,43 +1013,6 @@ func (m *Shell) reconstructInbox() {
 			continue
 		case exhaustedActivity(snap.Activity):
 			m.inbox.seed(attnItem{Feature: id, Kind: attnBudget, Text: budgetAttentionText(snap.Feature.Stage, false)})
-		case unsettledCritique(snap):
-			// A critique that did not clear its gate is not a gate
-			// anyone should be invited to approve. Live, a changes
-			// verdict never raises one at all — the loop bounces
-			// straight into a rework round — so a card is only ever
-			// found in this state because the process stopped between
-			// the verdict and the round it was going to feed.
-			// Reconstructing it as a plain gate said "review & advance"
-			// over a verdict that had just said the opposite, and left
-			// the card unbounceable on top (bounceStage's plan arm is
-			// legal only on an escalated gate — msgs.go).
-			//
-			// Escalated, because that is what this stop is: the loop did
-			// not settle it, and it is waiting on a person's judgement
-			// rather than on their approval.
-			m.inbox.seed(attnItem{
-				Feature: id, Kind: attnGate, Escalated: true,
-				Text: unsettledGateReason(snap.Feature.Stage, sessionVerdict(snap)),
-			})
-		default:
-			// gateReason, not a hardcoded "review & advance": a card that
-			// reached its verify gate while the TUI was closed is reconstructed
-			// here, and telling that reader to "advance" it hides that the next
-			// keypress lands the branch on main (reviewloop.go).
-			//
-			// The outcome word comes from VerifiedAt, not from the
-			// session's own verdict: the stamp is the store's record that
-			// the gate was crossed clean, where the verdict is only what
-			// the session concluded. An unstamped card gets "verify
-			// finished" — still told that the next press lands it, without
-			// claiming a result nothing recorded. (A verdict that did not
-			// settle is read one case up, where it decides whether this is
-			// a gate at all.)
-			m.inbox.seed(attnItem{
-				Feature: id, Kind: attnGate,
-				Text: gateReason(snap.Feature.Stage, id.Kind(), !snap.Feature.VerifiedAt.IsZero(), m.baseBranch(snap.Feature)),
-			})
 		}
 	}
 }
@@ -1121,27 +1029,14 @@ func exhaustedActivity(activity []string) bool {
 	return false
 }
 
-// raiseEscalation is raiseAttention for gates an automatic loop gave up
-// on (round cap, unclear verdict): the item carries the escalation flag
-// so surfaces tint it as needs-you rather than finished-clean. Every
-// escalation is a gate — the loop stopped at a decision only the human
-// can take — and it is recorded as one, the same seam the driver's
-// escalations raise through.
+// raiseEscalation is raiseAttention for a gate something gave up at (a
+// rebase an agent could not resolve): the item carries the escalation
+// flag so surfaces tint it as needs-you rather than finished-clean, and
+// it is recorded as a decision a person takes.
 func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
-	m.raiseEscalationAs(id, state.ParkReasonGaveUp, text)
-}
-
-// raiseBlocked is the escalation of a verify the environment could not
-// run. The park carries state.ParkReasonBlocked, which is what lets a goal
-// wait for such a card instead of giving up on it.
-func (m *Shell) raiseBlocked(id domain.FeatureID, text string) {
-	m.raiseEscalationAs(id, state.ParkReasonBlocked, text)
-}
-
-func (m *Shell) raiseEscalationAs(id domain.FeatureID, reason, text string) {
 	if m.inbox.addEscalated(id, attnGate, text) {
 		m.alert(id, text)
-		m.logPark(id, reason, text)
+		m.logPark(id, state.ParkReasonGaveUp, text)
 		m.logDecisionAs(id, decisionKindForStage(m.recordStage(id)), text, true)
 	}
 }
@@ -1187,28 +1082,6 @@ func (m *Shell) parkAttentionItem(id domain.FeatureID, kind attnKind, text strin
 	m.alert(id, text)
 	m.logPark(id, state.ParkReasonNeedsYou, text)
 	return true
-}
-
-// rewordGateDecision points the card's standing open gate decision at
-// text — the blocker Advance named — after a crossing attempted on the
-// card's behalf was refused. The row was opened by the attempt itself
-// (autopilotCrossGate) in the crossing's inviting wording, and it is the
-// record every waiting-on-you surface reads (status's escalation reason,
-// the startup inbox seed, the thread's pinned decision), so leaving it
-// standing as-is keeps inviting an approval the gate just refused.
-// Rewording in place keeps one row for the one stop and the id the
-// landing crossing answers; when no such row stands — a crossing the
-// `A` dialog attempted pre-opens nothing — a fresh one is opened
-// instead, so every blocked stop still leaves the row §10.18 requires.
-// Best-effort and silent, like logDecision beside it.
-func (m *Shell) rewordGateDecision(id domain.FeatureID, text string) {
-	if m.store == nil {
-		return
-	}
-	reworded, err := m.store.RewordOpenGateDecision(context.Background(), id, text)
-	if err == nil && !reworded {
-		m.logDecision(id, state.DecisionKindGate, text)
-	}
 }
 
 // logDecision records a card's open decision in its own history
@@ -1324,30 +1197,6 @@ func (m *Shell) fetchLastSeen() tea.Msg {
 	return lastSeenMsg{seqs: seqs, err: err}
 }
 
-// logAutopilot records the card changing hands: the machine starting to
-// drive it unattended (state.AutopilotTookOver) or giving it back
-// (state.AutopilotHandedBack). Best-effort and silent for the same
-// reason logPark above is — the user has already seen the switch move,
-// and a failed history write is not worth a second message contradicting
-// nothing.
-//
-// Only the gesture that would otherwise leave no trace writes a handback
-// here: turning the switch off. Every other way a card comes back to you
-// already writes something the reader treats as the end of the period —
-// a park or pause row, or a turn you typed — so recording those again
-// here would put two endings on one ending. A handback with no period open is harmless: the reader has
-// nothing to close and ignores it.
-//
-// by is whose gesture it was (humanActor, read on the loop when the
-// gesture was made): a named person at the web face is recorded by name.
-func (m *Shell) logAutopilot(id domain.FeatureID, event, reason, mode, by string) {
-	if m.store == nil {
-		return
-	}
-	_ = m.store.AppendAutopilotBy(context.Background(), id, m.recordStage(id),
-		event, reason, mode, by, "", time.Now())
-}
-
 // logPause records a person stopping a card's run by hand
 // (state.EventPause), by whose actor. Best-effort and silent, like
 // logPark: the pause has happened and the notice already said so.
@@ -1431,81 +1280,6 @@ func (m *Shell) recordStage(id domain.FeatureID) domain.Stage {
 		return f.Stage
 	}
 	return m.stageOf(id)
-}
-
-// autopilotModeFor reads a card's stored gate-approval mode: the store
-// itself first (storedFeature — a hand-over writes the mode and starts
-// the card in one command, so the row can still read attended when the
-// first stage ends), then the board's own row, then — for a card neither
-// knows — the engine session's own copy of the feature.
-func (m *Shell) autopilotModeFor(id domain.FeatureID) string {
-	if f, ok := m.storedFeature(id); ok {
-		return f.GateApproval
-	}
-	for _, r := range m.rows {
-		if r.F.ID == id {
-			return r.F.GateApproval
-		}
-	}
-	if m.engine != nil {
-		if s := m.engine.Get(id); s != nil {
-			return s.Snapshot().Feature.GateApproval
-		}
-	}
-	return ""
-}
-
-// markAutopilotAnswering / clearAutopilotAnswering bracket the interval
-// the pinned decision reports as autopilot's. Both run on the Update
-// goroutine (the dispatch, and the message the dispatched command sends
-// back), so the map needs no lock of its own.
-func (m *Shell) markAutopilotAnswering(id domain.FeatureID) {
-	if m.autopilotAnswering == nil {
-		m.autopilotAnswering = map[domain.FeatureID]bool{}
-	}
-	m.autopilotAnswering[id] = true
-}
-
-func (m *Shell) clearAutopilotAnswering(id domain.FeatureID) {
-	delete(m.autopilotAnswering, id)
-}
-
-// autopilotAnsweredMsg closes the interval markAutopilotAnswering opened,
-// whatever the answer's outcome was: the decision is no longer autopilot's
-// to take, either because it took it or because the attempt failed and
-// the card is the human's again.
-type autopilotAnsweredMsg struct {
-	id     domain.FeatureID
-	notice noticeMsg
-	// park is the needs-you text to queue when the answer did not land:
-	// the agent is still blocked on its question, so something has to
-	// point the user at it. Empty when the answer went through.
-	park string
-}
-
-// autopilotAnswerAsk answers id's live pending ask with rec as autopilot.
-// AnswerAs talks to the agent backend (it delivers the answer as a fresh
-// turn), which is exactly the IO the no-IO-in-Update contract keeps out
-// of Update itself, so it runs inside the returned command rather than
-// where handleEngineEvent decided to call it. It opens no decision row of
-// its own: the engine's ask path already opened one when it raised the
-// question (DESIGN §6.3), and the answer event AnswerAs records carries
-// that same id, closing it exactly as a human's answer would.
-func (m *Shell) autopilotAnswerAsk(id domain.FeatureID, rec, question string) tea.Cmd {
-	m.markAutopilotAnswering(id)
-	name := m.cardName(id)
-	return func() tea.Msg {
-		if err := m.engine.AnswerAs(context.Background(), id, rec, state.ActorAutopilot); err != nil {
-			// the agent is still blocked on the question, so the card has
-			// to reach the queue after all — park is what says so.
-			return autopilotAnsweredMsg{
-				id:     id,
-				notice: noticeMsg{text: sanitize(err.Error()), isErr: true},
-				park:   question,
-			}
-		}
-		return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: name + ": auto-answered: " + rec}}
-	}
 }
 
 // decisionKindForStage maps a stopped card's stage to the decision kind
@@ -1717,37 +1491,11 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		}
 	case engine.EventExhausted:
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.
-		// Clear the persisted plan-rounds count first, and only zero the
-		// in-memory counter once the write succeeds — a failed write must
-		// not re-grant budget on resume (the next entry rehydrates the
-		// persisted, nonzero value).
-		//
-		// With a card page open on another card, none of the four notice
-		// writes below land: each names this event's card, and the page
-		// being read is not its. The round-store failure arms are gated
-		// too — a failing store is systemic, so a run of exhausted cards
-		// would otherwise bark the same error onto every other card's
-		// page in a row — while every raiseAttention, both counter
-		// writes and the row reload stay unconditional.
+		// With a card page open on another card, the notices below do not
+		// land: each names this event's card, and the page being read is
+		// not its. Every raiseAttention and the row reload stay
+		// unconditional.
 		crossCard := m.crossCardOpen(ev.Feature)
-		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindPlan); err != nil {
-			if !crossCard {
-				m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
-			}
-			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
-		} else {
-			m.setRound(ev.Feature, domain.RoundKindPlan, 0)
-		}
-		// same write-through for the review-loop counter: a failed write
-		// must not lose the burned rounds recorded in the store.
-		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindReview); err != nil {
-			if !crossCard {
-				m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
-			}
-			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
-		} else {
-			m.setRound(ev.Feature, domain.RoundKindReview, 0)
-		}
 		if ev.Committed {
 			// wrap-up exhaustion: the stage's work is committed, so this
 			// reads as ready-to-advance with top-up as the alternative —
@@ -1779,28 +1527,6 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// read the row rather than the live session.
 		return m.loadRows
 	case engine.EventQuestion:
-		// A card whose stored mode answers its own questions (§10.17: full
-		// only — gates still stops for a question) takes the recommended
-		// option itself, whether or not anyone is looking at the card page
-		// right now: a decision must not resolve differently because a
-		// human happened to be on screen (the same reason the design
-		// forbids a countdown). This has to run before the cardOpen check
-		// below, which is about where a *parked* question is shown, not
-		// whether one gets parked at all.
-		if autopilotAnswers(m.autopilotModeFor(ev.Feature), decisionAsk) {
-			if s := m.engine.Get(ev.Feature); s != nil {
-				if ask := s.Snapshot().PendingAsk; ask != nil {
-					if rec := engine.RecommendedOption(ask); rec != "" {
-						// the question travels with the command: if the answer
-						// fails to land the agent is still blocked on it, and
-						// the queue is the only thing that would say so.
-						return m.autopilotAnswerAsk(ev.Feature, rec, "asks: "+ask.Question)
-					}
-				}
-			}
-			// no live ask, or RecommendedOption came back empty: nothing
-			// safe to answer with, so fall through and park like today.
-		}
 		// The agent asked something: queue it, always. This used to skip
 		// the queue whenever the card page happened to be open on the
 		// asking card, on the grounds that its pinned decision already
@@ -1847,27 +1573,12 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			return nil
 		}
 		// a finished rebase-resolve session is judged by the git state it
-		// left, never by the verdict loop of the stage it borrowed.
+		// left.
 		if s.Snapshot().Rebase {
 			return m.judgeRebase(ev.Feature)
 		}
-		// review/implement completions may drive the automatic loop;
-		// anything the loop doesn't consume becomes a generic gate item.
-		if handled, cmd := m.onAutonomousDone(ev.Feature, ev.Stage); handled {
-			return cmd
-		}
-		// verify never reaches here — onAutonomousDone consumes it and
-		// raises its own gate on the clean-pass arm — so the outcome word
-		// is dead for this call. It is false rather than true so that if
-		// that ever stops being true, the wording degrades to "verify
-		// finished" instead of silently asserting a pass.
-		text := gateReason(ev.Stage, ev.Feature.Kind(), false, m.baseBranchOf(ev.Feature))
-		if cmd, attempted := m.autopilotCrossGate(s.Snapshot().Feature, text); attempted {
-			return cmd
-		}
-		m.raiseAttention(ev.Feature, attnGate, text)
-		// the session may have edited the artifact or committed; reload so
-		// the gate's row state (landed, open-comment counts) is fresh
+		// a legacy workflow card's stage session settled: nothing drives
+		// it on, and the row reloads to show where it stopped
 		return m.loadRows
 	}
 	return nil
@@ -2071,7 +1782,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r, ok := m.selected(); ok {
 			cmds = append(cmds, m.ensureNarration(r))
 		}
-		cmds = append(cmds, m.measureToday(), m.resumeHeldGates())
+		cmds = append(cmds, m.measureToday())
 		return m, tea.Batch(cmds...)
 
 	case openDecisionsMsg:
@@ -2317,38 +2028,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case autopilotSettledMsg:
-		// whatever the crossing came back as, autopilot is done holding
-		// this decision (autopilot.go's autopilotSettled) — then the inner
-		// message is handled exactly as if it had arrived on its own.
-		m.clearAutopilotAnswering(msg.id)
-		if msg.inner == nil {
-			return m, nil
-		}
-		return m.update(msg.inner)
-
-	case autopilotAnsweredMsg:
-		m.clearAutopilotAnswering(msg.id)
-		if msg.park != "" {
-			// the answer never reached the agent — a session swapped out
-			// from under the command, an empty recommendation — and the
-			// agent is still blocked on the question. Park it the way the
-			// non-autopilot path would have, or the card waits on a
-			// question with nothing on screen pointing at it.
-			m.parkAttentionItem(msg.id, attnQuestion, msg.park)
-		}
-		m.notice = msg.notice
-		return m, nil
-
-	case autopilotContinueMsg:
-		// the crossing landed; the stage behind it is autopilot's to start
-		// (msgs.go's autopilotContinueMsg says why this is the idle
-		// decision being answered rather than a second gate crossing).
-		m.clearAutopilotAnswering(msg.id)
-		m.notice = noticeMsg{text: msg.note}
-		m.inbox.remove(msg.id)
-		return m, tea.Batch(m.loadRows, m.autopilotRun(msg.id, msg.to))
-
 	case landConflictMsg:
 		// the landing hit conflicts: the decision leads with the rebase
 		// that resolves them (merge.go's landConflictMsg)
@@ -2356,38 +2035,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.landConflicts = map[domain.FeatureID][]string{}
 		}
 		m.landConflicts[msg.id] = msg.files
-		model, cmd := m.update(msg.notice)
-		// on autopilot nobody is there to press r, so the rebase the
-		// decision leads with starts now (autopilotAnswers: every stop
-		// but budget is the mode's to answer)
-		if m.store != nil {
-			if f, err := m.store.GetFeature(context.Background(), msg.id); err == nil && autopilotAnswers(f.GateApproval, decisionVerify) {
-				return model, tea.Batch(cmd, m.rebaseFeature(f))
-			}
-		}
-		return model, cmd
-
-	case sentBackMsg:
-		// the send-back landed; on autopilot the stage it reached runs
-		// (reentry.go's sentBackMsg)
-		model, cmd := m.update(msg.notice)
-		return model, tea.Batch(cmd, m.continueSentBack(msg.id, msg.to))
-
-	case autopilotGateBlockedMsg:
-		// autopilotCrossGate (autopilot.go) already opened the gate's
-		// decision row before attempting the crossing, so parking here
-		// uses parkAttentionItem, not raiseAttention — logging the
-		// decision a second time for the one stop would leave a
-		// duplicate open row for what is a single park. But the row it
-		// opened speaks the crossing's own inviting wording, and the
-		// crossing was just refused: re-word it to the blocker Advance
-		// named — the same text the card parks with — so the card's
-		// waiting-on-you record stops inviting an approval the gate
-		// refuses.
-		m.clearAutopilotAnswering(msg.id)
-		m.parkAttentionItem(msg.id, attnGate, msg.text)
-		m.rewordGateDecision(msg.id, msg.text)
-		return m, m.loadRows
+		return m.update(msg.notice)
 
 	case handOffReadyMsg:
 		// the preflight passed (or did not): open the confirm that names
@@ -2433,11 +2081,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.prepareMerge(msg.f, true)
 
 	case rebaseConflictMsg:
-		// an autopilot card answers its own hand-off: the agent rebase
-		// starts without the confirm an attended card waits on
-		if autopilotAnswers(msg.f.GateApproval, decisionVerify) {
-			return m, m.agentRebase(msg)
-		}
 		m.offerAgentRebase(msg)
 		return m, nil
 
@@ -2460,14 +2103,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{m.loadRows, m.reloadOpenCardEvents(msg.id)}
 		if msg.discover {
 			cmds = append(cmds, m.discoverChecks(msg.id))
-		}
-		if msg.continueTo != "" {
-			// autopilot's own crossing: the stage behind the gate is its to
-			// start, alongside the one-shot passes rather than after them —
-			// discovery and the estimate read the artifact the crossing
-			// just promoted, and neither is a precondition of running.
-			m.clearAutopilotAnswering(msg.id)
-			cmds = append(cmds, m.autopilotRun(msg.id, msg.continueTo))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -2500,9 +2135,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.baselining[msg.id] = true
 		return m, tea.Batch(m.baselineChecks(msg.id), spinnerTick())
-
-	case reentryClassifiedMsg:
-		return m, m.applyReentry(msg)
 
 	case consultSentMsg:
 		delete(m.consultSending, msg.id)
@@ -2959,28 +2591,6 @@ func autopilotQuitQuestion(ids []string) string {
 	return fmt.Sprintf("%d %s running on autopilot — %s.", len(ids), verb, strings.Join(ids, ", "))
 }
 
-// resumeAfterTopUp restarts a card that had stopped for want of budget,
-// once its envelope has been raised and the user has said yes to the
-// separate resume question.
-//
-// It re-reads the card rather than reusing the row the dialog was built
-// from: that snapshot still carries the old, exhausted envelope, and
-// resuming against it would put the run straight back into the wall it
-// just stopped at.
-func (m *Shell) resumeAfterTopUp(id domain.FeatureID) tea.Cmd {
-	if m.store == nil {
-		return nil
-	}
-	f, err := m.store.GetFeature(context.Background(), id)
-	if err != nil {
-		return func() tea.Msg { return noticeMsg{text: sanitize(err.Error()), isErr: true} }
-	}
-	return tea.Batch(
-		m.resumeCard(f),
-		func() tea.Msg { return noticeMsg{text: m.cardName(id) + ": budget raised — resuming", reload: true} },
-	)
-}
-
 // handleKey routes one key press. Its shape is the keymap's tiers made
 // literal, read top to bottom:
 //
@@ -3344,23 +2954,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			return m.attachRaw(r.F)
 		}
-	case "A":
-		if r, ok := m.selected(); ok {
-			// A is not in foreignBlockedKeys (it is not a card verb the
-			// action inventory lists), so it carries the top guard's rule
-			// itself: how far a card runs on its own is the driver's
-			// setting, and a conducted card's driver is its goal's lead —
-			// changing it here would have the conductor and the reader
-			// disagreeing about when that card stops.
-			if r.watchOnly() {
-				m.notice = noticeMsg{
-					text:  fmt.Sprintf("%s is driven by %s — read-only here (enter watches it)", r.F.Name(), r.watchDriver()),
-					isErr: true,
-				}
-				return nil
-			}
-			return m.openAutopilot(r.F)
-		}
 	case "j", "down":
 		m.moveSel(1)
 	case "k", "up":
@@ -3435,8 +3028,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			m.Overlay.Push(newEnvelopeDialog(r.F, func(to int) tea.Cmd {
 				return m.setEnvelope(r.F.ID, to)
-			}, func() tea.Cmd {
-				return m.resumeAfterTopUp(r.F.ID)
 			}))
 		}
 	case "o":
@@ -3929,20 +3520,6 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 	return m.runStage(f)
 }
 
-// seedRounds hydrates the in-memory round counter for kind from the store
-// on loop entry, so a resumed (or relaunched) loop resumes with the rounds
-// already burned instead of a fresh budget. A failed read returns the
-// error and leaves the fast-path map untouched; the caller aborts dispatch
-// rather than proceeding on a guessed-zero count.
-func (m *Shell) seedRounds(f domain.Feature, kind domain.RoundKind) error {
-	n, err := rounds.Load(context.Background(), m.roundStore, f.ID, kind)
-	if err != nil {
-		return err
-	}
-	m.setRound(f.ID, kind, n)
-	return nil
-}
-
 // runStage enqueues an autonomous run for a feature's stage; the engine
 // schedules and kicks it off. Activity streams into the thread's live
 // stage block; `p` pauses it. On an already-running session, enter opens
@@ -3965,28 +3542,6 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 		m.notice = noticeMsg{text: f.Name() + ": " + m.noAgent(" — nothing to re-run the stage with"), isErr: true}
 		return nil
 	}
-	// entering the plan stage hydrates the loop's round counter from the
-	// store, so a resumed plan resumes with the rounds already burned. A
-	// failed read aborts dispatch rather than guessing at a fresh budget.
-	if f.Stage == domain.StagePlan {
-		if err := m.seedRounds(f, domain.RoundKindPlan); err != nil {
-			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
-			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
-			return nil
-		}
-	}
-	// the review loop spans review → work(fix/investigate) → review, and
-	// any of those can be the resume landing point, so seed the counter on
-	// each of them. Investigate is research's work leg — a resume landing
-	// on the RS work leg must not re-grant the review budget either.
-	if f.Stage == domain.StageImplement ||
-		f.Stage == domain.StagePlan {
-		if err := m.seedRounds(f, domain.RoundKindReview); err != nil {
-			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
-			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
-			return nil
-		}
-	}
 	if s := m.engine.Get(f.ID); s != nil {
 		switch s.State() {
 		case engine.StateRunning:
@@ -3999,41 +3554,6 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 				return m.openCard()
 			}
 			return nil
-		case engine.StateDone:
-			// A finished session on a stage that ends with a critique
-			// resumes the loop at its position instead of re-running the
-			// stage's writer: a finished writer means the (possibly
-			// reworked) output is already on disk, so the next leg is the
-			// critique; a finished critique means the loop is awaiting the
-			// judge's rework-or-approve decision. Other stages just re-run
-			// (status quo).
-			if _, ok := engine.CritiqueRoundKind(f.Stage); ok {
-				if s.Snapshot().Critique {
-					// A critique that passed with a required section still
-					// blank did not finish the job: the writer, not the
-					// human, is the missing step, and re-raising the gate
-					// only stacks another decision approving cannot cross.
-					// Run the writer with the blank sections named; the
-					// loop re-critiques when it is done. The human asked
-					// for this run, so the round cap does not apply here.
-					if names := m.undraftedGate(f); len(names) > 0 {
-						return m.redraftUndrafted(f.ID, names)
-					}
-					// A clean critique has nothing left to resume: its
-					// gate is already raised, so judging it again only
-					// re-raised the gate the person was looking at, and
-					// "start the architect" did nothing. Asking to run the
-					// stage there is asking for its writer. So is a line
-					// sent with the ask, whatever the critique said — it
-					// is meant for the writer, and resuming the judge
-					// dropped it.
-					if note == "" && sessionVerdict(s.Snapshot()) != verdictPass {
-						return m.onCritiqueStageDone(f.ID, f.Stage)
-					}
-					break
-				}
-				return m.critiqueStep(f.ID, f.Stage, true, "resuming "+string(f.Stage)+" critique (output already written)")
-			}
 		case engine.StatePaused:
 			// An interrupted critique resumes as a critique: the stage's
 			// output is already written, so restarting its writer would
@@ -4373,28 +3893,6 @@ func budgetAttentionText(stage domain.Stage, committed bool) string {
 	return string(stage) + " hit its budget — top it up or park it from the inbox"
 }
 
-// setGateApproval persists a card's gate-approval mode — the write half
-// of the autopilot overlay's confirm (autopilot.go's startAutopilot).
-// Like SetVerifiedAt/SetGateApproval on the store side
-// this is a side-channel write: it touches neither a session nor the
-// stage, so — unlike deleteFeature/cleanupLanded — it carries no card
-// lock, the same call shape as setRepo and setEnvelope above.
-func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
-	name := m.cardName(id)
-	return func() tea.Msg {
-		if err := m.store.SetGateApproval(context.Background(), id, mode); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		// The confirmation reads back in the words the choice was made in.
-		// Two modes, so two sentences — no table to look them up in.
-		text := fmt.Sprintf("%s: attended — every gate stops for you", name)
-		if autopilotModeFor(mode) == domain.GateAutopilot {
-			text = fmt.Sprintf("%s: autopilot — it runs to a verified branch on its own", name)
-		}
-		return noticeMsg{text: text, reload: true}
-	}
-}
-
 // autonomousStage reports whether a stage runs an autonomous agent
 // (as opposed to interactive chat or no agent).
 func autonomousStage(s domain.Stage) bool {
@@ -4560,4 +4058,15 @@ func (m *Shell) brand() string {
 		return "gummi"
 	}
 	return "gummi · " + m.name
+}
+
+// rowByID is the board's row for id as it is now, or false for a card
+// that is gone.
+func (m *Shell) rowByID(id domain.FeatureID) (featureRow, bool) {
+	for i := range m.rows {
+		if m.rows[i].F.ID == id {
+			return m.rows[i], true
+		}
+	}
+	return featureRow{}, false
 }

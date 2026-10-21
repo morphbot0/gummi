@@ -81,13 +81,6 @@ type webInput struct {
 	// downstream — a goal that verified while an approval was being
 	// followed — is a person's to confirm, never the request's.
 	land bool
-	// autopilot: the request is about the autopilot switch itself, so the
-	// switch's dialog is its to answer even without a mode.
-	autopilot bool
-	// handoverAsked: the person already chose autopilot on a form that
-	// said what it does (the new-card form's "Create & autopilot"), so the
-	// switch's hand-over is not asked a second time.
-	handoverAsked bool
 }
 
 // webOutcome is how an intent ended, in the TUI's own words.
@@ -493,7 +486,7 @@ func (m *Shell) finishIntent(t *webIntent) webOutcome {
 		}
 	}
 	t.waiting = nil
-	if t.resetComposer && m.chip(t.card) == nil {
+	if t.resetComposer {
 		m.threadInput.Reset()
 	}
 	select {

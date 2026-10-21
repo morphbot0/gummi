@@ -61,11 +61,8 @@ func (m *Shell) openBugFromCard(r featureRow) tea.Cmd {
 }
 
 // bugFromLine is openBugFromCard with the line named rather than read off
-// the composer, for the re-entry's own route to this row
-// (reentry.go's fixedSendBack). The two cannot be one function reading
-// the composer: a line that reached the router through a conversation had
-// its leading vocabulary word stripped on the way (chat.go's chatExit),
-// so the composer holds a word the bug card must not be titled with.
+// the composer: a line routed to the follow-up, or the web menu's
+// follow-up carrying its words in the request.
 func (m *Shell) bugFromLine(r featureRow, line string) tea.Cmd {
 	if line == "" {
 		m.notice = noticeMsg{text: "type what is wrong — your line becomes the follow-up session"}

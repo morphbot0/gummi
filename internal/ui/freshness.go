@@ -176,7 +176,7 @@ func (m *Shell) emitRowChanges(msg rowsMsg) {
 
 // liveKey is what a card's page shows that its row does not hold, reduced
 // to a comparable string: whether it is busy and at what, its session's
-// state, a pause asked for, a chip waiting on the reader. Cheap — no
+// state, a pause asked for. Cheap — no
 // transcript copy — because it is taken for every card after every
 // message a page could care about.
 func (m *Shell) liveKey(r featureRow) string {
@@ -190,11 +190,9 @@ func (m *Shell) liveKey(r featureRow) string {
 		}
 	}
 	flag(m.baselining[id])
-	flag(m.reentryRead != nil && m.reentryRead.id == id)
 	b = strconv.AppendInt(b, int64(m.scribing[id]), 10)
 	flag(m.consultSending[id] != "")
 	flag(m.pausing[id])
-	flag(m.chips[id] != nil)
 	if m.engine != nil {
 		if ff := m.engine.Freeform(id); ff != nil {
 			b = append(b, 'f')

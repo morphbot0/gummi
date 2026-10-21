@@ -11,7 +11,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -192,7 +191,6 @@ type nextInput struct {
 	// surfaces that report the stop word it as the overrule it is.
 	flooredPass bool
 
-	reviewRound   int    // automatic review→fix rounds burned so far
 	verifyBounces int    // verify→work bounces already burned (each one a failed verify)
 	failedCheck   string // first failing manual `v` check, "" if none
 	// backendNeverStarted marks the failure a first-time user hits most
@@ -272,10 +270,8 @@ type nextInput struct {
 	// commit is the squash commit a landing created (LandedSHA). It has
 	// been recorded since the first merge and shown nowhere.
 	commit string
-	// spend is what the card cost, and corrective how many rounds of it
-	// were work done again.
-	spend      float64
-	corrective int
+	// spend is what the card cost.
+	spend float64
 
 	// --- answers the server would refuse --------------------------------
 	//
@@ -479,7 +475,7 @@ func stageExited(events []state.CardEvent, hist []state.TransitionRecord, stage 
 			Verdict string `json:"verdict"`
 		}
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		return verdict.FromTool(p.Verdict), true
+		return verdictFromTool(p.Verdict), true
 	}
 	return verdictUnclear, false
 }
@@ -531,7 +527,6 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		mainCheckout:     r.F.MainCheckout,
 		home:             r.F.Home,
 		hasWorktree:      r.HasWorktree,
-		reviewRound:      m.round(r.F.ID, domain.RoundKindReview),
 		verifyBounces:    verifyBounces(r.History),
 		openSpecQs:       r.OpenSpecQs,
 		openDiffComments: r.OpenDiffComments,
@@ -549,7 +544,6 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		continuedAs:      r.F.ContinuedAs,
 		commit:           r.F.LandedSHA,
 		spend:            r.F.Spend.Credits,
-		corrective:       m.round(r.F.ID, domain.RoundKindCorrective),
 		endedAt:          doneAt(r.History),
 		depBlockers:      r.DepBlockers,
 		stackBlocker:     m.stackLandBlocker(r.F.ID),

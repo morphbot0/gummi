@@ -14,7 +14,6 @@ import (
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
-	"github.com/morphis/gummi/internal/verdict"
 )
 
 // The card thread: a single scrollable surface a card's page opens onto.
@@ -501,18 +500,6 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		blank()
 	}
 
-	// A line out being read is the newest thing on the page, because it
-	// is the only thing still happening — so it goes here, in the
-	// conversation, beside every other marker for work in flight. It is
-	// deliberately NOT in the decision's control below: the picker's rows
-	// are still the answers to a question nobody has answered, and a
-	// status standing in their place would hide three choices to say one
-	// thing.
-	if p := m.reentryRead; p != nil && p.id == f.ID {
-		add("  " + s.Info.Render(m.spinner()+" reading your line…"))
-		blank()
-	}
-
 	// todo and done are the two stages currentSpecSection has no anchor
 	// for, and todo is exactly the stage where "what is this card about"
 	// is the whole question — with nothing run yet there is no receipt,
@@ -886,32 +873,16 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	if f.Profile != "" {
 		profile = headerGap + s.ProfileTag.Render("["+f.Profile+"]")
 	}
-	// A freeform card has no gates, so there is nothing for a gate-approval
-	// mode to govern and nothing for the field to report. "autopilot: off"
-	// on such a card says a mode is holding work back when no mode applies.
-	autopilot := ""
-	if !f.IsFreeform() {
-		autopilot = headerGap + autopilotField(s, m, f)
-	}
 	budget := ""
 	if f.Budget.Envelope > 0 {
 		budget = headerGap + s.Faint.Render(budgetSummary(f, m.liveCardSpent(f.ID)))
 	} else if !f.Spend.Zero() {
 		budget = headerGap + s.Faint.Render(featureSpend(f.Spend))
 	}
-	skips := ""
-	round := ""
-	if rl := roundLabel(m, f); rl != "" {
-		round = headerGap + s.Faint.Render(rl)
-	}
-	corrective := ""
-	if cl := correctiveLabel(m, f); cl != "" {
-		corrective = headerGap + s.Faint.Render(cl)
-	}
-	badges := func() string { return profile + autopilot + budget + skips + round + corrective }
-	// autopilot and budget/spend are deliberately absent from this list —
-	// they are never shed.
-	dropOrder := []*string{&profile, &skips, &round, &corrective}
+	badges := func() string { return profile + budget }
+	// budget/spend is deliberately absent from this list — it is never
+	// shed.
+	dropOrder := []*string{&profile}
 
 	idWidth := ansi.StringWidth(id) + 1 // +1 for the space before the title
 	// Room for the id, a minimally readable truncated title and the
@@ -927,103 +898,6 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	}
 	room := max(inner-idWidth-badgeWidth, 0)
 	return []string{id + " " + ansi.Truncate(title, room, "…") + badges(), stageStrip(s, f, inner)}
-}
-
-// correctiveLabel is the card's unified rework budget — every review
-// bounce, verify bounce and conflict handoff it has cost, against the
-// cap an unattended run is finally stopped by.
-//
-// It lives on the masthead because it is a fact about the whole card.
-// It used to be a row inside the block reporting what autopilot decided
-// while you were away, under a heading naming a bounded period, which it
-// was never scoped to: burnCorrective (reviewloop.go) counts a bounce
-// you drove by hand exactly the same as one autopilot drove, so a card
-// you sat and watched the whole time could carry that block on the
-// strength of this number alone.
-//
-// The trailing word is load-bearing twice over. roundLabel above already
-// renders a bare "⟲ n of m" for whichever loop the current stage belongs
-// to, and two unlabelled badges of the same shape side by side would be
-// two numbers nobody could tell apart. And "corrective" alone is an
-// adjective with nothing to modify — a reader has to already know this
-// is a count of rounds for it to parse at all. "rounds" is the noun the
-// word was missing, and it is the same phrase autopilot.go's own confirm
-// dialog already uses for this exact budget ("N corrective rounds"), so
-// the masthead badge now says what that dialog says rather than a
-// clipped half of it.
-func correctiveLabel(m *Shell, f domain.Feature) string {
-	n := m.round(f.ID, domain.RoundKindCorrective)
-	if n == 0 {
-		return ""
-	}
-	return "⟲ " + itoa(n) + " of " + itoa(verdict.MaxRounds(domain.RoundKindCorrective)) + " corrective rounds"
-}
-
-// autopilotField is the masthead's autopilot cell: the stored mode, and
-// — while a mode that is not off has the card — whether a turn is in flight
-// right now, at Info weight rather than Faint: running names a turn in
-// flight. A parked card claiming a turn was in flight is the one
-// misleading thing this field could say.
-//
-// This is the only thing about autopilot that stays pinned, and it is
-// pinned because it is the one autopilot fact that is about *now*. What
-// the card decided in the past is history and is drawn as history
-// (stretch.go). The difference matters: this is re-read from live
-// session state on every frame, so it cannot outlive its own truth the
-// way a note about a finished period did — there is nothing here to go
-// stale, and nothing to clean up.
-func autopilotField(s *theme.Styles, m *Shell, f domain.Feature) string {
-	// Both reads go through GateMode rather than the raw field. An unset
-	// GateApproval reads as attended (domain.Feature.GateApproval's own
-	// doc), and comparing the raw field against GateAttended made every
-	// card `bugs new` mints fall through to the live-session branch — so an
-	// attended card with a stage running rendered "autopilot: off ·
-	// running", claiming autopilot held work it had never been given.
-	label := "autopilot: " + threadfold.AutopilotLabel(f.GateMode())
-	if f.GateMode() == domain.GateAttended {
-		return s.Faint.Render(label)
-	}
-	sess := m.sessionFor(f.ID)
-	if sess == nil {
-		return s.Faint.Render(label)
-	}
-	// Paused and done do not — a mode is what those cards carry, not what
-	// they are doing.
-	switch sess.State() {
-	case engine.StateRunning:
-		return s.Info.Render(label + " · running")
-	default:
-		return s.Faint.Render(label)
-	}
-}
-
-// roundLabel renders the "⟲ n of m" badge for whichever automatic loop
-// the card's current stage belongs to — the plan critique loop at Plan,
-// the shared review→fix loop everywhere else a round has been burned.
-// Empty once nothing has run yet.
-//
-// It NAMES ITS LOOP, for the reason correctiveLabel's doc comment gives
-// and then only half-applied: "two unlabelled badges of the same shape
-// side by side would be two numbers nobody could tell apart". Labelling
-// one of the two does not tell a reader what the other one is, and round 3
-// put them on the masthead together —
-//
-//	⟲ 1 of 3   ⟲ 3 of 5 corrective rounds
-//
-// — with a third number ("reworking (round 1)") in the status bar under
-// them and a help legend that has one ⟲ entry describing only one of the
-// two. The denominator also changes silently from maxPlanRounds to
-// maxReviewRounds as the card crosses into implement, which is only
-// legible once the badge says which loop it is counting.
-func roundLabel(m *Shell, f domain.Feature) string {
-	kind, roundCap, loop := domain.RoundKindReview, maxReviewRounds, "review rounds"
-	if f.Stage == domain.StagePlan {
-		kind, roundCap, loop = domain.RoundKindPlan, maxPlanRounds, "plan rounds"
-	}
-	if n := m.round(f.ID, kind); n > 0 {
-		return "⟲ " + itoa(n) + " of " + itoa(roundCap) + " " + loop
-	}
-	return ""
 }
 
 // stageStrip renders every stage of this card's own workflow in order,

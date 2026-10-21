@@ -162,8 +162,5 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 	if msg.run {
 		cmds = append(cmds, m.runStage(msg.f))
 	}
-	if msg.start {
-		cmds = append(cmds, m.openAutopilot(msg.f))
-	}
 	return tea.Batch(cmds...)
 }

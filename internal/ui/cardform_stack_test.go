@@ -118,7 +118,7 @@ func TestTheStackRowIsOneRepository(t *testing.T) {
 
 	d.repo.selectName("web")
 	d.text.SetValue("a card in the other repo")
-	if done, _ := d.submit(false); done {
+	if done, _ := d.submit(); done {
 		t.Fatal("submit should refuse a card stacked across repositories")
 	}
 	if !strings.Contains(d.errText, "one repository") {

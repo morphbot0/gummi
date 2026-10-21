@@ -353,32 +353,6 @@ func TestBG058InputAgreesWithDroppedDecisionBlock(t *testing.T) {
 	}
 }
 
-// reviewGateWorkspace walks a fresh feature to review and raises the gate
-// attention, so its card page carries a gate decision — read the findings,
-// bounce to implement, advance to verify — with the bounce as the option
-// that consumes words.
-// verifyGateWorkspace parks a card at the verify gate — the one gate
-// autopilot may never cross on its own, under any mode. It used to be
-// reachable as "the review gate" too; Review is a pass now, and the work
-// stage's gate IS autopilot-crossable (autopilotForward), so verify is
-// the remaining example.
-func verifyGateWorkspace(t *testing.T) *Shell {
-	t.Helper()
-	m, _ := newWorkspace(t)
-	m = pump(t, m, m.Init())
-	m = openFeatureForm(t, m)
-	m = typeString(t, m, "Bouncy")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 3 { // todo→plan→implement→verify
-		m = pressAdvance(t, m)
-	}
-	if m.rows[0].F.Stage != domain.StageVerify {
-		t.Fatalf("stage = %s, want verify", m.rows[0].F.Stage)
-	}
-	m.raiseAttention("FD-001", attnGate, "verify is ready for your decision")
-	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
-}
-
 func reviewGateWorkspace(t *testing.T) *Shell {
 	t.Helper()
 	m, _ := newWorkspace(t)
@@ -481,51 +455,6 @@ func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
 	if _, ok := m.bounceNotes["FD-001"]; ok {
 		t.Error("the bounce note survived the run that consumed it")
 	}
-}
-
-// TestThreadDecisionTypedProseRidesTheRun: at an autonomous idle decision
-// the word-eater is the run — typed prose re-runs the stage with the line
-// appended to its kickoff.
-func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
-	// the card is at plan with nobody live: a complaint typed here is
-	// read, and the reading is "start the design stage with this as its
-	// brief" — a spend, so it waits for y
-	m, eng := chatWorkspace(t, classifyingAgent("plan_wrong"))
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
-
-	d := m.openDecision(m.rows[m.sel])
-	if d == nil || d.wordConsumer() != 0 || d.actions[0].id != "run" {
-		t.Fatalf("plan idle decision has no run to aim at: %+v", d)
-	}
-
-	m = typeString(t, m, "focus the plan on the retry path")
-	out := ansi.Strip(m.threadView(100, 30))
-	if !strings.Contains(out, "start the architect with your words") {
-		t.Errorf("typing did not relabel the run:\n%s", out)
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if p := m.pendingChip(); p == nil || p.out.Target != domain.StagePlan || p.goOnEnter {
-		t.Fatalf("no y-only chip to start the design stage: %+v", p)
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if m.pendingChip() != nil {
-		t.Fatal("y did not take the chip")
-	}
-	settleChat(t, eng)
-
-	snap := eng.Get("FD-001").Snapshot()
-	if len(snap.Transcript) == 0 {
-		t.Fatal("run never started")
-	}
-	// the typed line rides gummi's own kickoff turn, not a user turn —
-	// same as the bounce note in TestThreadDecisionBounceNoteRidesTheNextRun
-	for _, msg := range snap.Transcript {
-		if msg.Author == engine.AuthorSystem && strings.Contains(msg.Content, "focus the plan on the retry path") {
-			return
-		}
-	}
-	t.Errorf("the line did not ride the kickoff: %+v", snap.Transcript)
 }
 
 // TestThreadDecisionTypedProseAnswersTheAsk: a free-form ask consumes the

@@ -173,23 +173,6 @@ func TestRunningStretchHasNoClose(t *testing.T) {
 	}
 }
 
-// TestCorrectiveBadgeOnTheMasthead: the rework count is a whole-card
-// fact and lives with the other whole-card facts. The word is required —
-// roundLabel renders a bare "⟲ n of m" for the current loop, and two
-// unlabelled badges of the same shape would be indistinguishable.
-func TestCorrectiveBadgeOnTheMasthead(t *testing.T) {
-	m := populatedShell(120, 30)
-	m.sel = 1
-	id := m.rows[m.sel].F.ID
-	m.setRound(id, domain.RoundKindCorrective, 2)
-	m.cardOpen = true
-
-	out := ansi.Strip(m.threadView(116, 30))
-	if !strings.Contains(out, "2 of 5 corrective") {
-		t.Fatalf("masthead is missing the corrective badge:\n%s", out)
-	}
-}
-
 // TestPeriodBeforeAnyStageDrawsBothRules is an edge the first cut of the
 // placement got wrong. Handing a card in todo to autopilot writes the
 // takeover before anything has entered a stage, and switching straight
@@ -521,30 +504,5 @@ func TestPeriodThatDecidedNothingWithholdsOnlyTheTally(t *testing.T) {
 		if strings.Contains(out, notWant) {
 			t.Fatalf("a row of zeroes was drawn (%q):\n%s", notWant, out)
 		}
-	}
-}
-
-// TestMastheadSaysWhenAutopilotIsRunning is P6, and it is the only
-// autopilot fact that stays pinned — because it is the only one about
-// now. It has to be read from live session state every frame, so that it
-// cannot outlive its own truth the way the deleted rollup did.
-func TestMastheadSaysWhenAutopilotIsRunning(t *testing.T) {
-	s := m0Styles()
-	f := domain.Feature{ID: "FD-001", Kind: domain.KindFeature, GateApproval: domain.GateAutopilot}
-	m := populatedShell(120, 30)
-
-	// no session: the mode alone, no claim about now
-	if got := ansi.Strip(autopilotField(s, m, f)); strings.Contains(got, "running") {
-		t.Fatalf("autopilotField = %q, want no claim that a card with no session is running", got)
-	}
-	if !strings.Contains(ansi.Strip(autopilotField(s, m, f)), "autopilot: on") {
-		t.Fatalf("autopilotField = %q, want the stored mode", ansi.Strip(autopilotField(s, m, f)))
-	}
-
-	// attended never claims it either, whatever is running
-	off := f
-	off.GateApproval = domain.GateAttended
-	if got := ansi.Strip(autopilotField(s, m, off)); strings.Contains(got, "running") {
-		t.Fatalf("autopilotField(off) = %q, want no running claim", got)
 	}
 }

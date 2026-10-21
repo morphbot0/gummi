@@ -325,8 +325,7 @@ func TestCardFormEnvelope(t *testing.T) {
 }
 
 // TestCardFormSubmitCarriesKindSeverityAndButtons: the result names the
-// kind, a bug's severity, the profile, and whether Create & start was the
-// button pressed.
+// kind, a bug's severity and the profile.
 func TestCardFormSubmitCarriesKindSeverityAndButtons(t *testing.T) {
 	var got formResult
 	form := door(domain.CardType{Kind: domain.KindBug}, func(res formResult) tea.Cmd { got = res; return nil })
@@ -338,11 +337,11 @@ func TestCardFormSubmitCarriesKindSeverityAndButtons(t *testing.T) {
 	form.setFocus(cardStopProfile)
 	form.HandleKey(keyRight) // premium
 	form.setFocus(cardStopButtons)
-	form.buttons.SetCursor(2)
+	form.buttons.SetCursor(1)
 	if done, _ := form.HandleKey(keyEnter); !done {
-		t.Fatal("Create & start did not submit")
+		t.Fatal("Create did not submit")
 	}
-	if got.Kind != domain.KindBug || got.Severity != domain.SeverityHigh || got.Profile != "premium" || !got.Start {
+	if got.Kind != domain.KindBug || got.Severity != domain.SeverityHigh || got.Profile != "premium" {
 		t.Errorf("result = %+v", got)
 	}
 	if got.Desc != "Login loops\n\nSSO users bounce back" || got.Source != "manual" {
@@ -717,24 +716,5 @@ func TestBoardNOpensTheDoorAndRemembersTheRepo(t *testing.T) {
 	}
 	if !strings.Contains(m.notice.text, "“Dark mode” created") {
 		t.Errorf("notice = %q", m.notice.text)
-	}
-}
-
-// TestCreateAndStartOpensAutopilot: the third button mints, then opens
-// the autopilot dialog on the new card instead of running anything.
-func TestCreateAndStartOpensAutopilot(t *testing.T) {
-	m, _ := newWorkspace(t)
-	m = pump(t, m, m.Init())
-	m = openFeatureForm(t, m)
-	m = typeString(t, m, "Dark mode")
-	form := m.Overlay.Top().(*cardForm)
-	form.setFocus(cardStopButtons)
-	form.buttons.SetCursor(2)
-	m = press(t, m, keyEnter)
-	if len(m.rows) != 1 {
-		t.Fatalf("card not created: %q", m.notice.text)
-	}
-	if _, ok := m.Overlay.Top().(*autopilotDialog); !ok {
-		t.Errorf("Create & start did not open the autopilot dialog (top=%T notice=%q)", m.Overlay.Top(), m.notice.text)
 	}
 }

@@ -18,7 +18,7 @@ func verifyMergeFixture(t *testing.T) *Shell {
 	m, _, _ := mergeFixture(t) // at verify
 	m.inbox.put(attnItem{
 		Feature: "FD-001", Kind: attnGate,
-		Text: gateReason(domain.StageVerify, domain.KindFeature, true, ""),
+		Text: "verify passed — review & land on main",
 	})
 	return m
 }

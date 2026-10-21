@@ -264,22 +264,12 @@ func endingSentence(in nextInput) string {
 	return "Closed" + when + "."
 }
 
-// costSentence is the second half of the receipt: what the card cost and
-// how much of that was work done twice. Rework is the number worth
-// reading beside the total — it is the one that says whether the card was
-// hard or the harness was.
+// costSentence is the second half of the receipt: what the card cost.
 func costSentence(in nextInput) string {
 	if in.spend <= 0 {
 		return ""
 	}
-	s := "It cost " + money(in.spend)
-	switch {
-	case in.corrective == 1:
-		s += ", with one round redone"
-	case in.corrective > 1:
-		s += ", with " + strconv.Itoa(in.corrective) + " rounds redone"
-	}
-	return s + "."
+	return "It cost " + money(in.spend) + "."
 }
 
 // shortSHA is the commit as a reader would quote it. Twelve characters,

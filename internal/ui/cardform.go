@@ -245,7 +245,7 @@ func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, 
 		ct: ct, repo: repo, origins: map[string]repoOrigin{},
 		text: text, env: env, profiles: profiles,
 		afterCands: cands, afterFilter: filter,
-		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}, button{label: "Create & autopilot"}),
+		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}),
 		onSubmit: onSubmit,
 	}
 	d.buttons.SetCursor(1)
@@ -502,14 +502,10 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		case "right", "l":
 			d.buttons.Move(1)
 		case "enter":
-			switch d.buttons.Cursor() {
-			case 0:
+			if d.buttons.Cursor() == 0 {
 				return true, d.cancel()
-			case 1:
-				return d.submit(false)
-			default:
-				return d.submit(true)
 			}
+			return d.submit()
 		}
 		return false, nil
 	case cardStopRepo:
@@ -524,18 +520,18 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			return false, nil
 		}
 		if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 		return d.fallThrough(key)
 	case cardStopText:
 		if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 		d.text, _ = d.text.Update(key)
 		d.errText = ""
 	case cardStopEnvelope:
 		if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 		d.env, _ = d.env.Update(key)
 		d.errText = ""
@@ -544,37 +540,37 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			n := len(d.profiles)
 			d.profile = ((d.profile+delta)%n + n) % n
 		} else if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 	case cardStopSeverity:
 		if delta, ok := selectCycleDelta(k); ok {
 			n := len(bugSeverityChoices)
 			d.sev = ((d.sev+delta)%n + n) % n
 		} else if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 	case cardStopAfter:
 		if !d.handleAfterKey(key) {
 			// enter with nothing to add is enter: create
-			return d.submit(false)
+			return d.submit()
 		}
 	case cardStopWhere:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.cycleWhere(delta)
 		} else if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 	case cardStopBase:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.cycleBase(delta)
 		} else if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 	case cardStopStack:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.cycleStack(delta)
 		} else if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 	}
 	return false, nil
@@ -760,8 +756,8 @@ func (d *cardForm) failImport(err error) {
 	d.errText = "import: " + sanitize(err.Error())
 }
 
-// submit validates and fires onSubmit. start marks Create & autopilot.
-func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
+// submit validates and fires onSubmit.
+func (d *cardForm) submit() (bool, tea.Cmd) {
 	if d.asksRepo() && d.repo.needsChoice() {
 		d.errText = repoUnchosenErr
 		d.setFocus(cardStopRepo)
@@ -819,7 +815,6 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		Kind: d.ct.Kind, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
 		Base: d.base, StackOnto: d.stackOnto, StackInto: d.stackInto,
-		Start:          start,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
 		MainCheckout: d.mainCheckout, Home: d.home,
 	}

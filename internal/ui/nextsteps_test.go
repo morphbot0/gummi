@@ -243,15 +243,14 @@ func TestNextInputForAssembly(t *testing.T) {
 		Undrafted:        []string{"Verification plan"},
 	}
 	m.inbox.addEscalated("FD-001", attnGate, "escalated")
-	m.setRound("FD-001", domain.RoundKindReview, 2)
 	m.checks["FD-001"] = stagedChecks{stage: domain.StageVerify, results: []verify.Result{{Name: "lint", OK: true}, {Name: "unit", OK: false}}}
 
 	in := m.nextInputFor(row)
 	want := nextInput{
 		stage: domain.StageVerify, landed: true,
 		attn: attnGate, escalated: true, attnText: "escalated",
-		reviewRound: 2, failedCheck: "unit",
-		openSpecQs: 1, openDiffComments: 2,
+		failedCheck: "unit",
+		openSpecQs:  1, openDiffComments: 2,
 		undrafted: []string{"Verification plan"},
 		// base is resolved at assembly now, so the landing row can name the
 		// branch the card actually merges onto instead of the literal "main"

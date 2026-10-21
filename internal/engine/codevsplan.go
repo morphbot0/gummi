@@ -114,3 +114,15 @@ func (e *Engine) CodeVsPlan(ctx context.Context, f domain.Feature) (claim, ancho
 	claim, anchor = parseCodeVsPlan(text)
 	return claim, anchor, nil
 }
+
+// kindNoun is a legacy workflow card's kind as a sentence names it.
+func kindNoun(k domain.Kind) string {
+	switch k {
+	case domain.KindBug:
+		return "bug"
+	case domain.KindResearch:
+		return "research card"
+	default:
+		return "feature"
+	}
+}

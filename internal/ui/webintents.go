@@ -223,36 +223,13 @@ func (b *Bridge) answeredOrMoved(ctx context.Context, id, ref, against string, c
 	return &WebError{Code: WebConflict, Reason: webapi.ConflictMoved, Text: "the card moved since you read it — now " + now}
 }
 
-// webAnswer runs one option of an open decision: the chip's go or keep,
-// an ask's option (or its chat row, with the words as the answer), or a
+// webAnswer runs one option of an open decision: an ask's option (or its
+// chat row, with the words as the answer), or a
 // stop's workflow answer — with words, the line the TUI's composer would
 // have carried to the word-eating option.
 func (m *Shell) webAnswer(r featureRow, od *webOpenDecision, req webapi.AnswerRequest) (tea.Cmd, error) {
 	words := strings.TrimSpace(req.Words)
 	switch od.api.Kind {
-	case webapi.DecisionConfirm:
-		switch req.Option {
-		case webOptionGo:
-			if !od.chip.goOnEnter {
-				// the TUI's enter says "that spends credits — press y";
-				// the page asks the same question, with what the go
-				// does, and sends back the token that answers it
-				q := r.F.Name() + ": that spends credits — go?"
-				if detail := strings.TrimSpace(od.api.Options[0].Detail); detail != "" {
-					q += "\n" + detail
-				}
-				if m.intent == nil || !m.intent.in.takeConfirm(webConfirmToken("chip-go", r.F.ID, q)) {
-					return nil, &WebError{
-						Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(webapi.ActionNeedsConfirm),
-						Text: q, Confirm: webConfirmToken("chip-go", r.F.ID, q),
-					}
-				}
-			}
-			return m.takeReading(r), nil
-		case webOptionKeep:
-			return m.declineReading(r), nil
-		}
-		return nil, refuse(WebBadRequest, "the chip answers go or keep, not "+strconv.Quote(req.Option))
 	case webapi.DecisionAsk:
 		if req.Option == webOptionChat {
 			if words == "" {
@@ -306,7 +283,6 @@ func (m *Shell) webAnswer(r featureRow, od *webOpenDecision, req webapi.AnswerRe
 		}
 	}
 	m.clearTransientNotice()
-	m.endChat(r.F.ID) // a row picked is the way out of a conversation
 	return m.answerDecisionAt(r, od.d, i, nil), nil
 }
 
@@ -460,7 +436,7 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	in := webInput{
 		actor: state.PersonActor(person), message: req.Message, number: req.Number,
 		profile: req.Profile, repo: req.Repo, mode: req.Mode, confirm: req.Confirm,
-		land: action == "merge" || action == "squash", autopilot: action == "gate" || action == "autopilot",
+		land:   action == "merge" || action == "squash",
 		method: method, keepBranch: req.KeepBranch,
 	}
 	switch req.Mode {
@@ -654,11 +630,6 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(req.Profile)+" is not one "+r.F.Name()+" can switch to")
 		}
 		return m.confirmCardProfileChange(r.F.ID, req.Profile), nil
-	case "gate":
-		if m.intent.in.mode == "" {
-			// the menu entry names the move from where the card is
-			m.intent.in.mode = entry.Default
-		}
 	case "run":
 		if msg != "" {
 			// a run with a note: the kickoff carries it, as the re-run
@@ -667,7 +638,7 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		}
 	case "bounce":
 		if msg != "" {
-			return m.fixedSendBack(r, "bounce", msg), nil
+			return m.deliverWords(r, "bounce", msg), nil
 		}
 	case "changes", "newbug":
 		if msg == "" {
@@ -676,7 +647,7 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 				Text: "say what is wrong — your words go with it",
 			}
 		}
-		return m.fixedSendBack(r, id, msg), nil
+		return m.deliverWords(r, id, msg), nil
 	case "merge", "squash":
 		// the message answers the landing dialog; the menu's own route
 		// runs every pre-check the dialog's opening runs

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -43,50 +42,6 @@ func TestInboxOps(t *testing.T) {
 		t.Errorf("after remove: %+v", b.list())
 	}
 	b.remove("FD-404") // no-op
-}
-
-func TestCompletedRunRaisesGate(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		// the plan writer's completion triggers the critique pass; a
-		// clean critique verdict is what raises the approval gate.
-		text := "Plan written."
-		if opts.Role == agent.RoleReviewer {
-			text = "Plan is sound.\nVERDICT: pass"
-		}
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: text},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	m, eng := chatWorkspace(t, ag)
-	// this test is about the gate-raising/clearing mechanism itself, not
-	// autopilot — pin the card to off so a clean critique still parks the
-	// gate for a human, unaffected by gates' own crossing (autopilot_gate_test.go
-	// covers that).
-	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateAttended); err != nil {
-		t.Fatal(err)
-	}
-	m = pump(t, m, m.loadRows)
-	// advance to plan (autonomous), run it
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = openAndAttach(t, m) // run
-	settleChat(t, eng)
-
-	// drain events and loop commands: plan done → critique → pass → gate
-	m = drainEngineLoop(t, m)
-	if m.inbox.len() != 1 {
-		t.Fatalf("inbox len = %d, want 1 gate item", m.inbox.len())
-	}
-	if m.inbox.list()[0].Kind != attnGate {
-		t.Errorf("item kind = %s, want gate", m.inbox.list()[0].Kind)
-	}
-	// acting on the feature (advance) clears the item
-	m = toKeys(t, m)
-	m = pressAdvance(t, m)
-	if m.inbox.len() != 0 {
-		t.Error("advancing did not clear the gate item")
-	}
 }
 
 func TestInboxErrorItem(t *testing.T) {

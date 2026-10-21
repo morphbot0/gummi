@@ -166,22 +166,21 @@ func (m *Shell) globalCommands() []command {
 // command answers to in the command menu's own vocabulary, and a card's
 // actions must not shadow one of the board-root globals by word.
 var cardCommandNames = map[string]string{
-	"advance":   "approve land",
-	"bounce":    "bounce",
-	"changes":   "changes",
-	"pause":     "park pause",
-	"verify":    "verify",
-	"rebase":    "rebase",
-	"handoff":   "handoff close keep hand off",
-	"merge":     "land merge",
-	"squash":    "squash",
-	"clean":     "clean",
-	"newbug":    "bug followup",
-	"adopt":     "adopt take back",
-	"gate":      "autopilot",
-	"spec":      "spec",
-	"diff":      "diff",
-	"ask":       "ask",
+	"advance": "approve land",
+	"bounce":  "bounce",
+	"changes": "changes",
+	"pause":   "park pause",
+	"verify":  "verify",
+	"rebase":  "rebase",
+	"handoff": "handoff close keep hand off",
+	"merge":   "land merge",
+	"squash":  "squash",
+	"clean":   "clean",
+	"newbug":  "bug followup",
+	"adopt":   "adopt take back",
+	"spec":    "spec",
+	"diff":    "diff",
+	"ask":     "ask",
 }
 
 func (m *Shell) cardCommands(existing []command) []command {
@@ -308,11 +307,6 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 	case "newbug":
 		if r, ok := m.selected(); ok {
 			return m.openBugFromCard(r)
-		}
-		return nil
-	case "gate":
-		if r, ok := m.selected(); ok {
-			return m.openAutopilot(r.F)
 		}
 		return nil
 	case "profile":
@@ -456,15 +450,6 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// response.
 		m.notice = noticeMsg{text: "type what should change — your line goes back with it"}
 		return nil
-	case "gate":
-		// the two-state toggle (tighten applies immediately, loosen
-		// confirms first) is superseded by the autopilot overlay
-		// (autopilot.go): its own confirm button is the deliberate act
-		// that protects a loosening move now, so there is no second
-		// confirm layered on top of it here.
-		if r, ok := m.selected(); ok {
-			return m.openAutopilot(r.F)
-		}
 	case "prlink":
 		if r, ok := m.selected(); ok {
 			return m.openPRLinkDialog(r.F)

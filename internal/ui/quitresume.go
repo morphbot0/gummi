@@ -22,7 +22,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
-	"github.com/morphis/gummi/internal/verdict"
 )
 
 const quitResumeDialogWidth = 62
@@ -88,20 +87,9 @@ func (m *Shell) resumeQuitStopped(cards []engine.QuitStoppedCard) tea.Cmd {
 
 // resumeCard restarts one quit-stopped card in place. StopForQuit only
 // ever stops a live Running/Queued session (engine/quit.go), which means
-// the card was mid-stage, not parked at a gate — so planAutopilot
-// (autopilot.go) resolves it to the "running" bucket, whose own start
-// path is a no-op by design (nothing to start — the card was already
-// going). What resumes a paused mid-stage session is the board's
-// ordinary resume-in-place path, runStage (shell.go), the same one
-// `enter` already uses on a paused autonomous-stage card. The
-// todo/gate buckets are handled through the switch's own start path
-// (startAutopilot) for completeness, though StopForQuit's own shape
-// never actually produces them.
+// the card was mid-stage: the board's ordinary resume-in-place path,
+// runStage (shell.go), picks it up.
 func (m *Shell) resumeCard(f domain.Feature) tea.Cmd {
-	plan := m.planAutopilot(f)
-	if plan.bucket == "todo" || plan.bucket == "gate" {
-		return m.startAutopilot(f, f.GateApproval, plan)
-	}
 	return m.runStage(f)
 }
 
@@ -157,23 +145,10 @@ func (d *quitResumeDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-// cardLine renders one offered card: id, title, stage, and — only when
-// it spent any — the corrective-round budget, worded the same way
-// autopilotBody (autopilot.go) already does: rounds spent against
-// verdict.MaxRounds(domain.RoundKindCorrective), never hardcoded.
-//
-// "corrective rounds", not "corrections". The budget had three names on
-// three screens — the card header's "⟲ N of M corrective rounds", the
-// autopilot dialog's "up to M corrective rounds", and this line's
-// "corrections" — for one concept nobody can guess from any of them.
-// One name is the least a reader is owed.
+// cardLine renders one offered card: id, title and stage.
 func cardLine(c engine.QuitStoppedCard, idWidth, titleWidth int) string {
-	line := "  " + padRight(string(c.Feature.ID), idWidth) + "  " +
+	return "  " + padRight(string(c.Feature.ID), idWidth) + "  " +
 		padRight(c.Feature.Title, titleWidth) + "  " + string(c.Feature.Stage)
-	if c.Corrective > 0 {
-		line += fmt.Sprintf(" · %d of %d corrective rounds spent", c.Corrective, verdict.MaxRounds(domain.RoundKindCorrective))
-	}
-	return line
 }
 
 // View implements overlay.Dialog.

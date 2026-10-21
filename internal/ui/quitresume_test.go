@@ -228,7 +228,7 @@ func TestQuitResumeDialogEscNeverResumes(t *testing.T) {
 // engine.Engine.StopForQuit would have left it: a paused session
 // snapshot plus a quit park event, so engine.Restore + QuitStoppedCards
 // see the same shape a real quit-then-reopen produces.
-func seedQuitStopped(t *testing.T, store *state.Store, num int, title string, stage domain.Stage, gate string, corrective int, parkedAt time.Time) domain.Feature {
+func seedQuitStopped(t *testing.T, store *state.Store, num int, title string, stage domain.Stage, gate string, parkedAt time.Time) domain.Feature {
 	t.Helper()
 	ctx := context.Background()
 	id, _ := domain.NewFeatureID(num)
@@ -255,11 +255,6 @@ func seedQuitStopped(t *testing.T, store *state.Store, num int, title string, st
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for range corrective {
-		if err := store.IncrementRounds(ctx, f.ID, domain.RoundKindCorrective); err != nil {
-			t.Fatal(err)
-		}
-	}
 	return f
 }
 
@@ -271,8 +266,8 @@ func TestMaybeOfferQuitResumePushesDialogWithBothCards(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
 	parked := time.Now().Add(-7 * time.Hour)
-	fSearch := seedQuitStopped(t, store, 44, "search", domain.StageVerify, domain.GateAttended, 0, parked)
-	fCSV := seedQuitStopped(t, store, 47, "csv export", domain.StageImplement, domain.GateAutopilot, 2, parked)
+	fSearch := seedQuitStopped(t, store, 44, "search", domain.StageVerify, domain.GateAttended, parked)
+	fCSV := seedQuitStopped(t, store, 47, "csv export", domain.StageImplement, domain.GateAutopilot, parked)
 
 	eng := engine.New(engine.Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Pool: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { eng.Close() })
@@ -295,12 +290,6 @@ func TestMaybeOfferQuitResumePushesDialogWithBothCards(t *testing.T) {
 	// "FD-044" sorts before "FD-047".
 	if d.cards[0].Feature.ID != fSearch.ID || d.cards[1].Feature.ID != fCSV.ID {
 		t.Fatalf("cards = [%s %s], want [%s %s]", d.cards[0].Feature.ID, d.cards[1].Feature.ID, fSearch.ID, fCSV.ID)
-	}
-	if d.cards[0].Corrective != 0 {
-		t.Errorf("search corrective = %d, want 0", d.cards[0].Corrective)
-	}
-	if d.cards[1].Corrective != 2 {
-		t.Errorf("csv export corrective = %d, want 2", d.cards[1].Corrective)
 	}
 }
 
@@ -329,7 +318,7 @@ func TestMaybeOfferQuitResumeNothingToOffer(t *testing.T) {
 func TestResumeCardRestartsMidStageSession(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
-	f := seedQuitStopped(t, store, 1, "csv export", domain.StageImplement, domain.GateAutopilot, 0, time.Now())
+	f := seedQuitStopped(t, store, 1, "csv export", domain.StageImplement, domain.GateAutopilot, time.Now())
 	if _, err := wt.Create(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
@@ -368,12 +357,11 @@ func TestResumeCardRestartsMidStageSession(t *testing.T) {
 // --- golden ---
 
 // TestQuitResumeDialogGolden renders the reopen prompt over two offered
-// cards, matching the design mock's shape: a stage line with corrections
-// spent, and one without.
+// cards, each a stage line.
 func TestQuitResumeDialogGolden(t *testing.T) {
 	m := populatedShell(100, 30)
 	cards := []engine.QuitStoppedCard{
-		{Feature: domain.Feature{ID: "FD-047", Title: "csv export", Stage: domain.StageImplement}, Corrective: 2},
+		{Feature: domain.Feature{ID: "FD-047", Title: "csv export", Stage: domain.StageImplement}},
 		{Feature: domain.Feature{ID: "FD-044", Title: "search", Stage: domain.StageVerify}},
 	}
 	m.Overlay.Push(newQuitResumeDialog(cards, "7h0m ago", func() tea.Cmd { return nil }))

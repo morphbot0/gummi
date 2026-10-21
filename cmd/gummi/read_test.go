@@ -406,9 +406,8 @@ func TestRenderStatusPRLine(t *testing.T) {
 
 // TestBuildStatusExplainsAParkedCard: a caller that finds verified:false
 // and running:false must be able to learn WHY from the status alone. The
-// three things that answer it — the open decision that parked the card,
-// how many rounds it has burned, and where the spend went — all come from
-// the store, and none of them were exposed before.
+// things that answer it — the open decision that parked the card and
+// where the spend went — both come from the store.
 func TestBuildStatusExplainsAParkedCard(t *testing.T) {
 	f := newReadFixture(t)
 	feat := f.mkFeature(t, "JIRA-9")
@@ -423,12 +422,6 @@ func TestBuildStatusExplainsAParkedCard(t *testing.T) {
 		Kind:     state.DecisionKindAsk,
 		Question: "per-device or synced?\nsay which",
 	}, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.store.IncrementRounds(f.ctx, feat.ID, domain.RoundKindReview); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.store.IncrementRounds(f.ctx, feat.ID, domain.RoundKindReview); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.RecordStageSpend(f.ctx, feat.ID, state.SpendSample{
@@ -457,9 +450,6 @@ func TestBuildStatusExplainsAParkedCard(t *testing.T) {
 	}
 	if v.Escalation.Stage != string(feat.Stage) {
 		t.Errorf("escalation stage = %q, want %s", v.Escalation.Stage, feat.Stage)
-	}
-	if v.Rounds.Review != 2 || v.Rounds.Plan != 0 {
-		t.Errorf("rounds = %+v, want review 2 / plan 0", v.Rounds)
 	}
 	// largest first: the stage that dominates a run reads at the top
 	if len(v.StageSpend) != 2 {

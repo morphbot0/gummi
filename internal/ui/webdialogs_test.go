@@ -13,35 +13,11 @@ import (
 // one the person gave.
 func TestAWebBudgetTooLongIsRefusedNotTruncated(t *testing.T) {
 	got := -1
-	d := newEnvelopeDialog(domain.Feature{ID: "FD-001"}, func(to int) tea.Cmd { got = to; return nil }, nil)
+	d := newEnvelopeDialog(domain.Feature{ID: "FD-001"}, func(to int) tea.Cmd { got = to; return nil })
 	n := 123456789
 	res := d.webAnswer(nil, &webInput{number: &n})
 	if got != -1 || res.refused == "" {
 		t.Errorf("asked for %d: set %d, refused %q — want it refused and nothing set", n, got, res.refused)
-	}
-}
-
-// The budget dialog's resume follow-up (a parked autopilot card whose
-// budget is raised) is a question the TUI asks with y/n, and the web puts
-// it to the person rather than taking its silence for a no.
-func TestAWebBudgetRaiseAsksTheResumeQuestion(t *testing.T) {
-	f := domain.Feature{ID: "FD-001", GateApproval: domain.GateAutopilot}
-	f.Budget.Envelope = 10
-	f.Spend.Add(12, 0, 0)
-	resumed := false
-	d := newEnvelopeDialog(f, func(int) tea.Cmd { return nil }, func() tea.Cmd { resumed = true; return nil })
-	n := 50
-	if !d.offersResume(n) {
-		t.Fatal("precondition: the TUI would ask to resume")
-	}
-	res := d.webAnswer(nil, &webInput{number: &n})
-	if res.cmd != nil {
-		if msg := res.cmd(); msg != nil {
-			_ = msg
-		}
-	}
-	if res.needs == "" && !resumed {
-		t.Errorf("the resume question was answered no without being asked: %+v", res)
 	}
 }
 

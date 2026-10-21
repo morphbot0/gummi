@@ -255,7 +255,6 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// decompose instead (keymap.go).
 		advanceLabel, advanceWhy = "decompose", "on a done RS: re-run decompose"
 	}
-	gateLabel, gateWhy := gateLabelWhy(r.F.GateApproval, r.baseBranch())
 
 	// A landing is offered only where one would go through: the floor
 	// every landing door reads (merge.go's landingRefusal, carried in as
@@ -399,14 +398,6 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// sees, so those are what §5 renames to "budget".
 			"envelope", "u", "budget", "set the card's budget (dollars; 0 = uncapped)", false,
 			envelopeRefusal(r) == nil,
-		},
-		// no accelerator, for the same reason duplicate has none: this is a
-		// rare, deliberate setting change, not something to fat-finger from
-		// the board. The mode is a property of the card, not of its stage
-		// or kind — but a closed card has no gate left for it to govern.
-		{
-			"gate", "", gateLabel, gateWhy, false,
-			!freeform && !closed,
 		},
 		// no accelerator: `ask` is a word you type on the composer, the
 		// same way `park`'s own accelerator collision is avoided (see
@@ -745,26 +736,6 @@ func pauseLabelWhy(in nextInput) (label, why string) {
 		// paused or finished: p parks it so the loop stops offering it
 		return "park", "park the settled session so it stops asking"
 	}
-}
-
-// gateLabelWhy words the gate-approval toggle for the card's current
-// mode, the same "name what pressing it does" adaptation runLabelWhy and
-// pauseLabelWhy already give run/pause. mode is r.F.GateApproval as
-// stored, and empty reads as attended like everywhere else, so the label
-// names the one move available from where the card actually is. base is
-// the branch this card lands on (r.baseBranch()) — the "it never lands
-// on main" guarantee has to say the checkout's real trunk, not assert
-// "main" (REVIEW-ux-drive-2026-09-10-round2.md §3.4).
-//
-// The autopilot-on label used to be "take back the gates" — a phrase
-// nothing on screen defines. §5 of the round 2 UX drive asked for what
-// it actually does instead: you stop autopilot, and every gate goes back
-// to waiting on you.
-func gateLabelWhy(mode string, base string) (label, why string) {
-	if mode == domain.GateAutopilot {
-		return "stop autopilot", "stop at every gate again — you decide each crossing (tightens control)"
-	}
-	return "hand to autopilot", "let this card run to a verified branch unattended (loosens control — it never lands on " + base + ")"
 }
 
 // markerWidth is the width of the per-row cursor marker ("▸ " / "  ");

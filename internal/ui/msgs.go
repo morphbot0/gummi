@@ -14,7 +14,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/rmtree"
-	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/threadfold"
@@ -442,10 +441,9 @@ func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
 // formResult is what the new-card dialog hands the shell: everything a
 // mint needs, for any kind. The description's first line is the card's
 // title; the lines past it seed the artifact (cardmint decides how, per
-// kind). After names dependency edges written once the card exists;
-// Start opens the autopilot dialog on it.
+// kind). After names dependency edges written once the card exists.
 type formResult struct {
-	Kind        domain.Kind         // "" reads as feature
+	Kind        domain.Kind // "" reads as feature
 	Desc        string
 	Profile     string
 	Envelope    *int // nil = the shell's default envelope
@@ -462,7 +460,6 @@ type formResult struct {
 	// stack at the top. Both empty is a standalone card.
 	StackOnto domain.FeatureID
 	StackInto domain.StackID
-	Start     bool
 	// SessionBackend and SessionModel are the agent and model a freeform
 	// card's session runs on when the person picked them (DESIGN §19.8);
 	// both empty is the profile's implementer. Only the web face's session
@@ -480,11 +477,9 @@ type formResult struct {
 }
 
 // cardCreatedMsg is createCard's success: the shell reloads rows, keeps
-// the repo as the next dialog's preselect, and does what the result
-// asked for next (the autopilot dialog).
+// the repo as the next dialog's preselect.
 type cardCreatedMsg struct {
-	f     domain.Feature
-	start bool
+	f domain.Feature
 	// stack is the stack the new card joined, empty when standalone. The
 	// shell ticks it so the card's branch is cut on the right base.
 	stack domain.StackID
@@ -562,7 +557,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			}
 		}
 		created := cardCreatedMsg{
-			f: f, start: res.Start,
+			f:     f,
 			stack: stacked, warn: strings.Join(warn, "; "),
 		}
 		if f.IsFreeform() {
@@ -668,71 +663,20 @@ func (m *Shell) humanActor() string {
 	return state.ActorUser
 }
 
-// autopilotGateBlockedMsg reports that actor state.ActorAutopilot's own
-// attempt to cross a design gate (advanceStageAs) found the gate
-// blocked — an open %%/diff thread, an unmet dependency, or the
-// document floor. Autopilot cannot resolve any of those itself, so the
-// card must park exactly as if autopilot had never tried the crossing;
-// the Update handler (shell.go) raises the attention item that the
-// event which tried autopilot first skipped in favor of the attempt.
-// It carries plain text rather than an AdvanceStatus because every
-// blocked branch below already renders the right explanation once, for
-// both actors — the handler adds no second rendering of its own: it
-// parks with this text and re-words the standing gate decision with it,
-// so the card's waiting-on-you record names the blocker Advance named
-// instead of the crossing's inviting wording (shell.go's
-// rewordGateDecision).
-type autopilotGateBlockedMsg struct {
-	id   domain.FeatureID
-	text string
-}
-
 // unmetDependencyClause is the words a gate blocked on a dependency parks
 // with. resumeHeldGates (autopilot.go) finds such a park by them
 // once the dependency is done, so the phrase is written in one place.
 const unmetDependencyClause = "blocked by unmet dependency"
 
-// autopilotContinueMsg follows a crossing autopilot made itself onto an
-// autonomous stage. The card now sits at a stage with nothing running,
-// which is decisionIdle — the last kind in §10.17's table, and the one
-// that makes the rest of the table mean anything: crossing a gate and
-// then sitting at the stage behind it would leave "it runs to a verified
-// branch on its own" false, and would leave `gates` promising that
-// design gates cross themselves while the card stopped anyway, one stage
-// further along.
-//
-// It is sent only for autopilot's OWN crossing. An idle card the board
-// merely finds that way — restored at startup, parked by a quit — is
-// never started down this path, because nothing resumes itself after a
-// quit without being asked (§10.17, and the reason quitresume.go's
-// dialog exists at all).
-type autopilotContinueMsg struct {
-	id   domain.FeatureID
-	to   domain.Stage
-	note string
-}
-
-// blockedMsg maps one blocked Advance outcome to the message the calling
-// actor should see: a human gets the plain error notice advanceStage has
-// always returned; autopilot — which only attempted the crossing because
-// autopilotCrossGate (autopilot.go) had already decided the mode and the
-// edge allow it — gets autopilotGateBlockedMsg instead, so Update parks
-// the card rather than just flashing an error nobody is watching for.
-func blockedMsg(actor string, id domain.FeatureID, text string) tea.Msg {
-	return blockedMsgWeb(actor, id, text, "")
+// blockedMsg maps one blocked Advance outcome to the notice the person
+// who tried the crossing sees.
+func blockedMsg(_ string, id domain.FeatureID, text string) tea.Msg {
+	return blockedMsgWeb("", id, text, "")
 }
 
 // blockedMsgWeb is blockedMsg for a refusal whose terminal wording names
-// keys: web is the same sentence with the act named instead. Autopilot's
-// park is written to the card's record, which both faces read, so it
-// takes the key-free words.
-func blockedMsgWeb(actor string, id domain.FeatureID, text, web string) tea.Msg {
-	if actor == state.ActorAutopilot {
-		if web != "" {
-			text = web
-		}
-		return autopilotGateBlockedMsg{id: id, text: text}
-	}
+// keys: web is the same sentence with the act named instead.
+func blockedMsgWeb(_ string, _ domain.FeatureID, text, web string) tea.Msg {
 	return noticeMsg{text: text, isErr: true, web: web}
 }
 
@@ -863,27 +807,10 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 	// worktree was created (both kinds).
 	note := fmt.Sprintf("%s → %s", m.cardName(id), res.To) + res.EstimateNotice()
 	discover := res.EnteredWorktree
-	continueTo := domain.Stage("")
-	// A person's crossing on a card they handed to autopilot continues the
-	// same way autopilot's own does: the card now sits at a stage with
-	// nothing running, which is the idle decision autopilot answers
-	// (§10.17). Stopping there made "approve" on an autopilot card leave it
-	// idle at implement, which is the one thing a hand-over promises it
-	// will not do.
-	if autonomousStage(res.To) && (actor == state.ActorAutopilot || autopilotAnswers(res.Feature.GateApproval, decisionIdle)) {
-		continueTo = res.To
-	}
 	if discover {
 		// the crossing entered a worktree, so the background one-shot
-		// passes go first — but the continuation rides along rather
-		// than being dropped here. Entering a worktree is exactly what
-		// a spec approval does, which made this the branch autopilot's
-		// own handover took, and it used to end the story: the gate
-		// crossed and nothing behind it ever started.
-		return worktreeEnteredMsg{id: id, note: note, discover: discover, continueTo: continueTo}
-	}
-	if continueTo != "" {
-		return autopilotContinueMsg{id: id, to: continueTo, note: note}
+		// passes go first
+		return worktreeEnteredMsg{id: id, note: note, discover: discover}
 	}
 	return noticeMsg{text: note, reload: true, clearInbox: id}
 }
@@ -895,13 +822,6 @@ type worktreeEnteredMsg struct {
 	id       domain.FeatureID
 	note     string
 	discover bool // run check auto-discovery
-	// continueTo is the autonomous stage autopilot's own crossing opened
-	// and must now start, or "" for a crossing nobody is continuing. It
-	// rides this message because entering a worktree is what a spec
-	// approval does, so the handover's own crossing lands here rather
-	// than on autopilotContinueMsg — and dropping it here left the gate
-	// crossed with nothing behind it running.
-	continueTo domain.Stage
 }
 
 // checksDiscoveredMsg follows the check auto-discovery pass, whether or
@@ -1347,73 +1267,21 @@ func (m *Shell) undraftedGate(f domain.Feature) []string {
 	return engine.UndraftedAt(f, m.artifactFile(&f), forwardEdge(f))
 }
 
-// bounceStage sends a feature back for rework. Implement and Verify
-// bounce via the domain transition into Plan/Implement (the rerun
-// edges) — the edges into Implement and Plan are normally forward moves
-// belonging to g, so only those two stages take them backward. Plan
-// bounces without leaving the stage: it sits *before* the work stage,
-// so there is no stage to transition back to — instead it resets the
-// critique loop's round counter and re-runs the same in-stage replan
-// onPlanDone's automatic path already uses, giving the human a fresh
-// capped budget instead of g's silent override of an unresolved
-// "changes needed" verdict. Only legal once the loop has actually
-// escalated — see the attnGate check below; a plan that hasn't hit that
-// gate has nothing to bounce.
-
-// note is the prose the composer aimed at the bounce: for
-// Implement/Verify it rides the reborn stage's kickoff when that run
-// starts (shell.go's bounceNotes); for Plan there is no later kickoff
-// to catch it, so it is appended to the replan kickoff directly. Empty
-// for the plain b key either way.
+// bounceStage sends a legacy workflow card back along its rerun edge:
+// verify rewinds the work stage, implement the plan that produced it.
 //
-// bounceStage itself runs on the Update goroutine (every call site
-// invokes it directly from a key/decision handler, never from inside a
-// tea.Cmd), so the store read that decides which branch applies, and
-// every write this function makes to Shell's own unguarded fields
-// (m.rounds via setRound, m.bounceNotes), happen here, synchronously,
-// before any tea.Cmd is returned — matching how onPlanDone resets the
-// same round counter. Only the engine/store calls that do real I/O
-// (RunWith, Transition) are deferred into the returned cmd, which runs
-// later on its own goroutine.
+// note is the prose the composer aimed at the bounce: it rides the reborn
+// stage's kickoff when that run starts (shell.go's bounceNotes). Empty
+// for the plain b key.
 func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 	ctx := context.Background()
 	f, err := m.store.GetFeature(ctx, id)
 	if err != nil {
 		return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
 	}
-	if f.Stage == domain.StagePlan {
-		it, ok := m.inbox.get(id)
-		if !ok || it.Kind != attnGate || !it.Escalated {
-			text := fmt.Sprintf("%s plan has no escalated gate to bounce", m.cardName(id))
-			return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
-		}
-		if err := rounds.Reset(ctx, m.roundStore, id, domain.RoundKindPlan); err != nil {
-			return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
-		}
-		m.setRound(id, domain.RoundKindPlan, 0)
-		m.dropSession(id)
-		kickoff := replanNote
-		if note != "" {
-			kickoff += "\n\n" + note
-		}
-		name := m.cardName(id)
-		return func() tea.Msg {
-			if err := m.engine.RunWith(f, kickoff); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-			text := fmt.Sprintf("%s sent back for another plan round", name)
-			if note != "" {
-				text += " — your line rides the kickoff"
-			}
-			return noticeMsg{text: text, reload: true, clearInbox: id}
-		}
-	}
-	// each stage takes its own rerun edge backward: verify rewinds the
-	// work stage, implement rewinds the plan that produced it. The
-	// escalated-plan branch above re-runs in place and is not an edge.
 	back, ok := workflow.RerunTarget(f.Stage)
 	if !ok {
-		text := fmt.Sprintf("%s is in %s — only plan/implement/verify can bounce back", m.cardName(id), f.Stage)
+		text := fmt.Sprintf("%s is in %s — only implement/verify can bounce back", m.cardName(id), f.Stage)
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 	}
 	if note != "" {
@@ -1433,7 +1301,7 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 		if note != "" {
 			text += " — your line rides the next run's kickoff"
 		}
-		return sentBackMsg{id: id, to: back, notice: noticeMsg{text: text, reload: true, clearInbox: id}}
+		return noticeMsg{text: text, reload: true, clearInbox: id}
 	}
 }
 

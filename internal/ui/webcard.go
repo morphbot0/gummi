@@ -36,9 +36,8 @@ import (
 // webOpenDecision is the pinned decision with what answering it needs:
 // the TUI decision behind it and each option id's place in it.
 type webOpenDecision struct {
-	api  webapi.Decision
-	d    *threadDecision
-	chip *reentryReading
+	api webapi.Decision
+	d   *threadDecision
 	// index maps an option id to its index in d's picker (an ask's
 	// option, or a workflow action).
 	index map[string]int
@@ -50,17 +49,12 @@ type webOpenDecision struct {
 // Option ids that are not an index or an action id.
 const (
 	webOptionChat = "chat"
-	webOptionGo   = "go"
-	webOptionKeep = "keep"
 )
 
 // webOpenDecision is the decision the card page pins right now, or nil.
 // It must be called with the card entered (enterCard).
 func (m *Shell) webOpenDecision(r featureRow) *webOpenDecision {
 	d := m.openDecision(r)
-	if p := m.chip(r.F.ID); p != nil && (d == nil || d.ask == nil) {
-		return m.worded(m.webChipDecision(r, p), r)
-	}
 	if d == nil {
 		return nil
 	}
@@ -261,31 +255,6 @@ func webDecisionKind(k decisionKind, r featureRow) (webapi.DecisionKind, webapi.
 		return webapi.DecisionClosed, webapi.AnchorThread, ""
 	}
 	return webapi.DecisionIdle, webapi.AnchorThread, rev
-}
-
-// webChipDecision is the re-entry's confirm chip as a decision: the
-// reading of a line the person sent, and the two answers the chip takes —
-// do it, or keep the line here as a message.
-func (m *Shell) webChipDecision(r featureRow, p *reentryReading) *webOpenDecision {
-	act := chipAct(r.F, r.baseBranch(), p)
-	ref := "confirm:" + string(r.F.ID) + ":" + webHash(p.line)
-	details := chipDetails(r, p)
-	return &webOpenDecision{
-		chip:  p,
-		index: map[string]int{webOptionGo: 0, webOptionKeep: 1},
-		api: webapi.Decision{
-			Ref: ref, Kind: webapi.DecisionConfirm,
-			Question: "I read that as " + readingNoun(p.out) + ".",
-			Anchor:   webapi.AnchorThread,
-			Against:  webapi.Against{Token: ref, Label: "your line"},
-			Options: []webapi.Option{
-				// a go that spends is never given on enter (chip.go's
-				// goOnEnter): the page marks it, and the answer asks first
-				{ID: webOptionGo, Label: "go", Detail: strings.TrimSpace(act + " " + strings.Join(details, " ")), Danger: !p.goOnEnter},
-				{ID: webOptionKeep, Label: "keep it here", Detail: "send the line as a message instead"},
-			},
-		},
-	}
 }
 
 func webHash(s string) string {
@@ -687,8 +656,6 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		if s := m.webSessionOf(r.F); s != nil {
 			a.Default = s.Backend + " " + s.Model
 		}
-	case "gate":
-		a.Default = autopilotSwitchTo(r.F.GateApproval)
 	case "prcreate", "push", "prready", "prdraft":
 		// the page's publish dialog reads the facts itself and confirms
 		// through POST /api/cards/{id}/publish, never through this action
@@ -743,9 +710,7 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 	c := m.classifyThreadLine(r, line, func() *threadDecision { return m.openDecision(r) })
 	route, says := m.webLineRoute(r, line, c)
 	images := m.engine != nil && m.engine.SessionTakesImages(context.Background(), r.F.ID)
-	// an answer route is either an ask's reply, which answers at once, or
-	// words going with a stop's answer, which are read first (webLineRoute)
-	out := webapi.Composer{Route: route, Says: says, Images: images, Read: route == webapi.RouteAnswer && c.route != lineAskAnswer}
+	out := webapi.Composer{Route: route, Says: says, Images: images}
 	// the line as typed: "/review " is a command awaiting its arguments,
 	// not a word still being completed
 	if word, ok := strings.CutPrefix(strings.TrimLeft(text, " \t\n"), "/"); ok {
@@ -845,18 +810,8 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 		return webapi.RouteFreeform, freeformTurnRoute(r)
 	case lineAskAnswer:
 		return webapi.RouteAnswer, "answers the question above, in your words"
-	case lineChat:
-		return m.webMessageRoute(r)
-	case lineChatReentry, lineChatIntent, lineReentry:
-		if sess := m.sessionFor(r.F.ID); sess != nil && sess.Live() {
-			return m.webMessageRoute(r)
-		}
-		if c.consumer >= 0 && c.d != nil {
-			return webapi.RouteAnswer, "goes with “" + c.d.actions[c.consumer].label + "” — read first, to place it"
-		}
-		// no answer takes words: the line is sent as a line and read, as
-		// the TUI's enter reads it — never given as the highlighted answer
-		return webapi.RouteRead, "is read first, to place it — a message if it is not a change"
+	case lineWords:
+		return webapi.RouteAnswer, "goes with “" + c.d.actions[c.consumer].label + "”"
 	}
 	parsed := parseInput(text)
 	switch parsed.Kind {

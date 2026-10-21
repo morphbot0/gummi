@@ -29,33 +29,18 @@ type envelopeDialog struct {
 	buttons  *buttonRow
 	focus    int
 	onSubmit func(to int) tea.Cmd
-	// onResume restarts the card, for the second step submit() raises on a
-	// parked autopilot run. Separate from onSubmit because raising an
-	// envelope and resuming a run are two decisions, and topping up has
-	// never implied the second.
-	onResume func() tea.Cmd
 	problem  string // parse error shown under the input, cleared on edit
-
-	// askResume/resumeTo/resumeButtons carry the follow-up "resume it?"
-	// step submit() raises for a parked autopilot card (see offersResume):
-	// the envelope has already been set by the time this shows — raising
-	// it must never itself restart a run — so this is a second, explicit
-	// question the user answers on its own.
-	askResume     bool
-	resumeTo      int
-	resumeButtons *buttonRow
 }
 
-func newEnvelopeDialog(f domain.Feature, onSubmit func(int) tea.Cmd, onResume func() tea.Cmd) *envelopeDialog {
+func newEnvelopeDialog(f domain.Feature, onSubmit func(int) tea.Cmd) *envelopeDialog {
 	in := textinput.New()
 	in.Placeholder = "dollars (0 = uncapped)"
 	in.CharLimit = 8
 	in.SetWidth(28)
 	in.Focus()
 	return &envelopeDialog{
-		feature: f, input: in, onSubmit: onSubmit, onResume: onResume,
-		buttons:       newButtonRow(button{label: "Cancel"}, button{label: "Set"}),
-		resumeButtons: newButtonRow(button{label: "Not now"}, button{label: "Resume"}),
+		feature: f, input: in, onSubmit: onSubmit,
+		buttons: newButtonRow(button{label: "Cancel"}, button{label: "Set"}),
 	}
 }
 
@@ -64,11 +49,7 @@ func (d *envelopeDialog) ID() string { return "envelope" }
 
 // submit validates and fires onSubmit, matching the input's own enter
 // handling exactly — the button row's Set button is just another way to
-// reach the same action. The envelope is set unconditionally; when the
-// card looks like a parked autopilot run (offersResume), submit does not
-// close the dialog — it swaps to the resume confirm step instead, a
-// second and entirely separate question (the top-up must never restart
-// a run on its own).
+// reach the same action. Raising a budget never restarts anything.
 func (d *envelopeDialog) submit() (bool, tea.Cmd) {
 	raw := strings.TrimSpace(d.input.Value())
 	if raw == "" {
@@ -79,78 +60,11 @@ func (d *envelopeDialog) submit() (bool, tea.Cmd) {
 		d.problem = "a dollar amount, like 5 or 12.50"
 		return false, nil
 	}
-	cmd := d.onSubmit(to)
-	if d.offersResume(to) {
-		d.askResume, d.resumeTo = true, to
-		return false, cmd
-	}
-	return true, cmd
-}
-
-// offersResume reports whether raising the envelope to `to` earns the
-// follow-up "resume it?" question: an autopilot card whose envelope,
-// before this raise, was already spent — the one shape of "parked for
-// lack of budget" this dialog can tell from a card that's simply mid-run
-// without reaching into live session state, which this dialog — built
-// from a bare domain.Feature snapshot — has no access to.
-//
-// The mode is read through GateMode, never off the raw field: every card
-// `bugs new` mints stores the empty string, and a bare comparison against
-// domain.GateAttended reads every one of them as autopilot — which would
-// hand an attended card the resume question, and a "yes" there restarts a
-// run nobody handed over.
-func (d *envelopeDialog) offersResume(to int) bool {
-	f := d.feature
-	if f.GateMode() == domain.GateAttended {
-		return false
-	}
-	if f.Budget.Envelope <= 0 || to <= f.Budget.Envelope {
-		return false // was already uncapped, or this isn't actually a raise
-	}
-	return f.Spend.CreditEquivalent() >= float64(f.Budget.Envelope)
-}
-
-// resumeNotice answers "yes" on the resume question: restart the card
-// through whatever the constructing surface handed us. A dialog with no
-// resume wired says so rather than reporting a restart that did not
-// happen — the whole reason the question is a separate step is that the
-// answer has to be true.
-func (d *envelopeDialog) resumeNotice() tea.Cmd {
-	id := d.feature.ID
-	if d.onResume == nil {
-		return func() tea.Msg {
-			return noticeMsg{text: fmt.Sprintf(
-				"%s: budget raised — pick it back up from the inbox (i) or `gummi resume %s`", id, id)}
-		}
-	}
-	return d.onResume()
+	return true, d.onSubmit(to)
 }
 
 // HandleKey implements overlay.Dialog.
 func (d *envelopeDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
-	if d.askResume {
-		switch key.String() {
-		case "left", "h":
-			d.resumeButtons.Move(-1)
-			return false, nil
-		case "right", "l":
-			d.resumeButtons.Move(1)
-			return false, nil
-		case "y":
-			d.askResume = false
-			return true, d.resumeNotice()
-		case "n", "esc":
-			d.askResume = false
-			return true, nil
-		case "enter":
-			d.askResume = false
-			if d.resumeButtons.Cursor() == 1 { // "Resume"
-				return true, d.resumeNotice()
-			}
-			return true, nil
-		}
-		return false, nil
-	}
 	switch key.String() {
 	case "esc":
 		return true, nil
@@ -204,14 +118,6 @@ func (d *envelopeDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 
 // View implements overlay.Dialog.
 func (d *envelopeDialog) View(s *theme.Styles, w, h int) string {
-	if d.askResume {
-		var b strings.Builder
-		b.WriteString(s.DialogTitle.Render("budget · "+d.feature.Name()) + "\n\n")
-		b.WriteString(fmt.Sprintf("raised to %s — resume %s on autopilot?", domain.FormatDollars(float64(d.resumeTo)), d.feature.Name()) + "\n")
-		b.WriteString("\n" + d.resumeButtons.View(s, true) + "\n")
-		b.WriteString("\n" + s.Faint.Render("y/enter resume · n/esc not now"))
-		return s.DialogFrame.Render(b.String())
-	}
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("budget · "+d.feature.Name()) + "\n\n")
 	spent := d.feature.Spend.CreditEquivalent()

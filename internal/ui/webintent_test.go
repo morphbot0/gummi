@@ -10,7 +10,6 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/reentry"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -166,60 +165,6 @@ func TestAnIntentFollowsItsCommandsToTheEnd(t *testing.T) {
 	}
 	if e := out.err(); e == nil || e.Error() != "second went wrong" {
 		t.Errorf("err = %v", e)
-	}
-}
-
-// The re-entry chip — a reading of a line the person sent, waiting to be
-// confirmed — is the card's decision on the web face, as it stands where
-// the picker stood in the TUI. "keep it here" is the chip's esc: nothing
-// moves, and the line goes as a message.
-func TestTheReentryChipIsAConfirmDecision(t *testing.T) {
-	b, _, eng, f, _ := headlessBoard(t, agent.NewFake("noted"))
-	ctx := context.Background()
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		m.setChip(&reentryReading{
-			id: f.ID, line: "the flag was never in the spec",
-			out: reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}, Reason: "requirement_missing", Note: "the flag was never in the spec"},
-		})
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	c, err := b.Card(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := c.Decision
-	if d == nil || d.Kind != webapi.DecisionConfirm || len(d.Options) != 2 || d.Options[0].ID != webOptionGo || d.Options[1].ID != webOptionKeep {
-		t.Fatalf("decision = %+v", d)
-	}
-	if _, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: d.Ref, Option: webOptionKeep, Against: d.Against.Token}, "Simon"); err != nil {
-		t.Fatal(err)
-	}
-	c, err = b.Card(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Decision != nil && c.Decision.Kind == webapi.DecisionConfirm {
-		t.Error("the chip is still up after keep")
-	}
-	if c.Stage != string(domain.StagePlan) {
-		t.Errorf("keep moved the card to %s", c.Stage)
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if cs := eng.Consult(f.ID); cs != nil {
-			for _, msg := range cs.Snapshot().Transcript {
-				if msg.Content == "the flag was never in the spec" {
-					return
-				}
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the kept line never reached the card's consult session")
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 

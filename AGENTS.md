@@ -55,7 +55,6 @@ leaf services.
 |---|---|
 | `domain` | Core types: features, bugs, stages, work items. No I/O. |
 | `workflow` | The single fixed state machine: one graph, its legal transitions and rerun edges. **Compiled in, never configurable.** |
-| `gatepolicy` | Shared checkpoint policy used by both the TUI and headless driver to raise and cross workflow gates. |
 | `spec` | The markdown spec artifact + its `gummi-checks` verification block. |
 | `state` | SQLite store: features, sessions, diff annotations, dependency edges, sequences, workspace. |
 | `engine` | The orchestrator. Binds stages to agent sessions, starts autonomous runs (nothing caps or queues them), routes turns, streams activity. Start here to trace behavior. |
@@ -81,9 +80,7 @@ leaf services.
 | `ui` | The Bubbletea TUI: board, chat, diff/spec views, inbox, dialogs. |
 | `cardops` | The card operations every face runs the same way: Merge, HandOff, Squash, Commit, Clean, and a linked PR's open-thread count, with the NDJSON emitter and the typed `Status`/`Outcome` exit table. `cmd/gummi`'s landing verbs call it directly. |
 | `driver` | The headless session loop behind `gummi run`/`resume`: mints a session from a prompt, pre-authorises its crew up to the envelope, ticks the crew and waits; stops `done`, or `needs_you` on a question or a crew decision the pre-authorisation does not cover. Emits NDJSON + typed exit statuses (`docs/HEADLESS.md`). |
-| `planround` / `reviewround` | Single seam persisting the plan-critique / review→fix round counters across process boundaries, so the TUI and headless driver can't drift apart on rerun caps. |
 | `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
-| `verdict` | Shared stage-verdict grammar the TUI and headless driver both parse, per DESIGN §13. |
 | `engine/freeformsession.go` | The one session that is not a stage run and still writes: a freeform card's whole working life — its worktree, its per-card lock and its envelope. It never commits for the agent: every commit on its branch is one the agent made on purpose. Built from `consultsession.go`'s lifecycle and `boardsession.go`'s absences; read all three together. The web face calls it a **session**: `engine/sessionmodel.go` holds the agent and model a session picks for itself, starting a backend the board did not launch, and switching mid-conversation, and `ui/websession.go` holds the picker's catalog and "write a spec" (DESIGN §19.8). |
 | `web` | `gummi web`: serves the board to a browser as a page of its own (DESIGN §20). Holds no board: it asks the TUI's model, run headless behind `ui.Bridge`, for every read and write. Pairing and device tokens (`pair.go`), same-origin and auth (`auth.go`), the SSE hub (`hub.go`), one `routes_*.go` per area, and the page itself under `assets/` (plain ES modules, no build step, strict CSP — no inline script or style). |
 | `web/push` | Web Push from the host with the standard library alone: VAPID identity, RFC 8291 encryption, the per-device subscription store, and the fan-out notifier the board's attention hook posts to. |

@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/gatepolicy"
-	"github.com/morphis/gummi/internal/verdict"
 )
 
 // TestBG090ResearchVerifyGateDoesNotOfferToLand: a passing verify puts
@@ -39,42 +37,5 @@ func TestBG090ResearchVerifyGateDoesNotOfferToLand(t *testing.T) {
 		if strings.Contains(a.label, "land") || strings.Contains(a.why, "land on main") {
 			t.Errorf("research verify row %q/%q talks about landing", a.label, a.why)
 		}
-	}
-}
-
-// TestBG090VerifyGateReasonMatchesTheKind covers the receipt half over
-// every kind: the gate reason onVerifyDone raises is what the inbox
-// shows and what card_events keeps, and it must offer to land exactly
-// when the kind has a branch to land — which every non-research kind is
-// the standing answer to.
-func TestBG090VerifyGateReasonMatchesTheKind(t *testing.T) {
-	for _, k := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch} {
-		id, err := domain.NewID(k, 5)
-		if err != nil {
-			t.Fatal(err)
-		}
-		reason := verifyGateReason(id.Kind(), true, "")
-		branchy := k != domain.KindResearch
-		if got := strings.Contains(reason, "land on main"); got != branchy {
-			t.Errorf("%s: gate reason %q offers landing = %v, want %v", k, reason, got, branchy)
-		}
-		if !branchy && !strings.Contains(reason, "done") {
-			t.Errorf("%s: gate reason %q says neither land nor done", k, reason)
-		}
-	}
-}
-
-// TestBG090GatePolicyStillRaisesTheGate pins the precondition the two
-// assertions above rest on: a clean research verify really does reach
-// the RaiseGate arm, so the wording under test is the wording shown.
-func TestBG090GatePolicyStillRaisesTheGate(t *testing.T) {
-	out := gatepolicy.Decide(gatepolicy.Input{
-		Stage:     domain.StageVerify,
-		Kind:      domain.KindResearch,
-		Verdict:   verdict.Pass,
-		WorkStage: domain.StageImplement,
-	})
-	if out.Action != gatepolicy.RaiseGate {
-		t.Fatalf("a clean research verify took the %v arm, not RaiseGate", out.Action)
 	}
 }

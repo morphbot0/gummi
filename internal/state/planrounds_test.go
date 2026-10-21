@@ -7,9 +7,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// A feature's plan-round count set via the SetPlanRounds side-channel
-// survives a round-trip through Rounds — the record the engine uses to
-// size the remaining critique budget on resume.
+// A legacy card's plan-round count reads back through Rounds.
 func TestPlanRoundsRoundtrip(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
@@ -18,9 +16,7 @@ func TestPlanRoundsRoundtrip(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetPlanRounds(ctx, f.ID, 2); err != nil {
-		t.Fatal(err)
-	}
+	seedRounds(t, s, f.ID, domain.RoundKindPlan, 2)
 	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
 		t.Fatalf("Rounds(plan) = %d, %v; want 2", got, err)
 	}
@@ -46,86 +42,6 @@ func TestPlanRoundsDefaultsZero(t *testing.T) {
 	}
 }
 
-// IncrementRounds(plan) is the live-cycle atomic bump: each call steps the
-// counter by one via a single upsert, from a fresh 0.
-func TestIncrementPlanRounds(t *testing.T) {
-	s := openStore(t)
-	ctx := context.Background()
-	f := feat(3, "Incremental")
-	if err := s.CreateFeature(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 1 {
-		t.Fatalf("PlanRounds after first increment = %d, %v; want 1", got, err)
-	}
-	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 3 {
-		t.Fatalf("PlanRounds after three increments = %d, %v; want 3", got, err)
-	}
-}
-
-// SetPlanRounds is the set-by-value side-channel write; the value it
-// stores round-trips through both Rounds(plan) and PlanRounds.
-func TestSetPlanRounds(t *testing.T) {
-	s := openStore(t)
-	ctx := context.Background()
-	f := feat(4, "Set by value")
-	if err := s.CreateFeature(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.SetPlanRounds(ctx, f.ID, 2); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
-		t.Fatalf("PlanRounds after set = %d, %v; want 2", got, err)
-	}
-	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
-		t.Fatalf("Rounds(plan) after set = %d, %v; want 2", got, err)
-	}
-}
-
-// ClearRounds(plan) resets the live-cycle counter to 0 and is harmless on
-// a row that is already 0 — the reset a completed plan cycle performs.
-func TestClearPlanRounds(t *testing.T) {
-	s := openStore(t)
-	ctx := context.Background()
-	f := feat(5, "Clear")
-	if err := s.CreateFeature(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.ClearRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 0 {
-		t.Fatalf("PlanRounds after clear = %d, %v; want 0", got, err)
-	}
-
-	// clearing an already-0 row succeeds and stays 0.
-	if err := s.ClearRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
-		t.Fatalf("clear on zero row: %v", err)
-	}
-	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 0 {
-		t.Fatalf("PlanRounds after second clear = %d, %v; want 0", got, err)
-	}
-}
-
 // Reopening an existing DB applies the idempotent rounds migration: a
 // second open succeeds and the plan-round count survives.
 func TestPlanRoundsMigrationIdempotent(t *testing.T) {
@@ -142,9 +58,7 @@ func TestPlanRoundsMigrationIdempotent(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetPlanRounds(ctx, f.ID, 2); err != nil {
-		t.Fatal(err)
-	}
+	seedRounds(t, s, f.ID, domain.RoundKindPlan, 2)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -157,5 +71,17 @@ func TestPlanRoundsMigrationIdempotent(t *testing.T) {
 	defer s.Close()
 	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
 		t.Fatalf("PlanRounds after reopen = %d, %v; want 2", got, err)
+	}
+}
+
+// seedRounds writes a legacy card's round count the way the retired
+// stage loop left it in the rounds table.
+func seedRounds(t *testing.T, s *Store, id domain.FeatureID, kind domain.RoundKind, n int) {
+	t.Helper()
+	if _, err := s.db.ExecContext(context.Background(), `
+		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, ?)
+		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = ?`,
+		string(id), string(kind), n, n); err != nil {
+		t.Fatal(err)
 	}
 }

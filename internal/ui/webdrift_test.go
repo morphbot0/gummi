@@ -13,7 +13,6 @@ import (
 	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/reentry"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -179,22 +178,5 @@ func TestWebEdgeDecisionsMatchTheTUI(t *testing.T) {
 	requirePickerRows(t, "multi-pick", picker, od.api)
 	if !od.api.Multi {
 		t.Error("a multi-pick question is served as single-pick")
-	}
-
-	// the chip: go is danger exactly when the terminal's enter will not
-	// give it (y is the key), and a spending go asks before it goes
-	for _, tc := range []struct {
-		name string
-		out  reentry.Outcome
-	}{
-		{"rewind", reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}}},
-		{"advance", reentry.Outcome{Action: reentry.Advance, Target: domain.StageImplement, Path: []domain.Stage{domain.StageImplement}}},
-	} {
-		p := &reentryReading{id: m.rows[3].F.ID, line: "go on", out: tc.out, goOnEnter: goOnEnter(tc.out)}
-		chip := m.webChipDecision(m.rows[3], p)
-		keys := ansi.Strip(chipKeys(m0Styles(), p.goOnEnter))
-		if got, yKey := chip.api.Options[0].Danger, strings.HasPrefix(keys, "y go"); got != yKey {
-			t.Errorf("%s: web go danger=%v but the terminal's keys read %q", tc.name, got, keys)
-		}
 	}
 }

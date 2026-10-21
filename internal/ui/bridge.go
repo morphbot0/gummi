@@ -274,8 +274,6 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 		m.emitRowChanges(msg)
 	case openDecisionsMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-	case sentBackMsg:
-		m.emitChanges(msg.notice)
 	case landConflictMsg:
 		m.emitChanges(msg.notice)
 	case noticeMsg:
@@ -296,8 +294,6 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 	case pausedMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(msg.id)})
-		m.emitChanges(msg.inner)
-	case autopilotSettledMsg:
 		m.emitChanges(msg.inner)
 	case todaySpentMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})

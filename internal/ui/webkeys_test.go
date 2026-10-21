@@ -39,8 +39,7 @@ func TestWebDecisionDetailsNameNoTerminalKeys(t *testing.T) {
 }
 
 // TestABlockedCrossingNamesNoKeyOnTheWeb: the refusal a blocked gate
-// answers with reads without keys on the web, and autopilot's park — a
-// record both faces read — takes the key-free words.
+// answers with reads without keys on the web.
 func TestABlockedCrossingNamesNoKeyOnTheWeb(t *testing.T) {
 	m := &Shell{}
 	res := engine.AdvanceResult{Status: engine.StatusBlockedQuestions, Blockers: 2, Feature: domain.Feature{ID: "FD-001", Kind: domain.KindFeature}}
@@ -50,10 +49,6 @@ func TestABlockedCrossingNamesNoKeyOnTheWeb(t *testing.T) {
 	}
 	if !terminalKey.MatchString(n.text) || terminalKey.MatchString(n.webText()) {
 		t.Errorf("terminal %q / web %q", n.text, n.webText())
-	}
-	p, ok := m.advanceOutcome("FD-001", state.ActorAutopilot, res, nil).(autopilotGateBlockedMsg)
-	if !ok || terminalKey.MatchString(p.text) {
-		t.Errorf("autopilot's park reads %q", p.text)
 	}
 }
 

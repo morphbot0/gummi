@@ -71,9 +71,9 @@ func mkFeature(t *testing.T, store *state.Store, num int, title string, stage do
 }
 
 // TestReconstructInboxAfterRestart rebuilds the needs-attention queue
-// from durable session state: a parked budget stop, a plain gate, and a
-// failed run all reappear after a restart, so the top-up path for a
-// parked card isn't stranded (the drive's FD-002 finding).
+// from durable session state: a parked budget stop and a failed run
+// reappear after a restart, so the top-up path for a parked card isn't
+// stranded (the drive's FD-002 finding).
 func TestReconstructInboxAfterRestart(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
@@ -106,8 +106,8 @@ func TestReconstructInboxAfterRestart(t *testing.T) {
 	m.AttachEngine(eng)
 	m.reconstructInbox()
 
-	if m.inbox.len() != 3 {
-		t.Fatalf("reconstructed inbox len = %d, want 3: %+v", m.inbox.len(), m.inbox.list())
+	if m.inbox.len() != 2 {
+		t.Fatalf("reconstructed inbox len = %d, want 2: %+v", m.inbox.len(), m.inbox.list())
 	}
 	got := map[domain.FeatureID]attnKind{}
 	for _, it := range m.inbox.list() {
@@ -116,8 +116,10 @@ func TestReconstructInboxAfterRestart(t *testing.T) {
 	if got[fBudget.ID] != attnBudget {
 		t.Errorf("budget park reconstructed as %q, want budget", got[fBudget.ID])
 	}
-	if got[fGate.ID] != attnGate {
-		t.Errorf("plain gate reconstructed as %q, want gate", got[fGate.ID])
+	// a legacy card's settled stage is not a gate anyone is invited to
+	// cross: nothing drives such a card on
+	if k, ok := got[fGate.ID]; ok {
+		t.Errorf("a settled stage reconstructed as %q, want nothing", k)
 	}
 	if got[fFail.ID] != attnFailure {
 		t.Errorf("failed run reconstructed as %q, want failure", got[fFail.ID])

@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -99,13 +98,6 @@ type QuitStoppedCard struct {
 	// event's own timestamp, read back off the log rather than kept
 	// anywhere else.
 	ParkedAt time.Time
-	// Corrective is the corrective-round budget already spent
-	// (domain.RoundKindCorrective), the same count autopilotBody
-	// (autopilot.go) reads against verdict.MaxRounds — the cap itself
-	// is a ui-layer concern (verdict imports engine, so engine can't
-	// import verdict back); the reopen prompt reads it the same way
-	// autopilotBody does.
-	Corrective int
 }
 
 // QuitStoppedCards is StopForQuit's read side: the cards the
@@ -146,11 +138,7 @@ func (e *Engine) QuitStoppedCards(ctx context.Context) ([]QuitStoppedCard, error
 		if n := len(evs); n > 0 {
 			parkedAt = evs[n-1].At
 		}
-		n, err := rounds.Load(ctx, e.cfg.Store, id, domain.RoundKindCorrective)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, QuitStoppedCard{Feature: s.Feature, ParkedAt: parkedAt, Corrective: n})
+		out = append(out, QuitStoppedCard{Feature: s.Feature, ParkedAt: parkedAt})
 	}
 	return out, nil
 }

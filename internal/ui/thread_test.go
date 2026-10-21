@@ -727,39 +727,6 @@ func TestSendItBackVerbsCarryTheirRemainder(t *testing.T) {
 	}
 }
 
-// TestAutopilotVerbDegradesToTheMenu: the autopilot switch is a card
-// SETTING, not one of the four answers to "what now" — the proposal's own
-// table files it under housekeeping — so it never appears in the answer
-// set and the on-screen rule always sends it to the "/" menu, where the
-// card's inventory carries it. It must find something there: a
-// pre-filtered menu with no rows is a worse dead end than the "isn't
-// wired to an action yet" notice it replaced.
-func TestAutopilotVerbDegradesToTheMenu(t *testing.T) {
-	m := populatedShell(120, 34)
-	m.cardOpen = true
-	r := m.rows[m.sel]
-
-	if m.verbOnScreen(r, "autopilot") {
-		t.Fatal("the autopilot switch is in the answer set — it is a card setting, not an answer")
-	}
-	if !m.verbDegrades(r, "autopilot") {
-		t.Fatal("/autopilot does not degrade to the menu")
-	}
-
-	m.threadInput.SetValue("/autopilot")
-	m.submitThreadInput(r)
-	cm, ok := m.Overlay.Top().(*commandMenu)
-	if !ok {
-		t.Fatalf("/autopilot did not open the command menu: %T", m.Overlay.Top())
-	}
-	if cm.filter.Value() != "autopilot" {
-		t.Fatalf("menu filter = %q, want the verb", cm.filter.Value())
-	}
-	if len(cm.visible()) == 0 {
-		t.Error("the pre-filtered menu is empty — the degradation is a dead end")
-	}
-}
-
 // TestVerbMenuOpensCommandMenuPreFiltered: a bare "/" (already consumed
 // by focusThreadInput on the way in, so this covers what happens once the
 // user re-types it as content) opens the same command menu boardKey's

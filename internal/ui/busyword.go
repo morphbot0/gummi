@@ -2,91 +2,14 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 )
 
-// The plan stage hides an automatic plan→critique→replan loop behind a
-// single stage pill (reviewloop.go): the feature never leaves Plan, so
-// without extra signal the UI reads as "the planner keeps re-running".
-// This file names the loop's legs and renders where it currently is —
-// a breadcrumb on the dashboard, a leg word on the board card, and the
-// verb next to the activity spinner.
-
-// Plan-loop legs, in flow order.
-const (
-	planLegWrite    = iota // architect writing (or revising) the plan
-	planLegCritique        // fresh-context reviewer refuting it
-	planLegApprove         // human gate at the end of the loop
-)
-
-// planLoopLeg reports which leg a Plan-stage feature is on — escalated
-// marks an approve leg the loop gave up on rather than finished clean —
-// or ok=false when there is no loop activity to show (nothing live, no
-// gate raised).
-func (m *Shell) planLoopLeg(id domain.FeatureID) (leg int, escalated, ok bool) {
-	// only a running session marks an agent leg — a finished one
-	// lingers for its transcript while the gate below owns the loop state.
-	if sess := m.sessionFor(id); sess != nil &&
-		sess.Feature.Stage == domain.StagePlan && !sess.Interactive {
-		if sess.State() == engine.StateRunning {
-			if sess.Critique {
-				return planLegCritique, false, true
-			}
-			return planLegWrite, false, true
-		}
-	}
-	// no live session: a pending gate means the loop finished (clean or
-	// escalated) and the plan is waiting on the human.
-	if it, ok := m.inbox.get(id); ok && it.Kind == attnGate {
-		return planLegApprove, it.Escalated, true
-	}
-	return 0, false, false
-}
-
-// planLoopLine renders the dashboard breadcrumb for the plan loop: past
-// legs checked off quietly, the live one in the stage accent, upcoming
-// ones faint — plus the replan round once the critique has bounced.
-func (m *Shell) planLoopLine(f domain.Feature) string {
-	if f.Stage != domain.StagePlan {
-		return ""
-	}
-	leg, escalated, ok := m.planLoopLeg(f.ID)
-	if !ok {
-		return ""
-	}
-	s := m.styles
-	names := []string{"plan", "critique", "approve"}
-	if m.round(f.ID, domain.RoundKindPlan) > 0 {
-		names[planLegWrite] = "replan"
-	}
-	parts := make([]string, len(names))
-	for i, n := range names {
-		switch {
-		case i < leg:
-			parts[i] = s.Subtle.Render(n + " ✓")
-		case i == leg && escalated:
-			// the loop gave up (round cap or unclear verdict): the gate is
-			// a needs-you, not a clean pass
-			parts[i] = s.Warning.Render("● " + n)
-		case i == leg:
-			parts[i] = s.Stage(f.Stage).Render("● " + n)
-		default:
-			parts[i] = s.Faint.Render(n)
-		}
-	}
-	line := strings.Join(parts, s.Faint.Render(" → "))
-	if r := m.round(f.ID, domain.RoundKindPlan); r > 0 {
-		line += s.Faint.Render("  ·  round " + itoa(r) + "/" + itoa(maxPlanRounds))
-	}
-	if escalated {
-		line += s.Warning.Render("  ·  escalated")
-	}
-	return line
-}
+// What a busy card is doing, in a word: the board row's word beside its
+// spinner, and the thread's busy line with its clock.
 
 // cardBusyWord names the work behind a busy board row's spinner, only
 // meaningful when cardBusy(r) is true. A running baseline takes
@@ -107,12 +30,6 @@ func (m *Shell) planLoopLine(f domain.Feature) string {
 func (m *Shell) cardBusyWord(r featureRow) string {
 	if m.baselining[r.F.ID] {
 		return "checking"
-	}
-	if m.reentryRead != nil && m.reentryRead.id == r.F.ID {
-		// a re-entry read is a scribe pass and counts as one for busy-ness,
-		// but the row can say what it is actually doing: reading the line
-		// the reader just typed, not writing anything
-		return "reading"
 	}
 	if m.scribing[r.F.ID] > 0 {
 		return "scribing"
@@ -158,20 +75,15 @@ func (m *Shell) runningLabel(snap engine.Snapshot, since time.Time) string {
 // runningVerb is runningLabel's word without the elapsed clock —
 // Interactive sessions (a raw attach, a consult, the board chat) and any
 // stage besides the three that actually run an agent turn fall back to
-// the generic "running"; the plan loop's own legs take priority over the
-// per-stage verb because they say more than the stage alone can.
+// the generic "running".
 func (m *Shell) runningVerb(snap engine.Snapshot) string {
 	if !snap.Interactive {
 		switch snap.Feature.Stage {
 		case domain.StagePlan:
-			switch {
-			case snap.Critique:
+			if snap.Critique {
 				return "critiquing plan"
-			case m.round(snap.Feature.ID, domain.RoundKindPlan) > 0:
-				return "replanning"
-			default:
-				return "writing plan"
 			}
+			return "writing plan"
 		case domain.StageImplement:
 			return "implementing"
 		case domain.StageVerify:

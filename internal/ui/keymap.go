@@ -310,7 +310,6 @@ func (m *Shell) boardBindings() []binding {
 		{key: "u", label: "budget", help: "set the card's budget (dollars; 0 = uncapped)"},
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "open a terminal agent in this card's worktree"},
-		{key: "A", label: "autopilot", help: "set how far this card runs on its own, and start it"},
 		{key: "tab", label: "next tab", help: "cycle the tabs (board, stats, inbox, agent)"},
 		{key: tabChords, label: "tab", help: "jump straight to board / stats / inbox / agent"},
 		{key: "i", label: "inbox", help: "open the needs-you inbox"},
@@ -362,7 +361,7 @@ func (m *Shell) boardBindings() []binding {
 		filtered := bs[:0:0]
 		for _, b := range bs {
 			switch b.key {
-			case "g", "s", "b", "v", "A":
+			case "g", "s", "b", "v":
 				continue
 			}
 			filtered = append(filtered, b)
@@ -405,4 +404,3 @@ func (m *Shell) splashBindings() []binding {
 		{key: "q", label: "quit", bar: true},
 	}
 }
-

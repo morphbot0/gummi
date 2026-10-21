@@ -1396,59 +1396,6 @@ func (s *Store) Rounds(ctx context.Context, id domain.FeatureID, kind domain.Rou
 	return count, nil
 }
 
-// IncrementRounds bumps a feature's round count for the given kind by one
-// in a single atomic upsert — never a read-modify-write — so concurrent
-// processes can't lose an increment across a resume. It is unbounded: no
-// cap lives here (see verdict.MaxRounds).
-func (s *Store) IncrementRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind) error {
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, 1)
-		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = count + 1`,
-		string(id), string(kind)); err != nil {
-		return fmt.Errorf("incrementing %s-rounds for %s: %w", kind, id, err)
-	}
-	return nil
-}
-
-// ClearRounds resets a feature's round count for the given kind to 0 —
-// the reset that happens when a cycle completes or escalates. A
-// live-cycle counter, so clearing a row that doesn't exist yet is
-// harmless.
-func (s *Store) ClearRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind) error {
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, 0)
-		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = 0`,
-		string(id), string(kind)); err != nil {
-		return fmt.Errorf("clearing %s-rounds for %s: %w", kind, id, err)
-	}
-	return nil
-}
-
-// SetPlanRounds sets a feature's plan-critique round count by value — a
-// test-only side-channel write routed to the keyed rounds storage. No cap
-// is enforced here; that stays verdict.MaxRounds.
-func (s *Store) SetPlanRounds(ctx context.Context, id domain.FeatureID, rounds int) error {
-	return s.setRounds(ctx, id, domain.RoundKindPlan, rounds)
-}
-
-// SetReviewRounds sets a feature's review→fix round count by value — a
-// test-only side-channel write routed to the keyed rounds storage,
-// matching SetPlanRounds. No cap is enforced here; that stays
-// verdict.MaxRounds.
-func (s *Store) SetReviewRounds(ctx context.Context, id domain.FeatureID, rounds int) error {
-	return s.setRounds(ctx, id, domain.RoundKindReview, rounds)
-}
-
-func (s *Store) setRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind, rounds int) error {
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, ?)
-		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = ?`,
-		string(id), string(kind), rounds, rounds); err != nil {
-		return fmt.Errorf("setting %s-rounds for %s: %w", kind, id, err)
-	}
-	return nil
-}
-
 // StageSpend is one rollup row from stage_spend: the realized cost a
 // stage incurred on a given model, in credits and tokens. Session names
 // the stage session that spent it, and is empty on a row rolled up

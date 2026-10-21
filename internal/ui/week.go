@@ -12,7 +12,6 @@ import (
 
 	"github.com/morphis/gummi/internal/cardrun"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -140,7 +139,7 @@ func (d *weekDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 // and belongs nowhere near a frame.
 func (m *Shell) measureWeek() tea.Cmd {
 	rows := append([]featureRow(nil), m.rows...)
-	rs, now, store := m.roundStore, m.now(), m.store
+	now, store := m.now(), m.store
 	return func() tea.Msg {
 		ctx := context.Background()
 		rep := weekReport{ByEnding: map[domain.Ending]int{}}
@@ -159,10 +158,9 @@ func (m *Shell) measureWeek() tea.Cmd {
 				ID: r.F.ID, Title: r.F.Title, Ending: r.F.Ending(r.Landed),
 				Commit: r.F.LandedSHA, Spend: r.F.Spend.Credits, At: at,
 			}
-			if rs != nil {
-				c.Corrective, _ = rounds.Load(ctx, rs, r.F.ID, domain.RoundKindCorrective)
-			}
 			if store != nil {
+				// a legacy workflow card's rework count; a session has none
+				c.Corrective, _ = store.Rounds(ctx, r.F.ID, domain.RoundKindCorrective)
 				if run, ok := weekRun(ctx, store, r.F); ok {
 					c.Rework, c.Waiting, c.Elapsed = run.Money.Rework, run.Clock.Waiting, run.Clock.Elapsed
 					c.Envelope = run.Envelope.Granted

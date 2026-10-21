@@ -272,8 +272,7 @@ func (b *Bridge) RefreshRepos(ctx context.Context) {
 }
 
 // CreateCard is POST /api/cards: the new-card form, filled in and
-// submitted as its Create (or, with Autopilot, its "Create & autopilot")
-// button submits it. It answers the new card.
+// submitted as its Create button submits it. It answers the new card.
 func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, person string) (webapi.Card, error) {
 	ct, ok := webCardType(req.Kind)
 	if !ok {
@@ -288,18 +287,13 @@ func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, p
 	}
 	// the name the request carries may be a clone made since launch
 	b.RefreshRepos(ctx)
-	// only "create & autopilot" answers the autopilot switch its flow
-	// opens; a plain create leaves any such dialog for a person
 	in := webInput{actor: state.PersonActor(person)}
-	if req.Autopilot {
-		in.mode, in.autopilot, in.handoverAsked = domain.GateAutopilot, true, true
-	}
 	out, werr := b.intent(ctx, "", in, webWait, func(m *Shell, _ featureRow) (tea.Cmd, error) {
 		d := m.openCardForm(ct)
 		if problem := m.webFill(d, req); problem != "" {
 			return nil, refuse(WebBadRequest, problem)
 		}
-		done, cmd := d.submit(req.Autopilot)
+		done, cmd := d.submit()
 		if !done {
 			return nil, refuse(WebBadRequest, d.errText)
 		}

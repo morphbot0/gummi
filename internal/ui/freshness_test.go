@@ -2,13 +2,10 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -206,67 +203,6 @@ func TestADeletedCardIsReportedGone(t *testing.T) {
 	}
 }
 
-// A re-entry chip raised after its request stopped waiting reaches every
-// open page. With a real model the read takes longer than the request
-// follows it; the chip was raised on a detached message nothing mapped
-// to a change, and the page that sent the line saw nothing until a
-// reload.
-func TestAChipRaisedAfterTheRequestReturnedIsPushed(t *testing.T) {
-	var release sync.Once
-	gate := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		reply := "ok"
-		if strings.Contains(msg, "INTENT: <one of the words above>") {
-			<-gate // the scribe answers only after the request returned
-			reply = "INTENT: requirement_missing"
-		}
-		return []agent.Event{{Kind: agent.EventMessage, Text: reply}, {Kind: agent.EventIdle}}
-	}}
-	t.Cleanup(func() { release.Do(func() { close(gate) }) })
-	b, log, _, f, _ := headlessBoardFor(t, ag, domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageVerify})
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	withWorktree(t, b, f)
-	ctx := context.Background()
-	_, err := b.intent(ctx, f.ID, webInput{}, 20*time.Millisecond, func(m *Shell, r featureRow) (tea.Cmd, error) {
-		return m.routeReentry(r, "bounce", "the persistence step was never in the spec"), nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := b.Card(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Decision != nil && c.Decision.Kind == webapi.DecisionConfirm {
-		t.Fatal("precondition: the chip is up before the scribe answered")
-	}
-	log.mu.Lock()
-	mark := len(log.all)
-	log.mu.Unlock()
-	release.Do(func() { close(gate) })
-	waitCard(t, b, "FD-001", "chip", func(c webapi.Card) bool {
-		return c.Decision != nil && c.Decision.Kind == webapi.DecisionConfirm
-	})
-	// a card change reported after the chip went up: the page refetches
-	// the head on it and draws the chip
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		log.mu.Lock()
-		var seen bool
-		for _, c := range log.all[mark:] {
-			seen = seen || (c.Kind == webapi.ChangeCard && c.ID == "FD-001")
-		}
-		log.mu.Unlock()
-		if seen {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the chip went up and no page was told the card changed")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
 // A commit made in a card's worktree by something else — another
 // process, a person at a shell — reaches the open page: the store never
 // hears of it, so only a watch of the branch head can.
@@ -382,123 +318,5 @@ func TestTwoAutopilotCardsBothRun(t *testing.T) {
 		if r.Running == nil || r.Running.Verb == "queued" {
 			t.Errorf("%s = %+v, want a running card", r.ID, r.Running)
 		}
-	}
-}
-
-// What the status bar says once a slow read comes back — after the request
-// that sent the line has answered — reaches the open pages as a toast: the
-// request's own outcome can no longer carry it.
-func TestANoticeFromADetachedFlowIsToasted(t *testing.T) {
-	gate := make(chan struct{})
-	var release sync.Once
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if strings.Contains(msg, "INTENT: <one of the words above>") {
-			<-gate
-			return []agent.Event{{Kind: agent.EventError, Err: errors.New("model unavailable")}}
-		}
-		return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
-	}}
-	t.Cleanup(func() { release.Do(func() { close(gate) }) })
-	b, log, _, f, _ := headlessBoardFor(t, ag, domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageVerify})
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	withWorktree(t, b, f)
-	ctx := context.Background()
-	if _, err := b.intent(ctx, f.ID, webInput{}, 20*time.Millisecond, func(m *Shell, r featureRow) (tea.Cmd, error) {
-		return m.routeReentry(r, "bounce", "the persistence step was never in the spec"), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	log.mu.Lock()
-	mark := len(log.all)
-	log.mu.Unlock()
-	release.Do(func() { close(gate) })
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		log.mu.Lock()
-		var said string
-		for _, c := range log.all[mark:] {
-			if c.Kind == webapi.ChangeToast && strings.Contains(c.Text, "could not read the card") {
-				said = c.Text
-			}
-		}
-		log.mu.Unlock()
-		if said != "" {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the read failed after the request returned, and no page was told: %+v", log.all[mark:])
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// A passed verify the person stops at ("stop here", a park) is still a
-// passed verify: the pause took the session's done state, which the
-// verdict was read from, and the page headed the card "verify failed"
-// over "land on main" while `gummi status` said verified.
-func TestAPassedVerifyStoppedByHandStillReadsPassed(t *testing.T) {
-	ag := verdictAgent(func(opts agent.SessionOpts) string {
-		if isVerify(opts) {
-			return "All checks green.\nVERDICT: pass"
-		}
-		return "done"
-	})
-	b, _, _, f, _ := headlessBoardFor(t, ag, domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageVerify})
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	withWorktree(t, b, f)
-	ctx := context.Background()
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { return m.runStage(f) }); err != nil {
-		t.Fatal(err)
-	}
-	c := waitCard(t, b, "FD-001", "verify passed", func(c webapi.Card) bool {
-		return c.Decision != nil && c.Decision.Word == "verify passed"
-	})
-	// the card reads "verify passed" once the session is done, a beat
-	// before the board handles its end and raises the gate: a stop that
-	// lands in between leaves no gate to keep, so wait for the gate
-	deadline := time.Now().Add(15 * time.Second)
-	for raised := false; !raised; time.Sleep(20 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatal("the passed verify never raised its gate")
-		}
-		_ = b.Do(ctx, func(m *Shell) tea.Cmd {
-			it, ok := m.inbox.get(f.ID)
-			raised = ok && it.Kind == attnGate
-			return nil
-		})
-	}
-	// the gate settles a beat after it is raised (the stamp, the diff):
-	// an answer against a token that moved is read again and resent
-	for try := 0; ; try++ {
-		_, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "pause", Against: c.Decision.Against.Token}, "Simon")
-		if err == nil {
-			break
-		}
-		if try == 50 || !strings.Contains(err.Error(), "moved") {
-			t.Fatal(err)
-		}
-		time.Sleep(20 * time.Millisecond)
-		if c, err = b.Card(ctx, "FD-001"); err != nil || c.Decision == nil {
-			t.Fatalf("re-reading the gate: %v", err)
-		}
-	}
-	deadline = time.Now().Add(5 * time.Second)
-	for paused := false; !paused; time.Sleep(20 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatal("the stop never paused the session")
-		}
-		_ = b.Do(ctx, func(m *Shell) tea.Cmd {
-			s := m.sessionFor(f.ID)
-			paused = s != nil && s.State() == engine.StatePaused
-			return nil
-		})
-	}
-	// the card reads the paused session on its next refresh, a beat
-	// behind the session itself
-	c = waitCard(t, b, "FD-001", "verify passed after the stop", func(c webapi.Card) bool {
-		return c.Decision != nil && c.Decision.Word == "verify passed" && c.Decision.Tone == "ok"
-	})
-	if !strings.HasPrefix(c.Decision.Question, "verification passed") {
-		t.Errorf("its question reads %q", c.Decision.Question)
 	}
 }

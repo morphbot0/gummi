@@ -53,9 +53,6 @@ func (m *Shell) openCard() tea.Cmd {
 // (F5) — "leaving hides, never discards" applies to the draft too, just
 // scoped to the card that owns it rather than to the shared widget.
 func (m *Shell) closeCard() {
-	if r, ok := m.selected(); ok {
-		m.endChat(r.F.ID)
-	}
 	m.clearTransientNotice()
 	if r, ok := m.selected(); ok {
 		m.saveThreadDraft(r.F.ID)
@@ -120,12 +117,7 @@ func (m *Shell) jumpToCard(id domain.FeatureID) (tea.Cmd, bool) {
 		return nil, false
 	}
 	if from, ok := m.selected(); ok && from.F.ID != id {
-		// leaving a card is leaving its conversation, the way picking a
-		// row is (decision.go's answerDecision) — the next line typed on
-		// the card arrived at is read, not continued from a thread it was
-		// never part of.
 		m.saveThreadDraft(from.F.ID)
-		m.endChat(from.F.ID)
 	}
 	m.sel = at
 	if !m.cardOpen {
@@ -605,7 +597,6 @@ func (m *Shell) cardPageBindings() []binding {
 	out = append(out, []binding{
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread — it opens on the newest event", bar: true},
 		{key: "/", label: "compose", help: "focus the thread input — a message, or a leading verb/command", bar: true},
-		{key: "A", label: "autopilot", help: "open the autopilot switch — off/gates/full, and it starts the card"},
 	}...)
 	out = append(out, m.threadOutputsBinding())
 	for _, b := range m.boardBindings() {
