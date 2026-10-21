@@ -25,7 +25,7 @@ func TestCreateFeatureSeedsDraft(t *testing.T) {
 	m.Attach(store, wt, ws)
 
 	desc := "Dark mode toggle\n\nRespect the OS preference by default.\nPersist an explicit override in config."
-	if msg := m.createCard(formResult{Desc: desc})(); msg != nil {
+	if msg := m.createCard(formResult{Kind: domain.KindFeature, Desc: desc})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}
@@ -46,7 +46,7 @@ func TestCreateFeatureSeedsDraft(t *testing.T) {
 	}
 
 	// one line carries no more than the card already does — no draft
-	if msg := m.createCard(formResult{Desc: "Add a healthz endpoint"})(); msg != nil {
+	if msg := m.createCard(formResult{Kind: domain.KindFeature, Desc: "Add a healthz endpoint"})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}

@@ -247,15 +247,4 @@ func TestCardFormNeverAsksAGoalForARepo(t *testing.T) {
 	if got.Repo != "" {
 		t.Errorf("created repo = %q, want none — the plan gate settles it", got.Repo)
 	}
-
-	// and switching the kind row onto a goal takes the focus off a repo
-	// row that is no longer there
-	g := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"a", "b"}, false, "", nil, 0, nil)
-	if g.focus != cardStopRepo {
-		t.Fatalf("a feature still opens on the repo row, got %d", g.focus)
-	}
-	g.setKind(domain.CardType{Kind: domain.KindGoal})
-	if g.focus != cardStopText {
-		t.Fatalf("focus = %d after switching to a goal, want the text box", g.focus)
-	}
 }

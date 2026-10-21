@@ -231,7 +231,7 @@ func (e *Engine) delegateMint(ctx context.Context, parentID domain.FeatureID, r 
 	f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
 		Kind: r.kind, Description: r.description, Profile: parent.Profile, Envelope: r.envelope,
 		Repo: parent.Repo, RequireRepo: e.RequireRepo, GateApproval: domain.GateAutopilot,
-		Parent: parent.ID, Unattended: true,
+		Parent: parent.ID, Unattended: true, Workflow: true,
 	})
 	if err != nil {
 		return "not created: " + err.Error()

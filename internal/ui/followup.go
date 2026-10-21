@@ -20,8 +20,8 @@ import (
 // history offered nothing at all, so the honest path was `esc`, `n`, and
 // typing out again the context this card is already keeping.
 //
-// So: the line you type at a finished card becomes a bug card, and the
-// new card carries where it came from. One keystroke instead of a
+// So: the line you type at a finished card becomes a follow-up session,
+// and the new card carries where it came from. One keystroke instead of a
 // re-transcription, and the provenance is recorded rather than
 // remembered.
 
@@ -68,7 +68,7 @@ func (m *Shell) openBugFromCard(r featureRow) tea.Cmd {
 // so the composer holds a word the bug card must not be titled with.
 func (m *Shell) bugFromLine(r featureRow, line string) tea.Cmd {
 	if line == "" {
-		m.notice = noticeMsg{text: "type what is wrong — your line becomes the bug card"}
+		m.notice = noticeMsg{text: "type what is wrong — your line becomes the follow-up session"}
 		m.focusThreadInput()
 		return nil
 	}
@@ -80,7 +80,7 @@ func (m *Shell) bugFromLine(r featureRow, line string) tea.Cmd {
 	}
 	f, landed := r.F, r.Landed
 	title, _, _ := domain.SplitFreeform(line)
-	detail := "\na new bug card, carrying where it came from.\n\n" +
+	detail := "\na new session, carrying where it came from.\n\n" +
 		"  " + pad("title") + title + "\n" +
 		"  " + pad("found in") + f.Name() + " — " + endingWord(f.Ending(landed)) + "\n" +
 		"  " + pad("carries") + f.ArtifactPath() + " · " + f.BranchName()
@@ -89,7 +89,7 @@ func (m *Shell) bugFromLine(r featureRow, line string) tea.Cmd {
 		id:           "confirm-bug-from-card",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Open it",
-		question:     "open a bug from " + f.Name() + "?",
+		question:     "start a follow-up session from " + f.Name() + "?",
 		detail:       detail,
 		onConfirm:    func() tea.Cmd { return m.mintBugFromCard(f, line, landed) },
 	})
@@ -117,15 +117,13 @@ func (m *Shell) mintBugFromCard(parent domain.Feature, line string, landed bool)
 	m.saveThreadDraft(parent.ID)
 	return func() tea.Msg {
 		f, err := cardmint.Mint(context.Background(), m.store, m.ws, cardmint.Input{
-			Kind:        domain.KindBug,
+			Kind:        domain.KindFreeform,
 			Description: desc,
 			Profile:     parent.Profile,
 			Envelope:    env,
 			Repo:        parent.Repo,
 			RequireRepo: m.requireRepo,
-			// FoundBy has always meant "the card that filed this one" —
-			// it was written only by a goal until now, because a goal was
-			// the only thing that ever filed one.
+			// FoundBy: "the card that filed this one"
 			FoundBy: parent.ID,
 		})
 		if err != nil {
@@ -135,6 +133,6 @@ func (m *Shell) mintBugFromCard(parent domain.Feature, line string, landed bool)
 		// the sentence they just typed is its whole content, and the card
 		// they typed it at has ended. Leaving the cursor on the finished
 		// card would answer a mint with a page that cannot act on it.
-		return cardCreatedMsg{f: f, open: true}
+		return cardCreatedMsg{f: f, open: true, opening: desc}
 	}
 }

@@ -45,7 +45,7 @@ func TestFollowUpTakesTheTypedLine(t *testing.T) {
 	}
 
 	m = typeString(t, m, "the export drops the last row")
-	if out := ansi.Strip(m.threadView(100, 30)); !strings.Contains(out, "open a bug from this with your words") {
+	if out := ansi.Strip(m.threadView(100, 30)); !strings.Contains(out, "start a follow-up session with your words") {
 		t.Fatalf("typing did not aim and relabel the follow-up:\n%s", out)
 	}
 
@@ -69,12 +69,12 @@ func TestFollowUpTakesTheTypedLine(t *testing.T) {
 
 	var bug *domain.Feature
 	for i := range m.rows {
-		if m.rows[i].F.Kind == domain.KindBug {
+		if m.rows[i].F.Kind == domain.KindFreeform {
 			bug = &m.rows[i].F
 		}
 	}
 	if bug == nil {
-		t.Fatalf("no bug card was minted (notice %q)", m.notice.text)
+		t.Fatalf("no follow-up session was minted (notice %q)", m.notice.text)
 	}
 	if !strings.Contains(bug.Title, "export") {
 		t.Errorf("bug title = %q, want the typed line", bug.Title)

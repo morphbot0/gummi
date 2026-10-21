@@ -132,7 +132,7 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await expect(page.getByTestId('live')).toBeVisible();
     await L.snap('running-thread');
 
-    // landed, backlog with a dependency, a bug, freeform, research, a stack
+    // landed, backlog with a dependency, a bug, freeform, a stack
     await L.open(b.landed);
     await L.snap('landed-thread');
     await L.tab('stats');
@@ -143,10 +143,6 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await L.snap('bug-thread');
     await L.open(b.freeform!);
     await L.snap('freeform-thread');
-    await L.open(b.research);
-    await L.snap('research-thread');
-    await L.tab('spec');
-    await L.snap('research-spec');
     await L.open(b.stacked[0]);
     await L.snap('stacked-thread');
 

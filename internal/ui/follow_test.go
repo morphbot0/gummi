@@ -267,7 +267,7 @@ func TestEventCardCreatedReloadsRows(t *testing.T) {
 	}
 
 	f, err := cardmint.Mint(context.Background(), m.store, m.ws, cardmint.Input{
-		Kind: domain.KindBug, Description: "a card minted over the workspace MCP endpoint",
+		Kind: domain.KindFreeform, Description: "a card minted over the workspace MCP endpoint",
 	})
 	if err != nil {
 		t.Fatalf("Mint: %v", err)

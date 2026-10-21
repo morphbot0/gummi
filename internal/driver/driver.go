@@ -2265,6 +2265,8 @@ func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc str
 		Repo: repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
 		Adopt: d.opts.Adopt, InspectAdopted: d.eng.AdoptInspector(ctx, repo, d.opts.Base),
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
+		// `gummi run` still drives a card through the stage graph
+		Workflow: true,
 	})
 }
 

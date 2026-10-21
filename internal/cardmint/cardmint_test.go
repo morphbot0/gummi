@@ -50,6 +50,7 @@ func TestMintFeatureQuickRoute(t *testing.T) {
 	ctx := context.Background()
 
 	f, err := Mint(ctx, store, ws, Input{
+		Workflow:    true,
 		Kind:        domain.KindFeature,
 		Description: "Add a card_new tool\n\nSo hosted agents can mint cards too.",
 		Envelope:    2400,
@@ -89,6 +90,7 @@ func TestMintFeatureQuickRoute(t *testing.T) {
 func TestMintBugSeedsBugTemplate(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
+		Workflow:    true,
 		Kind:        domain.KindBug,
 		Description: "Repro bug\n\nThis is a multi-line description used to trigger the seeded draft path.",
 		Envelope:    2400,
@@ -121,7 +123,8 @@ func TestMintBugSeedsBugTemplate(t *testing.T) {
 func TestMintNoOverflowNoDraft(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "Just a title", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "Just a title", Envelope: 2400,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +140,8 @@ func TestMintNoOverflowNoDraft(t *testing.T) {
 func TestMintAcceptanceAloneSeedsDraft(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "Just a title", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "Just a title", Envelope: 2400,
 		Acceptance: "it must not panic",
 	})
 	if err != nil {
@@ -159,7 +163,8 @@ func TestMintAcceptanceAloneSeedsDraft(t *testing.T) {
 func TestMintResearch(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindResearch, Description: "grounded look at auth", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindResearch, Description: "grounded look at auth", Envelope: 2400,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +192,8 @@ func TestMintResearch(t *testing.T) {
 func TestMintResearchDoesNotDoubleTheWord(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindResearch, Description: "Research: compare greeting libraries", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindResearch, Description: "Research: compare greeting libraries", Envelope: 2400,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +204,7 @@ func TestMintResearchDoesNotDoubleTheWord(t *testing.T) {
 	if b := f.BranchName(); strings.Contains(b, "research-research") || strings.Contains(b, "research/research") {
 		t.Errorf("branch name doubles the word: %s", b)
 	}
-	g, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindResearch, Description: "Research", Envelope: 2400})
+	g, err := Mint(context.Background(), store, ws, Input{Workflow: true, Kind: domain.KindResearch, Description: "Research", Envelope: 2400})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +221,8 @@ func TestMintRejectsUnknownRepoBeforeMinting(t *testing.T) {
 	seq := readSeq(t, ws.SeqFile())
 
 	_, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "should not exist", Envelope: 2400,
 		Repo:        "nope",
 		RequireRepo: func(string) error { return errors.New("repository \"nope\" is not configured") },
 	})
@@ -248,7 +255,8 @@ func nameIsA(name string) error {
 func TestMintNilRequireRepoFailsClosed(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	_, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400, Repo: "a",
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "should not exist", Envelope: 2400, Repo: "a",
 	})
 	if err == nil {
 		t.Fatal("expected an error minting with Repo set and RequireRepo nil")
@@ -267,7 +275,8 @@ func TestMintRejectsUnnamedRepoWhenThereIsNoDefault(t *testing.T) {
 	seq := readSeq(t, ws.SeqFile())
 
 	_, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "should not exist", Envelope: 2400,
 		RequireRepo: nameIsA,
 	})
 	if err == nil {
@@ -283,7 +292,8 @@ func TestMintRejectsUnnamedRepoWhenThereIsNoDefault(t *testing.T) {
 func TestMintAcceptsKnownRepo(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "lives in repo a", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "lives in repo a", Envelope: 2400,
 		Repo:        "a",
 		RequireRepo: func(name string) error { return nameIsA(name) },
 	})
@@ -303,7 +313,8 @@ func TestMintAcceptsKnownRepo(t *testing.T) {
 func TestMintEmptyRepoWithNoChecker(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "default repo", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "default repo", Envelope: 2400,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +329,8 @@ func TestMintEmptyRepoWithNoChecker(t *testing.T) {
 func TestMintPropagatesGateApprovalAndRef(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "checkpointed card", Envelope: 2400,
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "checkpointed card", Envelope: 2400,
 		GateApproval: domain.GateAttended, ExternalRef: "gh-123",
 	})
 	if err != nil {
@@ -337,11 +349,11 @@ func TestMintPropagatesGateApprovalAndRef(t *testing.T) {
 func TestMintSequenceIncrements(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
-	f1, err := Mint(ctx, store, ws, Input{Kind: domain.KindFeature, Description: "first", Envelope: 2400})
+	f1, err := Mint(ctx, store, ws, Input{Workflow: true, Kind: domain.KindFeature, Description: "first", Envelope: 2400})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f2, err := Mint(ctx, store, ws, Input{Kind: domain.KindBug, Description: "second", Envelope: 2400})
+	f2, err := Mint(ctx, store, ws, Input{Workflow: true, Kind: domain.KindBug, Description: "second", Envelope: 2400})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,6 +369,7 @@ func TestMintSequenceIncrements(t *testing.T) {
 func TestMintBugSeverityAndSections(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
+		Workflow:    true,
 		Kind:        domain.KindBug,
 		Description: "Login loops\n\nSSO users bounce back.\n\n## Steps to reproduce\n1. log in\n\n## Expected\nthe dashboard",
 		Envelope:    2400,
@@ -390,7 +403,7 @@ func TestMintBugSeverityAndSections(t *testing.T) {
 	}
 
 	// comments alone are enough to warrant a bug draft
-	f2, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindBug, Description: "Just a title", Envelope: 1, Discussion: "**a:** hi"})
+	f2, err := Mint(context.Background(), store, ws, Input{Workflow: true, Kind: domain.KindBug, Description: "Just a title", Envelope: 1, Discussion: "**a:** hi"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,6 +418,7 @@ func TestMintBugSeverityAndSections(t *testing.T) {
 func TestMintFeatureAcceptanceHeading(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
+		Workflow:    true,
 		Kind:        domain.KindFeature,
 		Description: "Dark mode\n\nThe console is white at night.\n\n## Steps to reproduce\nnot a bug heading here\n\n## Acceptance\n- a toggle in settings",
 		Envelope:    2400,
@@ -432,7 +446,8 @@ func TestMintDiagnosisSeedsTheDiagnosisDocument(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
 	f, err := Mint(ctx, store, ws, Input{
-		Kind: domain.KindResearch, Mode: domain.ModeDiagnosis,
+		Workflow: true,
+		Kind:     domain.KindResearch, Mode: domain.ModeDiagnosis,
 		Description: "The picker drops answers\n\nSeen twice today, both on a tall window.",
 		Envelope:    300,
 	})
@@ -467,7 +482,7 @@ func TestMintDiagnosisSeedsTheDiagnosisDocument(t *testing.T) {
 // row and then moves it must not mint a bug carrying a research mode.
 func TestMintDropsAModeOnANonResearchKind(t *testing.T) {
 	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindBug, Mode: domain.ModeDiagnosis, Description: "Login loops", Envelope: 300})
+	f, err := Mint(context.Background(), store, ws, Input{Workflow: true, Kind: domain.KindBug, Mode: domain.ModeDiagnosis, Description: "Login loops", Envelope: 300})
 	if err != nil {
 		t.Fatalf("the mint should drop the mode, not fail: %v", err)
 	}
@@ -481,7 +496,8 @@ func TestMintDropsAModeOnANonResearchKind(t *testing.T) {
 func TestMintUsesTheKindBranchScheme(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindBug, Description: "flaky login test", Envelope: 100,
+		Workflow: true,
+		Kind:     domain.KindBug, Description: "flaky login test", Envelope: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -501,7 +517,8 @@ func TestMintUsesTheKindBranchScheme(t *testing.T) {
 func TestMintRefusesACollidingBranch(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	first, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindBug, Description: "flaky login test", Envelope: 100,
+		Workflow: true,
+		Kind:     domain.KindBug, Description: "flaky login test", Envelope: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -510,7 +527,8 @@ func TestMintRefusesACollidingBranch(t *testing.T) {
 
 	// A different title that slugifies identically.
 	_, err = Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindBug, Description: "Flaky login test!", Envelope: 100,
+		Workflow: true,
+		Kind:     domain.KindBug, Description: "Flaky login test!", Envelope: 100,
 	})
 	if err == nil {
 		t.Fatal("a second card wanting the same branch should be refused")
@@ -532,12 +550,14 @@ func TestMintAllowsSameLabelAcrossKinds(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
 	if _, err := Mint(ctx, store, ws, Input{
-		Kind: domain.KindBug, Description: "rate limits", Envelope: 100,
+		Workflow: true,
+		Kind:     domain.KindBug, Description: "rate limits", Envelope: 100,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	f, err := Mint(ctx, store, ws, Input{
-		Kind: domain.KindFeature, Description: "rate limits", Envelope: 100,
+		Workflow: true,
+		Kind:     domain.KindFeature, Description: "rate limits", Envelope: 100,
 	})
 	if err != nil {
 		t.Fatalf("a feature should be free to share a bug's label: %v", err)
@@ -546,7 +566,8 @@ func TestMintAllowsSameLabelAcrossKinds(t *testing.T) {
 		t.Errorf("BranchName() = %q, want feat/rate-limits", got)
 	}
 	if _, rerr := Mint(ctx, store, ws, Input{
-		Kind: domain.KindResearch, Description: "rate limits", Envelope: 100,
+		Workflow: true,
+		Kind:     domain.KindResearch, Description: "rate limits", Envelope: 100,
 	}); rerr != nil {
 		t.Errorf("a research card has no branch and must never collide: %v", rerr)
 	}

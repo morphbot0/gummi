@@ -211,59 +211,17 @@ func TestCardFormOpensInTextWithKindPreset(t *testing.T) {
 		}
 	}
 	bogus := domain.CardType{Kind: "bogus"}
-	if form := door(bogus, nil); form.Kind() != domain.KindFeature {
-		t.Errorf("an invalid preset should read as feature, got %q", form.Kind())
+	if form := door(bogus, nil); form.Kind() != domain.KindFreeform {
+		t.Errorf("an invalid preset should read as a session, got %q", form.Kind())
 	}
 	// A mode on a kind that has none is just as invalid as an unknown
 	// kind: it names no entry on the row, so there is nothing to select.
-	if form := door(domain.CardType{Kind: domain.KindBug, Mode: domain.ModeDiagnosis}, nil); form.Kind() != domain.KindFeature {
-		t.Errorf("a mode on a bug should read as feature, got %q", form.CardType().Name())
+	if form := door(domain.CardType{Kind: domain.KindBug, Mode: domain.ModeDiagnosis}, nil); form.Kind() != domain.KindFreeform {
+		t.Errorf("a mode on a bug should read as a session, got %q", form.CardType().Name())
 	}
 }
 
-// TestCardFormKindRowCycles: ←/→ on the kind row move it; a printable
-// key there falls through to the text instead of doing nothing.
-func TestCardFormKindRowCycles(t *testing.T) {
-	form := door(domain.CardType{Kind: domain.KindFeature}, nil)
-	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}) // buttons
-	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}) // after (expands)
-	form.setFocus(cardStopKind)
-	form.HandleKey(keyRight)
-	if form.Kind() != domain.KindBug {
-		t.Fatalf("→ on kind = %q, want bug", form.Kind())
-	}
-	// research and diagnosis are two stops on the row and one kind, so
-	// stepping past research lands on a card that is still RS.
-	form.HandleKey(keyRight)
-	if ct := form.CardType(); ct != (domain.CardType{Kind: domain.KindResearch}) {
-		t.Fatalf("→ past bug = %q, want research", ct.Name())
-	}
-	form.HandleKey(keyRight)
-	if ct := form.CardType(); ct.Kind != domain.KindResearch || ct.Mode != domain.ModeDiagnosis {
-		t.Fatalf("→ past research = %q, want diagnosis", ct.Name())
-	}
-	form.HandleKey(keyRight)
-	if form.Kind() != domain.KindGoal {
-		t.Fatalf("→ past diagnosis = %q, want goal", form.Kind())
-	}
-	// freeform is the row's last stop: the one type that buys no workflow
-	// at all, so it reads as the exception rather than as one of the kinds
-	// of work gummi conducts.
-	form.HandleKey(keyRight)
-	if form.Kind() != domain.KindFreeform {
-		t.Fatalf("→ past goal = %q, want freeform", form.Kind())
-	}
-	form.HandleKey(keyRight)
-	if form.Kind() != domain.KindFeature {
-		t.Fatalf("kind should wrap back to feature, got %q", form.Kind())
-	}
-	form.HandleKey(doorKey('d'))
-	if form.focus != cardStopText || form.Text() != "d" {
-		t.Errorf("typing on the kind row should type into the text: focus=%d text=%q", form.focus, form.Text())
-	}
-}
-
-// TestCardFormTabOrder: tab walks kind, text, then expands the options —
+// TestCardFormTabOrder: tab walks the text, then expands the options —
 // envelope, profile, (severity for a bug), after, stack — then the
 // buttons, and wraps. The repo stop is absent when there is nothing to
 // choose, and so is the base stop when the repo has fewer than two
@@ -273,7 +231,7 @@ func TestCardFormTabOrder(t *testing.T) {
 	if form.expanded {
 		t.Fatal("options should open collapsed")
 	}
-	for _, want := range []int{cardStopText, cardStopEnvelope, cardStopProfile, cardStopAfter, cardStopStack, cardStopButtons, cardStopKind, cardStopText} {
+	for _, want := range []int{cardStopText, cardStopEnvelope, cardStopProfile, cardStopAfter, cardStopStack, cardStopButtons, cardStopText} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}
@@ -692,7 +650,7 @@ func TestCreateCardEnvelope(t *testing.T) {
 	m.Attach(store, wt, ws)
 
 	zero := 0
-	if msg := m.createCard(formResult{Desc: "Explicit uncapped", Envelope: &zero})(); msg != nil {
+	if msg := m.createCard(formResult{Kind: domain.KindFeature, Desc: "Explicit uncapped", Envelope: &zero})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}
@@ -705,7 +663,7 @@ func TestCreateCardEnvelope(t *testing.T) {
 		t.Errorf("envelope = %d, want 0 (uncapped)", f.Budget.Envelope)
 	}
 
-	msg := m.createCard(formResult{Desc: "Default envelope"})()
+	msg := m.createCard(formResult{Kind: domain.KindFeature, Desc: "Default envelope"})()
 	created, ok := msg.(cardCreatedMsg)
 	if !ok {
 		t.Fatalf("createCard returned %#v", msg)
@@ -740,10 +698,10 @@ func TestCreateCardWritesDependencies(t *testing.T) {
 	ctx := context.Background()
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.Attach(store, wt, ws)
-	if _, ok := m.createCard(formResult{Desc: "first"})().(cardCreatedMsg); !ok {
+	if _, ok := m.createCard(formResult{Kind: domain.KindFeature, Desc: "first"})().(cardCreatedMsg); !ok {
 		t.Fatal("first create failed")
 	}
-	msg := m.createCard(formResult{Desc: "second", After: []domain.FeatureID{"FD-001", "FD-999"}})()
+	msg := m.createCard(formResult{Kind: domain.KindFeature, Desc: "second", After: []domain.FeatureID{"FD-001", "FD-999"}})()
 	created, ok := msg.(cardCreatedMsg)
 	if !ok {
 		t.Fatalf("createCard returned %#v", msg)
@@ -760,27 +718,19 @@ func TestCreateCardWritesDependencies(t *testing.T) {
 	}
 }
 
-// TestBoardNOpensTheDoorAndRemembersTheRepo: n opens the door; a created
-// card's repository preselects the next one; B and R preset the kind.
+// TestBoardNOpensTheDoorAndRemembersTheRepo: n opens the door on a
+// session; a created card's repository preselects the next one.
 func TestBoardNOpensTheDoorAndRemembersTheRepo(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	form, ok := m.Overlay.Top().(*cardForm)
-	if !ok || form.Kind() != domain.KindFeature {
-		t.Fatal("n did not open the door on feature")
+	if !ok || form.Kind() != domain.KindFreeform {
+		t.Fatal("n did not open the door on a session")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	for key, kind := range map[rune]domain.Kind{'B': domain.KindBug, 'R': domain.KindResearch} {
-		m = press(t, m, tea.KeyPressMsg{Code: key, Text: string(key)})
-		form, ok := m.Overlay.Top().(*cardForm)
-		if !ok || form.Kind() != kind {
-			t.Errorf("%c did not preset %s", key, kind)
-		}
-		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	}
 	m.lastRepo = ""
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Dark mode")
 	m = press(t, m, keyEnter)
 	if m.Overlay.HasDialogs() || len(m.rows) != 1 {
@@ -796,7 +746,7 @@ func TestBoardNOpensTheDoorAndRemembersTheRepo(t *testing.T) {
 func TestCreateAndStartOpensAutopilot(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Dark mode")
 	form := m.Overlay.Top().(*cardForm)
 	form.setFocus(cardStopButtons)

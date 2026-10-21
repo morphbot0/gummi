@@ -27,7 +27,8 @@ func TestCreateACardWithDependenciesAndAStack(t *testing.T) {
 	for _, k := range form.Kinds {
 		kinds = append(kinds, k.Value)
 	}
-	if !slices.Equal(kinds, []string{"feature", "bug", "research", "research:diagnosis", "goal", "freeform"}) {
+	// the form makes a session; a workflow kind is an API caller's alone
+	if !slices.Equal(kinds, []string{"freeform"}) {
 		t.Errorf("kinds = %v", kinds)
 	}
 	if form.Envelope <= 0 || len(form.Severities) == 0 || len(form.Profiles) == 0 {

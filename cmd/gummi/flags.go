@@ -218,14 +218,6 @@ var sharedDriveFlagNames = []string{
 	"autonomous", "verbose", "ref", "repo", "base", "until",
 }
 
-// adoptionFlags declares the two ways to mint a card onto a branch gummi
-// did not cut (DESIGN §10 D22). Shared by `run` and `bugs new`, which
-// offer the identical choice.
-func adoptionFlags(fs *pflag.FlagSet) {
-	fs.String("adopt", "", "mint the card onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it")
-	fs.String("pr", "", "mint the card onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations")
-}
-
 // messageFlag declares the -m/--message pair the three committing verbs
 // share. They differ only in what the message is for, so that is the
 // argument; the sentinel "-" reads the message from stdin everywhere.

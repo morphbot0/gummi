@@ -109,10 +109,10 @@
     "options": [
       {
         "id": "newbug",
-        "label": "open a bug from this",
-        "detail": "a fresh bug card carrying this card's spec, branch and thread",
+        "label": "start a follow-up session",
+        "detail": "a fresh session carrying this card's spec, branch and thread",
         "words": true,
-        "relabel": "open a bug from this with your words"
+        "relabel": "start a follow-up session with your words"
       }
     ]
   },

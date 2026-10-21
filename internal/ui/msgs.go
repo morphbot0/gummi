@@ -525,7 +525,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 		ctx := context.Background()
 		kind := res.Kind
 		if !kind.Valid() {
-			kind = domain.KindFeature
+			kind = domain.KindFreeform
 		}
 		env := m.envelope
 		if res.Envelope != nil {
@@ -544,6 +544,9 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			Discussion:     res.Discussion,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
 			MainCheckout: res.MainCheckout, Home: res.Home,
+			// The form offers no kind: a workflow kind reaches it only as a
+			// preset, from the bug import or the web API's explicit kind.
+			Workflow: kind != domain.KindFreeform,
 		})
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}

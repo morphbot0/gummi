@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/state"
@@ -46,12 +47,6 @@ func runRun(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	adoption, err := resolveAdoption(fl.String("adopt"), fl.String("pr"), fl.String("repo"))
-	if err != nil {
-		return err
-	}
-	opts.Adopt = adoption.Branch
-
 	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
 		// mint the card first, then take its per-card lock for the drive so
 		// this run is the sole governor of the card it just created (two
@@ -59,16 +54,6 @@ func runRun(fl cliFlags, args []string) error {
 		f, err := d.Create(ctx, domain.CardType{Kind: domain.KindFeature}, desc)
 		if err != nil {
 			return driver.Outcome{}, err
-		}
-		// A card adopted from a pull request is linked to it and carries its
-		// review comments before the first stage reads anything — see
-		// linkAdoptedPR for why that ordering is the point.
-		if adoption.HasPR() {
-			if wt, werr := d.Worktrees(ctx, &f); werr == nil {
-				linkAdoptedPR(ctx, store, wt, &f, adoption.PR)
-			} else {
-				fmt.Fprintf(os.Stderr, "warning: %s could not be linked to %s: %v\n", f.ID, adoption.PR.URL, werr)
-			}
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
@@ -252,4 +237,20 @@ func driverExit(out driver.Outcome, _ error) error {
 		return nil
 	}
 	return &exitError{code: out.Status.ExitCode()}
+}
+
+// closeAgents closes every distinct agent in the map exactly once (the
+// "" default alias points at one of the concrete-name entries).
+func closeAgents(agents map[string]agent.Agent) {
+	seen := map[agent.Agent]struct{}{}
+	for _, a := range agents {
+		if a == nil {
+			continue
+		}
+		if _, ok := seen[a]; ok {
+			continue
+		}
+		seen[a] = struct{}{}
+		_ = a.Close()
+	}
 }

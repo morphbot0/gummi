@@ -73,20 +73,11 @@ test('a landed card is done and on main', async ({ workspace: ws }) => {
   expect(await ws.git('log', '-1', '--format=%s', 'main')).toContain('feat: add a nod helper');
 });
 
-test('backlog, bug and research cards', async ({ workspace: ws }) => {
+test('backlog and bug cards', async ({ workspace: ws }) => {
   const backlog = await ws.seedBacklog(['Add a wave helper', 'Add a shrug helper']);
   expect(backlog).toHaveLength(2);
   const bug = await ws.seedBug('Greet panics on an empty name', { severity: 'high' });
   for (const id of [...backlog, bug]) expect((await ws.status(id)).stage).toBe('todo');
-
-  const rs = await ws.seedResearch('How does the module greet');
-  expect(rs).toMatch(/^RS-\d+$/);
-  const st = await ws.status(rs);
-  expect(st.kind).toBe('research');
-  expect(st.stage).toBe('plan');
-  const doc = await ws.gummiOK(['spec', rs]);
-  expect(doc.stdout).toContain('## Direction');
-  expect(doc.stdout).toContain('Survey `greet.go`');
 });
 
 test('fake gh answers pr link/status/comments and bug import', async ({ workspace: ws }) => {

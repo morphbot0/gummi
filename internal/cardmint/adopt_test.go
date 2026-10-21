@@ -39,6 +39,7 @@ func TestMintOntoAnExistingBranch(t *testing.T) {
 	ctx := context.Background()
 
 	f, err := Mint(ctx, store, ws, Input{
+		Workflow:       true,
 		Kind:           domain.KindFeature,
 		Description:    "Finish the parser\n\nTheir branch stops at the empty case.",
 		Envelope:       2400,
@@ -86,6 +87,7 @@ func TestMintOntoAnExistingBranch(t *testing.T) {
 func TestMintOntoABranchAlwaysWritesTheDraft(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
+		Workflow:       true,
 		Kind:           domain.KindFeature,
 		Description:    "Finish the parser",
 		Adopt:          "feat/their-parser",
@@ -107,6 +109,7 @@ func TestOneBranchOneCard(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
 	in := Input{
+		Workflow:       true,
 		Kind:           domain.KindFeature,
 		Description:    "Finish the parser",
 		Adopt:          "feat/their-parser",
@@ -127,7 +130,7 @@ func TestOneBranchOneCard(t *testing.T) {
 func TestAdoptionRefusesWhatItCannotVerify(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
-	base := Input{Kind: domain.KindFeature, Description: "Finish the parser"}
+	base := Input{Workflow: true, Kind: domain.KindFeature, Description: "Finish the parser"}
 
 	seqBefore := readSeq(t, ws.SeqFile())
 

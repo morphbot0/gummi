@@ -35,7 +35,7 @@ func webKindValue(ct domain.CardType) string {
 // value WebForm offered, or "research" with the diagnosis flag.
 func webCardType(kind string, diagnosis bool) (domain.CardType, bool) {
 	if kind == "" {
-		kind = string(domain.KindFeature)
+		kind = string(domain.KindFreeform)
 	}
 	ct := domain.CardType{Kind: domain.Kind(kind)}
 	if kind == webKindValue(domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}) ||
@@ -48,12 +48,12 @@ func webCardType(kind string, diagnosis bool) (domain.CardType, bool) {
 // WebForm is GET /api/form: the new-card form's choices, for repo (the
 // workspace default when empty).
 func (m *Shell) WebForm(repo string) (webapi.Form, error) {
-	d := m.openCardForm(domain.CardType{Kind: domain.KindFeature})
+	d := m.openCardForm(domain.CardType{Kind: domain.KindFreeform})
 	if problem := m.webFormRepo(d, repo); problem != "" {
 		return webapi.Form{}, refuse(WebBadRequest, problem)
 	}
 	f := webapi.Form{
-		Kinds:      make([]webapi.Choice, 0, len(domain.CardTypes)),
+		Kinds:      make([]webapi.Choice, 0, 1),
 		Profiles:   append([]string{}, d.profiles...),
 		Repos:      []string{},
 		Severities: []string{},
@@ -63,9 +63,10 @@ func (m *Shell) WebForm(repo string) (webapi.Form, error) {
 		Envelope:   m.envelopePrefill(),
 		Sessions:   m.webSessionModels(),
 	}
-	for _, ct := range domain.CardTypes {
-		f.Kinds = append(f.Kinds, webapi.Choice{Value: webKindValue(ct), Label: ct.Name(), Detail: firstLineOf(cardPlaceholderFor(ct))})
-	}
+	// The form makes a session; the workflow kinds are no longer offered
+	// (an API caller may still name one, Input.Workflow).
+	ct := domain.CardType{Kind: domain.KindFreeform}
+	f.Kinds = append(f.Kinds, webapi.Choice{Value: webKindValue(ct), Label: ct.Name(), Detail: firstLineOf(cardPlaceholderFor(ct))})
 	if d.repo.shown() {
 		f.Repos = append(f.Repos, d.repo.options()...)
 	}
@@ -128,7 +129,7 @@ func (b *Bridge) Form(ctx context.Context, repo string) (webapi.Form, error) {
 		f, werr = m.WebForm(repo)
 		name, pool, store = repo, m.wt, m.store
 		if name == "" {
-			name = m.openCardForm(domain.CardType{Kind: domain.KindFeature}).repo.name()
+			name = m.openCardForm(domain.CardType{Kind: domain.KindFreeform}).repo.name()
 		}
 		return nil
 	}); err != nil {

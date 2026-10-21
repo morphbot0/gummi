@@ -20,7 +20,7 @@ import { agentScript, fakeGh, fakeGhData, fakeSsh, gummiBin } from './paths';
  *            server logs
  *   config/  XDG_CONFIG_HOME, so the user's own gummi config never leaks in
  *
- * Seeding helpers drive the real CLI (`gummi run`, `resume`, `research`,
+ * Seeding helpers drive the real CLI (`gummi run`, `resume`,
  * `merge`, `ingest`, `bugs`), so a seeded card is in exactly the state the
  * product puts it in. They need no web server and are safe to call while
  * one runs (the CLI takes only per-card locks), though a running board
@@ -312,18 +312,6 @@ export class Workspace {
     return mintedIds(r.stdout, 'BG');
   }
 
-  /**
-   * A research card parked at its design gate (Questions, Constraints and
-   * Direction written). `gummi research --until plan`. Only the plan stage
-   * can run on the headless backend: later research stages need a
-   * read-only cage it cannot enforce, so gummi refuses them.
-   */
-  async seedResearch(brief: string, opts: RunOpts = {}): Promise<string> {
-    const r = await this.drive(['research', '--gate-approval', 'attended', '--until', 'plan', ...runFlags(opts), withKeyword(brief, '[research]')]);
-    expectEvent(r, 'stopped');
-    return r.id;
-  }
-
   /** Approve a design gate and drive on to a verified branch (or the next stop). */
   async approve(id: string): Promise<DriveResult> {
     return this.drive(['resume', id, '--approve']);
@@ -390,7 +378,7 @@ export interface DriveResult extends Exec {
   events: DriverEvent[];
 }
 
-/** Flags every seeding helper forwards to `gummi run` / `research`. */
+/** Flags every seeding helper forwards to `gummi run`. */
 export interface RunOpts {
   envelope?: number;
   profile?: string;

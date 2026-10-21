@@ -156,7 +156,7 @@ func selectRow(t *testing.T, m *Shell, id domain.FeatureID) {
 // starts its run exactly the way it does on a feature.
 func TestBugDesignStageRuns(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("Can you reproduce it?"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
+	m = openBugForm(t, m)
 	m = typeString(t, m, "Login loops")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	selectRow(t, m, "BG-002")

@@ -1529,8 +1529,8 @@ func closedActions(in nextInput) []nextAction {
 			// a session has no spec to carry
 			carries = "branch and thread"
 		}
-		out = append(out, nextStep("newbug", "", "open a bug from this",
-			"a fresh bug card carrying this card's "+carries))
+		out = append(out, nextStep("newbug", "", "start a follow-up session",
+			"a fresh session carrying this card's "+carries))
 	}
 	// Clean-up last, because it is the destructive one and a destructive
 	// action never gets to be what enter runs by default.

@@ -163,6 +163,13 @@ type Input struct {
 	// stored field. Mint writes the resolved value rather than the empty
 	// string so nothing downstream has to resolve it again.
 	GateApproval string
+	// Workflow lets a caller that still runs cards through the stage graph
+	// mint a workflow kind (feature, bug, research): the headless driver's
+	// `gummi run`, a session's delegation, a session's "write a spec", the
+	// bug import and the web API's explicit kind. Without it only a
+	// freeform card — a session, or an agent — is minted; every person-
+	// facing creation surface leaves it unset.
+	Workflow bool
 	// Unattended marks a mint with nobody present to retitle a colliding
 	// card — a schedule firing on a cadence mints the same description
 	// every fire, and the collision surfaces at the fire, after the
@@ -293,6 +300,15 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		if rest, ok := strings.CutPrefix(slug, "research-"); ok && rest != "" {
 			slug = rest
 		}
+	}
+	// Sessions are the card a person makes now; the workflow kinds are
+	// minted only by the callers that still drive them (Input.Workflow),
+	// and a goal by none.
+	if in.Kind == domain.KindGoal {
+		return domain.Feature{}, fmt.Errorf("goals are retired: start a session and let its crew do the work")
+	}
+	if in.Kind != domain.KindFreeform && !in.Workflow {
+		return domain.Feature{}, fmt.Errorf("a %s card is no longer made here: start a session instead", in.Kind)
 	}
 	// an agent names no repository, so there is none to require of it
 	if !in.Home {

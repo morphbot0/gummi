@@ -89,7 +89,7 @@ func agentWorkspaceProfiles(t *testing.T, ag agent.Agent, profiles config.Profil
 	m = model.(*Shell)
 
 	// create a card and walk it to its design stage
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Dark mode")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	// advance todo → plan, the design stage every card starts its work in

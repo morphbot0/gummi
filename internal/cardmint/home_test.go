@@ -51,7 +51,7 @@ func TestAnAgentNamesNoRepositoryOrBranch(t *testing.T) {
 		in   Input
 		want string
 	}{
-		"kind":  {Input{Kind: domain.KindFeature, Description: "x", Home: true}, "is an agent's"},
+		"kind":  {Input{Workflow: true, Kind: domain.KindFeature, Description: "x", Home: true}, "is an agent's"},
 		"repo":  {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Repo: "api"}, "in no repository"},
 		"base":  {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Base: "release"}, "forks from no branch"},
 		"adopt": {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Adopt: "topic"}, "adopt"},

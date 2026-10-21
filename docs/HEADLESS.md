@@ -6,7 +6,7 @@ the full reference for that path. The README carries the short version, and
 `gummi skill show` prints the loop as a calling agent reads it.
 
 Headless verbs change *who approves a gate*, never *whether* review and
-verify run. `run`, `research` and `resume` never merge. They stop at a
+verify run. `run` and `resume` never merge. They stop at a
 verified branch, and landing is the separate `merge` verb.
 
 ## Starting a card
@@ -14,7 +14,6 @@ verified branch, and landing is the separate `merge` verb.
 ```sh
 gummi run --envelope 5 "Add a --format=json flag to the export command"
 gummi run --envelope 5 --gate-approval autopilot "..."
-gummi research --envelope 3 "Where does the exporter buffer, and why?"
 ```
 
 Two things must be true before any work begins, and both fail loud:
@@ -54,7 +53,6 @@ carry the full id. One flag still wants the id itself:
 | command | purpose |
 |---|---|
 | `gummi run [flags] "<description>"` | create and drive one feature to a verified branch |
-| `gummi research [flags] "<question>"` | create and drive one research card |
 | `gummi resume <id\|ref> [decision]` | apply a decision and drive on |
 | `gummi resume <id\|ref> --say "<line>"` | read a line the way the card page would and report what it would do, as a `say` event, without acting |
 | `gummi status <id\|ref> [--json]` | stage, blockers, spend, branch state |
@@ -79,7 +77,7 @@ carry the full id. One flag still wants the id itself:
 
 `status`, `watch`, `spec` and `diff` take no lock, so you can inspect a card
 while a run is live. Everything that drives or writes a card (`run`,
-`resume`, `research`, `verify`, `merge`, `squash`, `commit`, `clean`) holds
+`resume`, `verify`, `merge`, `squash`, `commit`, `clean`) holds
 that card's own lock for the length of the command — not a lock on the
 whole `.gummi` workspace. Headless runs on different cards, and a run
 beside an open board, proceed side by side; two writers on the same card
@@ -90,7 +88,7 @@ one exclusive lock only against a second board.
 
 ## Watching a run
 
-`run`, `research`, `diagnose` and `resume` stream NDJSON milestones on
+`run` and `resume` stream NDJSON milestones on
 stdout. `--verbose` adds one `activity` line per tool call. The line worth
 knowing is `stage`, whose `result` names what the card is doing:
 
@@ -160,7 +158,7 @@ above it is only the total.
 
 ## Exit statuses
 
-Every `run`, `research` and `resume` ends on a typed exit the caller
+Every `run` and `resume` ends on a typed exit the caller
 branches on:
 
 | exit | status | caller action |
@@ -335,40 +333,6 @@ its own branch with your message. It touches no PR, remote or main
 checkout, moves no stage, and has no precondition. A clean worktree is a
 no-op, reported as such.
 
-## Adopting a branch or a PR
-
-A card can be minted **onto** a branch gummi did not cut, and rework it in
-place (DESIGN §10 D22):
-
-```sh
-gummi run --adopt feat/their-parser --envelope 5 "finish the empty-case handling"
-gummi run --pr 412 --envelope 5 "address the review comments"
-gummi bugs new --title "Parser drops empty input" --adopt fix/parser --envelope 3
-```
-
-`--adopt <branch>` takes a local branch as it stands. `--pr <url|number>`
-resolves the pull request, fetches its head branch locally (a fork's
-included — the local copy is named `pr-<N>-<branch>` and the result is a
-branch you own, since gummi cannot write to somebody else's fork), links
-the card to the PR and ingests its unresolved review threads as diff
-annotations before the first stage runs. Both refuse before a card is
-minted if the branch is missing, is checked out elsewhere, carries no
-commits of its own, shares no history with the base, or already belongs to
-another card — one branch, one card.
-
-The card then runs the ordinary graph. There is no fast lane: `plan` reads
-the inherited diff and designs the rework against it, which is what keeps
-the quality floor true for code gummi did not write.
-
-Four rules apply to an adopted branch for as long as the card exists:
-
-| rule | what it means |
-|---|---|
-| never deleted | `clean` removes the worktree and keeps the branch; the `cleaned` event carries `"branch_kept": true` |
-| never rewritten | no rebase, reset or force-push; the card reports how far behind its base it is and works where it stands |
-| not blamed for what it inherited | the approval baseline records what was already failing, and verify holds the card only to what the rework broke |
-| handed back by default | `gummi handoff <id>` is the expected ending; `gummi merge` still works and is a deliberate act |
-
 ## Dependencies
 
 `gummi deps add <dependent> <depends-on>` records that one card needs
@@ -376,9 +340,7 @@ another (`rm` and `list` remove and read the edges). A dependency counts
 as met only when the target reaches `done`, meaning verified *and*
 landed. Anything short of that blocks the dependent card's entry into
 implement with a `blocked` exit naming the outstanding cards. The board
-shows the same edges through the `p` key's dependency picker, and
-`gummi ingest` seeds edges when a decomposed spec says one proposal
-depends on another.
+shows the same edges through the `p` key's dependency picker.
 
 ## The calling-agent skill
 

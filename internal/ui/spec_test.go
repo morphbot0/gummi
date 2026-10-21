@@ -33,7 +33,7 @@ func specWorkspace(t *testing.T) *Shell {
 	m.now = func() time.Time { return fixedTime }
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Dark mode")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	return m
@@ -657,4 +657,20 @@ func TestSpecBindingsAreOneTable(t *testing.T) {
 	if has(m.spec.bindings(), "tab") {
 		t.Error("spec still binds tab — it cycles the tabs now")
 	}
+}
+
+// openFeatureForm opens the card form preset to a feature, the way the
+// bug import and the web API's explicit kind still reach it: `n` makes a
+// session now, and these tests drive a card through the stage graph.
+func openFeatureForm(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFeature}))
+	return m
+}
+
+// openBugForm is openFeatureForm for a bug.
+func openBugForm(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindBug}))
+	return m
 }

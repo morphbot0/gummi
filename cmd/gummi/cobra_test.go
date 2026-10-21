@@ -125,19 +125,6 @@ func TestCobraHelp(t *testing.T) {
 	}
 }
 
-// bugs help lists its ingest/new subcommands.
-func TestCobraBugsHelp(t *testing.T) {
-	out := captureStdout(t, func() {
-		rootCmd.SetArgs([]string{"bugs", "--help"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("Execute(bugs --help): %v", err)
-		}
-	})
-	if !strings.Contains(out, "ingest") || !strings.Contains(out, "new") {
-		t.Fatalf("bugs help missing subcommands:\n%s", out)
-	}
-}
-
 // An unknown command errors (cobra's unknown-command path).
 func TestCobraUnknownCommand(t *testing.T) {
 	rootCmd.SetArgs([]string{"frobnicate"})
@@ -225,5 +212,18 @@ func TestInitCmdRegistered(t *testing.T) {
 	}
 	if cmd != initCmd {
 		t.Errorf("rootCmd.Find([\"init\"]) resolved to %v, want initCmd", cmd)
+	}
+}
+
+// bugs help lists its ingest/new subcommands.
+func TestCobraBugsHelp(t *testing.T) {
+	out := captureStdout(t, func() {
+		rootCmd.SetArgs([]string{"bugs", "--help"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("Execute(bugs --help): %v", err)
+		}
+	})
+	if !strings.Contains(out, "ingest") || !strings.Contains(out, "new") {
+		t.Fatalf("bugs help missing subcommands:\n%s", out)
 	}
 }

@@ -136,7 +136,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	}
 
 	// n → form, type a title, enter → feature created in todo
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	if m.Overlay.Top() == nil {
 		t.Fatal("n did not open the form")
 	}
@@ -238,7 +238,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 	m = pump(t, m, m.Init())
 
 	// B → bug form, type a title, enter → bug created in todo
-	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
+	m = openBugForm(t, m)
 	if form, ok := m.Overlay.Top().(*cardForm); !ok || form.Kind() != domain.KindBug {
 		t.Fatal("B did not open the new-card form with bug preset")
 	}
@@ -310,7 +310,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 func TestBugBouncesReviewToFix(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
+	m = openBugForm(t, m)
 	m = typeString(t, m, "Crash on nil")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	for range 2 { // todo→plan→implement
@@ -335,7 +335,7 @@ func TestBugBouncesReviewToFix(t *testing.T) {
 func TestBounceFromReview(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	for range 3 { // todo→plan→implement→verify
@@ -353,7 +353,7 @@ func TestBounceFromReview(t *testing.T) {
 	// b from todo is illegal → error notice, stage unchanged
 	m2, _ := newWorkspace(t)
 	m2 = pump(t, m2, m2.Init())
-	m2 = press(t, m2, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m2 = openFeatureForm(t, m2)
 	m2 = typeString(t, m2, "Stuck")
 	m2 = press(t, m2, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 = press(t, m2, tea.KeyPressMsg{Code: 'b', Text: "b"})
@@ -371,7 +371,7 @@ func TestBounceFromPlanRefused(t *testing.T) {
 	// always an error — never a quiet forward crossing (DESIGN §10.11).
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "No shortcut")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = pressAdvance(t, m) // todo → plan
@@ -458,7 +458,7 @@ func TestBounceFromEscalatedPlan(t *testing.T) {
 func TestSkipFlagsChangeRoute(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Tiny fix")
 	// there is no route field any more (one graph, one route); enter from
 	// any option row still creates — here from the after row, which has
@@ -487,7 +487,7 @@ func TestSkipFlagsChangeRoute(t *testing.T) {
 func TestFormValidationBlocksEmptyTitle(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.Overlay.HasDialogs() {
 		t.Fatal("form closed despite empty title")

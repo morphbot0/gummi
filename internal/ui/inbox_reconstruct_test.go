@@ -134,7 +134,7 @@ func TestCreateFeatureDerivesTitle(t *testing.T) {
 	m.Attach(store, wt, ws)
 
 	long := "Add a healthz endpoint. It returns status and version so the load balancer can check liveness."
-	if msg := m.createCard(formResult{Desc: long})(); msg != nil {
+	if msg := m.createCard(formResult{Kind: domain.KindFeature, Desc: long})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}

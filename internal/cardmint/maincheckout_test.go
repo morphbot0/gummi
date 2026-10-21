@@ -58,6 +58,7 @@ func TestMainCheckoutIsRefusedOnEveryOtherKind(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	seqBefore := readSeq(t, ws.SeqFile())
 	_, err := Mint(context.Background(), store, ws, Input{
+		Workflow:     true,
 		Kind:         domain.KindFeature,
 		Description:  "a feature with nowhere to work",
 		MainCheckout: true,

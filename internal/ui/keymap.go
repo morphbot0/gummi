@@ -330,10 +330,8 @@ func (m *Shell) boardBindings() []binding {
 		{key: "W", label: "this week", help: "what the last seven days produced: endings, cost, rework"},
 		{key: "L", label: "schedules", help: "schedules and heartbeats — what comes back on a clock without a person typing"},
 		{key: "E", label: "skills", help: "the skill pack and its curator — pin, revert, run now"},
-		{key: "n", label: "new", help: "new card — feature, bug, research or goal, or paste an issue link to import one", bar: true},
+		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
 		{key: "f", label: "fold archive", help: "fold or unfold the archive of cards that settled a while ago"},
-		{key: "B", label: "bug", help: "same screen as n, straight to the bug preset"},
-		{key: "R", label: "research", help: "same screen as n, straight to the research preset"},
 		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},
 		{key: "I", label: "ingest", help: "split a document into cards"},
 		{key: "G", label: "import", help: "same screen as n, straight to importing a bug from a GitHub issue — browse the repo's issues"},
@@ -421,9 +419,7 @@ func (m *Shell) splashBindings() []binding {
 	}
 	return []binding{
 		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
-		{key: "n", label: "new", help: "new card — feature, bug or research, or paste an issue link to import one", bar: true},
-		{key: "B", label: "bug", help: "same screen as n, straight to the bug preset"},
-		{key: "R", label: "research", help: "same screen as n, straight to the research preset"},
+		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
 		{key: "I", label: "ingest", help: "split a document into cards"},
 		{key: "G", label: "import", help: "same screen as n, straight to importing a bug from a GitHub issue — browse the repo's issues"},
 		{key: "?", label: "help", bar: true},

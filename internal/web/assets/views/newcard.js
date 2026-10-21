@@ -1,6 +1,6 @@
-// views/newcard.js — the new-card form: every kind the board makes
-// (feature, bug, research and its diagnosis mode, goal, freeform), with
-// the choices GET /api/form offers — profiles, the default budget,
+// views/newcard.js — the new-card form: a session (the board's one
+// kind; an agent is a session's "where"), with the choices GET /api/form
+// offers — profiles, the default budget,
 // repositories and their branches, the cards a new one can stack on or
 // wait for. Submitting is POST /api/cards, which fills in and submits the
 // TUI's own card form: its validation is the one that runs, and its
@@ -19,7 +19,6 @@ const ABOUT = {
   bug: 'A defect: the fix is planned, implemented and verified like a feature.',
   research: 'A question to investigate. It ends in findings, not a branch to land.',
   'research:diagnosis': 'Research that pins down why something fails.',
-  goal: 'An outcome a lead agent drives through several cards, within one budget.',
   freeform: 'No stages and no gates: an agent works on a branch while you talk to it. It opens at once.'
 }
 const BRIEF = {
@@ -27,7 +26,6 @@ const BRIEF = {
   bug: ['What happens', 'What goes wrong, and where'],
   research: ['The question', 'What do you want to know?'],
   'research:diagnosis': ['The symptom', 'What fails, and when'],
-  goal: ['Done when', 'The outcome, and how you will know it is reached'],
   freeform: ['What to do', 'Say what you want done']
 }
 const ADOPTS = new Set(['feature', 'bug'])
@@ -63,7 +61,7 @@ registerView('newcard', {
     const seed = String(ctx.params?.text || '').trim()
     const [seedTitle, ...seedRest] = seed.split('\n')
     const st = {
-      kind: ctx.params?.kind || 'feature',
+      kind: 'freeform',
       form: null,
       repo: '',
       busy: false,
@@ -93,13 +91,15 @@ registerView('newcard', {
     const draw = () => {
       const f = st.form
       clear(body)
-      const kinds = h('div', { class: 'nc-kinds', role: 'radiogroup', 'aria-label': 'Kind', testid: 'newcard-kinds' },
+      if (!f.kinds.some(k => k.value === st.kind)) st.kind = f.kinds[0]?.value || 'freeform'
+      // one kind is no choice: the picker shows only while there are two
+      const kinds = f.kinds.length < 2 ? null : h('div', { class: 'nc-kinds', role: 'radiogroup', 'aria-label': 'Kind', testid: 'newcard-kinds' },
         f.kinds.map(k => h('button', {
           type: 'button', role: 'radio', class: ['nc-kind', k.value === st.kind && 'on'],
           'aria-checked': String(k.value === st.kind), testid: `newcard-kind-${k.value.replace(':', '-')}`,
           onclick: () => { keep(); st.kind = k.value; draw() }
         }, k.label)))
-      const [briefLabel, briefPh] = BRIEF[st.kind] || BRIEF.feature
+      const [briefLabel, briefPh] = BRIEF[st.kind] || BRIEF.freeform
       el.title = h('input', { testid: 'newcard-title', placeholder: 'A short title', autocomplete: 'off', value: st.title ?? seedTitle ?? '' })
       el.desc = h('textarea', { testid: 'newcard-desc', placeholder: briefPh, rows: 5, value: st.desc ?? seedRest.join('\n').trim() })
       const chips = h('div', { class: 'chips', testid: 'newcard-chips', hidden: st.attachments.length === 0 })

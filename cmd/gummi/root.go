@@ -49,8 +49,6 @@ func init() {
 	rootCmd.AddCommand(curatorCmd)
 	rootCmd.AddCommand(prCmd, pushCmd)
 	rootCmd.AddCommand(runCmd)
-	rootCmd.AddCommand(researchCmd)
-	rootCmd.AddCommand(diagnoseCmd)
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(verifyCmd)
 	rootCmd.AddCommand(mergeCmd)

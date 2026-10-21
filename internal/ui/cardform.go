@@ -206,8 +206,7 @@ func (o repoOrigin) label() string {
 // moment focus reaches it, severity exists for bugs only. stops() is the
 // live list; focus always names one of its entries.
 const (
-	cardStopKind = iota
-	cardStopRepo
+	cardStopRepo = iota
 	cardStopText
 	cardStopRuns
 	cardStopEnvelope
@@ -221,11 +220,9 @@ const (
 	cardStopButtons
 )
 
-// The kind row's choices are domain.CardTypes, which is five entries for
-// four kinds: research appears twice, once as the survey and once as the
-// diagnosis. They share the RS prefix because they are one kind, so the
-// `becomes` line's prefix does not tell them apart — the kind word
-// beside it does.
+// There is no kind row: the form makes a session (an agent is the
+// session's "where" choice). A workflow kind reaches it only as a preset
+// — the bug import, the web API's explicit kind — and is then fixed.
 
 // newCardForm builds the door. kind presets the kind row; repos and
 // hasDefault shape the repo row as in every other creation dialog;
@@ -237,7 +234,7 @@ func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, 
 		profiles = defaultProfilePresets
 	}
 	if !ct.Valid() {
-		ct = domain.CardType{Kind: domain.KindFeature}
+		ct = domain.CardType{Kind: domain.KindFreeform}
 	}
 	text := textarea.New()
 	text.CharLimit = 4096
@@ -348,7 +345,7 @@ func (d *cardForm) asksRepo() bool {
 
 // stops is the live focus ring, in tab order.
 func (d *cardForm) stops() []int {
-	s := []int{cardStopKind}
+	var s []int
 	if d.asksRepo() {
 		s = append(s, cardStopRepo)
 	}
@@ -451,17 +448,6 @@ func (d *cardForm) setKind(c domain.CardType) {
 	}
 }
 
-func (d *cardForm) cycleKind(delta int) {
-	n := len(domain.CardTypes)
-	i := 0
-	for j, c := range domain.CardTypes {
-		if c == d.ct {
-			i = j
-		}
-	}
-	d.setKind(domain.CardTypes[((i+delta)%n+n)%n])
-}
-
 // formRepo is the repository the card is created in: the chosen one, and
 // nothing at all for a goal, whose home the plan gate settles.
 func (d *cardForm) formRepo() string {
@@ -549,15 +535,6 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			}
 		}
 		return false, nil
-	case cardStopKind:
-		if delta, ok := selectCycleDelta(k); ok {
-			d.cycleKind(delta)
-			return false, nil
-		}
-		if k == "enter" {
-			return d.submit(false)
-		}
-		return d.fallThrough(key)
 	case cardStopRepo:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.moveRepo(func() { d.repo.cycle(delta) })
@@ -928,7 +905,7 @@ func (d *cardForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 		d.env, _ = d.env.Update(msg)
 	case cardStopAfter:
 		d.afterFilter, _ = d.afterFilter.Update(msg)
-	case cardStopKind, cardStopRepo:
+	case cardStopRepo:
 		d.setFocus(cardStopText)
 		d.text, _ = d.text.Update(msg)
 		d.errText = ""
@@ -1508,17 +1485,7 @@ func (d *cardForm) layout(s *theme.Styles, textW, h, fold int, hint, spacers boo
 		}
 		return nil
 	}
-	kinds := make([]string, len(domain.CardTypes))
-	kindIdx := 0
-	for i, c := range domain.CardTypes {
-		kinds[i] = c.Name()
-		if c == d.ct {
-			kindIdx = i
-		}
-	}
-
 	rows = append(rows, s.DialogTitle.Render("new card"), "")
-	rows = append(rows, choiceRowLines(s, d.focus == cardStopKind, "kind", kinds, kindIdx, "", false, textW, fold)...)
 	if d.repo.shown() && d.ct.Kind != domain.KindGoal {
 		rows = append(rows, d.repoRows(s, textW, fold)...)
 	}
@@ -1562,8 +1529,6 @@ func (d *cardForm) hint() string {
 	switch d.focus {
 	case cardStopRepo:
 		return "←/→ or 1–9 choose a repo · typing goes to the text · tab next · esc cancel"
-	case cardStopKind:
-		return "←/→ choose the kind · typing goes to the text · tab next · esc cancel"
 	case cardStopText:
 		g := "alt+g browse issues"
 		if d.imported != nil {
@@ -1571,11 +1536,9 @@ func (d *cardForm) hint() string {
 		} else if _, ok := d.reference(); ok {
 			g = "alt+g import"
 		}
-		// shift+tab is named here, not just tab. The composer is where focus
-		// starts and `kind` is the row directly ABOVE it — one shift+tab
-		// away and five tabs the other way round the cycle. A reader who
-		// types a bug description, sees "becomes  FD (feature) · …" and
-		// wants to fix it was being shown only the long way (round 3 §6).
+		// shift+tab is named here, not just tab: the rows above the
+		// composer are one shift+tab away and several tabs the other way
+		// round the cycle.
 		return "tab/shift+tab rows · " + g + " · alt+o options · alt+enter newline · enter create · esc cancel"
 	case cardStopEnvelope:
 		return "type a dollar amount · alt+o collapse · tab next · esc cancel"

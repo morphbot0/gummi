@@ -15,7 +15,6 @@ export interface Board {
   landed: string;
   backlog: string[];
   bug: string;
-  research: string;
   stacked: string[];
   // filled by seedLive
   freeform?: string;
@@ -29,11 +28,10 @@ export async function seedBoard(ws: Workspace): Promise<Board> {
   const landed = await ws.seedLanded('Add a farewell helper');
   const backlog = await ws.seedBacklog(['Add a shrug helper', 'Add a nod helper']);
   const bug = await ws.seedBug('Greet panics on an empty name', { severity: 'high' });
-  const research = await ws.seedResearch('Compare greeting libraries');
   const bottom = await ws.seedVerified('Add a bow helper');
   await ws.gummiOK(['stack', 'new', bottom, '--name', 'greetings']);
   await ws.gummiOK(['stack', 'add', 'greetings', gate]);
-  return { gate, failed, ask, landed, backlog, bug, research, stacked: [bottom, gate] };
+  return { gate, failed, ask, landed, backlog, bug, stacked: [bottom, gate] };
 }
 
 /** The half that needs the running board: a freeform card, a running card, a diff comment, a dependency. */

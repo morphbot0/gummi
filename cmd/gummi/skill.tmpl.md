@@ -134,22 +134,6 @@ the design gate is the one boundary where stopping is unambiguous.
 `--until` is per-invocation only — it is never persisted on the card, so a bare
 `resume --approve` with no `--until` runs straight through to the end.
 
-## Research and diagnosis cards
-
-`gummi research "<brief>"` mints one RS card from a free-form brief and drives
-it to the decompose gate; `gummi diagnose "<symptom>"` is the same card for
-behaviour somebody saw rather than a question somebody asked. Both run the same
-stages every card does, with two differences: the implement stage is read-only
-(it gathers evidence rather than writing code) and the card never gets a
-worktree.
-
-At the gate the stream emits a `question` event whose payload carries the
-proposed follow-on FD slices plus a coverage map, and the run exits `question`
-(code 2). From there, `gummi resume RS-NNN --approve` mints each proposed FD and
-moves the RS card to `done`; `--request-changes "<note>"` re-runs the decompose
-pass with the note attached and emits a fresh `question`. `status` and `spec`
-work as they do for any card.
-
 ## Worktrees, and re-attaching a proven branch
 
 Each card is checked out in its **own linked git worktree** under

@@ -435,7 +435,7 @@ func TestRS_R_CreatesResearchCard(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = model.(*Shell)
 
-	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
+	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindResearch}))
 	form, ok := m.Overlay.Top().(*cardForm)
 	if !ok || form.Kind() != domain.KindResearch {
 		t.Fatal("R did not open the new-card form with research preset")

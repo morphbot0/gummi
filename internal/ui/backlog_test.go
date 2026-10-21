@@ -324,7 +324,7 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	m.threadInput.Focus()
 	m.sel = 5 // FD-039, done
 	_, bs = m.activeSurface()
-	assertLabel(t, bs, "enter", "open a bug from this")
+	assertLabel(t, bs, "enter", "start a follow-up session")
 	assertLabel(t, bs, "↑↓", "choose")
 }
 

@@ -21,7 +21,7 @@ func TestPasteIntoFeatureForm(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
 
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = paste(t, m, "Dark ")
 	m = typeString(t, m, "mo")
 	m = paste(t, m, "de")
@@ -34,7 +34,7 @@ func TestPasteIntoFeatureForm(t *testing.T) {
 	}
 
 	// paste while the options row is focused must not touch the input
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = paste(t, m, "stray")
 	form := m.Overlay.Top().(*cardForm)
@@ -55,7 +55,7 @@ func TestPasteIntoBugForm(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
 
-	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
+	m = openBugForm(t, m)
 	m = paste(t, m, "Login loops")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.rows) != 1 || m.rows[0].F.Kind != domain.KindBug {
@@ -69,7 +69,7 @@ func TestPasteIntoBugForm(t *testing.T) {
 func TestPasteIntoTextPrompt(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Dark mode")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 

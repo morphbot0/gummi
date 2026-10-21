@@ -78,3 +78,20 @@ func TestAFreeformCardCannotAdoptABranch(t *testing.T) {
 	}
 }
 
+// TestOnlyASessionIsMintedByDefault: a workflow kind is minted only by a
+// caller that still drives the stage graph and says so; a goal by none.
+func TestOnlyASessionIsMintedByDefault(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	ctx := context.Background()
+	for _, k := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch} {
+		if _, err := Mint(ctx, store, ws, Input{Kind: k, Description: "x " + string(k), Envelope: 100}); err == nil {
+			t.Errorf("a %s card was minted without Workflow", k)
+		}
+	}
+	if _, err := Mint(ctx, store, ws, Input{Workflow: true, Kind: domain.KindGoal, Description: "outcome", Envelope: 100}); err == nil {
+		t.Error("a goal was minted")
+	}
+	if _, err := Mint(ctx, store, ws, Input{Kind: domain.KindFreeform, Description: "a session", Envelope: 100}); err != nil {
+		t.Errorf("a session was refused: %v", err)
+	}
+}

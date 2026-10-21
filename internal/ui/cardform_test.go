@@ -26,7 +26,6 @@ func TestCardFormHintNamesEachStop(t *testing.T) {
 		stop int
 		name string
 	}{
-		{cardStopKind, "kind"},
 		{cardStopText, ""}, // text's own hint names itself via alt+g wording; not a bare row name
 		{cardStopEnvelope, "dollar"},
 		{cardStopProfile, "profile"},

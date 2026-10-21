@@ -26,25 +26,6 @@ var runCmd = &cobra.Command{
 	},
 }
 
-// researchCmd implements `gummi research [flags] "<brief>"`.
-var researchCmd = &cobra.Command{
-	Use:   "research [flags] \"<brief>\"",
-	Short: "Headlessly drive one research card through decompose",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runResearchCard(cmdFlags(cmd), args, domain.CardType{Kind: domain.KindResearch}, "brief")
-	},
-}
-
-// diagnoseCmd implements `gummi diagnose [flags] "<symptom>"`.
-var diagnoseCmd = &cobra.Command{
-	Use:   "diagnose [flags] \"<symptom>\"",
-	Short: "Headlessly drive one diagnosis card through decompose",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runResearchCard(cmdFlags(cmd), args,
-			domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}, "symptom")
-	},
-}
-
 // resumeCmd implements `gummi resume <id|ref> [decision]`.
 var resumeCmd = &cobra.Command{
 	Use:   "resume <id|ref> [decision]",
@@ -524,10 +505,6 @@ var webUnpairCmd = &cobra.Command{
 
 func init() {
 	bindRunFlags(runCmd.Flags())
-	bindResearchFlags(researchCmd.Flags())
-	// diagnose is the same card in the other mode, so it is the same flag
-	// surface — bound from the one definition rather than restated.
-	bindResearchFlags(diagnoseCmd.Flags())
 	bindResumeFlags(resumeCmd.Flags())
 	bindMergeFlags(mergeCmd.Flags())
 	bindHandoffFlags(handoffCmd.Flags())
@@ -575,21 +552,10 @@ func init() {
 }
 
 // bindRunFlags declares `gummi run`'s flags: the shared driving surface
-// plus the three only a feature card takes.
+// plus the one only a feature card takes.
 func bindRunFlags(fs *pflag.FlagSet) {
 	stdDriveFlags().bind(fs)
 	fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
-	adoptionFlags(fs)
-}
-
-// bindResearchFlags declares the flags `gummi research` and `gummi
-// diagnose` share. No --acceptance: RS has no Verification-plan section to
-// seed, and it never gets a branch, so neither adoption flag applies.
-func bindResearchFlags(fs *pflag.FlagSet) {
-	d := stdDriveFlags()
-	d.envelope = "spend budget for the research card, in dollars (required; falls back to GUMMI_ENVELOPE)"
-	d.until = `stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)`
-	d.bind(fs)
 }
 
 // bindResumeFlags declares `gummi resume`'s flags: the shared driving
@@ -700,7 +666,6 @@ func bindBugsNewFlags(fs *pflag.FlagSet) {
 	envelopeFlag(fs, "spend budget, in dollars (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	fs.String("repo", "", "managed repository to create the bug in (a configured repos: name; required when repos: is configured)")
 	fs.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)")
-	adoptionFlags(fs)
 	fs.Bool("yes", false, "create without the confirmation prompt")
 }
 

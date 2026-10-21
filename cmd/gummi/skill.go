@@ -224,7 +224,6 @@ type grammarEntry struct {
 func coreGrammar() []grammarEntry {
 	return []grammarEntry{
 		{sigs: []string{`gummi run [flags] "<description>"`}, path: "run"},
-		{sigs: []string{`gummi research [flags] "<brief>"`, `gummi diagnose [flags] "<symptom>"`}, path: "research"},
 		{sigs: []string{"gummi resume <id|ref> [decision]"}, path: "resume"},
 		{sigs: []string{"gummi verify <id|ref>"}, path: "verify"},
 		{sigs: []string{"gummi merge <id|ref> -m <message|->"}, path: "merge"},
@@ -257,7 +256,7 @@ func coreGrammar() []grammarEntry {
 // budget) reads as a difference instead of drowning in restatement.
 func commandGrammar() string {
 	var b strings.Builder
-	b.WriteString("Flags shared by run, research, diagnose and resume — listed again under a\nverb only where that verb means something different by one:\n\n")
+	b.WriteString("Flags shared by run and resume — listed again under a\nverb only where that verb means something different by one:\n\n")
 	writeFlagLines(&b, sharedFlagLines())
 	for _, e := range coreGrammar() {
 		b.WriteString("\n")

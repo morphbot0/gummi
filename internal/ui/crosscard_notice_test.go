@@ -32,7 +32,7 @@ import (
 func twoCardBoard(t *testing.T) (*Shell, *bytes.Buffer) {
 	t.Helper()
 	m, _ := chatWorkspace(t, agent.NewFake("hi"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Second card")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	var buf bytes.Buffer

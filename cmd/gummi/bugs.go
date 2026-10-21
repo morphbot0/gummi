@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -74,22 +73,6 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	}, nil
 }
 
-// closeAgents closes every distinct agent in the map exactly once (the
-// "" default alias points at one of the concrete-name entries).
-func closeAgents(agents map[string]agent.Agent) {
-	seen := map[agent.Agent]struct{}{}
-	for _, a := range agents {
-		if a == nil {
-			continue
-		}
-		if _, ok := seen[a]; ok {
-			continue
-		}
-		seen[a] = struct{}{}
-		_ = a.Close()
-	}
-}
-
 // runBugIngest implements `gummi bugs ingest`: pull open issues from a
 // GitHub repo (default: this repo's origin remote), print them, and —
 // after confirmation — materialize the fresh ones into the todo backlog.
@@ -132,7 +115,7 @@ func runBugIngest(fl cliFlags) error {
 				return nil
 			}
 		}
-		return materializeBugs(ctx, be, []domain.BugProposal{prop}, fl.String("target-repo"), "", adoption{})
+		return materializeBugs(ctx, be, []domain.BugProposal{prop}, fl.String("target-repo"), "")
 	}
 
 	renderBugProposals(os.Stdout, res)
@@ -147,7 +130,7 @@ func runBugIngest(fl cliFlags) error {
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, fl.String("target-repo"), "", adoption{})
+	return materializeBugs(ctx, be, res.Proposals, fl.String("target-repo"), "")
 }
 
 // selectIssue resolves a GitHub issue number against a single
@@ -189,11 +172,6 @@ func runBugNew(fl cliFlags) error {
 	if strings.TrimSpace(fl.String("title")) == "" {
 		return fmt.Errorf("bugs new needs a --title")
 	}
-	adopted, err := resolveAdoption(fl.String("adopt"), fl.String("pr"), fl.String("repo"))
-	if err != nil {
-		return err
-	}
-
 	be, err := openBugEnv(fl.String("profile"), fl.Budget("envelope"))
 	if err != nil {
 		return err
@@ -225,22 +203,12 @@ func runBugNew(fl cliFlags) error {
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, fl.String("repo"), fl.String("base"), adopted)
+	return materializeBugs(ctx, be, res.Proposals, fl.String("repo"), fl.String("base"))
 }
 
 // materializeBugs mints the proposals and prints what was created.
-func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal, repo, base string, adopt adoption) error {
-	opts := engine.MaterializeOpts{Profile: be.profile, Envelope: be.env, Repo: repo, Base: base, Adopt: adopt.Branch}
-	if adopt.Branch != "" {
-		// The same inspection cardmint's callers run, asked here because
-		// this mint path does not go through cardmint: the branch has to
-		// exist and carry work before a bug is minted onto it.
-		w, ierr := be.eng.AdoptInspector(ctx, repo, base)(adopt.Branch)
-		if ierr != nil {
-			return ierr
-		}
-		opts.AdoptedWork = w
-	}
+func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal, repo, base string) error {
+	opts := engine.MaterializeOpts{Profile: be.profile, Envelope: be.env, Repo: repo, Base: base}
 	created, err := be.eng.MaterializeBugs(ctx, props, opts)
 	for _, f := range created {
 		fmt.Printf("  %s  %s\n", f.ID, clean(f.Title))

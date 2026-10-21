@@ -43,7 +43,7 @@ func oneCardWorkspace(t *testing.T) *Shell {
 	t.Helper()
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Actor")
 	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 }

@@ -299,7 +299,7 @@ func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, 
 		spec, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
 			Kind: domain.KindFeature, Description: specBrief(f, title, head, brief),
 			Profile: profile, Envelope: envelope, Repo: f.Repo, RequireRepo: m.requireRepo, Base: f.Base,
-			Source: "manual",
+			Source: "manual", Workflow: true,
 		})
 		if err != nil {
 			return noticeMsg{text: f.Name() + " was handed off, but the spec was not created: " + sanitize(err.Error()), isErr: true, id: f.ID}

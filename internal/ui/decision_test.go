@@ -75,7 +75,7 @@ func TestDecisionQuestionRehydratedSessionIsNotClaimedLive(t *testing.T) {
 func TestThreadDecisionAdvancesIdleTodo(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("hi"))
 	// a fresh second card sits in todo, untouched by the fixture's advance
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Second card")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	selectRow(t, m, "FD-002")
@@ -366,7 +366,7 @@ func verifyGateWorkspace(t *testing.T) *Shell {
 	t.Helper()
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	for range 3 { // todo→plan→implement→verify
@@ -384,7 +384,7 @@ func reviewGateWorkspace(t *testing.T) *Shell {
 	m, _ := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openFeatureForm(t, m)
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	for range 2 { // todo→plan→implement
