@@ -288,22 +288,22 @@ func headSHA(t *testing.T, root string) string {
 }
 
 // TestTheArtifactChordAnswersOnAFreeformCard: the tab bar does not draw an
-// artifact tab for a card with no document, so the chord that names it owes
-// an answer rather than mounting a view onto nothing.
+// artifact tab for a session with no spec yet, so the chord that names it
+// owes an answer rather than mounting a view onto nothing.
 func TestTheArtifactChordAnswersOnAFreeformCard(t *testing.T) {
 	m := freeformShell(t, 120, 34, true)
 	m.cardOpen = true
 	if bar := ansi.Strip(m.cardTabBar(cardTabThread, 120)); strings.Contains(bar, "spec") {
-		t.Errorf("the tab bar offers a document on a freeform card: %q", bar)
+		t.Errorf("the tab bar offers a document on a session with no spec: %q", bar)
 	}
 	cmd, handled := m.cardTabKey("alt+s")
 	if !handled {
 		t.Fatal("alt+s was not answered on a freeform card")
 	}
 	if cmd != nil {
-		t.Error("alt+s mounted something on a card with no document")
+		t.Error("alt+s mounted something on a session with no spec")
 	}
-	if !strings.Contains(m.notice.text, "no document") {
+	if !strings.Contains(m.notice.text, "no spec yet") {
 		t.Errorf("notice = %q, want it to say why", m.notice.text)
 	}
 }

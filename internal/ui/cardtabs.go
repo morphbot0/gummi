@@ -88,11 +88,25 @@ func cardHasDiff(r featureRow) bool {
 	return r.F.Kind != domain.KindResearch && r.F.Stage != domain.StageTodo
 }
 
+// cardHasSessionSpec reports whether this card is a session with a spec
+// to open: a card hasSessionSpec may keep (websessionspec.go — freeform,
+// not a crew's own card or node, no home) whose spec file actually
+// exists on disk. The tab bar, alt+s (here and shell.go's board-level
+// key) and cardActionsFor's "open document" entry all call this one
+// predicate, so they cannot disagree about whether a session has a spec
+// to show. The file's existence is resolved once at load (loadRows, the
+// same point HasWorktree is), never stat'd again on the render path.
+func cardHasSessionSpec(r featureRow) bool {
+	return hasSessionSpec(r.F) && r.HasSessionSpec
+}
+
 // cardHasArtifact reports whether the card has a document for the
-// artifact tab to open. Every kind does but one: a freeform card's record
-// is its thread (DESIGN §19), so Kind.ArtifactNoun is empty for it and the
-// tab would render as a nameless label opening nothing.
-func cardHasArtifact(r featureRow) bool { return artifactNoun(r.F.Kind) != "" }
+// artifact tab to open. Every workflow kind but freeform does by
+// definition: Kind.ArtifactNoun is empty for freeform (DESIGN §19), so a
+// freeform card's own document is its session spec, when it has one.
+func cardHasArtifact(r featureRow) bool {
+	return artifactNoun(r.F.Kind) != "" || cardHasSessionSpec(r)
+}
 
 // cardTabBar renders the bar. The active tab is titled, the others are
 // muted and wear their chord, so the row teaches the keys instead of
@@ -127,7 +141,12 @@ func (m *Shell) cardTabBar(active cardTab, w int) string {
 			// the label is the interface, so it takes the card's own noun
 			// for its document — a bug card's page calling it a "spec"
 			// names the document by a word appearing nowhere else on it.
+			// A session has no noun of its own (Kind.ArtifactNoun is empty
+			// for freeform): its document is its spec.
 			name = artifactNoun(r.F.Kind)
+			if name == "" {
+				name = "spec"
+			}
 		}
 		if t == active {
 			out += s.PaneTitleActive.Render(name)
@@ -178,9 +197,9 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 	case cardTabArtifact:
 		if !cardHasArtifact(r) {
 			// the bar does not draw the tab for such a card, so the chord
-			// says why rather than mounting a view onto no document — the
-			// same contract the diff and stats chords keep below.
-			m.notice = noticeMsg{text: r.F.Name() + ": a freeform card has no document — its thread is the record"}
+			// says why rather than mounting a view onto nothing — the same
+			// contract the diff and stats chords keep below.
+			m.notice = noticeMsg{text: r.F.Name() + ": " + noArtifactReason(r)}
 			return nil, true
 		}
 		m.diff, m.stats, m.logv = nil, nil, nil
@@ -215,6 +234,18 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 		return m.openLog(r.F), true
 	}
 	return nil, false
+}
+
+// noArtifactReason says why the artifact tab draws nothing for this
+// card: a session hasSessionSpec may keep, but has not started one
+// (most never need one; a crew does), reads differently from an agent —
+// a main-checkout card with no document at all, its record is its
+// thread and nothing else.
+func noArtifactReason(r featureRow) string {
+	if hasSessionSpec(r.F) {
+		return "it has no spec yet — most sessions never need one; a crew does"
+	}
+	return "a freeform card has no document — its thread is the record"
 }
 
 // cardTabFor resolves a chord to its tab.
@@ -256,10 +287,15 @@ func (m *Shell) cardTabBindings() []binding {
 	r, haveCard := m.selected()
 	bs = append(bs,
 		binding{key: "alt+t", label: "thread", help: "the card's conversation — where you answer the decision"},
-		binding{key: "alt+s", label: "artifact", help: "the document the stage wrote — comment, resolve and approve in place"},
+		binding{key: "alt+s", label: "artifact", help: "the document the stage wrote, or a session's own spec — comment, resolve and approve in place"},
 	)
-	if haveCard {
+	switch {
+	case haveCard && cardHasSessionSpec(r):
+		bs[len(bs)-1].help = "the session's spec — comment, resolve and approve in place"
+	case haveCard && artifactNoun(r.F.Kind) != "":
 		bs[len(bs)-1].help = "the " + artifactNoun(r.F.Kind) + " — comment, resolve and approve in place"
+	case haveCard && hasSessionSpec(r.F):
+		bs[len(bs)-1].help = "a session's own spec, once it has one — most never need one"
 	}
 	if !haveCard || cardHasDiff(r) {
 		bs = append(bs, binding{key: "alt+d", label: "diff", help: "the card's diff — comment, resolve and approve in place"})

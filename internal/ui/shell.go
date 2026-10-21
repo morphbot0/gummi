@@ -2381,11 +2381,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			m.clearTransientNotice()
 			if !cardHasArtifact(r) {
-				// A freeform card has no document to open (DESIGN §19). The
-				// key is filtered out of this card's bindings, so nothing
+				// A card with no document (or no spec) to open (DESIGN §19).
+				// The key is filtered out of this card's bindings, so nothing
 				// advertises it here — but the handler still answers, the way
 				// every other withheld key on this board does.
-				m.notice = noticeMsg{text: r.F.Name() + ": a freeform card has no document — its thread is the record", id: r.F.ID}
+				m.notice = noticeMsg{text: r.F.Name() + ": " + noArtifactReason(r), id: r.F.ID}
 				return nil
 			}
 			return m.openSpec(r.F)

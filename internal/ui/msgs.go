@@ -68,6 +68,12 @@ type featureRow struct {
 	// work (the rebase), and the answer set has to know that without
 	// reading it back out of an error sentence.
 	Drift *worktree.ForkDriftError
+	// HasSessionSpec is whether a session's spec file exists on disk,
+	// stat'd once at load (loadRows) the same way HasWorktree is — so
+	// cardHasSessionSpec (cardtabs.go), which gates the spec tab, alt+s
+	// and the action inventory's "open document" entry, costs the render
+	// path nothing.
+	HasSessionSpec bool
 }
 
 // baseBranch names the branch r's card lands on, for prose that only has
@@ -284,6 +290,11 @@ func (m *Shell) loadRows() tea.Msg {
 		}
 		row.OpenDiffComments = m.openDiffComments(f.ID)
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
+		if hasSessionSpec(f) {
+			if _, err := os.Stat(filepath.Join(m.wt.Root(), filepath.FromSlash(f.SpecPath()))); err == nil {
+				row.HasSessionSpec = true
+			}
+		}
 		rows = append(rows, row)
 	}
 	// Stack annotations are derived here, on the command goroutine,

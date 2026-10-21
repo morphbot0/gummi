@@ -242,6 +242,17 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	// same way (closedRefusal).
 	closed := in.closed()
 
+	// A session has no noun of its own (artifactNoun(KindFreeform) is
+	// empty), but it may still have a document to open: its own spec,
+	// the same predicate the tab bar and alt+s answer from
+	// (cardHasSessionSpec), so the three cannot disagree about whether
+	// this card has one.
+	sessionSpec := cardHasSessionSpec(r)
+	specLabel := artifactNoun(in.kind)
+	if sessionSpec {
+		specLabel = "spec"
+	}
+
 	specs := []actionSpec{
 		// on a card something else drives, enter can only watch
 		{
@@ -255,10 +266,11 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			// the label is the interface, so it takes the card's own noun
-			// for its document. The id stays "spec": that is what the
-			// Shell switches on, not what a reader sees.
-			"spec", "s", artifactNoun(in.kind), "read the " + artifactNoun(in.kind), false,
-			!freeform,
+			// for its document — "spec" for a session that has one. The id
+			// stays "spec": that is what the Shell switches on, not what a
+			// reader sees.
+			"spec", "s", specLabel, "read the " + specLabel, false,
+			!freeform || sessionSpec,
 		},
 		{
 			"diff", "d", "diff", "read or comment on the diff (tab toggles commenting)", false,

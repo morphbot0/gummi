@@ -15,6 +15,7 @@ import (
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -46,11 +47,16 @@ type specLoadedMsg struct {
 	err     error
 }
 
-// openSpec resolves the feature's spec file — the workspace copy under
+// openSpec resolves the feature's spec file — a session's own spec file
+// directly (no draft, no migration: a person does not start one from the
+// TUI), or for a retired workflow card, the workspace copy under
 // .gummi/specs|bugs once the feature has a worktree, the draft under
 // .gummi/state/drafts/ before then (created from the template on first
 // open).
 func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
+	if hasSessionSpec(f) {
+		return m.openSessionSpec(f)
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		// Once the worktree exists the artifact lives at its workspace
@@ -68,6 +74,33 @@ func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
 				return specLoadedMsg{err: err}
 			}
 		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return specLoadedMsg{err: err}
+		}
+		return specLoadedMsg{f: f, path: path, content: string(raw)}
+	}
+}
+
+// sessionSpecFilePath is where f's own spec lives on disk — the engine's
+// own SessionSpecPath when an engine is wired, or the same formula
+// (workspace root + Feature.SpecPath) when the board is static (a
+// session's spec still reads and writes without an agent, AGENTS.md).
+func (m *Shell) sessionSpecFilePath(f domain.Feature) string {
+	if m.engine != nil {
+		return m.engine.SessionSpecPath(f)
+	}
+	return filepath.Join(m.wt.Root(), filepath.FromSlash(f.SpecPath()))
+}
+
+// openSessionSpec mounts a session's own spec directly — no draft, no
+// migrateDraft, no EnsureDraft: those exist to seed a retired workflow
+// card's artifact, and a person does not start a session's spec from the
+// TUI (spec_start, the agent's own tool, and the web page's start button
+// remain the ways in).
+func (m *Shell) openSessionSpec(f domain.Feature) tea.Cmd {
+	path := m.sessionSpecFilePath(f)
+	return func() tea.Msg {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return specLoadedMsg{err: err}
@@ -98,13 +131,45 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 		return nil
 	}
 	reload := m.reloadSpec()
-	path := sv.path
+	f, path := sv.f, sv.path
 	return func() tea.Msg {
 		if err := writeSpecNote(path, line, m.now().Format("2006-01-02"), text); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
+		if err := m.noteSessionSpecRevision(f, path); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
 		return reload()
 	}
+}
+
+// noteSessionSpecRevision records a session's spec, just written to path
+// by the caller, as a new numbered revision through the engine — the
+// terminal's mirror of the web page's own writer (WebDocs.noteSessionRevision),
+// so a comment, a resolution or an $EDITOR save made here reaches a
+// running crew as a steer the same way a web edit does. A no-op for
+// every card that is not such a session, or when no engine is wired (a
+// static board still reads and writes the file directly; there is
+// nothing to record a revision with).
+func (m *Shell) noteSessionSpecRevision(f domain.Feature, path string) error {
+	if !hasSessionSpec(f) {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	fresh := f
+	if got, ferr := m.store.GetFeature(ctx, f.ID); ferr == nil {
+		fresh = got
+	}
+	var writeErr error
+	m.withEngine(func(eng *engine.Engine) tea.Msg {
+		_, writeErr = eng.WriteSessionSpec(ctx, fresh, string(raw), m.humanActor())
+		return nil
+	})
+	return writeErr
 }
 
 // writeSpecNote writes one `@user` note under line of the document at
@@ -144,9 +209,12 @@ func (m *Shell) resolveSpecComment(line int, reason string) tea.Cmd {
 		return nil
 	}
 	reload := m.reloadSpec()
-	path := sv.path
+	f, path := sv.f, sv.path
 	return func() tea.Msg {
 		if err := writeSpecResolution(path, line, m.now().Format("2006-01-02"), reason, nil); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := m.noteSessionSpecRevision(f, path); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return reload()
@@ -341,11 +409,19 @@ func (m *Shell) editSpec() tea.Cmd {
 		}
 	}
 	reload := m.reloadSpec()
-	path := sv.path
+	f, path, before := sv.f, sv.path, sv.content
 	cmd := exec.CommandContext(context.Background(), editor, path) //nolint:gosec // $EDITOR is the user's own trusted setting
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return noticeMsg{text: fmt.Sprintf("editor: %v", err), isErr: true}
+		}
+		// only a save that actually changed the file is worth a revision —
+		// an editor opened and closed untouched would otherwise spend a
+		// revision (and a crew steer) on nothing.
+		if raw, rerr := os.ReadFile(path); rerr == nil && string(raw) != before {
+			if err := m.noteSessionSpecRevision(f, path); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
 		}
 		return reload()
 	})
