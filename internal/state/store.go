@@ -953,8 +953,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		false, false, f.Profile,
 		f.Budget.Envelope,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		// the three false values are skip_triage/skip_diagnose/quick: vestigial
-		string(kind), f.ExternalRef, false, false, false, f.GateApproval,
+		// the three false values are skip_triage/skip_diagnose/quick, and
+		// the empty gate_approval, are vestigial
+		string(kind), f.ExternalRef, false, false, false, "",
 		string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.CommitDraft, f.CommitDraftSHA, f.Repo,
 		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA,
 		// the goal_* columns are vestigial: goals are gone
@@ -1022,13 +1023,16 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	// the columns stay so an older gummi can still read the database and
 	// so no rebuild is needed to drop them. Scanned into a bin.
 	var vestigialSkips [5]bool
+	// gate_approval is vestigial too: it was a workflow card's autopilot
+	// mode.
+	var vestigialGate string
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
 		&vestigialSkips[0], &vestigialSkips[1], &f.Profile,
 		&f.Budget.Envelope,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.CommitDraft, &f.CommitDraftSHA, &f.Repo,
+		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &vestigialGate, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.CommitDraft, &f.CommitDraftSHA, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
 		&foundBy,
 		&mode,

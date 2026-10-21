@@ -1,13 +1,15 @@
-// Package engine is gummi's orchestrator: it binds features' stages to
-// agent sessions, starts autonomous runs (DESIGN §4.2), routes turns,
-// and streams typed activity to the UI.
+// Package engine is gummi's orchestrator: it runs each session's agent in
+// its card's worktree (freeformsession.go), conducts a session's crew —
+// its planner, its nodes on their own branches, their reviews and the
+// report (crew*.go, DESIGN §24) — fires schedules and heartbeats, ticks
+// stacks, runs the skill curator, routes turns and streams typed
+// activity to the faces.
 //
-// Every autonomous run (plan/implement/review/verify) starts the moment
-// it is asked for. Nothing caps how many run at once, and nothing queues
-// one behind another: parallelism is the operator's decision. A card's
-// gate-approval mode decides how its gates are crossed and who answers
-// its questions, never when it runs. The per-card lock is what keeps two
-// runs of the same card from overlapping.
+// A session runs the moment it is asked to. Nothing caps how many run at
+// once, and nothing queues one behind another: parallelism is the
+// operator's decision. The per-card lock is what keeps two processes from
+// driving the same card. A workflow card left in an old database is read,
+// never run.
 package engine
 
 import (

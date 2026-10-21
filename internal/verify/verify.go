@@ -1,15 +1,8 @@
-// Package verify runs a feature's Verify-stage check commands in its
-// worktree and reports pass/fail with output. The commands come from
-// the artifact's gummi-checks block (internal/spec): auto-discovered at
-// approval, then ordinary spec content — human-gated by the approval
-// gates and versioned with the branch (DESIGN §4.4).
-//
-// Two callers, two safety stories: the manual verify dialog surfaces the
-// commands and runs on confirmation (a bare host may be watching); the
-// engine runs them autonomously at the Verify stage only in allow-all
-// mode, where the sandbox is the boundary and the stage's agent would
-// otherwise run the identical shell itself. In guarded mode the engine
-// does not auto-run them — the agent handles verification instead.
+// Package verify runs check commands in a worktree and reports pass/fail
+// with output. Its caller is a session's crew: a node's own checks before
+// it lands, and the plan's done-when checks at the final review and on a
+// re-run from the card's head (DESIGN §24). The commands come from the
+// crew's plan, which a person approved.
 package verify
 
 import (

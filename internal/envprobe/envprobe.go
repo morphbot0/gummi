@@ -7,8 +7,7 @@
 // probe source is operator config from outside the worktree; only the working
 // directory is the card's worktree.
 //
-// Probes run fresh on every Verify kickoff and every `gummi doctor` run — no
-// cache, no TTL. Each probe is bounded by a compiled-in 60s cap; a hung probe
+// Probes run fresh on every `gummi doctor` run — no cache, no TTL. Each probe is bounded by a compiled-in 60s cap; a hung probe
 // is killed by process group so it cannot orphan children.
 package envprobe
 

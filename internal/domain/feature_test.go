@@ -143,44 +143,6 @@ func TestFeatureValidate(t *testing.T) {
 	}
 }
 
-func TestValidGateApproval(t *testing.T) {
-	cases := []struct {
-		s    string
-		want bool
-	}{
-		{"", true},
-		{GateAttended, true},
-		{GateAttended, true},
-		{GateAutopilot, true},
-		{"auto", false},   // legacy input spelling — not a stored form
-		{"caller", false}, // legacy input spelling — not a stored form
-		{"bogus", false},
-	}
-	for _, c := range cases {
-		if got := ValidGateApproval(c.s); got != c.want {
-			t.Errorf("ValidGateApproval(%q) = %v, want %v", c.s, got, c.want)
-		}
-	}
-}
-
-// TestGateModeResolvesTheEmptyDefault pins the contract every reader of
-// GateApproval depends on: the stored empty string is attended, not "some
-// third thing". Comparing the raw field instead of calling this is what
-// classified every card minted with an unset mode as autopilot work — see
-// engine's TestLanePoolForEmptyGateIsAttended for the failure that caused.
-func TestGateModeResolvesTheEmptyDefault(t *testing.T) {
-	for _, c := range []struct{ stored, want string }{
-		{"", GateAttended},
-		{GateAttended, GateAttended},
-		{GateAutopilot, GateAutopilot},
-	} {
-		f := Feature{GateApproval: c.stored}
-		if got := f.GateMode(); got != c.want {
-			t.Errorf("Feature{GateApproval: %q}.GateMode() = %q, want %q", c.stored, got, c.want)
-		}
-	}
-}
-
 func TestNormalizeGateApproval(t *testing.T) {
 	cases := []struct {
 		in     string

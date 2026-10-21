@@ -292,7 +292,7 @@ func (e *Engine) mintCrewCard(ctx context.Context, sess domain.Feature, parent d
 	f := domain.Feature{
 		ID: id, Num: num, Kind: domain.KindFreeform, Title: title, Slug: sess.Slug,
 		Stage: domain.StageOpen, Profile: sess.Profile, Budget: domain.Budget{Envelope: envelope},
-		Repo: sess.Repo, ParentID: parent, Crew: link, GateApproval: domain.GateAutopilot,
+		Repo: sess.Repo, ParentID: parent, Crew: link,
 		SessionBackend: backend, SessionModel: model,
 		BranchScheme: domain.DefaultBranchScheme, CreatedAt: now, UpdatedAt: now,
 	}

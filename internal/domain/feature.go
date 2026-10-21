@@ -14,44 +14,15 @@ import (
 	"unicode"
 )
 
-// Gate approval modes: who crosses a feature's gates on an unattended
-// resume. There are two, and the axis is "how much do I trust this card"
-// rather than a per-gate policy:
-//
-//   - GateAttended stops at every gate. The stage asks whether to
-//     advance; you review, comment, and answer. This is the default when
-//     the field is empty.
-//   - GateAutopilot stops at none. It runs all the way to a verified
-//     branch on its own — gates, critique bounces and conflict handoffs
-//     all auto-cross — and stops there: it never lands on main by itself.
-//
-// This replaces three modes with two, and the default gets STRICTER in
-// the process. The retired middle mode ("gates") auto-crossed design
-// gates while still stopping for a mid-stage question, and it was the
-// default; attended stops at all of them. The trade is that each stop is
-// a question in the conversation rather than a control to go find.
-//
-// The mode is chosen at `run` and persisted on the card so an unattended
-// `resume` keeps it instead of silently reverting to the default. Empty
-// reads as GateAttended. These are the canonical, stored values — the
-// only ones ValidGateApproval accepts. The spellings that came before
-// them ("off", "gates", "caller", "auto" → attended; "full" →
-// autopilot) are still accepted as INPUT through NormalizeGateApproval,
-// so existing scripts keep working and old rows migrate, but they are
-// never stored and nothing branches on them.
+// Gate approval modes: who crossed a workflow card's gates — a person at
+// each one (GateAttended, also the empty default) or nobody until the
+// branch was verified (GateAutopilot). Workflow cards are retired; the
+// spellings survive because a legacy card's log still records its mode
+// changes, and the thread renders them (threadfold.ModeLine).
 const (
 	GateAttended  = "attended"
 	GateAutopilot = "autopilot"
 )
-
-// ValidGateApproval reports whether s is a storable gate-approval mode:
-// empty, "attended", or "autopilot". Empty is valid and reads as
-// GateAttended. It does not accept the retired input spellings — those
-// are resolved to their canonical form by NormalizeGateApproval before
-// anything reaches storage or Validate.
-func ValidGateApproval(s string) bool {
-	return s == "" || s == GateAttended || s == GateAutopilot
-}
 
 // NormalizeGateApproval resolves a gate-approval mode as given by a
 // caller (CLI flag, MCP tool argument, a persisted row written by an
@@ -69,8 +40,7 @@ func ValidGateApproval(s string) bool {
 // which is autopilot exactly.
 //
 // "" passes through unchanged — the empty string carries no default
-// here; the caller decides what empty means for it (persisted rows and
-// Feature.GateApproval read it as GateAttended).
+// here; the caller decides what empty means for it.
 func NormalizeGateApproval(s string) (string, bool) {
 	switch s {
 	case "":
@@ -419,15 +389,9 @@ type Feature struct {
 	ParentID FeatureID
 	// Crew marks a crew's own card or one of its nodes' (DESIGN §24): a
 	// hidden freeform child no person works. Zero on every other card.
-	Crew CrewLink
-	// GateApproval is who crosses this card's gates on an unattended
-	// resume: GateAttended (default) or GateAutopilot.
-	// Persisted at creation so a `resume` that doesn't re-pass
-	// --gate-approval inherits the run's choice rather than reverting to
-	// the default. Empty reads as GateAttended.
-	GateApproval string
-	Budget       Budget
-	Spend        Spend // metered cost across all stages
+	Crew   CrewLink
+	Budget Budget
+	Spend  Spend // metered cost across all stages
 	// ExternalRef ties a bug back to its source (e.g. a GitHub issue URL),
 	// so re-ingesting the same source skips items already imported. Empty
 	// for manually created features and bugs.
@@ -774,22 +738,6 @@ func ShortRev(rev string) string {
 	return rev
 }
 
-// GateMode returns the feature's gate-approval mode with the empty
-// default resolved, the same job kind() does for Kind. Every read of
-// GateApproval that branches on the mode must go through this: the field
-// is documented as "empty reads as GateAttended" and ValidGateApproval
-// accepts empty as storable, so a bare `f.GateApproval == GateAttended`
-// silently classifies an unset card as autopilot. That is exactly what
-// the engine's old pool split did — every card minted by `bugs new` stores the
-// empty string, so every bug card competed in the autopilot lane pool
-// while its own card page read "autopilot: off".
-func (f *Feature) GateMode() string {
-	if f.GateApproval == GateAutopilot {
-		return GateAutopilot
-	}
-	return GateAttended
-}
-
 // HandedOff reports whether the card was ended by hand-off — closed with
 // its branch deliberately left unlanded. It is the predicate every
 // surface asks (the board badge, the clean-up refusal, Advance's fourth
@@ -1019,9 +967,6 @@ func (f *Feature) Validate() error {
 	}
 	if f.Budget.Envelope < 0 {
 		return fmt.Errorf("feature %s: negative budget", f.ID)
-	}
-	if !ValidGateApproval(f.GateApproval) {
-		return fmt.Errorf("feature %s: unknown gate-approval mode %q", f.ID, f.GateApproval)
 	}
 	if !f.Mode.Valid() {
 		return fmt.Errorf("feature %s: unknown research mode %q", f.ID, f.Mode)

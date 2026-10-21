@@ -8,7 +8,7 @@
 //	hooks:
 //	  - run: ~/bin/gummi-notify "$1"       # every event
 //	  - run: page-oncall.sh "$1"
-//	    events: [gate.waiting, budget.exhausted]
+//	    events: [question.waiting, budget.exhausted]
 //
 // The `run:` line is a shell command line, not a program name: it is fed
 // to `sh -c`, where the event name is "$1". A line that names a script
@@ -29,7 +29,7 @@
 //     line at Close, because a hook nobody can see failing is a hook
 //     nobody can fix.
 //   - Hooks fire where the event is committed. The store reports
-//     committed card events (Transitions, parks, decisions, creations)
+//     committed card events (parks, decisions, creations)
 //     and the worktree layer reports squash-merges; a hook therefore
 //     fires from whichever process performed the write, exactly once per
 //     committed row (the store's own dedupe keys are honored — a
@@ -62,11 +62,13 @@ import (
 const (
 	// EventCardCreated: a card was minted (the new-card form, a schedule, a crew).
 	EventCardCreated = "card.created"
-	// EventStageEnter: a card crossed a stage edge (forward or rerun);
-	// from/to/actor name the edge.
+	// EventStageEnter: a workflow card crossed a stage edge. Never raised
+	// since workflow cards were retired; still accepted in a filter so an
+	// existing config loads.
 	EventStageEnter = "stage.enter"
-	// EventCardVerified: the card reached done with a verified branch —
-	// the landing moment, merge or hand-off alike.
+	// EventCardVerified: a workflow card reached done with a verified
+	// branch. Never raised since workflow cards were retired; still
+	// accepted in a filter so an existing config loads.
 	EventCardVerified = "card.verified"
 	// EventCardParked: the card stopped and waits (reason/detail say why:
 	// needs-you, gave-up, blocked, quit).
@@ -74,15 +76,17 @@ const (
 	// EventCardMerged: the card's branch was squash-merged onto its base;
 	// commit is the landed sha.
 	EventCardMerged = "card.merged"
-	// EventGateWaiting: the card blocked on a design-gate approval.
+	// EventGateWaiting: a workflow card blocked on a design-gate
+	// approval. Never raised since workflow cards were retired; still
+	// accepted in a filter so an existing config loads.
 	EventGateWaiting = "gate.waiting"
 	// EventAskWaiting: the card's agent asked a question and awaits an
 	// answer.
 	EventAskWaiting = "question.waiting"
 	// EventBudgetGone: the card's envelope is spent.
 	EventBudgetGone = "budget.exhausted"
-	// EventCardFailed: the card hit a failing verify, a rebase conflict,
-	// or an idle stop; decision_kind distinguishes (verify|conflict|idle).
+	// EventCardFailed: the card stopped on a failure — its session could
+	// not run, or it went idle; decision_kind distinguishes (failure|idle).
 	EventCardFailed = "card.failed"
 )
 

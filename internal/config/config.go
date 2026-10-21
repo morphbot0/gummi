@@ -1,7 +1,7 @@
 // Package config loads .gummi/config.yaml — the repo-controlled gummi
-// settings. Since M5 this is only the permission mode: the verify-stage
-// check commands live in each feature's spec as a gummi-checks block
-// (auto-discovered at approval), not in static config.
+// settings: the permission and sandbox modes, the managed repositories,
+// environment probes, instructions, hooks, co-authors and the skill
+// curator. A crew's checks live in its plan's done-when items, not here.
 package config
 
 import (
@@ -71,9 +71,9 @@ type Config struct {
 	// skills would load and its skills would silently stop arriving.
 	// Sessions now see what each backend discovers itself (DESIGN §4.1a).
 	RemovedSkills any `yaml:"skills"`
-	// Checks supplies workspace-wide default verification checks. When
-	// Checks.Default is non-empty, check discovery bypasses the scribe and
-	// writes the configured list straight into the artifact.
+	// Checks supplied workspace-wide default checks to a workflow card's
+	// check discovery. Nothing reads it since workflow cards were retired;
+	// it is still parsed so an existing config loads.
 	Checks ChecksConfig `yaml:"checks"`
 	// Hooks are the scripts run on board events (the notification surface
 	// beside GUMMI_NOTIFY's bell/desktop). Each entry runs on every event,
