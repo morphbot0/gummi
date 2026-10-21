@@ -9,8 +9,11 @@
 // The rules, in the order Decide applies them:
 //
 //  1. Only a running crew is conducted.
-//  2. A stop, or a budget past its reserve, winds the crew down: every
-//     ready node still lands, every other unsettled node is dropped.
+//  2. A stop, or a budget actually spent, winds the crew down: every
+//     ready node still lands, every other unsettled node is dropped. A
+//     budget past its reserve only by what nodes hold winds it down more
+//     gently: nothing new starts and the planner does not run, ready and
+//     live nodes finish and land, the rest are dropped.
 //  3. One ready node lands per tick, in plan order.
 //  4. A waiting node that needs a dropped node is stuck.
 //  5. An exhausted node goes to the planner once, then is dropped.
@@ -118,13 +121,17 @@ type Ledger struct {
 	Given     float64
 	Reserve   int
 	Available float64 // Budget − Own − Given − Reserve
+	// Spent is what has actually been spent: Own and every node's spend,
+	// with nothing held for what a node has yet to spend.
+	Spent float64
 }
 
 // ComputeLedger totals a snapshot's budget.
 func ComputeLedger(in Input) Ledger {
-	l := Ledger{Budget: in.Budget, Own: in.OwnSpent, Reserve: in.Reserve}
+	l := Ledger{Budget: in.Budget, Own: in.OwnSpent, Reserve: in.Reserve, Spent: in.OwnSpent}
 	for _, n := range in.Nodes {
 		l.Given += n.Held()
+		l.Spent += n.Spent
 	}
 	l.Available = float64(in.Budget) - l.Own - l.Given - float64(in.Reserve)
 	return l
@@ -142,10 +149,10 @@ func Decide(in Input) []Action {
 	}
 
 	led := ComputeLedger(in)
-	if in.Stopping || led.Available < 0 {
+	if in.Stopping || led.Spent >= float64(in.Budget) {
 		why := "stopped"
 		if !in.Stopping {
-			why = fmt.Sprintf("the budget is past its reserve (%.0f over)", -led.Available)
+			why = fmt.Sprintf("the budget is spent (%.0f of %d)", led.Spent, in.Budget)
 		}
 		out = append(out, Action{Kind: WindDown, Reason: why})
 		for _, n := range in.Nodes {
@@ -157,6 +164,9 @@ func Decide(in Input) []Action {
 			}
 		}
 		return append(out, Action{Kind: FinalReview})
+	}
+	if led.Available < 0 {
+		return windDownOnBudget(in, -led.Available)
 	}
 
 	for _, n := range in.Nodes {
@@ -237,6 +247,38 @@ func Decide(in Input) []Action {
 		}
 	}
 	if settled && len(in.Nodes) > 0 && !in.PlannerBusy && len(reasons) == 0 {
+		out = append(out, Action{Kind: FinalReview})
+	}
+	return out
+}
+
+// windDownOnBudget is rule 2 for a budget past its reserve. What the
+// crew still holds is mostly what it has not spent — a waiting node
+// holds its whole envelope — so nothing new starts and no planner turn
+// runs, but work already in flight is not thrown away: a ready node
+// lands, a live node finishes its run, checks and review (its envelope
+// is already counted against the budget), and only the nodes that have
+// not started or have stalled are dropped. The final review runs once
+// every node is settled.
+func windDownOnBudget(in Input, over float64) []Action {
+	why := fmt.Sprintf("the budget is past its reserve (%.0f over)", over)
+	var out []Action
+	settled := true
+	for _, n := range in.Nodes {
+		switch {
+		case n.State == domain.NodeReady:
+			out = append(out, Action{Kind: Land, Node: n.ID})
+			settled = false
+		case n.State.Live():
+			settled = false
+		case !n.State.Settled():
+			out = append(out, Action{Kind: Drop, Node: n.ID, Reason: "the crew wound down: " + why})
+		}
+	}
+	if len(out) > 0 {
+		out = append([]Action{{Kind: WindDown, Reason: why}}, out...)
+	}
+	if settled && !in.PlannerBusy {
 		out = append(out, Action{Kind: FinalReview})
 	}
 	return out

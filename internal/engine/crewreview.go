@@ -147,6 +147,10 @@ func (e *Engine) finalReview(ctx context.Context, id domain.FeatureID) {
 		}
 	}
 	review := domain.CrewReview{Pass: true, Parsed: true}
+	// judged: the final reviewer read the crew's change. With nothing on
+	// the crew branch, or a stop, nobody judged the judge items, and the
+	// report must not mark them met.
+	judged := false
 	diff := ""
 	if mgr, err := e.mgr(ctx, &card); err == nil {
 		diff, _ = mgr.Diff(ctx, &card)
@@ -166,6 +170,7 @@ func (e *Engine) finalReview(ctx context.Context, id domain.FeatureID) {
 			b.WriteString("\nThe done-when checks:\n" + checksSummary(results) + "\n")
 		}
 		b.WriteString("\nThe crew's change:\n```diff\n" + tail(diff, maxReviewDiff) + "\n```\n")
+		judged = true
 		reply, rerr := e.crewToolTurn(ctx, crewTurnSpec{
 			crew: c, label: "final reviewer", role: agent.RoleReviewer, prompt: b.String(),
 			hints: []string{crewReviewHint}, workDir: tree, readOnly: true,
@@ -180,7 +185,13 @@ func (e *Engine) finalReview(ctx context.Context, id domain.FeatureID) {
 	if err != nil || c == nil {
 		return
 	}
-	finished := checksPassed(results) && review.Pass && len(dropped) == 0 && !c.Stopping
+	unjudged := false
+	for _, it := range c.Items {
+		if it.Judge && !judged {
+			unjudged = true
+		}
+	}
+	finished := checksPassed(results) && review.Pass && len(dropped) == 0 && !c.Stopping && !unjudged
 	var b strings.Builder
 	if finished {
 		fmt.Fprintf(&b, "Crew %d finished: the final review passed.\n", c.Seq)
@@ -195,10 +206,19 @@ func (e *Engine) finalReview(ctx context.Context, id domain.FeatureID) {
 		switch {
 		case strings.TrimSpace(it.Check) != "" && !byID[it.ID]:
 			mark = "✗"
+		case it.Judge && !judged:
+			mark = "–"
 		case it.Judge && !review.Pass:
 			mark = "?"
 		}
 		fmt.Fprintf(&b, "%s %s %s\n", mark, it.ID, it.Says)
+	}
+	if unjudged {
+		if strings.TrimSpace(diff) == "" {
+			b.WriteString("\nNothing landed on the crew's branch, so no item marked – was judged.\n")
+		} else {
+			b.WriteString("\nThe crew stopped before its final review, so no item marked – was judged.\n")
+		}
 	}
 	if len(review.Findings) > 0 {
 		b.WriteString("\nThe final review found:\n- " + strings.Join(review.Findings, "\n- ") + "\n")

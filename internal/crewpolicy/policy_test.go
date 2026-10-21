@@ -131,11 +131,45 @@ func TestStoppingWindsDown(t *testing.T) {
 	}
 }
 
-func TestABudgetPastItsReserveWindsDown(t *testing.T) {
+func TestASpentBudgetWindsDown(t *testing.T) {
 	x := in(Node{ID: "t1", State: domain.NodeRunning, Envelope: 50, Spent: 990})
-	x.Reserve = 20
-	if got := Decide(x); got[0].Kind != WindDown {
-		t.Fatalf("got %v", kinds(got))
+	x.OwnSpent = 10
+	want := []string{"wind-down: the budget is spent (1000 of 1000)", "drop t1: the crew wound down: the budget is spent (1000 of 1000)", "final-review"}
+	if got := kinds(Decide(x)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+// A budget past its reserve only by what the nodes hold — a waiting node
+// holds its whole envelope — keeps the work in flight: the ready node
+// lands, the reviewing one finishes, and only the one not started is
+// dropped. Nothing starts and the planner does not run.
+func TestABudgetPastItsReserveKeepsWorkInFlight(t *testing.T) {
+	x := in(
+		Node{ID: "t1", State: domain.NodeReady, Envelope: 300, Spent: 250},
+		Node{ID: "t2", State: domain.NodeReviewing, Envelope: 300, Spent: 310},
+		Node{ID: "t3", State: domain.NodeWaiting, Envelope: 300},
+		Node{ID: "t4", State: domain.NodeWaiting, Envelope: 50, Needs: []string{"t1"}},
+	)
+	x.Reserve, x.OwnSpent, x.Lanes = 100, 100, 4
+	x.Wake = []string{"a steer"}
+	why := "the budget is past its reserve (160 over)"
+	want := []string{"wind-down: " + why, "land t1", "drop t3: the crew wound down: " + why, "drop t4: the crew wound down: " + why}
+	if got := kinds(Decide(x)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+
+	// still past it with only the reviewing node left: ticks wait on it
+	// quietly — the steer wakes no planner — and the final review runs
+	// when it has landed
+	x.Nodes[0].State, x.Nodes[2].State, x.Nodes[3].State = domain.NodeLanded, domain.NodeDropped, domain.NodeDropped
+	x.Reserve = 600
+	if got := Decide(x); len(got) != 0 {
+		t.Fatalf("a tick waiting on the reviewing node: %v", kinds(got))
+	}
+	x.Nodes[1].State = domain.NodeLanded
+	if got := kinds(Decide(x)); !reflect.DeepEqual(got, []string{"final-review"}) {
+		t.Fatalf("got %v", got)
 	}
 }
 

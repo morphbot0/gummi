@@ -6184,7 +6184,12 @@ goal conductor a crew needs.
 `Engine.CrewTick` builds the snapshot and executes the actions. Each
 tick, in this order:
 
-1. Wind down when the budget is past its reserve.
+1. Wind down when the budget is spent or stopped: land what is ready,
+   drop the rest. When it is past its reserve only by what the nodes hold
+   (a waiting node holds its whole envelope), wind down without throwing
+   work away: nothing starts and the planner does not wake, but ready
+   and live nodes finish and land, and only the nodes not yet started or
+   stalled are dropped.
 2. Land one node that has passed its checks and review.
 3. Send an exhausted node to the planner once, to raise or drop it.
 4. Send a stuck node to the planner up to twice, then drop it.
@@ -6195,6 +6200,9 @@ tick, in this order:
 7. When nothing is left, run the **final review** and write the report.
    The final review is the done-when checks on the crew's tip, plus one
    reviewer over the whole crew diff against the frozen spec.
+   With no crew diff to read (nothing landed) or a stop, no reviewer
+   runs: the report marks the judge items unjudged (`–`), never met, and
+   the crew is partial.
 
 Tranches, substrates, experiments and programmes were goal machinery,
 and were retired with goals.

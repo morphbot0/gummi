@@ -275,6 +275,60 @@ nodes:
 	}
 }
 
+// TestAnEmptyCrewJudgesNothing: when nothing lands on the crew's branch
+// the final reviewer never reads a change, so the report must not mark
+// the spec's judge items met, and the crew is partial rather than
+// finished.
+func TestAnEmptyCrewJudgesNothing(t *testing.T) {
+	cf := newCrewFake()
+	cf.plan = `lanes: 1
+budget: 400
+nodes:
+  - id: t1
+    role: implementer
+    title: write crew.txt
+    owns: [crew.txt]
+    serves: [DW-1, DW-2]
+    checks: ["test -f crew.txt"]
+    envelope: 100
+`
+	e, store, f, _ := crewEngine(t, cf)
+	ctx := context.Background()
+	judged := strings.Replace(crewTestSpec, "  check: test -f crew.txt\n",
+		"  check: test -f crew.txt\n- id: DW-2\n  says: crew.txt reads well\n  judge: true\n", 1)
+	if _, err := e.WriteSessionSpec(ctx, f, judged, "user"); err != nil {
+		t.Fatal(err)
+	}
+	// the session already has the file the node will write, word for word
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	if err := os.WriteFile(filepath.Join(tree, "crew.txt"), []byte("made by the crew\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitOut(t, tree, "add", "crew.txt")
+	gitOut(t, tree, "commit", "-q", "-m", "crew.txt")
+
+	if _, err := e.CrewStart(ctx, f.ID, "make the file", 400, ActorAgent); err != nil {
+		t.Fatal(err)
+	}
+	c := tickUntil(t, e, f.ID, "proposed", func(c *domain.Crew) bool { return c.Pending != nil })
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewRunPlan, "user"); err != nil {
+		t.Fatal(err)
+	}
+	c = tickUntil(t, e, f.ID, "reported", func(c *domain.Crew) bool { return c.State.Ended() })
+	if c.State != domain.CrewPartial {
+		t.Errorf("a crew that changed nothing ended %s", c.State)
+	}
+	for _, want := range []string{"✓ DW-1", "– DW-2", "Nothing landed on the crew's branch"} {
+		if !strings.Contains(c.Report, want) {
+			t.Errorf("the report does not say %q:\n%s", want, c.Report)
+		}
+	}
+	if strings.Contains(c.Report, "✓ DW-2") {
+		t.Errorf("the report marks an unread judge item met:\n%s", c.Report)
+	}
+}
+
 func TestARejectedReviewSendsTheNodeBack(t *testing.T) {
 	cf := newCrewFake()
 	cf.review = func(n int) string {
