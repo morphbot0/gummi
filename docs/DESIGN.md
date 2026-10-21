@@ -61,8 +61,16 @@ spend. This is the single most important design decision for the cost goal:
 
 ## 3. The workflow
 
-*Retired by decision 27 once §24 has shipped; until then this is the
-workflow every card in it walks.*
+> **Superseded by §24 (decision 27).** The workflow is retired. No card
+> is minted into it any more and nothing runs one: the only card anyone
+> makes is a session (§19, §24), which holds `StageOpen` until it is
+> closed. The graph, its stage contracts, its critique passes, its verify
+> gate, autopilot and the rerun edges are gone from the code
+> (`internal/workflow` is deleted). A crew's plan checks, per-node review
+> and rework, and its done-when checks (§24.5–§24.8) are what remains of
+> the floor, and they run only where a session calls a crew. A workflow
+> card left in an old database is read-only: shown, never run. What
+> follows is kept as the record of what the crew replaced.
 
 There is exactly one workflow, compiled into gummi — never configurable,
 and now literally one: the three graphs this document originally
@@ -1182,6 +1190,13 @@ several widths, so visual regressions fail CI, not eyes. Demo GIFs via
 
 ### 6.3 The decision — one control for every human checkpoint
 
+> **Superseded in part by §24 (decision 27).** The design gates, verify
+> failures and autopilot this section names are retired with the
+> workflow. The one control and the durable decision record (decision
+> 18) stand: a session's `ask_user` question, an exhausted envelope, a
+> rebase conflict, and a crew's plan, widening and node questions the
+> planner passes on (§24.3, §24.7) are its decisions now.
+
 A card stops for a human in several unrelated-looking ways: a design gate
 opens, an agent calls `ask_user`, verify fails, a rebase conflicts, a
 stage exhausts its envelope, nothing is running and something must be
@@ -1556,9 +1571,9 @@ Decided in the design interview (2026-07-03):
    reaching `done` without its critique and its verify, and any
    configuration that would let one.
 
-   *To be reversed by decision 27 (§24)* once workflow cards are
-   retired: the floor moves into the crew, and whether to call one is
-   the session's choice.
+   *Reversed by decision 27 (§24).* Workflow cards are retired: the
+   floor moved into the crew, and whether to call one is the session's
+   choice.
 4. **Critique before every gate**: each stage ends with a fresh-context
    pass that tries to refute what it produced, and a *changes* verdict
    re-runs that stage in place — capped (default 2–3 rounds, and bounded
@@ -1569,8 +1584,8 @@ Decided in the design interview (2026-07-03):
    gate — catching design-level security/correctness flaws before
    implementation tokens are spent.
 
-   *To be reversed by decision 27 (§24)*: a crew reviews every node it
-   writes, and a session's spec critique is offered, never required.
+   *Reversed by decision 27 (§24)*: a crew reviews every node it
+   writes; nothing else is critiqued unasked.
 5. **The design stage is gummi-native chat** over SDK sessions; raw
    copilot attach is an escape hatch only. **The surface is the card
    thread** (§6): opening a card at its design stage *is* opening the
@@ -1721,7 +1736,9 @@ Decided in the design interview (2026-07-03):
     write to it is withheld from the action list, the key handler, and
     the help overlay alike — watching is the only thing this board can
     honestly offer.
-14. **Third kind, `RS-NNN`** — own compiled-in graph and artifact under
+14. *Retired with research cards by decision 27 (§24): research is a
+    session's to do, or a crew of scouts and a scribe.*
+    **Third kind, `RS-NNN`** — own compiled-in graph and artifact under
     `.gummi/research/`, no branch or worktree, reusing Review/Verify
     verbatim as the quality floor.
 15. **Decomposition is wired into the RS `verify → done` gate** —
@@ -1730,7 +1747,11 @@ Decided in the design interview (2026-07-03):
     pass.
 16. **`investigate` as a borrowed pass on an existing FD/BG** is deferred
     to a follow-up.
-17. **Autopilot may redo its own work. It may never widen its own
+17. *Autopilot is retired with the workflow by decision 27 (§24). The
+    rule survives inside a crew: the planner may redo, rework, split and
+    drop nodes, and any widening of scope, budget or done-when goes to
+    the person (§24.7).*
+    **Autopilot may redo its own work. It may never widen its own
     reach.** A card can be pointed at a stop — *off*, *gates*, or *full*
     — and run itself from wherever it sits. Under *full* it may cross its
     own design gates, answer its own consequential questions, bounce a
@@ -1847,9 +1868,13 @@ Decided in the design interview (2026-07-03):
     sandbox refusal is a refusal — the lead plans around it, never widens
     a card's reach.
 
-    *To be replaced by decision 27 (§24)*: a goal becomes a long-lived
-    session whose crews may have sessions as nodes.
-21. **A plan's promises are part of the quality floor**, decided after
+    *Retired by decision 27 (§24)*: goals are gone. No goal is minted or
+    run; a legacy goal row is read-only and never lands. Outcome-sized
+    work is a session with a spec and its crews.
+21. *Retired with the workflow by decision 27 (§24): there is no plan
+    stage or verify gate to hold a card to its promises; a crew is held
+    to its done-when checks instead.*
+    **A plan's promises are part of the quality floor**, decided after
     the lxd drives (2026-09-15). Until then the floor asked whether the
     stages *ran* — a plan exists, a critique read the diff, the checks
     exited zero — and never whether what the plan *promised* is in the
@@ -1879,7 +1904,12 @@ Decided in the design interview (2026-07-03):
     event, because a pass that never compiled three of the branch's
     files is a pass about the other files and the caller cannot
     otherwise tell.
-22. **gummi may take custody of a branch it did not cut**, decided
+22. *Amended by decision 27 (§24): no new card adopts a branch
+    (`--adopt` and `--pr` are gone), and nothing walks the graph. A
+    legacy adopted card keeps the custody rules below: gummi never
+    deletes, rebases or force-pushes its branch (`Feature.Adopted`,
+    `worktree.ErrAdoptedBranch`).*
+    **gummi may take custody of a branch it did not cut**, decided
     2026-09-22. Until then every branch on the board was one gummi
     created from a base it chose, and work that arrived any other way —
     a colleague's half-finished branch, a PR sitting under review — could
@@ -2013,15 +2043,16 @@ Decided in the design interview (2026-07-03):
     checked and reviewed, onto a branch of the crew's own. gummi offers
     the process and no longer enforces it: the session agent calls a
     crew like a tool, or a person asks for one. Workflow cards are
-    retired, with no crew template that reproduces them, in the order
-    §24.12 sets: nothing is deleted before its replacement has run real
-    work. Once that is done, this decision **reverses decision 3** (the
-    graph and its floor), **reverses decision 4** (critique before every
-    gate becomes review after every crew node, and `spec_critique` on
-    offer), **replaces decision 20** (a goal becomes a long-lived session
-    whose crews may have sessions as nodes) and ends the verified-branch
-    floor in `Feature.MayLand` (`MayLandAt`), leaving the one §19.1 named
-    beside it: a person's read of the diff.
+    retired, with no crew template that reproduces them (*implemented*,
+    §24.12): nothing mints or runs one, and a legacy row is read-only.
+    This decision **reverses decision 3** (the graph and its floor),
+    **reverses decision 4** (critique before every gate becomes review
+    after every crew node), **retires decision 20** (goals) and with it
+    autopilot (decision 17), research (14–16), plan promises (21),
+    delegation (§19.10), new branch adoption (22), spec ingestion and
+    card dependencies (§11), and ends the verified-branch floor in
+    `Feature.MayLand`, leaving the one §19.1 named beside it: a person's
+    read of the diff.
 
     What does not bend, inside a crew: the plan passes
     `crewplan.Problems` before a person sees it; every writing node is
@@ -2059,6 +2090,12 @@ Still open:
    tolerate.
 
 ## 11. Spec ingestion — decomposing an existing spec into features
+
+> **Superseded by §24 (decision 27).** Ingestion is retired: there are no
+> feature cards to decompose a spec into, and the `ingest` verb is gone.
+> Work that starts from a document is a session that reads it, keeps a
+> spec of its own (§24.2) and, where the work divides, calls a crew whose
+> planner splits it into nodes (§24.4). The section is kept as history.
 
 gummi's unit is a Feature (FD): one PR-sized branch that flows through the
 fixed workflow. Today features are *born blank* — the creation form takes a
@@ -2160,6 +2197,12 @@ coverage map is where the agent justifies its cut.
 
 ### 11.4a First-class dependencies
 
+> **Retired by decision 27 (§24).** Card dependencies, the `deps` verb
+> and the dependency gate are gone with the workflow cards they ordered.
+> Ordering inside a piece of work is a crew node's `needs` (§24.4);
+> ordering of landings between branches is a stack (§18), which never
+> gates work. What follows is history.
+
 Shipped (FD-058–FD-062), superseding the prose-based `depends_on` this
 section originally described. A `feature_deps` store (`internal/state`) holds
 direct dependency edges between cards, independent of ingestion — added by
@@ -2207,6 +2250,12 @@ a stacked card (it remains the fallback for an unstacked one, so
   ingestion, for traceability audits against the original document.
 
 ## 12. Bugs — the second kind
+
+> **Superseded by §24 (decision 27).** Bug cards are retired, and so is
+> the `bugs` import verb. A bug is a session; a session's spec template
+> may carry a Reproduction section, and a crew may open with a scout
+> that reproduces it. A legacy `BG` card is read-only. The rest of this
+> section is history.
 
 > **Superseded in part.** This section was written when a bug ran its own
 > graph. It does not any more: the three workflows merged into one (§3),
@@ -2318,6 +2367,13 @@ the same fetched batch and materializes just that one bug.
   duplicate issues before the gate, if verbatim import proves too noisy.
 
 ## 13. Research — the third kind
+
+> **Superseded by §24 (decision 27).** Research cards, their scratch
+> tree, their deterministic verify and the decompose gate are retired. A
+> question is a session's to answer, or a crew of scouts and a scribe's;
+> new work a report proposes is started by a person as new sessions. A
+> legacy `RS` card is read-only and never runs. The rest of this section
+> is history.
 
 > **Superseded in part.** Like §12, this section was written when research
 > ran its own graph. It walks the one graph now (§3). The order also
@@ -2556,6 +2612,16 @@ small envelope, and it terminates in rows rather than a diff.
 
 ## 14. Non-interactive driver & skill distribution
 
+> **Superseded in part by §24 (decision 27).** The headless driver was
+> rebuilt on sessions: `gummi run "<prompt>"` mints a session,
+> pre-authorises its crew up to `--envelope`, sends the prompt and loops
+> until the session is idle with no crew open (`done`) or something needs
+> a person (`needs_you`); `gummi resume <id> [--answer TEXT | "<message>"]`
+> answers and drives on. The stage-shaped flags (`--gate-approval`,
+> `--until`, `--bounce`, `--approve`) and the dependency gate below are
+> gone. `docs/HEADLESS.md` is the current reference; §14.3 and §14.4 still
+> hold. What follows about stages and gates is history.
+
 The TUI assumes a human at the keyboard. A second driver runs the **same
 engine and the same quality floor** unattended, so a calling agent can ship a
 feature end to end — and gummi ships the skill that teaches that agent how.
@@ -2783,6 +2849,15 @@ changes" — the workflow wins, and the agent says so rather than silently
 complying or silently ignoring the repo.
 
 ## 17. Goals — the fourth kind
+
+> **Superseded by §24 (decision 27).** Goals are retired: no goal is
+> minted or run, and the goal engine, its ledger, substrates,
+> experiments, the notebook and programmes are deleted. A legacy `GL`
+> row is read-only and never lands. An outcome is a session with a spec;
+> its crews do the work, under a budget held against the session's
+> envelope (§24.3). This section is kept as the record of what crews
+> borrowed from it — the done-when items, the held-budget rule, a planner
+> that answers its workers' questions.
 
 A goal (`GL-NNN`) is a card whose work is other cards. You describe an
 outcome and a budget, agree what "done" means, and walk away; gummi works
@@ -3651,6 +3726,13 @@ ceremony.
 
 ### 19.1 The two landing floors
 
+> **Superseded in part by §24 (decision 27).** There is one floor now:
+> with the workflow retired, every card that lands is a session and lands
+> on a person's read of its diff. `MayLand` no longer holds a verified
+> branch; an open crew, a stack below and unresolved diff comments hold
+> a landing (§24.10). What follows describes the two floors as they
+> stood.
+
 This is the part that changes a promise, so it is stated plainly rather
 than buried in the mechanism. Decision 3 said the workflow is invariant
 and nothing lands without a critique and a verify. That remains true of
@@ -3977,6 +4059,12 @@ stop an *unattended* loop from spinning, and here the person is the loop.
 
 ### 19.5 What a freeform card may not do
 
+> **Superseded in part by §24 (decision 27).** Adoption and goals are
+> retired for every card, so the first two refusals below no longer have
+> anything to refuse. The third is reversed: `run`/`resume` now drive
+> exactly a session and its crew (§14's note, `docs/HEADLESS.md`). The
+> main-checkout stack refusal stands.
+
 - **Adopt a branch.** An adopted card walks the whole graph, "because the
   alternative is the first hole in the quality floor" (decision 22). A
   freeform card walks nothing, so adopting with one would be that hole.
@@ -4055,8 +4143,12 @@ card's fourth cycle most of the diff against base is already read.
 
 ### 19.8 Sessions: the model is the session's own
 
-*Under §24 a session keeps its spec rather than handing itself off into a
-feature card; "write a spec" becomes `spec_start` (§24.2).*
+> **Superseded in part by §24 (decision 27).** A session keeps its spec
+> rather than handing itself off into a feature card: the "write a spec"
+> ending below is retired, and `spec_start` (§24.2) replaces it. A
+> session handed off that way before the change still names the card its
+> work continued as (`Feature.ContinuedAs`), which lands it. The rest —
+> the model as the session's own — holds.
 
 The web face calls a freeform card a **session**, and treats it as the
 default kind of work rather than the last row of the new-card form: one
@@ -4282,7 +4374,11 @@ Per-fire history beyond the row's one last outcome is a later need.
 
 ### 19.10 Delegation: a session that creates workflow cards
 
-*Replaced by crews (§24) once they ship.*
+> **Superseded by §24 (decision 27).** Delegation is retired and replaced
+> by crews: a session that wants pieces of its work done by other agents
+> calls `crew_start`, and the crew's nodes fork from and land back on a
+> branch of the crew's own (§24.3). There are no workflow cards left to
+> delegate to. What follows is history.
 
 A person may let a session hand pieces of its work to workflow cards
 (`domain.Delegation`, `engine/delegate.go`). The cards are a goal's cards
@@ -5790,11 +5886,14 @@ not a spec's reviewer threads.
 
 ## 24. Sessions and crews — work without a workflow
 
-*Decided 2026-10-21 (decision 27); not yet built.* This section describes
-where gummi goes, and it supersedes the workflow (§3), the kinds' stage
-contracts (§12, §13), goals as a separate engine (§17) and delegation
-(§19.10) **once it has shipped and run real work** (§24.12). Until then
-those sections describe the code as it is.
+*Decided 2026-10-21 (decision 27); built.* This section describes the
+code as it is. It supersedes the workflow (§3), the kinds' stage
+contracts (§12, §13), spec ingestion and card dependencies (§11), goals
+(§17), the "write a spec" hand-off (§19.8), delegation (§19.10),
+autopilot (decision 17) and branch adoption (decision 22); each of those
+sections carries a note saying so and is kept as history. Workflow
+cards are retired: nothing mints or runs one, and a legacy row in an old
+database is read-only (§24.11).
 
 Every unit of work starts as a **session** (§19.8). A session may grow a
 **spec**, and it may call on a **crew**: a planner that turns the spec
@@ -5853,11 +5952,11 @@ items.
 | `spec_view(section?)` | reads it | the stage tool, offered to sessions |
 | `spec_replace_section(section, body)` | writes one section | the stage tool, offered to sessions |
 | `spec_annotate(anchor, note)` | anchors a `%%` question to the line a snippet names | the stage tool, offered to sessions |
-| `spec_critique()` | a fresh-context reviewer tries to refute the spec; findings land as anchored threads | the plan critique (decision 4), **offered, never required** |
+| `spec_critique()` | a fresh-context reviewer tries to refute the spec; findings land as anchored threads | the plan critique (decision 4), **offered, never required**; *not built* (§24.13) |
 
-Today these tools are stage-only (`engine.stageTools`); a session reaches
-a spec only by handing itself off into a new feature card. Under §24
-the spec stays on the session.
+The first four are offered to every session (`engine/sessionspec.go`);
+the spec stays on the session rather than handing itself off into a
+feature card.
 
 **The template** merges what the three kinds' contracts asked for:
 Problem, Approach, **Done when** (the `gummi-done-when` block,
@@ -5873,8 +5972,8 @@ card's diff and never lands in the repository. Each write through the
 spec tools or the Spec tab is a numbered **revision**, snapshotted in the
 state store, which nothing keeps today. The person reads, edits and
 annotates it on the card's Spec tab, the way a diff is annotated (§6.1).
-`resolve_annotation`, today a diff comment's only, is extended to the
-spec's comments so the agent can close them.
+Extending `resolve_annotation`, still a diff comment's only, to the
+spec's comments is deferred (§24.13).
 
 ### 24.3 A crew, from the session's side
 
@@ -5934,8 +6033,7 @@ cards are (`Pool.ManagerFor`). The session keeps its own checkout and
 may keep working while the crew runs.
 
 **Landing a crew.** A finished or partial crew lands on the session's
-branch the way `DelegateLand` lands a delegated card: as one squash
-commit, refused while the session's tree holds uncommitted work, with a
+branch (`crew_land`, `Engine.CrewLand`) as one squash commit, refused while the session's tree holds uncommitted work, with a
 conflict going back to the session agent. A partial crew lands what it
 landed, and says so. After the squash gummi runs the done-when checks
 on the session's new tip, and that commit is what the verified mark
@@ -5948,15 +6046,15 @@ goes when the crew lands, or with the session.
 an envelope, the crew's budget is held against it from the start, so a
 session cannot spend what its crew was promised. A session without an
 envelope (`Budget.Envelope` 0, no cap) still gives its crew one. Inside
-the crew the goal ledger's rule holds (`goalpolicy.Card.Held`,
-`domain.DelegateHeld`): an unfinished node holds the larger of its
-envelope and its spend, and a landed or dropped one only its spend. The
-planner and the final review are the crew's own spend (`Ledger.Own`).
+the crew the rule the goal ledger used holds (`crewpolicy.Node.Held`):
+an unfinished node holds the larger of its envelope and its spend, and a
+landed or dropped one only its spend. The planner and the final review
+are the crew's own spend.
 The session's own turns during a run are the session's, not the crew's.
 
 ### 24.4 The crew document
 
-`.gummi/crews/<ID>-<slug>/<n>.md`, a folder beside `.gummi/goals/`. Its sections:
+`.gummi/crews/<ID>-<slug>/<n>.md` (`Engine.CrewDocPath`). Its sections:
 
 - **Brief**: what the session asked for, and the spec revision frozen
   for the crew.
@@ -5985,8 +6083,9 @@ nodes:
     envelope: 220
 ```
 
-A node row is `domain.GoalCardRow` (title, serves, `depends_on` as
-`needs`, envelope) plus `role`, `brief`, `owns`, `checks` and `tier`.
+A node row (`domain.CrewNode`) is a title, the items it serves, the
+nodes it `needs`, an envelope, and its `role`, `brief`, `owns`, `checks`
+and `tier`.
 
 **The roles are a fixed catalogue.** The planner sharpens a role with a
 brief and with skills from the pack (§23); it does not invent one. An
@@ -6000,17 +6099,20 @@ invented role has no profile slot and no record to price it by.
 | tester | writes and extends tests |
 | scribe | writes docs and the try-it guide |
 
-**Two roles are gummi's, never the planner's to place.** The **reviewer**
-runs after every writing node. The **integrator** resolves landing
-conflicts. A plan cannot leave them out because a plan cannot name them.
+**The reviewer is gummi's, never the planner's to place.** It runs after
+every writing node, and a plan cannot leave it out because a plan cannot
+name it. Integration was designed as a second such role; as built, a
+node whose landing conflicts is sent back to integrate the crew branch
+into its own and resolve the conflict, then lands again.
 
-**Profiles map `planner` and the tiers to models.** `planner` falls
-back to the architect, as `lead` does.
+**Profiles map roles to models.** `planner` falls back to `architect`;
+a node's tier is the slot `crew-<tier>`, falling back to `implementer`;
+reviews use `reviewer`.
 
 ### 24.5 The plan checks
 
-A pure `crewplan.Problems(plan, items, budget) []string`, in the manner
-of `goalPlanProblems`. A plan that fails is sent back to the planner
+A pure `crewplan.Problems(plan, items) []string`; the budget is the
+plan's own. A plan that fails is sent back to the planner
 before any person sees it.
 
 1. Node ids are unique, every `needs` names a node, and there is no
@@ -6059,26 +6161,26 @@ waiting ─▶ running ─▶ checking ─▶ reviewing ─▶ landed
   `DECISION:` lines are how conflicting choices between siblings
   surface before they merge.
 - **Checking** runs the node's `checks` in its tree.
-- **Reviewing** is a fresh-context reviewer, ideally of another model,
-  using the verdict grammar the critiques use (`internal/verdict`).
-  Findings rework the node in place.
+- **Reviewing** is a fresh-context reviewer on the profile's `reviewer`,
+  ending in `FINDING:` lines and one `VERDICT: pass|changes` line
+  (`engine/crewreview.go`). Findings rework the node in place.
 - **What it owns is enforced when it lands.** A diff that touches a path
   outside `owns` is sent back as a finding. The one-writer rule is
   something gummi checks, not something it asks for.
 - **Landing** squashes the node onto the crew branch in plan order
-  (`SquashMerge`). A conflict gets an integrator turn in the crew tree,
-  the way a goal resolves a catch-up conflict (`GoalTree.CatchUp`).
-- **Questions** (`ask_user`) go to the planner first, routed the way a
-  goal's lead takes its cards' questions (`GoalAnswer`). It answers what
-  the frozen spec settles. What the spec does not settle goes to the
-  person on the Crew tab. This differs from `GoalAnswer`, which falls
-  back to the recommended option: a crew never answers for the person.
+  (`Pool.SquashMerge`). A conflict sends the node back to merge the crew
+  branch into its own and resolve it.
+- **Questions** (`ask_user`) go to the planner first, as a goal's lead
+  once took its cards' questions. It answers what the frozen spec
+  settles. What the spec does not settle goes to the person as a crew
+  decision. Unlike the goal's lead, which fell back to the recommended
+  option, a crew never answers for the person.
   The planner's answers are drawn in the node's thread as its own.
 
 ### 24.7 The conductor and the planner
 
-`crewpolicy.Decide(Input) []Action` is pure. It is the subset of
-`goalpolicy.Decide` a crew needs, and it reuses that package's `Ledger`.
+`crewpolicy.Decide(Input) []Action` is pure: the subset of the retired
+goal conductor a crew needs.
 `Engine.CrewTick` builds the snapshot and executes the actions. Each
 tick, in this order:
 
@@ -6094,16 +6196,18 @@ tick, in this order:
    The final review is the done-when checks on the crew's tip, plus one
    reviewer over the whole crew diff against the frozen spec.
 
-Tranches, substrates, experiments and programmes stay goal machinery
-until goals move onto crews (§24.12).
+Tranches, substrates, experiments and programmes were goal machinery,
+and were retired with goals.
 
 **The planner** is a short turn on `planner`, in the crew tree, waking
 only on those events and acting only through its own tools:
+- `crew_doc(section?)` (reads the crew document),
 - `plan_write` (the first plan, or a revision),
-- `node_rework(id, note)`,
-- `node_drop(id, why)`,
-- `node_raise(id, to)`,
-- `answer(node, text)`.
+- `node_rework(node, note)`,
+- `node_drop(node, why)`,
+- `node_raise(node, to)`,
+- `answer(node, text)`,
+- `ask_person(node)` (the spec does not settle the question).
 Each turn is booked to the session.
 
 **Widening is mechanical.** gummi compares every revision with the
@@ -6172,48 +6276,67 @@ run itself folds to one line per event.
 **On the board.** A session with a crew shows one square per node in its
 state's colour, and its attention lane counts the crew's open questions.
 
-**Read models.** A pure `crewrun` fold reads the crew record into what
-both faces draw. It reuses `cardrun` per node, so no surface disagrees
-about what a crew cost. Its JSON shape is set in `webapi` first.
+**Read models.** As built, `internal/ui/webcrew.go` reads the crew
+record into what the page draws (`internal/web/assets/crew.js`), with
+its JSON shape set in `webapi` (`webapi/crew.go`) first. A pure
+`crewrun` fold shared with the TUI and reusing `cardrun` per node is
+deferred (§24.13).
 
-The TUI shows the same fold as a list grouped by wave, and a phone does
-the same. The canvas is the web face's own.
+The TUI ticks crews (`ui/crewloop.go`) and answers their decisions in
+its picker; it has no Crew tab of its own yet. The canvas is the web
+face's own.
 
 ### 24.10 What a person gives up
 
-- **The guarantee.** Today a card in the workflow cannot land unverified,
-  and `MayLand` enforces it. Under §24 a branch is as verified as the
-  crews that ran on it, and the verified mark says how current that is.
+- **The guarantee.** A card in the workflow could not land unverified,
+  and `MayLand` enforced it. Now a branch is as verified as the crews
+  that ran on it, and the verified mark says how current that is.
+  `MayLand` refuses only a card with no landing of its own; an open
+  crew, a stack below and unresolved diff comments hold a landing
+  (`cardops`).
 - **A fixed contract for outside drivers.** `gummi run`/`resume`, their
-  NDJSON and the `gummi skill` bundle describe stages. They change shape
-  (§24.12) and are deprecated, not broken.
-- **The adopted-branch floor.** An adopted card had to walk the whole
-  graph (D22). An adopted branch becomes an ordinary session on a branch
-  gummi did not cut. Custody is unchanged: gummi never deletes,
-  rebases or force-pushes one. Only the graph walk goes.
+  NDJSON and the `gummi skill` bundle described stages. They were
+  rebuilt on sessions and crews (`docs/HEADLESS.md`); the stage-shaped
+  flags and events are gone rather than deprecated.
+- **Adoption.** An adopted card had to walk the whole graph (D22). No
+  new card adopts a branch now. A legacy adopted card keeps its custody:
+  gummi never deletes, rebases or force-pushes its branch.
 
 ### 24.11 What becomes of what is there
 
-| now | under §24 |
+| was | now |
 |---|---|
 | the graph and its rerun edges (§3, `internal/workflow`) | retired; a node's rework and the planner's revisions replace the reruns |
 | plan stage: explore, converge, plan | the session's conversation and its spec |
 | plan critique | `spec_critique`, offered; the planner's plan is checked by `crewplan.Problems` |
 | implement and its critique | a crew's nodes, each reviewed |
 | verify | each node's checks and the crew's final review |
-| feature, bug and research kinds | spec template prompts and planner guidance; research is a crew of scouts and a scribe that may run in a scratch tree |
-| research's decompose gate | the planner proposes new sessions in a report |
-| goals (§17) | a long-lived session whose crews may have sessions as nodes; `goalpolicy` and the goal tree become crew machinery |
+| feature, bug and research kinds | retired; spec template prompts and planner guidance; research is a session's, or a crew of scouts and a scribe |
+| research's decompose gate | retired; a report's open items go into the spec's Notes, and a person starts new sessions |
+| spec ingestion (§11) and card dependencies (§11.4a) | retired; a crew node's `needs` orders work inside a crew, and a stack (§18) orders landings |
+| goals (§17) | retired, with their ledger, substrates, experiments, notebook and programmes; `crewpolicy` keeps the held-budget rule |
 | delegation (§19.10) | replaced by crews |
+| autopilot (decision 17) | retired; inside a crew the planner may redo and never widen |
+| branch adoption (decision 22) | no new adoption; a legacy adopted card keeps its custody rules |
+| "write a spec" (§19.8) | `spec_start` |
 | objectives (§19.11), schedules and heartbeats (§19.9) | unchanged: they are already a session's |
 | stacks (§18) | unchanged |
-| `gatepolicy` | answers the two decisions left, a plan and a widening |
-| `MayLand`'s two floors | the verified-branch floor goes; a person's read of the diff (§19.1) stays |
-| `run` / `resume` | start a session from a prompt that may call crews within its envelope and exits with a report; the stage-shaped NDJSON and exit statuses are deprecated |
+| `gatepolicy` | deleted; the two decisions left, a plan and a widening, are crew decisions (`Engine.CrewDecision`, `CrewAnswer`) |
+| `MayLand`'s two floors | the verified-branch floor is gone; a person's read of the diff (§19.1) stays |
+| `run` / `resume` | `run` mints a session from a prompt, pre-authorises its crew to `--envelope` and drives it until it is `done` or `needs_you`; `resume` answers or sends a turn and drives on (`docs/HEADLESS.md`) |
+| workflow, bug, research and goal rows in an old database | read-only: shown, never run, minted or copied |
 
 ### 24.12 The order of retirement
 
-Each step ships on its own and leaves gummi working:
+*Done.* Step 1 shipped, and the web face's Crew tab draws the plan as
+waves of nodes (step 2); the TUI has no Crew view yet (§24.13). Step 3 went further: rather
+than moving goals onto crews, goals were retired, and `run`/`resume`
+were rebuilt on sessions without keeping the old output. Step 4's
+evidence was not waited for: workflow cards stopped being minted, and
+`internal/workflow`, the stage contracts, autopilot, goals, delegation,
+adoption, research, ingestion, card dependencies and the verified-branch
+floor were deleted together, with legacy rows left read-only. The plan
+as written:
 
 1. **Crews in sessions.** Session specs, the crew tools, the document
    and its checks, nodes, the conductor, the report, and a Crew tab
@@ -6239,3 +6362,8 @@ Each step ships on its own and leaves gummi working:
 - **Two crews at once on one session**, which would need two integration
   branches and a merge between them.
 - **Planner-invented roles.**
+- **`spec_critique`** (§24.2), and `resolve_annotation` on a spec's
+  comments.
+- **A shared `crewrun` read model** and a Crew view in the TUI (§24.9).
+- **An integrator role** separate from the node whose landing conflicts
+  (§24.4).

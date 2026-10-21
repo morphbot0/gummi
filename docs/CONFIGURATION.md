@@ -5,10 +5,10 @@ files, and the full environment table. Design rationale lives in `DESIGN.md` §4
 
 ## Agent backends
 
-Stages are run by a pluggable agent layer. `GUMMI_AGENT` selects the
-default backend, and a role's `backend:` field in `profiles.yaml` overrides
-it, so one profile can mix providers: copilot for implement, claude for
-review.
+Sessions and a crew's roles are run by a pluggable agent layer.
+`GUMMI_AGENT` selects the default backend, and a role's `backend:` field in
+`profiles.yaml` overrides it, so one profile can mix providers: copilot for
+a crew's nodes, claude for its planner and reviews.
 
 - **copilot** *(default)*: the official Copilot SDK for Go, driving the
   `copilot` CLI in server mode. Full duplex: streaming, tool-call
@@ -32,18 +32,82 @@ review.
   read. Both degrade silently: a CLI whose `--help` does not advertise
   `--tools` keeps the full roster, and a conversation the CLI no longer
   holds is simply not resumed.
+- **codex**: the Codex CLI (`GUMMI_CODEX_BIN` overrides the binary), using
+  `codex exec --json` JSONL turns and `codex exec resume` — for turns
+  within one gummi session, and for a session that continues an earlier
+  one (a restored question, a reattached chat), whose thread gummi hands
+  back so it keeps what it had already read. A thread the CLI no longer
+  holds is dropped and the turn re-runs on a new one, so a stale id costs
+  a slower turn rather than the session. Codex owns authentication (`codex login`) and provider
+  config; gummi passes the profile's model through Codex's `-m` flag and
+  never copies credentials. Requires `permissions: allow-all`: the exec
+  stream cannot service guarded approval callbacks. Messages appear when
+  Codex completes each message item; command, file-change and MCP activity
+  stays visible as tool events.
 - **opencode**: the opencode CLI (`GUMMI_OPENCODE_BIN` overrides the
   binary). Provider and model config is owned by opencode itself
   (`opencode auth`, `opencode.json`). Conversations carry across gummi
-  processes through `run --session`; a session opencode cannot find is
-  dropped and the turn re-runs on a fresh one. Under `permissions: guarded`, edits and writes inside the card's
+  processes through `run --session`, with the same fallback codex has: a
+  session opencode cannot find is dropped and the turn re-runs on a fresh
+  one. Under `permissions: guarded`, edits and writes inside the card's
   worktree are not asked for: the worktree cage allows them outright, and
   guarded asks only for what the cage does not name (the shell, web
   fetches, everything outside the worktree). opencode's own `question`
   tool is always denied; agents ask through gummi's `ask_user`.
+- **pi**: the pi coding agent in RPC mode (`GUMMI_PI_BIN` overrides the
+  binary): one `pi --mode rpc` child per session, speaking JSON lines on
+  stdio. Provider and model config is owned by pi itself (`pi` →
+  `/login`, or the provider's API-key env var such as
+  `OPENROUTER_API_KEY`); `GUMMI_PI_PROVIDER` names the provider for model
+  ids that do not carry one (`openrouter/z-ai/glm-flash-latest` carries
+  its own, a bare `claude-sonnet-4.5` does not and would hit pi's
+  built-in default). Conversations carry across gummi processes through
+  `--session <id>`, with the same fallback the other CLI adapters have: a
+  session pi cannot confirm is dropped and the turn re-runs on a fresh
+  one. `--tools` gives pi's read-only sessions (a consult, a crew's
+  planner or reviewer) a structural allowlist (bash/edit/write are absent, not merely unapproved). pi has
+  no native MCP client, so gummi's tools reach it through a generated
+  `--extension` (a per-session artifact): the session's tool descriptors
+  register at load, and a spawned `gummi __mcp` child serves the actual
+  calls, so ask_user and friends block exactly as on the MCP-native
+  backends. RPC mode has no approval gate, so guarded collapses to
+  allow-all.
+- **antigravity**: Google's Antigravity CLI (binary `agy`;
+  `GUMMI_ANTIGRAVITY_BIN` overrides it) in its bidirectional stream-json
+  mode: one `agy` child per session, turns framed on stdin, events
+  streamed off stdout. agy has no config-dir flag, so the adapter spawns
+  every child with `HOME` redirected to a per-card directory under the
+  workspace state area (`.gummi/state/agent-home/<ID>/agy`, and
+  `agy-consult` beside it for the card's consult conversation) — the
+  card's config tree (OAuth token copy, `mcp_config.json`,
+  conversations) lives there and nowhere in the operator's own config.
+  It is kept apart from the card's scratch directory, which the agent is
+  told is its own; a home an older gummi kept under
+  `.gummi/state/scratch/<ID>/agy-home` is moved on the card's next
+  session, conversations and all, so a resume still finds them. The card
+  home is seeded from the operator's
+  login (re-run `agy` in your real home to refresh it) and removed with
+  the card's cleanup. The tools agy runs inherit that `HOME`, so gummi
+  points the few settings they need back at your real home, each only
+  when you have not set it yourself: `GIT_CONFIG_GLOBAL` (your git
+  identity and signing setup), `GNUPGHOME`, and Go's `GOENV`, `GOPATH`,
+  `GOCACHE` and `GOLANGCI_LINT_CACHE`, so cards share your module and
+  build caches. `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` stay redirected,
+  because agy reads them itself. gummi's tools reach the child through the card
+  home's `mcp_config.json`, and your own agy skills
+  (`~/.gemini/config/skills`) are symlinked into the card home's copy of
+  that directory, so a card loads them as agy run by hand would.
+  Usage is metered as per-turn deltas from agy's cumulative token totals;
+  `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` prices them into credits, or the
+  engine's default token pricing applies. Requires `permissions:
+  allow-all` (agy's print mode has no approval surface, so guarded is
+  refused); read-only sessions are refused too (no structural
+  write-stripping); a turn cannot be interrupted mid-flight (the stream
+  protocol has no cancel event) — the board's stop control waits for the
+  turn to end; images are not carried. The model id carries the effort
+  dial (`gemini-3.1-pro-high`); an empty model runs agy's own default.
 - **headless**: a generic subprocess adapter for any agent binary speaking
-  a small stdio JSON protocol. It is what gummi's own demo and browser
-  tests drive, not a supported agent. `GUMMI_AGENT_CMD` is its command line. The
+  a small stdio JSON protocol. `GUMMI_AGENT_CMD` is its command line. The
   child inherits gummi's environment and reads its own provider config from
   there. `GUMMI_HEADLESS_CREDITS_PER_1K` prices a local endpoint's token
   spend into credits so it meters against the same envelope.
@@ -58,21 +122,20 @@ repository, or in your user directory for that agent. Which directories
 those are is each CLI's own business. See DESIGN §4.1a.
 
 Your MCP servers load too: claude's card sessions add gummi's server
-beside yours. Only a read-only research session on claude runs with
+beside yours. Only a read-only session on claude runs with
 `--strict-mcp-config`, since its tool roster is its cage. The session
 env is scrubbed.
 
-A card's **consult** (a question asked beside its stage) runs in the main
-checkout, not the card's worktree. On claude and opencode it runs
-read-only: the backend's own write tools are stripped, as for a research
-session. copilot cannot strip them, so a consult
+A card's **consult** (a question asked beside its session) runs in the
+main checkout, not the card's worktree. On claude, opencode and pi it runs
+read-only: the backend's own write tools are stripped. copilot, codex and antigravity cannot strip them, so a consult
 there still answers but can write to the checkout; the consult says so
 where it opens (TUI and web), and `gummi doctor` reports it per backend as
 `consult:<backend>`. Route the profile's `consult` role (it falls back to
 the architect's) to a confining backend to avoid that.
 
-No usable agent leaves the board static. Creation, specs, worktrees and
-gates all still work.
+No usable agent leaves the board static. Creating sessions, their
+worktrees and specs all still work.
 
 ## `.gummi/config.yaml`
 
@@ -85,21 +148,24 @@ Scaffolded on first run. Every key is optional.
 | `coauthors` | a list of people, each written `Name <email>`, named in a `Co-authored-by:` trailer on every commit made in the workspace: gummi appends them to the commits it makes (checkpoints, `gummi commit`, squashes, landings, a message written in a rewrite), and a `commit-msg` hook adds them to every other commit made under it — a card's agent's, a person's in the web terminal. The hook lives under `.gummi/state/hooks` and is named to git through gummi's own environment (`core.hooksPath`), so nothing is written to the repository or its git configuration and no session is asked to go against the repository's own instructions; it runs the repository's own hooks first, names co-authors only in checkouts under the workspace root, and is skipped by `git commit --no-verify`. Unset means no trailer. A workspace list replaces a user-level one. The settings in the web page and the TUI write the workspace's. A configured co-author is the one `Co-authored-by:` line gummi's attribution checks let through |
 | `repo` | the git repository gummi manages when `.gummi` sits above it, named relative to the workspace root (e.g. `git/lxd`). Empty means the workspace root is the repo |
 | `repos` | a map of selectable names to repository paths under the workspace. Every card names one; `--repo` on the headless verbs and `o` on the board pick it |
-| `checks.default` | a fixed list of verification checks. When set, check discovery skips the scribe and writes this list into every spec's verification plan. Unset, gummi discovers the repo's build, test and lint commands at plan approval into a `gummi-checks` block you review and edit |
-| `env` | environment prerequisites, each `{probe, describe}`. A verification plan cites one with an `[env: <name>]` tag; gummi runs the probe at verify kickoff and in `gummi doctor` |
-| `substrates` | the external environments work is proved on — a test cluster, a device farm — each `{describe, probe, provision, reset, ttl, timeout}`; only `probe` is required. A plan cites one exactly as it cites an env prerequisite (`[env: <name>]`), so a name may not be both. Unlike one, a substrate can be brought up (`provision`) and put back to a known state (`reset`), it expires (`ttl`, a Go duration), and **one job holds it at a time** across every gummi process on the workspace. `timeout` bounds one provision or reset (default 45m, at most 6h). `gummi doctor` reports each one's state and holder. See DESIGN §17.7 |
-| `experiments` | the orchestrated live runs that prove work on a substrate, each `{describe, substrate, inputs, control, deploy, settle, run, collect, timeout}`; `substrate` and `run` are required. A goal's done-when item names one as its means of proof (`experiment: <name>`, optionally `assertions: [ids]`). Every command runs in the workspace root with `GUMMI_EVIDENCE` (a directory to write into — `results.ndjson` there, one `{"id","ok","detail"}` per line, is how a run reports its assertions), `GUMMI_TREE_<REPO>` and `GUMMI_HEAD_<REPO>` for each input (the unnamed default repo is `HOME`), `GUMMI_SUBSTRATE`, `GUMMI_EXPERIMENT`, `GUMMI_RUN`, `GUMMI_PURPOSE` and `GUMMI_ATTEMPT`. Exit 75 from any phase means *this run could not be judged*. `timeout` bounds each phase (default 30m). Operator configuration on purpose: a goal may change the rig it is tested on, and must not thereby change what counts as passing. See DESIGN §17.8 |
+| `checks.default` | a fixed list of checks, each `{name, cmd}`, validated at load |
+| `env` | environment prerequisites, each `{probe, describe}`; `gummi doctor` runs each probe and reports it |
 | `instructions` | extra instruction files (absolute paths) appended to the workspace environment card, user then workspace |
 
 ## `.gummi/profiles.yaml`
 
 The first run seeds this file. Its default `thrifty` profile leaves
 `backend:` out, so the default backend drives it, and its model ids are
-written for that backend: the CLI's aliases for claude and
-`provider/model` for opencode. An existing file is never rewritten.
+written for that backend: the CLI's aliases for claude, `provider/model`
+for opencode and pi, OpenAI ids for codex, and `agy models` ids for
+antigravity. An existing file is never rewritten.
 
-A `default:` name plus a `profiles:` map. Each profile maps roles
-(`architect`, `implementer`, `reviewer`, `scribe`) to `{backend, model}`:
+A `default:` name plus a `profiles:` map. Each profile maps roles to
+`{backend, model}`. A crew reads `planner` (falling back to `architect`),
+`crew-cheap`, `crew-standard` and `crew-strong` for its nodes' tiers
+(each falling back to `implementer`), and `reviewer` for its reviews;
+`consult` falls back to `architect`, and `scribe` drafts landing
+messages:
 
 ```yaml
 default: thrifty
@@ -108,24 +174,18 @@ profiles:
     architect:   { backend: claude,  model: claude-opus-5 }
     implementer: { backend: copilot, model: gpt-5 }
     reviewer:    { backend: claude,  model: claude-sonnet-5 }
-    scribe:      { backend: copilot, model: gpt-5-mini }
-  open: # everything on opencode
-    architect:   { backend: opencode, model: anthropic/claude-sonnet-5-5 }
-    implementer: { backend: opencode, model: openai/gpt-5 }
-    reviewer:    { backend: opencode, model: anthropic/claude-sonnet-5-5 }
-    scribe:      { backend: opencode, model: anthropic/claude-haiku-4-5 }
+    scribe:      { backend: headless, model: qwen2.5-coder-32b }
+  gemini: # everything on Antigravity
+    architect:   { backend: antigravity, model: gemini-3.1-pro-high }
+    implementer: { backend: antigravity, model: gemini-3.1-pro-high }
+    reviewer:    { backend: antigravity, model: gemini-3.1-pro-high }
+    scribe:      { backend: antigravity, model: gemini-3.1-pro-low }
 ```
 
-A fifth role, `lead`, runs a goal's judgment (see
-[HEADLESS.md](HEADLESS.md#goals)). It is optional: a profile with no
-`lead:` runs its goals' leads on the architect's backend and model. A
-lead needs a backend that reaches tools — native client tools or MCP — or
-the goal runs on its rules alone.
-Lead turns are many and short — one per card question, plan check and
-event worth a judgment — and each is booked to the goal's budget, so on a
-goal with chatty cards the lead can cost more than any one card. A
-mid-size model is usually enough for it:
-`lead: { backend: claude, model: claude-sonnet-5 }` under an Opus
+Planner turns are many and short — one per plan, steer, node handoff
+worth a look and node question — and each is booked to the crew's
+budget. A mid-size model is usually enough for it:
+`planner: { backend: claude, model: claude-sonnet-5 }` under an Opus
 architect, for example.
 
 `backend:` is optional; a role without one uses `GUMMI_AGENT`.
@@ -146,15 +206,15 @@ which backends start". A session picks its own agent and model in the web
 face, and the board starts an installed agent CLI the first time a
 session asks for it, even if no profile names it. The engine closes the
 agents it started. `headless` needs `GUMMI_AGENT_CMD` for this, as it does
-everywhere. A spec's stages still take their agents from the card's
-profile (DESIGN §19.8).
+everywhere. A session's crew still takes its agents from the session's
+profile.
 
 Model ids are forwarded verbatim, so their spelling is the backend's: the
 claude CLI takes `claude-haiku-4-5`, while Copilot's spells the same
 model `claude-haiku-4.5`. `gummi doctor` fails a claude-backed role
 spelled the dotted way without needing `--deep`, and a scribe the backend
-refuses says so on the first card it fails, since discovery and landing
-drafts all run on it.
+refuses says so on the first card it fails, since landing drafts run on
+it.
 
 ## Hooks
 
@@ -172,7 +232,7 @@ root, with:
 hooks:
   - run: ~/bin/gummi-notify "$1"       # every event
   - run: page-oncall.sh "$1"
-    events: [gate.waiting, budget.exhausted]
+    events: [question.waiting, budget.exhausted]
 ```
 
 `"$1"` is the shell's first argument, not the script's: `run:` is a
@@ -189,25 +249,17 @@ The event vocabulary (closed; a config typo is rejected at load):
 | event | fires when |
 |---|---|
 | `card.created` | a card was minted (the new-card form, a schedule, a crew) |
-| `stage.enter` | a card crossed a stage edge (`from`/`to`/`actor` name it) |
-| `card.verified` | the verify gate passed and the branch is ready to land — where gummi's job ends, so it fires **there**, not at a later merge that may never come |
 | `card.parked` | the card stopped and waits (`reason`: needs-you, gave-up, blocked, quit) |
 | `card.merged` | the branch was squash-merged onto its base (`commit` is the sha) |
-| `gate.waiting` | the card waits at a gate for a person: a design-gate approval, an `--until` stop, and on a headless run the landing gate every `card.verified` leads to (a goal's own cards excepted — their goal lands them) |
 | `question.waiting` | the card's agent asked and awaits an answer |
 | `budget.exhausted` | the card's envelope is spent |
-| `card.failed` | a failing verify, a rebase conflict, or an idle stop (`decision_kind` distinguishes) |
+| `card.failed` | a rebase conflict, a session that could not run, or an idle stop (`decision_kind` distinguishes) |
+| `stage.enter`, `card.verified`, `gate.waiting` | raised by nothing since the workflow was retired (DESIGN §24); still accepted in `events:` so an existing config loads |
 
 A stop raises **two** events, general first: `card.parked` (the card
-stopped) then the decision that says how — `gate.waiting`,
-`question.waiting`, `budget.exhausted` or `card.failed`. Key a pager on
-the decision, not on the park. A landing likewise reports `card.merged`
-before the `stage.enter` that crosses to done, because the worktree
-reports the commit before the store commits the crossing. A run stopped
-by `--until <stage>` is a stop like any other: the card waits for a
-person to approve it on, so it raises `card.parked` and then
-`gate.waiting`. So does a headless run that verifies: `card.verified`,
-then `card.parked` and `gate.waiting` for the landing it now waits on.
+stopped) then the decision that says how — `question.waiting`,
+`budget.exhausted` or `card.failed`. Key a pager on the decision, not on
+the park.
 
 The contract is advisory end to end: hooks run detached from the caller's
 path (a full queue drops the event, a hung script is killed after 15
@@ -219,7 +271,7 @@ against a process that is done. Advisory is not silent, though — failed
 runs and undelivered events are counted and printed in one line at exit:
 
 ```
-gummi: hooks: 1 script run failed (last: page-oncall.sh "$1" on gate.waiting:
+gummi: hooks: 1 script run failed (last: page-oncall.sh "$1" on budget.exhausted:
 exit status 127: sh: page-oncall.sh: not found); 3 queued events abandoned at
 exit (15s drain budget)
 ```
@@ -228,9 +280,8 @@ exit (15s drain budget)
 line begins with a path or a bare command name, so a typo is visible
 before an event needs it.
 
-Events fire where they are committed — the store reports crossings,
-parks, decisions, creations and the verify stamp; the worktree layer
-reports squash-merges — so a hook fires once per committed row, from
+Events fire where they are committed — the store reports parks,
+decisions and creations; the worktree layer reports squash-merges — so a hook fires once per committed row, from
 whichever process drove it, and the store's dedupe keys apply (a
 re-raised decision that deduped to a no-op raises nothing).
 
@@ -238,15 +289,16 @@ re-raised decision that deduped to a no-op raises nothing).
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `opencode` (or `headless`, for tests and demos) |
+| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `codex`, `opencode`, `pi`, `antigravity`, `headless` |
 | `GUMMI_AGENT_CMD` | the headless adapter's command line |
-| `GUMMI_CLAUDE_BIN`, `GUMMI_OPENCODE_BIN` | a backend's binary, when it is not the default name on PATH |
+| `GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, `GUMMI_OPENCODE_BIN`, `GUMMI_PI_BIN`, `GUMMI_ANTIGRAVITY_BIN` | a backend's binary, when it is not the default name on PATH |
+| `GUMMI_PI_PROVIDER` | the provider pi routes a session to when its model id does not name one |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
+| `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` | token→credit rate for antigravity sessions (agy reports token counts only); 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_ENVELOPE` | default budget for new cards, in dollars (`20`, `$12.50`). Unset, the board prefills $20 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
-| `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
-| `GUMMI_TURN_RESERVE` | one turn's credits, the floor under envelope-derived stage budgets |
-| `GUMMI_REVIEW_DIFF_MAX` | bytes of diff the reviewer is handed inline (default 48 KiB); above it the reviewer gets a stat and fetches what it reads, and 0 forces that shape |
+| `GUMMI_STAGE_BUDGET` | flat credit cap for a card's agent session when the card has no envelope |
+| `GUMMI_TURN_RESERVE` | one turn's credits: the floor under envelope-derived session budgets, and what a planner or curator run must have left to start |
 | `GUMMI_COPILOT_HINT` | `off` hides the status-bar Copilot quota pill (needs an authenticated `gh`) |
 | `GUMMI_THEME` | `dark` (default), `light`, `neon` |
 | `GUMMI_NOTIFY` | needs-attention hook: `bell` (default), `desktop`, `off`; `gummi web` defaults to `off`, since its terminal is the server's log |
