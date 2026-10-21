@@ -682,7 +682,35 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 		*dropOrder[i] = ""
 	}
 	room := max(inner-idWidth-badgeWidth, 0)
-	return []string{id + " " + ansi.Truncate(title, room, "…") + badges(), stageStrip(s, f, inner)}
+	strip := stageStrip(s, f, inner)
+	if mark := crewMarkText(r.CrewMark); mark != "" {
+		if full := strip + s.Faint.Render(" · ") + s.Success.Render(mark); ansi.StringWidth(full) <= inner {
+			strip = full
+		}
+	}
+	return []string{id + " " + ansi.Truncate(title, room, "…") + badges(), strip}
+}
+
+// crewMarkText is the head's word for a session's verified mark: which
+// crew, at which commit, and how much has been committed on top since —
+// work no crew checked, which a reader of the diff should know about.
+func crewMarkText(mk *engine.CrewMark) string {
+	if mk == nil {
+		return ""
+	}
+	sha := mk.SHA
+	if len(sha) > 7 {
+		sha = sha[:7]
+	}
+	crew := "crew " + itoa(mk.Seq)
+	if mk.Partial {
+		crew += " (partial)"
+	}
+	text := crew + " verified at " + sha
+	if mk.Since > 0 {
+		text += " · " + itoa(mk.Since) + " commit" + plural(mk.Since) + " since"
+	}
+	return text
 }
 
 // stageStrip renders every stage of this card's own workflow in order,

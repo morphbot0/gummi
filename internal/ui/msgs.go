@@ -26,8 +26,12 @@ type featureRow struct {
 	// Crew is a session's latest crew (DESIGN §24) and CrewNodes its
 	// nodes, read at load so the board's squares and the open decision
 	// cost the render nothing. Nil on every card that never ran one.
-	Crew        *domain.Crew
-	CrewNodes   []domain.CrewNodeRun
+	Crew      *domain.Crew
+	CrewNodes []domain.CrewNodeRun
+	// CrewMark is the session's "crew verified at <sha>" mark (§24.8),
+	// read at load for an open session whose last crew landed: it runs
+	// git, so never at render. Nil on every other card.
+	CrewMark    *engine.CrewMark
 	HasWorktree bool
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	History     []state.TransitionRecord
@@ -246,6 +250,11 @@ func (m *Shell) loadRows() tea.Msg {
 		if c := crews[f.ID]; c != nil {
 			row.Crew = c
 			row.CrewNodes, _ = m.store.CrewNodes(ctx, c.ID)
+			if c.State == domain.CrewLanded && f.Stage != domain.StageDone && m.engine != nil {
+				if mk, ok := m.engine.CrewVerifiedMark(ctx, f.ID); ok {
+					row.CrewMark = &mk
+				}
+			}
 		}
 		if f.Base != "" && (f.StackID == "" || f.StackPos == 0) {
 			// a card cut from a chosen base forks from it and lands on
