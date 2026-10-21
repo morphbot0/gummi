@@ -1,4 +1,4 @@
-package driver
+package cardops
 
 import (
 	"context"
@@ -20,10 +20,10 @@ func gitStatusPorcelain(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestDriverCommitCommitsDirtyWorktree proves the happy path: a dirty
+// TestCommitCommitsDirtyWorktree proves the happy path: a dirty
 // worktree's changes land on the card's own branch under the caller's
 // message, and the worktree is clean afterward.
-func TestDriverCommitCommitsDirtyWorktree(t *testing.T) {
+func TestCommitCommitsDirtyWorktree(t *testing.T) {
 	h, d, id := driveVerified(t)
 	f, err := h.store.GetFeature(context.Background(), id)
 	if err != nil {
@@ -42,7 +42,7 @@ func TestDriverCommitCommitsDirtyWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 
@@ -65,9 +65,9 @@ func TestDriverCommitCommitsDirtyWorktree(t *testing.T) {
 	}
 }
 
-// TestDriverCommitNoopOnCleanWorktree proves a clean worktree is a no-op:
-// StatusVerified, no `committed` event, and the branch tip unchanged.
-func TestDriverCommitNoopOnCleanWorktree(t *testing.T) {
+// TestCommitNoopOnCleanWorktree proves a clean worktree is a no-op:
+// StatusDone, no `committed` event, and the branch tip unchanged.
+func TestCommitNoopOnCleanWorktree(t *testing.T) {
 	h, d, id := driveVerified(t)
 	f, err := h.store.GetFeature(context.Background(), id)
 	if err != nil {
@@ -83,7 +83,7 @@ func TestDriverCommitNoopOnCleanWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if lastEvent(h, "committed") != nil {
@@ -94,9 +94,9 @@ func TestDriverCommitNoopOnCleanWorktree(t *testing.T) {
 	}
 }
 
-// TestDriverCommitInvalidMessageRefused refuses a non-Conventional-Commits
+// TestCommitInvalidMessageRefused refuses a non-Conventional-Commits
 // message before any git mutation, leaving the worktree still dirty.
-func TestDriverCommitInvalidMessageRefused(t *testing.T) {
+func TestCommitInvalidMessageRefused(t *testing.T) {
 	h, d, id := driveVerified(t)
 	f, err := h.store.GetFeature(context.Background(), id)
 	if err != nil {

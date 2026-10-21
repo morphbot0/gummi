@@ -1,27 +1,13 @@
-package driver
+package cardops
 
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
 )
-
-// git runs one git command in the harness repo, failing the test on error.
-func (h *harness) git(args ...string) string {
-	h.t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = h.root
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		h.t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
 
 // somebodyElsesBranch puts a branch in the harness repo with a commit on
 // it that gummi had no part in — the premise of every adoption.
@@ -39,13 +25,13 @@ func (h *harness) somebodyElsesBranch(name string) {
 	h.git("checkout", "-q", "main")
 }
 
-// TestCleanKeepsAnAdoptedBranch is the custody guard at the driver's
+// TestCleanKeepsAnAdoptedBranch is the custody guard at the headless
 // surface (DESIGN §10 D22). Cleaning up is the one routine act that
 // destroys a branch, and an adopted branch is the part gummi never owned:
 // the worktree goes, the ref stays, and the clean still SUCCEEDS, because
 // a surviving branch is the intended outcome and not a partial failure.
 func TestCleanKeepsAnAdoptedBranch(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	ctx := context.Background()
 	// A card minted onto somebody else's branch before adoption was
 	// retired: still a row, still holding the branch, already landed.
@@ -63,11 +49,11 @@ func TestCleanKeepsAnAdoptedBranch(t *testing.T) {
 	h.git("merge", "-q", "--no-ff", "-m", "land their work", "feat/theirs")
 	id := f.ID
 
-	out, err := h.driver(Options{}).Clean(ctx, id)
+	out, err := h.ops().Clean(ctx, id)
 	if err != nil {
 		t.Fatalf("Clean refused an adopted card instead of keeping its branch: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want a clean success", out.Status)
 	}
 	if ex, _ := h.wt.Exists(ctx, &f); ex {

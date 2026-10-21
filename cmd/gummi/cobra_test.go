@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/morphis/gummi/internal/driver"
 )
 
 // captureStdout runs fn with the process-wide stdout redirected to a pipe and
@@ -133,17 +131,17 @@ func TestCobraUnknownCommand(t *testing.T) {
 	}
 }
 
-// BG-003: `resume --gate-approval attended` re-affirms the run's default
-// gate mode explicitly, overriding a mode persisted on the card.
+// BG-003: a flag passed with its default value is still a flag passed —
+// `resume --answer ""` is an (empty) answer, which the driver refuses,
+// not a bare resume that silently carries on.
 //
 // This used to be a hazard worth a dedicated workaround. Cobra parsed the
 // flag, a helper re-serialized the parsed flags into a []string for a
 // second, stdlib parser, and that serializer dropped any flag whose value
 // equalled its default — because a []string cannot carry "the user typed
-// this". The override silently never took effect, and one command grew a
-// bespoke patch to re-add exactly this flag. There is one parser now, and
-// pflag's Changed carries the fact directly.
-func TestResumeKeepsExplicitDefaultGateApproval(t *testing.T) {
+// this". There is one parser now, and pflag's Changed carries the fact
+// directly.
+func TestResumeKeepsAnExplicitDefaultFlag(t *testing.T) {
 	resetFlags(rootCmd)
 	t.Cleanup(func() { resetFlags(rootCmd) })
 
@@ -151,14 +149,15 @@ func TestResumeKeepsExplicitDefaultGateApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finding resume: %v", err)
 	}
-	if err := cmd.Flags().Set("gate-approval", driver.GateAttended); err != nil {
-		t.Fatalf("Set(gate-approval, %q): %v", driver.GateAttended, err)
+	if err := cmd.Flags().Set("answer", ""); err != nil {
+		t.Fatalf("Set(answer, \"\"): %v", err)
 	}
-	if !cmdFlags(cmd).Changed("gate-approval") {
-		t.Fatal("Changed(gate-approval) = false after an explicit --gate-approval attended")
+	if !cmdFlags(cmd).Changed("answer") {
+		t.Fatal("Changed(answer) = false after an explicit --answer \"\"")
 	}
-	if got := cmdFlags(cmd).String("gate-approval"); got != driver.GateAttended {
-		t.Fatalf("gate-approval = %q, want %q", got, driver.GateAttended)
+	in, err := resumeInput(cmdFlags(cmd), nil)
+	if err != nil || in.Answer == nil || *in.Answer != "" {
+		t.Fatalf("resumeInput = %+v, %v; want an empty answer", in, err)
 	}
 }
 
@@ -214,4 +213,3 @@ func TestInitCmdRegistered(t *testing.T) {
 		t.Errorf("rootCmd.Find([\"init\"]) resolved to %v, want initCmd", cmd)
 	}
 }
-

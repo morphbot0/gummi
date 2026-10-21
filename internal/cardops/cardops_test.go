@@ -10,8 +10,8 @@ import (
 
 func TestExitCodes(t *testing.T) {
 	for s, want := range map[Status]int{
-		StatusVerified: 0, StatusStopped: 0, StatusSaid: 0, StatusError: 1, StatusQuestion: 2,
-		StatusBlocked: 3, StatusEscalation: 4, StatusExhausted: 5, StatusTimeout: 6, Status("?"): 1,
+		StatusDone: 0, StatusError: 1, StatusNeedsYou: 2,
+		StatusExhausted: 5, StatusTimeout: 6, Status("?"): 1,
 	} {
 		if got := s.ExitCode(); got != want {
 			t.Errorf("%s exits %d, want %d", s, got, want)

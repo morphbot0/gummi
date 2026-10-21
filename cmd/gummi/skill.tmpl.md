@@ -1,26 +1,24 @@
-# Using gummi to ship a feature or bug
+# Using gummi to get work done in a session
 
-gummi is a meta-harness that drives coding agents through a **fixed, spec-driven
-workflow** — plan → implement → verify — with each work item on its own git
-worktree and branch. You (the calling agent) invoke `gummi run`, answer the
-questions it delegates to you, and report the **verified branch** it produces.
-gummi orchestrates the coding work; it never merges and never skips review or
-verify.
+gummi is a meta-harness for coding agents. `gummi run` starts a **session** — a
+coding agent on a git branch and worktree of its own — from your prompt, and
+drives it headlessly. When the work divides, the session can start a **crew**:
+a planner turns the session's spec into a plan of specialist nodes (scouts, a
+contractor, implementers, testers, a scribe), each checked and reviewed on a
+branch of the crew's own, and the crew's report comes back to the session.
+Running `gummi run` pre-authorises a crew up to the envelope you give it; a
+crew plan over that, a widening of an approved plan, or a question gummi will
+not answer for a person stops the run and comes back to you. gummi never
+merges on its own.
 
 ## When to use gummi (vs. editing directly)
 
-Use gummi for **PR-sized work that deserves a real quality bar** — a feature or
-bug fix that warrants a written spec, an independent code review, a verify pass
-(build/test/lint + acceptance checks), and an isolated branch a human can review
-before it lands.
+Use gummi for **work that deserves its own branch and an agent's full
+attention** — a feature, a bug fix, an investigation — where you want an
+isolated branch a human can read before it lands.
 
 Edit files directly for **trivia**: a typo, a one-line config tweak, a rename —
-anything where a spec-and-review cycle is pure overhead. If the change is big
-enough that you'd open a PR for it, it's big enough for gummi.
-
-**Oversized asks:** if the request spans several independently shippable pieces,
-don't push it through one run. Decompose it into PR-sized features yourself and
-loop `gummi run` once per feature, sequentially — one verified branch each.
+anything where a separate session is pure overhead.
 
 ## Before the first run
 
@@ -40,140 +38,98 @@ write and what to hand the human. Skip all of that once it reports
 {{.Grammar}}
 ```
 
-A run drives one card through the workflow: plan → implement → verify. There is
-one route — plan is the design stage (it explores the problem, converges on an
-approach and writes the implementation plan), implement is the coding stage, and
-verify runs the checks. Each stage ends with a critique pass before its gate.
-The design gate auto-crosses under `--gate-approval=autopilot`; the default,
-`attended`, stops for you to approve it.
-
 `status`, `watch`, `spec`, and `diff` are **read-only** — they take no lock, so
-you can inspect a card while a run is live. `status` answers *where* a card is
-(a store snapshot, updated once per turn); `gummi watch <id>` follows what it is
-doing *right now* — the agent's own transcript, tool calls, and state changes,
-streamed off the driving process's live file. `watch --json` emits that stream
-as NDJSON, one record per line, for a caller that would rather parse than read.
+you can inspect a session while a run is live. `status` answers *where* a card
+is (a store snapshot); `gummi watch <id>` follows what it is doing *right now*
+— the agent's own transcript, tool calls, and state changes, streamed off the
+driving process's live file. `watch --json` emits that stream as NDJSON.
 
-## The decision loop
+## The loop
 
-Each `gummi run` / `gummi resume` streams milestone + decision NDJSON on stdout
-and exits with a **typed status**. Branch on the exit code:
+Each `gummi run` / `gummi resume` streams NDJSON on stdout — `created`,
+`reply` (each finished reply of the session's agent), `crew` (a crew changing
+state), and one terminal line — and exits with a **typed status**. Branch on
+the exit code:
 
 {{.ExitTable}}
 
 **Capture that exit code directly — never through a pipe.** `gummi run … | tee
 run.log` (or `| head`, `| grep`) reports the *filter's* exit status, not
-gummi's, so a `question`/`exhausted`/`error` looks like success. Redirect to a
-file and read `$?` on the next line:
+gummi's, so a `needs_you`/`exhausted`/`error` looks like success. Redirect to
+a file and read `$?` on the next line:
 
 ```
-gummi run --envelope N "<description>" > run.log; ec=$?
+gummi run --envelope N "<prompt>" > run.log; ec=$?
 ```
 
-(or `set -o pipefail` if you must pipe). Equivalently, the exit code is fully
-redundant with the stream: the **last NDJSON line's `event`** (`verified`,
-`question`, `blocked`, `escalation`, `exhausted`, `timeout`, `stopped`,
-`error`) is the terminal status — parse that if you'd rather not depend on the
-shell.
+(or `set -o pipefail` if you must pipe). The exit code is also redundant with
+the stream: the **last NDJSON line's `event`** (`done`, `question`,
+`exhausted`, `timeout`, `error`) is the terminal status.
 
-Every resumable terminal event also carries a **`next`** field: the literal
-`gummi resume …` command for that stop, with the right verb already chosen
-(free-form values you must supply appear as a `<placeholder>`, e.g. `--answer
-"<answer>"`, and `exhausted` pre-fills a doubled `--envelope`). **Prefer running
-`next` verbatim over assembling the command yourself** — it can't pick the wrong
-verb. `verified` carries no `next` (nothing to resume); `blocked` carries none
-because its next step is to resolve the threads, not a fixed command.
+Every resumable stop carries a **`next`** field: the literal `gummi resume …`
+command for that stop (a value you must supply appears as a `<placeholder>`,
+e.g. `--answer "<answer>"`; `exhausted` pre-fills a raised `--envelope`).
+**Prefer running `next` verbatim over assembling the command yourself.**
 
 The loop you run:
 
-1. `gummi run --envelope N "<description>"` (add `--ref <id>` to correlate with
-   your own tracker, `--acceptance <file|->` to seed the verification plan).
+1. `gummi run --envelope N "<prompt>"` (add `--ref <id>` to correlate with your
+   own tracker).
 2. Read the exit code:
-   - **verified (0)** — parse the final `verified` line for the branch; report
-     it to your caller/human and stop. The branch is verified, not merged.
-   - **question (2)** — a design decision was delegated to you. Answer from your
-     **task context first**; if unsure, read the spec (`gummi spec <id>`) or diff
-     (`gummi diff <id>`); use the `recommended` option only as a tiebreaker.
-     Then `gummi resume <id> --answer "<text-or-option>"`. A design gate (the
-     default, `--gate-approval=attended`) is the same shape: `resume <id>
-     --approve` or `--request-changes "<note>"`.
-   - **blocked (3)** — either open `%%` spec threads or diff comments block a
-     gate (resolve them, or `gummi resume <id> --request-changes "<note>"` to
-     send it back; if you can't, escalate to the human), or an unmet dependency
-     blocks entry to the coding stage — the event's `blocking_deps` names the
-     outstanding card(s) and their stage. There's no gate to request changes on
-     in that case: wait for the dependency to reach `done`, or drop the edge
-     with `gummi deps rm <id> <dep-id>` if it no longer applies.
-   - **escalation (4) / exhausted (5) / timeout (6)** — stop and report to the
-     human. These are durable and resumable: the card stays on the board, and
-     `next` carries the command for each. Run the
+   - **done (0)** — the session is idle with no crew open. Its replies are on
+     the stream; its work is on the branch in the final `done` line, not
+     merged. Report it and stop, or send the session its next turn with
+     `gummi resume <id> "<message>"`.
+   - **needs_you (2)** — the `question` event says whose question it is
+     (`kind`): the session's own (`ask`), a crew plan over the
+     pre-authorisation (`crew_plan`), a widening of an approved crew plan
+     (`crew_widen`), a crew node's question the planner would not answer
+     (`crew_question`), or a paused crew (`crew_paused`). Answer from your task
+     context first; read the session's spec (`gummi spec <id>`) or diff
+     (`gummi diff <id>`) if unsure; use `recommended` only as a tiebreaker.
+     Then `gummi resume <id> --answer "<option-or-your-words>"`. A crew
+     decision's options are fixed phrases (`Run the crew`, `Keep it a
+     session`, `Widen the plan`, `Keep the scope: write it into Limits`);
+     other words go to the crew's planner as a note. A paused crew resumes
+     with a bare `gummi resume <id>`. A widening is the person's call: ask the
+     human unless your task already settles it.
+   - **exhausted (5) / timeout (6)** — stop and report to the human. Both are
+     durable and resumable, and `next` carries the command. Run the
      `preconditions.check_running` probe on the event before retrying —
-     `references/resume.md` says why, and which verb to reach for when you
-     choose one yourself.
-   - **error (1)** — a setup/agent failure. Check `gummi status <id>`: a
-     pre-id setup failure landed nothing (report it), but a mid-run failure
-     can leave a durable, non-terminal card that a `gummi resume <id>` may
-     finish — the error event's `resumable`/`stage` fields say which.
-3. After a `resume`, read the new exit code and repeat until `verified`.
+     `references/resume.md` says why.
+   - **error (1)** — a setup/agent failure. A failure before the session
+     existed landed nothing (report it); one after leaves a session that a
+     `gummi resume <id>` may carry on — the error event's `resumable` says
+     which.
+3. After a `resume`, read the new exit code and repeat until `done`.
 
-For a **small or well-specified** card whose delegated questions you'd answer
-with the `recommended` option anyway, start with `--autonomous`: it auto-takes
-the recommended answer instead of stopping at `question`, shipping to a verified
-branch hands-free. Reserve the checkpointing loop above for genuinely ambiguous
-forks where the recommended answer might be wrong.
+## Worktrees
 
-## Stop early for a human design review
+Each session is checked out in its **own linked git worktree** under
+`.gummi/worktrees/FF-NNN`. Its branch is *already checked out there*, so a
+plain `git checkout` of it in the main repo fails (`exit 128`, "already checked
+out"). To build, test, or inspect the work outside gummi, `cd` into its
+worktree.
 
-For work where a human should sign off on the design before implementation burns
-tokens, add `--until plan`. The run stops cleanly at the design stage — event
-`stopped`, exit 0 — with the card parked and resumable. Hand the spec to the
-human (`gummi spec <id>`); once approved, `gummi resume <id> --approve`
-continues to the verified branch. `plan` is the only stop `--until` accepts:
-the design gate is the one boundary where stopping is unambiguous.
+## Landing and cleanup
 
-`--until` is per-invocation only — it is never persisted on the card, so a bare
-`resume --approve` with no `--until` runs straight through to the end.
+`run`/`resume` never merge. Landing is a separate, explicit verb: `gummi merge
+<id> -m "<message>"` (or `-m -` to read the message from stdin) squash-merges
+the branch into main — only with a Conventional Commits `type(scope): summary`
+message with no diff dump or agent attribution, and refused while the session
+has a crew open or unresolved diff comments. Draft that message from the
+session's work and the branch's own commits, and have the human confirm it
+before you run `gummi merge` — don't invent a message and merge unattended.
+`gummi clean <id>` removes a landed card's worktree and branch afterward. Both
+hold the same per-card lock as `run`/`resume`.
 
-## Worktrees, and re-attaching a proven branch
-
-Each card is checked out in its **own linked git worktree** under
-`.gummi/worktrees/FD-NNN`, on branch `gummi/FD-NNN-slug`. That branch is
-*already checked out there*, so a plain `git checkout gummi/FD-NNN-…` in the
-main repo fails (`exit 128`, "already checked out"). To build, test, or inspect
-a branch outside gummi, `cd` into its worktree — don't check the branch out in
-the main checkout.
-
-If a `run`/`resume` was cut off **right at the end of verify** — the branch has
-all its commits and passes the acceptance checks, but the card is still
-`stage: verify` with `verified: false` (e.g. `status <id>` shows it) — you don't
-have to re-run the whole verify stage. `gummi verify <id>` re-runs the spec's
-`gummi-checks` on the existing branch and, if they pass, finalizes the card
-(stamps `verified`, emits the `verified` event, exit 0) with no fresh agent
-pass. If the checks still fail it escalates (exit 4); if a cheap re-attach can't
-be trusted (not parked at verify, no checks) it exits 1 and points you back to
-`resume`.
-
-## Landing, cleanup, and dependencies
-
-`run`/`resume` stop at a verified branch and never merge. Landing that decision
-is a separate, explicit verb: `gummi merge <id> -m "<message>"` (or `-m -` to
-read the message from stdin) squash-merges the branch into main — but only once
-the card is at a verified branch, and only with a Conventional Commits
-`type(scope): summary` message with no diff dump or agent attribution, or it
-refuses before touching git. Draft that message from the spec and the branch's
-own commits, and have the human confirm it before you run `gummi merge` — don't
-invent a message and merge unattended. `gummi clean <id>` removes a landed
-card's worktree and branch afterward. Both hold the same per-card lock as
-`run`/`resume`.
-
-`gummi commit <id> -m "<message>"` commits exactly a card's own uncommitted
+`gummi commit <id> -m "<message>"` commits exactly a session's own uncommitted
 worktree changes onto its own branch, with the same message rules as
-`merge`/`squash` — no auto-generated fallback, and refused before touching git
-if invalid. It has no PR-linked or stage precondition, unlike `merge` (which
+`merge`/`squash`. It has no PR-linked precondition, unlike `merge` (which
 refuses a PR-linked card outright) and `squash` (which refuses a dirty worktree
-outright): use `commit` first to turn stray worktree changes into a commit, then
-run `squash` on a PR-linked card that has them, in place of raw `git commit`. A
-clean worktree is a no-op, not an error.
+outright): use `commit` first to turn stray worktree changes into a commit,
+then run `squash` on a PR-linked card that has them. A clean worktree is a
+no-op, not an error.
 
 `gummi log <id>` lists a card's own commits, oldest first (`--json` for the
 SHAs). `gummi rewrite <id> --plan <file|->` rewords or squashes them in place:
@@ -186,27 +142,24 @@ commits already pushed unless `--allow-pushed` — then prints the force push,
 which it never runs. Like `squash`, rewriting history is the human's call: ask
 before you run it.
 
-If a card depends on another (`gummi deps add <dependent> <depends-on>`,
-`rm`/`list` to remove or read them back), an unmet dependency blocks it from
-entering its coding stage — see the `blocked (3)` case above.
-
 ## What gummi guarantees
 
-- **Review and verify always run.** There is no flag, profile, or config that
-  skips them — the quality floor is invariant.
-- **gummi stops at a verified branch. It never merges.** Landing (a PR, a push, a
-  squash-merge) stays with the human.
-- **It fails loud.** Anything a human would resolve — a design question, a
-  rerun/critique cap, an exhausted envelope, a stalled stage — becomes a typed
-  non-zero exit and a durable, resumable card, never a silent auto-proceed.
+- **gummi never merges on its own.** Landing (a PR, a push, a squash-merge)
+  stays with a person.
+- **A crew never runs past what was authorised.** A plan over the
+  pre-authorisation and every widening wait for an answer; a question a crew
+  node asks is answered from the frozen spec or comes to you.
+- **It fails loud.** Anything a person would resolve — a question, an
+  exhausted envelope, a stalled session — becomes a typed non-zero exit and a
+  durable, resumable session, never a silent auto-proceed.
 
-Your job: drive the loop, answer what's delegated to you, and report the verified
-branch upward.
+Your job: drive the loop, answer what comes to you, and report the branch
+upward.
 
 ## References
 
 Read these only when you need them; SKILL.md above is the whole common path.
 
 - `references/setup.md` — first-run readiness: backend, profile, auth, envelope.
-- `references/resume.md` — choosing a `resume` verb yourself, and the
+- `references/resume.md` — choosing a `resume` form yourself, and the
   orphan-process check to run before any retry.

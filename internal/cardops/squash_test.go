@@ -1,4 +1,4 @@
-package driver
+package cardops
 
 import (
 	"context"
@@ -21,11 +21,11 @@ func fakeOriginMain(t *testing.T, root, sha string) {
 	}
 }
 
-// TestDriverSquashCollapsesVerifiedBranch proves the happy path: a verified
+// TestSquashCollapsesVerifiedBranch proves the happy path: a verified
 // card's checkpoint-laden branch collapses to one commit off its fork point
 // with main, main is untouched, and a `squashed` event carries the
 // before/after/base shas and the message subject.
-func TestDriverSquashCollapsesVerifiedBranch(t *testing.T) {
+func TestSquashCollapsesVerifiedBranch(t *testing.T) {
 	h, d, id := driveVerified(t)
 	fakeOriginMain(t, h.root, gitHead(t, h.root))
 	before := gitHead(t, h.root)
@@ -34,7 +34,7 @@ func TestDriverSquashCollapsesVerifiedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Squash: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if got := gitHead(t, h.root); got != before {
@@ -61,9 +61,9 @@ func TestDriverSquashCollapsesVerifiedBranch(t *testing.T) {
 	}
 }
 
-// TestDriverSquashRefusesDoneCard refuses a done card before any git
+// TestSquashRefusesDoneCard refuses a done card before any git
 // mutation.
-func TestDriverSquashRefusesDoneCard(t *testing.T) {
+func TestSquashRefusesDoneCard(t *testing.T) {
 	h, d, id := driveVerified(t)
 	if _, err := d.Merge(context.Background(), id, "feat(export): land it", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -85,11 +85,11 @@ func TestDriverSquashRefusesDoneCard(t *testing.T) {
 	}
 }
 
-// TestDriverSquashRefusesLandedCard refuses a card whose branch actually
+// TestSquashRefusesLandedCard refuses a card whose branch actually
 // landed on main, even if its card record has not yet transitioned to done
 // (e.g. a TUI merge with thenDone unset leaves a card at verify with its
 // content landed).
-func TestDriverSquashRefusesLandedCard(t *testing.T) {
+func TestSquashRefusesLandedCard(t *testing.T) {
 	h, d, id := driveVerified(t)
 	f, err := h.store.GetFeature(context.Background(), id)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestDriverSquashRefusesLandedCard(t *testing.T) {
 	// land the branch through the real squash-merge path (which records the
 	// landed sha Landed checks ancestry against), without going through
 	// Driver.Merge, so the card stays parked at StageVerify.
-	wt, err := d.eng.WorktreesFor(context.Background(), &f)
+	wt, err := d.Eng.WorktreesFor(context.Background(), &f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,9 +122,9 @@ func TestDriverSquashRefusesLandedCard(t *testing.T) {
 	}
 }
 
-// TestDriverSquashInvalidMessageRefused refuses a non-Conventional-Commits
+// TestSquashInvalidMessageRefused refuses a non-Conventional-Commits
 // message before any git mutation.
-func TestDriverSquashInvalidMessageRefused(t *testing.T) {
+func TestSquashInvalidMessageRefused(t *testing.T) {
 	h, d, id := driveVerified(t)
 	fakeOriginMain(t, h.root, gitHead(t, h.root))
 	before := gitHead(t, h.root)
@@ -144,9 +144,9 @@ func TestDriverSquashInvalidMessageRefused(t *testing.T) {
 	}
 }
 
-// TestDriverOpenReviewThreadsCountsUnresolvedAnnotations proves the
+// TestOpenReviewThreadsCountsUnresolvedAnnotations proves the
 // --force-gate wrapper reports the linked PR's open diff-annotation count.
-func TestDriverOpenReviewThreadsCountsUnresolvedAnnotations(t *testing.T) {
+func TestOpenReviewThreadsCountsUnresolvedAnnotations(t *testing.T) {
 	h, d, id := driveVerified(t)
 	ref := domain.PullRequestRef{Repo: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
 	if err := h.store.SetPullRequest(context.Background(), id, ref); err != nil {
@@ -182,7 +182,7 @@ func TestMergeNoSquashKeepsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	parents := strings.Fields(gitOut(t, h.root, "log", "-1", "--format=%P"))
@@ -249,16 +249,6 @@ func TestMergeNoSquashRefusedForGoalCard(t *testing.T) {
 	}
 }
 
-// gitOut runs git in dir and returns its trimmed stdout.
-func gitOut(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir}, args...)...).Output()
-	if err != nil {
-		t.Fatalf("git %v: %v", args, err)
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // TestMergeNoSquashWithoutMessage proves a merge landing with no message is
 // not refused for want of one: it lands with git's own merge message and
 // the branch tip as its second parent.
@@ -271,7 +261,7 @@ func TestMergeNoSquashWithoutMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge without message: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	parents := strings.Fields(gitOut(t, h.root, "log", "-1", "--format=%P"))

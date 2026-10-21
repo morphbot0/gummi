@@ -50,7 +50,7 @@ func (o *Ops) fail(ctx context.Context, id string, err error) (Outcome, error) {
 // the same floor Advance does (a verified branch with no open blockers) plus
 // message validation, and performs zero git mutations on any precondition or
 // validation failure. On success it emits a `merged` event carrying the
-// landed commit's sha and returns StatusVerified.
+// landed commit's sha and returns StatusDone.
 func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, method domain.LandMethod) (Outcome, error) {
 	f, err := o.Store.GetFeature(ctx, id)
 	if err != nil {
@@ -107,7 +107,7 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 		// and it is the same one every landing crosses.
 		if err := f.MayLand(); err != nil {
 			return o.fail(ctx, string(id),
-				fmt.Errorf("%s is %w; run `gummi verify %s` first if it lost its finalize", id, err, id))
+				fmt.Errorf("%s is %w", id, err))
 		}
 	}
 	// a card lands either via its linked PR or locally, never both: refuse
@@ -192,7 +192,7 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 		}
 		if err := f.MayLandAt(head); err != nil {
 			return o.fail(ctx, string(id),
-				fmt.Errorf("%s is %w; run `gummi verify %s` to verify what would land", id, err, id))
+				fmt.Errorf("%s is %w", id, err))
 		}
 	}
 
@@ -229,7 +229,7 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 		}
 	}
 	o.Out.Emit(mergedEvent{Event: "merged", ID: string(id), Branch: f.BranchName(), Commit: sha, Method: string(method)})
-	return Outcome{Status: StatusVerified, ID: string(id)}, nil
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
 // Clean removes a card's worktree and branch once the card has no more use
@@ -240,7 +240,7 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 // card handed off and never landed or pushed loses its worktree and keeps
 // its branch, and the `cleaned` event says so. Nothing with uncommitted
 // work is ever removed. On success it emits a `cleaned` event and returns
-// StatusVerified.
+// StatusDone.
 func (o *Ops) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 	f, err := o.Store.GetFeature(ctx, id)
 	if err != nil {
@@ -345,7 +345,7 @@ func (o *Ops) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 		return o.fail(ctx, string(id), fmt.Errorf("removing card files %s: %w", dir, err))
 	}
 	o.Out.Emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName(), BranchKept: keptBranch})
-	return Outcome{Status: StatusVerified, ID: string(id)}, nil
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
 // HandOff ends a card without landing it — the headless counterpart of the
@@ -378,7 +378,7 @@ func (o *Ops) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, error)
 	// branch and lands nothing.
 	if err := f.MayLand(); err != nil {
 		return o.fail(ctx, string(id),
-			fmt.Errorf("%s is %w; run `gummi verify %s` first if it lost its finalize", id, err, id))
+			fmt.Errorf("%s is %w", id, err))
 	}
 
 	res, err := o.Eng.HandOff(ctx, id, o.Actor)
@@ -389,7 +389,7 @@ func (o *Ops) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, error)
 		return o.fail(ctx, string(id), handOffRefusal(id, res))
 	}
 	o.Out.Emit(handedOffEvent{Event: "handed off", ID: string(id), Branch: f.BranchName()})
-	return Outcome{Status: StatusVerified, ID: string(id)}, nil
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
 // handOffRefusal turns a non-advancing gate result into the sentence a
@@ -459,14 +459,14 @@ func (o *Ops) Squash(ctx context.Context, id domain.FeatureID, message string) (
 		return o.fail(ctx, string(id), err)
 	}
 	if sha == "" {
-		return Outcome{Status: StatusVerified, ID: string(id)}, nil
+		return Outcome{Status: StatusDone, ID: string(id)}, nil
 	}
 	o.Out.Emit(squashedEvent{
 		Event: "squashed", ID: string(id), Branch: f.BranchName(),
 		BeforeSHA: beforeSHA, AfterSHA: sha, BaseSHA: base,
 		MessageSubject: commitSubject(message),
 	})
-	return Outcome{Status: StatusVerified, ID: string(id)}, nil
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
 // Commit commits exactly the target card's own uncommitted worktree changes
@@ -478,7 +478,7 @@ func (o *Ops) Squash(ctx context.Context, id domain.FeatureID, message string) (
 // stray changes. It composes with Squash to replace the raw-git "commit the
 // stray changes, then collapse" workaround a PR-linked card with a dirty
 // worktree otherwise needs. A clean worktree is a no-op, reported as
-// StatusVerified with no `committed` event, not an error.
+// StatusDone with no `committed` event, not an error.
 func (o *Ops) Commit(ctx context.Context, id domain.FeatureID, message string) (Outcome, error) {
 	f, err := o.Store.GetFeature(ctx, id)
 	if err != nil {
@@ -498,7 +498,7 @@ func (o *Ops) Commit(ctx context.Context, id domain.FeatureID, message string) (
 		return o.fail(ctx, string(id), err)
 	}
 	if !committed {
-		return Outcome{Status: StatusVerified, ID: string(id)}, nil
+		return Outcome{Status: StatusDone, ID: string(id)}, nil
 	}
 
 	sha, err := wt.Head(ctx, &f)
@@ -506,7 +506,7 @@ func (o *Ops) Commit(ctx context.Context, id domain.FeatureID, message string) (
 		return o.fail(ctx, string(id), err)
 	}
 	o.Out.Emit(committedEvent{Event: "committed", ID: string(id), Branch: f.BranchName(), Commit: sha})
-	return Outcome{Status: StatusVerified, ID: string(id)}, nil
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
 // commitSubject returns msg's first line — the subject a squashed/merged

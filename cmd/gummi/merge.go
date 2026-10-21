@@ -112,7 +112,7 @@ func runCleanAll() error {
 			state.ReapOrphanAgent(ws, f.ID)
 			out, _ := d.Clean(ctx, f.ID)
 			release()
-			if out.Status == cardops.StatusVerified {
+			if out.Status == cardops.StatusDone {
 				cleaned++
 			} else {
 				failed++
@@ -121,7 +121,7 @@ func runCleanAll() error {
 		if failed > 0 {
 			return cardops.Outcome{Status: cardops.StatusError}, fmt.Errorf("clean --all: cleaned %d, failed %d", cleaned, failed)
 		}
-		return cardops.Outcome{Status: cardops.StatusVerified}, nil
+		return cardops.Outcome{Status: cardops.StatusDone}, nil
 	})
 }
 
@@ -163,7 +163,7 @@ func runHandOff(fl cliFlags, args []string) error {
 // other branches fork from, a goal's own sweep) is still closed, and
 // `gummi clean` is there for it afterwards.
 func closeOut(ctx context.Context, d *cardops.Ops, store *state.Store, pool *worktree.Pool, id domain.FeatureID, keep bool, out cardops.Outcome, err error) (cardops.Outcome, error) {
-	if err != nil || out.Status != cardops.StatusVerified || keep {
+	if err != nil || out.Status != cardops.StatusDone || keep {
 		return out, err
 	}
 	f, ferr := store.GetFeature(ctx, id)

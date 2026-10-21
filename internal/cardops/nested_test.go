@@ -1,4 +1,4 @@
-package driver
+package cardops
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -43,35 +42,13 @@ func nestedGitRepo(t *testing.T) (ws, repo string) {
 }
 
 // TestNestedLayoutEndToEnd proves Must hold 1: with .gummi at the parent
-// and the repo in a nested subdirectory, a card is created, driven to a
-// verified branch, merged, and cleaned — its worktree living under
-// ws/.gummi/worktrees, outside the repo working tree.
+// and the repo in a nested subdirectory, a session's worktree lives under
+// ws/.gummi/worktrees, outside the repo working tree, and it merges and
+// cleans from there.
 func TestNestedLayoutEndToEnd(t *testing.T) {
 	ws, repo := nestedGitRepo(t)
-	h := newHarnessRoots(t, true, map[domain.Stage]stageFn{
-		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Spec drafted.")
-		},
-		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
-			return msgIdle(o.Model, "Implemented.")
-		},
-		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-	}, ws, repo)
-
-	out, err := h.driver(Options{}).Run(context.Background(), "nested end-to-end")
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if out.Status != StatusVerified {
-		t.Fatalf("status = %q, want done", out.Status)
-	}
-	id := domain.FeatureID(out.ID)
+	h := newHarnessRoots(t, ws, repo)
+	id := sessionWithWork(t, h, 9, "").ID
 
 	// the feature worktree lives under ws/.gummi/worktrees, outside the repo
 	wtPath := filepath.Join(ws, ".gummi", "worktrees", string(id))
@@ -83,15 +60,15 @@ func TestNestedLayoutEndToEnd(t *testing.T) {
 	}
 
 	// merge onto main (the repo), then clean the worktree + branch
-	d := h.driver(Options{})
+	d := h.ops()
 	if out, err := d.Merge(context.Background(), id, "feat(nested): land the nested end-to-end card", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
-	} else if out.Status != StatusVerified {
+	} else if out.Status != StatusDone {
 		t.Fatalf("merge status = %q, want done", out.Status)
 	}
 	if out, err := d.Clean(context.Background(), id); err != nil {
 		t.Fatalf("Clean: %v", err)
-	} else if out.Status != StatusVerified {
+	} else if out.Status != StatusDone {
 		t.Fatalf("clean status = %q, want done", out.Status)
 	}
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {

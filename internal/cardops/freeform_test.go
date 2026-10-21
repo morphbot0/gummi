@@ -1,4 +1,4 @@
-package driver
+package cardops
 
 import (
 	"context"
@@ -47,16 +47,16 @@ func freeformWithWork(t *testing.T, h *harness, num int) domain.Feature {
 // reaches main through the same squash merge every card lands by — which is
 // the whole of what "a freeform card can land" had to mean.
 func TestAFreeformCardLandsWithoutVerifying(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	f := freeformWithWork(t, h, 21)
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).Merge(context.Background(), f.ID,
+	out, err := h.ops().Merge(context.Background(), f.ID,
 		"fix(copilot): drop the pty fd leaked on idle timeout", domain.LandSquash)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if got := gitHead(t, h.root); got == before {
@@ -85,7 +85,7 @@ func TestAFreeformCardLandsWithoutVerifying(t *testing.T) {
 // unresolved comments are the one thing between it and main — and they hold
 // it through exactly the check every other landing crosses.
 func TestUnresolvedCommentsHoldAFreeformLanding(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	f := freeformWithWork(t, h, 22)
 	ctx := context.Background()
 	if _, err := h.store.AddDiffAnnotation(ctx, domain.DiffAnnotation{
@@ -96,7 +96,7 @@ func TestUnresolvedCommentsHoldAFreeformLanding(t *testing.T) {
 	}
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).Merge(ctx, f.ID, "fix(copilot): drop the leaked fd", domain.LandSquash)
+	out, err := h.ops().Merge(ctx, f.ID, "fix(copilot): drop the leaked fd", domain.LandSquash)
 	if err == nil {
 		t.Fatal("a freeform card landed with an unresolved diff comment")
 	}
@@ -111,47 +111,20 @@ func TestUnresolvedCommentsHoldAFreeformLanding(t *testing.T) {
 	}
 }
 
-// TestRunRefusesAFreeformCard: `run`/`resume` drive stages, and a freeform
-// card has none. The refusal has to be explicit, because StageOpen is
-// terminal — so without it the loop would report a card that is very much
-// open as done.
-func TestRunRefusesAFreeformCard(t *testing.T) {
-	h := newHarness(t, true, nil)
-	f := freeformWithWork(t, h, 23)
-
-	out, err := h.driver(Options{}).Drive(context.Background(), f)
-	if err == nil {
-		t.Fatal("the driver drove a freeform card")
-	}
-	if out.Status != StatusError {
-		t.Errorf("status = %q, want error", out.Status)
-	}
-	if !strings.Contains(err.Error(), "freeform") {
-		t.Errorf("the refusal does not say why: %v", err)
-	}
-	if lastEvent(h, "done") != nil {
-		t.Error("the driver reported a freeform card done")
-	}
-	stored, _ := h.store.GetFeature(context.Background(), f.ID)
-	if stored.Stage != domain.StageOpen {
-		t.Errorf("stage = %q, want it left open", stored.Stage)
-	}
-}
-
 // TestAFreeformHandOffClosesTheCardAndKeepsItsBranch: the ending that lands
 // nothing. It crosses no gate, because there is none — and it still leaves
 // the branch exactly where it was, which is the whole point of the verb.
 func TestAFreeformHandOffClosesTheCardAndKeepsItsBranch(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	f := freeformWithWork(t, h, 24)
 	ctx := context.Background()
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).HandOff(ctx, f.ID)
+	out, err := h.ops().HandOff(ctx, f.ID)
 	if err != nil {
 		t.Fatalf("HandOff: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	stored, err := h.store.GetFeature(ctx, f.ID)
@@ -180,10 +153,10 @@ func TestAFreeformHandOffClosesTheCardAndKeepsItsBranch(t *testing.T) {
 // lands it on a verified branch. Landing the session too would put the same
 // work on main a second way, past the floor it was sent to.
 func TestASessionContinuedAsASpecIsNotLanded(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	f := freeformWithWork(t, h, 25)
 	ctx := context.Background()
-	if _, err := h.driver(Options{}).HandOff(ctx, f.ID); err != nil {
+	if _, err := h.ops().HandOff(ctx, f.ID); err != nil {
 		t.Fatalf("HandOff: %v", err)
 	}
 	if err := h.store.SetContinuedAs(ctx, f.ID, "FD-026"); err != nil {
@@ -191,7 +164,7 @@ func TestASessionContinuedAsASpecIsNotLanded(t *testing.T) {
 	}
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).Merge(ctx, f.ID, "fix(copilot): drop the leaked fd", domain.LandSquash)
+	out, err := h.ops().Merge(ctx, f.ID, "fix(copilot): drop the leaked fd", domain.LandSquash)
 	if err == nil {
 		t.Fatal("a session continued as a spec landed on its own")
 	}

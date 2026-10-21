@@ -46,7 +46,7 @@ const skillName = "gummi"
 // and its parser so the two cannot disagree about which agents exist.
 const skillAgentList = "claude|opencode|copilot"
 
-const skillDescription = "Ship one PR-sized feature or bug to a verified branch via gummi's headless, spec-driven workflow (spec, review, verify; gummi never merges). Use when the work warrants a spec, an independent code review, and an isolated branch — not for trivial one-line edits."
+const skillDescription = "Hand a piece of work to a gummi session — a coding agent on a branch of its own, which can start a reviewed crew of specialist agents when the work divides — and drive it headlessly until it is done or needs you (gummi never merges). Use when the work deserves its own branch — not for trivial one-line edits."
 
 // skillShow prints the rendered SKILL.md (frontmatter + body) to stdout,
 // or — given a name — one of the reference files it points at.
@@ -219,13 +219,11 @@ type grammarEntry struct {
 }
 
 // coreGrammar is the command surface SKILL.md documents: everything an
-// agent needs to take one card from a description to a verified branch and
-// land it.
+// agent needs to take a session from a prompt to a branch and land it.
 func coreGrammar() []grammarEntry {
 	return []grammarEntry{
-		{sigs: []string{`gummi run [flags] "<description>"`}, path: "run"},
-		{sigs: []string{"gummi resume <id|ref> [decision]"}, path: "resume"},
-		{sigs: []string{"gummi verify <id|ref>"}, path: "verify"},
+		{sigs: []string{`gummi run [flags] "<prompt>"`}, path: "run"},
+		{sigs: []string{`gummi resume <id|ref> [--answer <text> | "<message>"]`}, path: "resume"},
 		{sigs: []string{"gummi merge <id|ref> -m <message|->"}, path: "merge"},
 		{sigs: []string{"gummi squash <id|ref> -m <message|->"}, path: "squash"},
 		{sigs: []string{"gummi commit <id|ref> -m <message|->"}, path: "commit"},
@@ -238,9 +236,6 @@ func coreGrammar() []grammarEntry {
 		{sigs: []string{"gummi spec <id|ref>"}, path: "spec"},
 		{sigs: []string{"gummi diff <id|ref>"}, path: "diff"},
 		{sigs: []string{"gummi doctor"}, path: "doctor"},
-		{sigs: []string{"gummi deps add <dependent> <depends-on>"}, path: "deps add"},
-		{sigs: []string{"gummi deps rm <dependent> <depends-on>"}, path: "deps rm"},
-		{sigs: []string{"gummi deps list <id>"}, path: "deps list"},
 		{sigs: []string{"gummi skill show|install|list"}, path: "skill install"},
 	}
 }
@@ -382,14 +377,11 @@ func exitTable() string {
 		s       driver.Status
 		meaning string
 	}{
-		{driver.StatusVerified, "verified branch ready — report it upward, stop"},
-		{driver.StatusStopped, "clean `--until` stop — `resume <id> --approve` crosses the gate and continues"},
-		{driver.StatusError, "setup/agent failure — check `status <id>`; resumable if a non-terminal card exists (`resumable` on the error event)"},
-		{driver.StatusQuestion, "a delegated ask (`question` event) → `resume <id> --answer <text>`; a caller gate (`gate` event) → `resume <id> --approve` or `--request-changes <note>`"},
-		{driver.StatusBlocked, "open %% or diff threads block a gate — resolve them, then `resume <id>`; or `resume <id> --request-changes <note>` to bounce it back"},
-		{driver.StatusEscalation, "rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage. A verify-fail (or review cap-hit) carries `next: resume <id> --bounce --note \"<why>\"`, which rewinds the feature to implement/fix and drives review→verify again"},
-		{driver.StatusExhausted, "budget dry — `resume <id> --envelope <dollars>` (more than the dry budget) raises it and continues"},
-		{driver.StatusTimeout, "a stage went quiet — read the event `hint`, report to the human; `resume <id>` re-runs the stage"},
+		{driver.StatusDone, "the session is idle with no crew open — report its branch, or send it a next turn with `resume <id> \"<message>\"`"},
+		{driver.StatusError, "setup/agent failure — check `status <id>`; resumable if a session was left behind (`resumable` on the error event)"},
+		{driver.StatusNeedsYou, "a `question` event: the session asked (`kind: ask`), or its crew has a decision the pre-authorisation does not cover (`crew_plan`, `crew_widen`, `crew_question`) → `resume <id> --answer <text>`; a paused crew (`crew_paused`) → `resume <id>`"},
+		{driver.StatusExhausted, "budget dry — `resume <id> --envelope <dollars>` (more than the dry budget) raises it and carries on"},
+		{driver.StatusTimeout, "nothing happened for the --timeout window — read the event `hint`, report to the human; `resume <id>` carries on"},
 	}
 	var b strings.Builder
 	b.WriteString("| Exit | Status | What it means / your action |\n")

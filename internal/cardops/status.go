@@ -1,64 +1,42 @@
 package cardops
 
-// Status is the terminal classification of a run/resume invocation or a card operation. Each
-// maps to a stable process exit code (ExitCode) so a calling agent can
-// branch on the result without parsing stdout.
+// Status is the terminal classification of a run/resume invocation or a
+// card operation. Each maps to a stable process exit code (ExitCode) so a
+// calling agent can branch on the result without parsing stdout.
+//
+// The codes are stable across releases: the ones the retired workflow
+// used (3 blocked, 4 escalation) are not reused.
 type Status string
 
 const (
-	// StatusVerified: a verified branch is ready. gummi never merges it.
-	//
-	// It used to be spelled "done", which collided with the card's own
-	// done — the stage a card reaches when it is CLOSED. Both were
-	// correct and they meant different things, so a caller reading one
-	// table and not the other learned the difference from a pipeline that
-	// shipped nothing. The run reaches verified; only a card is ever done.
-	StatusVerified Status = "verified"
-	// StatusError: a setup or agent failure. Often nothing partial landed
-	// (a pre-id validation/setup failure), but a mid-run agent-turn failure
-	// can occur after earlier stages committed durable progress — that case
-	// is one `resume <id>` from possibly finishing. The exit code is 1
-	// regardless; the error event's `resumable`/`stage` fields tell the two
-	// apart (check `status <id>`).
+	// StatusDone: the session is idle with no crew open, or a card
+	// operation did what it was asked. gummi never merges on its own.
+	StatusDone Status = "done"
+	// StatusError: a setup or agent failure. The error event's
+	// `resumable` field says whether a session was left behind that a
+	// `resume <id>` may carry on.
 	StatusError Status = "error"
-	// StatusQuestion: a delegated ask_user question, or a caller design
-	// gate awaiting --approve/--request-changes. Resume to continue.
-	StatusQuestion Status = "question"
-	// StatusBlocked: open %%/diff threads block a gate. Resolve them (or
-	// resume --request-changes) before the gate can cross.
-	StatusBlocked Status = "blocked"
-	// StatusEscalation: a rerun/critique cap was hit, or a stage returned
-	// no clear verdict. The card stays durable + resumable.
-	StatusEscalation Status = "escalation"
+	// StatusNeedsYou: the session asked a question, or its crew has a
+	// decision the pre-authorisation does not cover, or its crew is
+	// paused. `resume <id> --answer <text>` (or a bare `resume <id>` for
+	// a paused crew) continues.
+	StatusNeedsYou Status = "needs_you"
 	// StatusExhausted: the credit envelope ran dry. Raise it, then resume.
 	StatusExhausted Status = "exhausted"
-	// StatusTimeout: a stage went quiet past the inactivity budget — a
-	// likely hang. Durable + resumable.
+	// StatusTimeout: nothing happened for the inactivity budget — a likely
+	// hang. Durable and resumable.
 	StatusTimeout Status = "timeout"
-	// StatusStopped: --until reached its deliberate stop before crossing a
-	// design gate. A clean, resumable halt — exit 0, distinguished from done
-	// only by the event name.
-	StatusStopped Status = "stopped"
-	// StatusSaid: --say reported what a line would do and stopped without
-	// acting. Exit 0: nothing happened, and that was the point.
-	StatusSaid Status = "said"
 )
 
-// ExitCode is the process exit status for a terminal Status. verified is 0;
-// error keeps the conventional 1; the decision boundaries take distinct
-// codes so a caller can branch on them.
+// ExitCode is the process exit status for a terminal Status. done is 0;
+// error keeps the conventional 1; the stops take distinct codes so a
+// caller can branch on them.
 func (s Status) ExitCode() int {
 	switch s {
-	case StatusVerified, StatusStopped, StatusSaid:
+	case StatusDone:
 		return 0
-	case StatusError:
-		return 1
-	case StatusQuestion:
+	case StatusNeedsYou:
 		return 2
-	case StatusBlocked:
-		return 3
-	case StatusEscalation:
-		return 4
 	case StatusExhausted:
 		return 5
 	case StatusTimeout:
@@ -68,8 +46,9 @@ func (s Status) ExitCode() int {
 	}
 }
 
-// Outcome is the terminal result of drive. ID is the feature the run
-// governed (empty only when creation itself failed before an ID existed).
+// Outcome is the terminal result of a run or an operation. ID is the card
+// it governed (empty only when creation itself failed before an ID
+// existed).
 type Outcome struct {
 	Status Status
 	ID     string

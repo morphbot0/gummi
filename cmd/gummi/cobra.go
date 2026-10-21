@@ -1,14 +1,10 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/morphis/gummi/internal/publish"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // This file wires the top-level commands and their nested subcommands onto
@@ -17,29 +13,22 @@ import (
 // and its RunE hands the body a cliFlags view of what cobra parsed. See
 // flags.go for why there is exactly one declaration site.
 
-// runCmd implements `gummi run [flags] "<description>"`.
+// runCmd implements `gummi run [flags] "<prompt>"`.
 var runCmd = &cobra.Command{
-	Use:   "run [flags] \"<description>\"",
-	Short: "Headlessly drive one card to a verified branch",
+	Use:   "run [flags] \"<prompt>\"",
+	Short: "Start a session from a prompt and drive it headlessly until it is done or needs you",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRun(cmdFlags(cmd), args)
 	},
 }
 
-// resumeCmd implements `gummi resume <id|ref> [decision]`.
+// resumeCmd implements `gummi resume <id|ref> [--answer <text> | "<message>"]`.
 var resumeCmd = &cobra.Command{
-	Use:   "resume <id|ref> [decision]",
-	Short: "Pick a parked card back up and drive it on",
+	Use:   "resume <id|ref> [--answer <text> | \"<message>\"]",
+	Short: "Answer a stopped session, or send it a turn, and drive it on",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runResume(cmdFlags(cmd), args)
 	},
-}
-
-// verifyCmd implements `gummi verify <id|ref>`.
-var verifyCmd = &cobra.Command{
-	Use:   "verify <id|ref>",
-	Short: "Re-run the checks on a verified branch and finalize its card",
-	RunE:  func(_ *cobra.Command, args []string) error { return runVerify(args) },
 }
 
 // mergeCmd implements `gummi merge <id|ref> -m <message|->`.
@@ -149,30 +138,6 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create and seed the .gummi workspace in the current directory",
 	RunE:  func(_ *cobra.Command, _ []string) error { return runInit() },
-}
-
-// depsCmd groups the dependency-edge operations (add/rm/list).
-var depsCmd = &cobra.Command{
-	Use:   "deps",
-	Short: "Manage dependency edges between cards",
-}
-
-var depsAddCmd = &cobra.Command{
-	Use:   "add <dependent> <depends-on>",
-	Short: "Record that a card depends on another",
-	RunE:  func(_ *cobra.Command, args []string) error { return runDepsAdd(args) },
-}
-
-var depsRmCmd = &cobra.Command{
-	Use:   "rm <dependent> <depends-on>",
-	Short: "Remove a dependency edge",
-	RunE:  func(_ *cobra.Command, args []string) error { return runDepsRm(args) },
-}
-
-var depsListCmd = &cobra.Command{
-	Use:   "list <id>",
-	Short: "List a card's dependencies",
-	RunE:  func(_ *cobra.Command, args []string) error { return runDepsList(args) },
 }
 
 // stackCmd groups the stack operations. A stack is a chain of cards
@@ -507,7 +472,6 @@ func init() {
 	jsonFlag(webDevicesCmd.Flags(), "emit the paired devices as JSON")
 	webUnpairCmd.Flags().Bool("all", false, "unpair every device")
 
-	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
 	stackCmd.AddCommand(stackNewCmd, stackAddCmd, stackRmCmd, stackMvCmd, stackListCmd, stackRestackCmd)
 	scheduleCmd.AddCommand(scheduleListCmd, scheduleAddCmd, scheduleEnableCmd, scheduleDisableCmd, scheduleRunNowCmd, scheduleRmCmd)
 	curatorCmd.AddCommand(curatorStatusCmd, curatorLogCmd, curatorRunCmd, curatorRevertCmd, curatorPinCmd, curatorUnpinCmd)
@@ -516,31 +480,23 @@ func init() {
 	webCmd.AddCommand(webPairCmd, webDevicesCmd, webUnpairCmd)
 }
 
-// bindRunFlags declares `gummi run`'s flags: the shared driving surface
-// plus the one only a feature card takes.
+// bindRunFlags declares `gummi run`'s flags: the shared driving surface.
 func bindRunFlags(fs *pflag.FlagSet) {
 	stdDriveFlags().bind(fs)
-	fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
 }
 
 // bindResumeFlags declares `gummi resume`'s flags: the shared driving
-// surface and the decision flags that say why the run stopped.
+// surface, worded for a session that already exists, and the answer.
 func bindResumeFlags(fs *pflag.FlagSet) {
 	d := stdDriveFlags()
-	d.envelope = "raise the spend budget before resuming, in dollars (required to clear a card that ran out; never lowers it)"
-	d.gate = "who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)"
+	d.envelope = "raise the session's budget, and its crew pre-authorisation with it, in dollars (clears an exhausted stop; never lowers it)"
 	d.ref = "external correlation id, echoed in the stream"
-	// A resumed card already knows its repository, its base branch and the
-	// profile it was minted with; none of the three can be changed now.
+	// A resumed session already knows its repository, its base branch and
+	// the profile it was minted with; none of the three can change now.
 	d.profile, d.repo, d.base = "", "", ""
 	d.bind(fs)
 
-	fs.String("answer", "", "answer a delegated ask_user question")
-	fs.Bool("approve", false, "approve a design gate handed back by --gate-approval=attended")
-	fs.String("request-changes", "", "send a design gate back with a note")
-	fs.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)")
-	fs.String("note", "", "addendum to the reborn stage's kickoff (used with --bounce)")
-	fs.String("say", "", "read a line the way the card page would and report what it would do, as a say event, without acting")
+	fs.String("answer", "", "answer the session's open question, or its crew's open decision (one of the offered options, or your own words)")
 }
 
 func bindCleanFlags(fs *pflag.FlagSet) {
@@ -698,17 +654,4 @@ func bindWebFlags(fs *pflag.FlagSet) {
 
 func bindWebPairFlags(fs *pflag.FlagSet) {
 	fs.String("name", "", "pair the browser that redeems the code as this person")
-}
-
-// gateApproval normalizes the --gate-approval value every driving verb
-// takes, reporting the one error message all of them used to spell out
-// separately (and differently).
-func gateApproval(raw string) (string, error) {
-	norm, ok := domain.NormalizeGateApproval(raw)
-	if !ok {
-		return "", fmt.Errorf(
-			"--gate-approval must be %q or %q (the retired %q/%q/%q/%q spellings are still accepted), got %q",
-			domain.GateAttended, domain.GateAutopilot, "off", "gates", "caller", "auto", raw)
-	}
-	return norm, nil
 }

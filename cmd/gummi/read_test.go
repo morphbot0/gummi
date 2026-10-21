@@ -191,7 +191,7 @@ func (f *readFixture) mkVerifyFeature(t *testing.T) domain.Feature {
 // verified:false even with an ahead branch (the false-positive guard), and
 // only a stamped VerifiedAt — what the engine sets at the stop-at-verified
 // gate — flips it true, while `done` stays false until an actual merge.
-func TestBuildStatusVerified(t *testing.T) {
+func TestBuildStatusDone(t *testing.T) {
 	f := newReadFixture(t)
 	feat := f.mkVerifyFeature(t)
 

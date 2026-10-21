@@ -1,4 +1,4 @@
-package driver
+package cardops
 
 import (
 	"context"
@@ -8,54 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// driveVerified drives the quick route to a verified branch and returns the
-// harness, a fresh driver (a fresh CLI process), and the feature id — the
-// setup behind every headless merge/clean test.
-func driveVerified(t *testing.T) (*harness, *Driver, domain.FeatureID) {
-	t.Helper()
-	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Spec drafted.")
-		},
-		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			// leave real committed work so the branch is genuinely ahead.
-			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
-			return msgIdle(o.Model, "Implemented.")
-		},
-		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-	})
-	out, err := h.driver(Options{}).Run(context.Background(), "add a json export")
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if out.Status != StatusVerified {
-		t.Fatalf("status = %q, want done", out.Status)
-	}
-	return h, h.driver(Options{}), domain.FeatureID(out.ID)
-}
-
-// gitHead returns the main checkout's current HEAD sha.
-func gitHead(t *testing.T, root string) string {
-	t.Helper()
-	out, err := exec.CommandContext(context.Background(), "git", "-C", root, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // Merge lands a verified card: the stream carries a `merged` event whose
 // commit is the actual sha now on main, the card moves to done, and the
-// outcome is StatusVerified (exit 0).
+// outcome is StatusDone (exit 0).
 func TestMergeLandsVerifiedBranch(t *testing.T) {
 	h, d, id := driveVerified(t)
 	before := gitHead(t, h.root)
@@ -64,7 +22,7 @@ func TestMergeLandsVerifiedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if st := h.stageOf(id); st != domain.StageDone {
@@ -94,7 +52,7 @@ func TestMergeLandsVerifiedBranch(t *testing.T) {
 // Merge refuses a card that is not at a verified branch — non-zero outcome,
 // and main's history is untouched.
 func TestMergeRefusesUnverified(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	f := feature(77, domain.StageImplement)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -102,7 +60,7 @@ func TestMergeRefusesUnverified(t *testing.T) {
 	id := f.ID
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).Merge(context.Background(), id, "feat(x): not verified", domain.LandSquash)
+	out, err := h.ops().Merge(context.Background(), id, "feat(x): not verified", domain.LandSquash)
 	if err == nil {
 		t.Fatal("Merge accepted an unverified card")
 	}
@@ -185,7 +143,7 @@ func TestMergeSucceedsAfterUnlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge after unlink: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 }
@@ -195,7 +153,7 @@ func TestMergeSucceedsAfterUnlink(t *testing.T) {
 func TestCleanRemovesLandedBranch(t *testing.T) {
 	h, d, id := driveVerified(t)
 	// land it first so there is something to clean.
-	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
+	if _, err := h.ops().Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	f, _ := h.store.GetFeature(context.Background(), id)
@@ -209,7 +167,7 @@ func TestCleanRemovesLandedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if ex, _ := h.wt.Exists(context.Background(), &f); ex {
@@ -231,7 +189,7 @@ func TestCleanRemovesLandedBranch(t *testing.T) {
 // but leaves a co-resident card's transcripts alone.
 func TestCleanRemovesTranscripts(t *testing.T) {
 	h, d, id := driveVerified(t)
-	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
+	if _, err := h.ops().Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 
@@ -263,7 +221,7 @@ func TestCleanRemovesTranscripts(t *testing.T) {
 // card's scratch files alone.
 func TestCleanRemovesScratchFiles(t *testing.T) {
 	h, d, id := driveVerified(t)
-	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
+	if _, err := h.ops().Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 
@@ -306,14 +264,14 @@ func TestCleanRemovesScratchFiles(t *testing.T) {
 
 // Clean refuses a card that has not actually landed — nothing is removed.
 func TestCleanRefusesUnlanded(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	f := feature(78, domain.StageImplement)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
 	id := f.ID
 
-	out, err := h.driver(Options{}).Clean(context.Background(), id)
+	out, err := h.ops().Clean(context.Background(), id)
 	if err == nil {
 		t.Fatal("Clean accepted an unlanded card")
 	}
@@ -325,35 +283,6 @@ func TestCleanRefusesUnlanded(t *testing.T) {
 	}
 }
 
-// driveVerifiedNamed drives a verified card whose Repo is the configured
-// named repo "b", via the multi-repo harness.
-func driveVerifiedNamed(t *testing.T) (*harness, *Driver, domain.FeatureID) {
-	t.Helper()
-	h := newMultiRepoHarness(t, map[domain.Stage]stageFn{
-		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Spec drafted.")
-		},
-		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
-			return msgIdle(o.Model, "Implemented.")
-		},
-		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-	})
-	out, err := h.driver(Options{Repo: "b"}).Run(context.Background(), "add a json export")
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if out.Status != StatusVerified {
-		t.Fatalf("status = %q, want done", out.Status)
-	}
-	return h, h.driver(Options{}), domain.FeatureID(out.ID)
-}
-
 // TestMergeLandsOnNamedRepo: a card in a configured named repo merges onto
 // that repo's main and never the default's.
 func TestMergeLandsOnNamedRepo(t *testing.T) {
@@ -363,19 +292,19 @@ func TestMergeLandsOnNamedRepo(t *testing.T) {
 		t.Fatalf("card repo = %q, want b", f.Repo)
 	}
 	defBefore := gitHead(t, h.root)
-	namedBefore := gitHead(t, h.byName["b"])
+	namedBefore := gitHead(t, filepath.Join(h.root, "git", "b"))
 
 	out, err := d.Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if st := h.stageOf(id); st != domain.StageDone {
 		t.Fatalf("feature at %s after merge, want done", st)
 	}
-	if got := gitHead(t, h.byName["b"]); got == namedBefore {
+	if got := gitHead(t, filepath.Join(h.root, "git", "b")); got == namedBefore {
 		t.Errorf("named repo main did not advance: %s", got)
 	}
 	if got := gitHead(t, h.root); got != defBefore {
@@ -386,7 +315,7 @@ func TestMergeLandsOnNamedRepo(t *testing.T) {
 		t.Fatalf("no merged event; got %v", h.eventKinds())
 	}
 	commit, _ := merged["commit"].(string)
-	if want := gitHead(t, h.byName["b"]); commit != want {
+	if want := gitHead(t, filepath.Join(h.root, "git", "b")); commit != want {
 		t.Fatalf("merged.commit %q != named-repo main HEAD %q", commit, want)
 	}
 }
@@ -395,7 +324,7 @@ func TestMergeLandsOnNamedRepo(t *testing.T) {
 // branch through the card's own manager.
 func TestCleanNamedRepo(t *testing.T) {
 	h, _, id := driveVerifiedNamed(t)
-	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
+	if _, err := h.ops().Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	f, _ := h.store.GetFeature(context.Background(), id)
@@ -404,11 +333,11 @@ func TestCleanNamedRepo(t *testing.T) {
 	if ex, _ := h.pool.Exists(context.Background(), &f); !ex {
 		t.Fatal("setup: worktree missing before clean")
 	}
-	out, err := h.driver(Options{}).Clean(context.Background(), id)
+	out, err := h.ops().Clean(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if ex, _ := h.pool.Exists(context.Background(), &f); ex {
@@ -442,7 +371,7 @@ func TestRefusalsNameTheBranchTheCardLandsOn(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.root, "README.md"), []byte("edited\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.driver(Options{}).Merge(ctx, id, "feat(export): land the json export", domain.LandSquash); err == nil ||
+	if _, err := h.ops().Merge(ctx, id, "feat(export): land the json export", domain.LandSquash); err == nil ||
 		!strings.Contains(err.Error(), "trunk checkout has uncommitted changes") {
 		t.Fatalf("merge names it too: %v", err)
 	}

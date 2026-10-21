@@ -20,38 +20,30 @@ import (
 // so it stays 0600).
 const eventsFileMode = 0o600
 
-// defaultStageTimeout bounds how long a single stage may go without any
-// activity before the driver treats it as a hang and escalates. Generous
-// by default (a frontier reviewer on a dense plan spec can genuinely take
-// well past ten minutes to complete one critique turn); --stage-timeout 0
-// disables it. Callers who know their profile is faster can shrink it;
-// callers on especially large specs can push it higher.
-const defaultStageTimeout = 20 * time.Minute
+// defaultTimeout bounds how long a run may hear nothing from its session
+// or the session's crew before it stops as a likely hang. Generous by
+// default (a strong model on a large change can think for a long time
+// between events); --timeout 0 disables it.
+const defaultTimeout = 20 * time.Minute
 
-// runRun implements `gummi run [flags] "<description>"` (DESIGN §8.2): it
-// creates one feature and drives it headlessly through the quality floor
-// to a verified branch, streaming milestone + decision NDJSON and exiting
-// with a typed status. An envelope is required (D6) and an agent must be
-// configured — both fail loud before any work begins.
+// runRun implements `gummi run [flags] "<prompt>"`: it starts one session
+// from the prompt, pre-authorises its crew up to the envelope, and drives
+// it headlessly until it is done or needs a person, streaming NDJSON and
+// exiting with a typed status. An envelope is required (D6) and an agent
+// must be configured — both fail loud before any work begins.
 func runRun(fl cliFlags, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("run needs exactly one description argument")
+		return fmt.Errorf("run needs exactly one prompt argument")
 	}
-	desc := args[0]
-
-	acceptanceText, err := readAcceptance(fl.String("acceptance"))
+	prompt := args[0]
+	opts, err := driverOptions(fl)
 	if err != nil {
 		return err
 	}
-	opts, err := driverOptions(fl, acceptanceText)
-	if err != nil {
-		return err
-	}
-	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
-		// mint the card first, then take its per-card lock for the drive so
-		// this run is the sole governor of the card it just created (two
-		// runs mint disjoint cards and so never contend on each other's lock).
-		f, err := d.Create(ctx, domain.CardType{Kind: domain.KindFeature}, desc)
+	return withRunEngine(func(ctx context.Context, d *driver.Driver, _ *state.Store, ws state.Workspace) (driver.Outcome, error) {
+		// mint the session first, then take its per-card lock for the drive
+		// so this run is the sole governor of the card it just created
+		f, err := d.Create(ctx, prompt)
 		if err != nil {
 			return driver.Outcome{}, err
 		}
@@ -66,31 +58,8 @@ func runRun(fl cliFlags, args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer clearPID()
-		return d.Drive(ctx, f)
+		return d.Start(ctx, f, prompt)
 	}, opts)
-}
-
-// readAcceptance loads the --acceptance criteria: a file path, or "-" for
-// stdin. An empty flag (the default) yields empty text and no read. File IO
-// lives here in the CLI so the driver's Options carries the criteria text,
-// not a path.
-func readAcceptance(pathOrDash string) (string, error) {
-	switch pathOrDash {
-	case "":
-		return "", nil
-	case "-":
-		b, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("reading --acceptance from stdin: %w", err)
-		}
-		return string(b), nil
-	default:
-		b, err := os.ReadFile(pathOrDash)
-		if err != nil {
-			return "", fmt.Errorf("reading --acceptance %s: %w", pathOrDash, err)
-		}
-		return string(b), nil
-	}
 }
 
 // envEnvelope is GUMMI_ENVELOPE in credits: a dollar amount, like
@@ -102,9 +71,9 @@ func envEnvelope() int {
 	return 0
 }
 
-// driverOptions validates and assembles the shared driving options. The
-// envelope is required: it falls back to GUMMI_ENVELOPE, then refuses.
-func driverOptions(fl cliFlags, acceptance string) (driver.Options, error) {
+// driverOptions validates and assembles run's options. The envelope is
+// required: it falls back to GUMMI_ENVELOPE, then refuses.
+func driverOptions(fl cliFlags) (driver.Options, error) {
 	envelope := fl.Budget("envelope")
 	if envelope == 0 {
 		envelope = envEnvelope()
@@ -112,30 +81,18 @@ func driverOptions(fl cliFlags, acceptance string) (driver.Options, error) {
 	if envelope <= 0 {
 		return driver.Options{}, fmt.Errorf("an envelope is required: pass --envelope <dollars> (or set GUMMI_ENVELOPE); runs refuse to start without one")
 	}
-	gate, err := gateApproval(fl.String("gate-approval"))
-	if err != nil {
-		return driver.Options{}, err
-	}
-	// validate --until before any work begins, so a bad target fails as a
-	// plain usage error rather than mid-run.
-	until := fl.String("until")
-	if err := driver.ValidateUntil(domain.Stage(until)); err != nil {
-		return driver.Options{}, err
-	}
 	return driver.Options{
-		Envelope: envelope, Profile: fl.opt("profile"), GateApproval: gate,
-		StageTimeout: fl.Duration("stage-timeout"),
-		Autonomous:   fl.Bool("autonomous"), Verbose: fl.Bool("verbose"), Ref: fl.String("ref"),
-		Acceptance: acceptance, Until: domain.Stage(until),
+		Envelope: envelope, Profile: fl.opt("profile"), Timeout: fl.Duration("timeout"),
+		Verbose: fl.Bool("verbose"), Ref: fl.String("ref"),
 		Repo: fl.opt("repo"), Base: fl.opt("base"),
 	}, nil
 }
 
 // trackPID records this process's pid at ws.PIDFile(id) and returns a
 // cleanup that clears it on clean exit. Call it once a card's per-card lock
-// is held, right where the id first comes into scope — for `run`/`research`
-// that's after Create mints the card, for `resume`/`verify` it's after the
-// existing card resolves. A caller whose bash wrapper is killed by the
+// is held, right where the id first comes into scope — for `run` that's
+// after Create mints the session, for `resume` it's after the existing
+// card resolves. A caller whose bash wrapper is killed by the
 // harness (SIGHUP-ignored gummi keeps running) has no way to tell whether
 // gummi died with the wrapper or is still churning: recording our pid lets
 // an external check use `kill -0` on that specific card to answer the
@@ -154,7 +111,7 @@ func trackPID(ws state.Workspace, id domain.FeatureID) (func(), error) {
 }
 
 // withRunEngine wires the workspace, store, worktree manager, and agent
-// engine (mirroring cmd/gummi/ingest.go), builds a driver over os.Stdout,
+// engine, builds a driver over os.Stdout,
 // hands it to fn, and maps the terminal Outcome to a process exit. It takes
 // no whole-workspace lock: each command's fn resolves its card and holds
 // that card's per-card lock for the drive, so independent cards run
@@ -231,8 +188,6 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store, state.
 // line is added (a setup error before the driver ran is returned plainly
 // and handled by main).
 func driverExit(out driver.Outcome, _ error) error {
-	// done and --until's clean stop both exit 0; every decision boundary
-	// takes its typed non-zero code (the NDJSON stream carried the detail).
 	if out.Status.ExitCode() == 0 {
 		return nil
 	}

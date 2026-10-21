@@ -79,8 +79,8 @@ leaf services.
 | `term` | A person's own shell on a pty in a card's worktree, for the web face's Terminal tab (`gummi web --terminal`): one session per card, bounded scrollback replayed on reattach, a cap and an idle sweep. Not an agent surface and not sandboxed; `web/routes_term.go` decides who may open one (DESIGN §20.5). |
 | `gittest` | Blank-imported by every test package that builds a git repository in a `t.TempDir`: switches off git's detached auto-maintenance, which otherwise outlives the command a test ran and fails the TempDir cleanup. A bare remote a test pushes to sets `maintenance.auto false` itself — git does not pass the switch to the receiving end. |
 | `ui` | The Bubbletea TUI: board, chat, diff/spec views, inbox, dialogs. |
-| `cardops` | The card operations every face runs the same way: Merge, HandOff, Squash, Commit, Clean, and a linked PR's open-thread count, with the NDJSON emitter and the typed `Status`/`Outcome` exit table. `cmd/gummi`'s landing verbs call it directly; the driver wraps it. |
-| `driver` | The headless counterpart of the TUI's autonomous loop: drives `run`/`resume` over the engine, emits NDJSON + typed exit statuses, holds the `.gummi` lock. |
+| `cardops` | The card operations every face runs the same way: Merge, HandOff, Squash, Commit, Clean, and a linked PR's open-thread count, with the NDJSON emitter and the typed `Status`/`Outcome` exit table. `cmd/gummi`'s landing verbs call it directly. |
+| `driver` | The headless session loop behind `gummi run`/`resume`: mints a session from a prompt, pre-authorises its crew up to the envelope, ticks the crew and waits; stops `done`, or `needs_you` on a question or a crew decision the pre-authorisation does not cover. Emits NDJSON + typed exit statuses (`docs/HEADLESS.md`). |
 | `planround` / `reviewround` | Single seam persisting the plan-critique / review→fix round counters across process boundaries, so the TUI and headless driver can't drift apart on rerun caps. |
 | `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
 | `verdict` | Shared stage-verdict grammar the TUI and headless driver both parse, per DESIGN §13. |
@@ -94,8 +94,8 @@ leaf services.
 
 `cmd/gummi` holds `main.go` plus the board's supporting subcommands and the
 headless driver surface — `run`, `resume`, `status` (`--stats` reports where a
-card's money and hours went), `spec`, `diff`, `verify`,
-`merge`, `clean`, `deps`, `stack`, `doctor`, `skill`. See `docs/HEADLESS.md`
+card's money and hours went), `spec`, `diff`,
+`merge`, `clean`, `stack`, `doctor`, `skill`. See `docs/HEADLESS.md`
 for the driver's command grammar and exit-status table.
 
 **Flags are declared once.** Cobra owns routing, help, completion *and*
@@ -156,7 +156,7 @@ make e2e    # scripted TUI drive asserting the full lifecycle (needs tmux)
 ```
 
 To try the headless driver instead of the TUI, `make demo` still gives you
-a throwaway repo — run `bin/gummi run --envelope 5 "<description>"` in it.
+a throwaway repo — run `bin/gummi run --envelope 5 "<prompt>"` in it.
 
 Running the real TUI (`bin/gummi`) needs a git repo and, for the default
 backend, an authenticated GitHub Copilot CLI. To drive agents without

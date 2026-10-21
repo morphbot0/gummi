@@ -1419,6 +1419,12 @@ func (e *Engine) restoreFreeformLocked(f domain.Feature, snap state.SessionSnaps
 	rc, backend := e.sessionRole(f)
 	sess := restoredFreeformSession(f, snap)
 	e.stampSpawnInfo(sess)
+	// a question still open in the card's log is still the question: the
+	// answer re-arms on a fresh backend (AnswerAs → ensureBackend), and a
+	// line typed meanwhile is refused as an answer waiting to be given
+	if ask := e.openAskFor(context.Background(), f.ID, domain.StageOpen); ask != nil {
+		sess.setPendingAsk(ask)
+	}
 	ff := &FreeformSession{
 		engine: e, id: f.ID, rc: rc, backend: backend, sess: sess,
 	}

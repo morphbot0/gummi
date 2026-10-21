@@ -86,7 +86,7 @@ func verifiedCLIRepo(t *testing.T) (*state.Store, domain.Feature) {
 
 // A commit added after verify passed is work no check has run on: merge
 // refuses it, main does not move, and the card stays at verify. The
-// refusal names the way forward.
+// refusal says why.
 func TestMergeRefusesCommitsAddedAfterVerify(t *testing.T) {
 	store, f := verifiedCLIRepo(t)
 	p := filepath.Join(".gummi", "worktrees", string(f.ID))
@@ -98,8 +98,8 @@ func TestMergeRefusesCommitsAddedAfterVerify(t *testing.T) {
 	before := cliGit(t, ".", "rev-parse", "HEAD")
 
 	out, err := captureNDJSON(t, func() error { return runCLI("merge", string(f.ID), "-m", "feat(export): land headlessly") })
-	if err == nil || !strings.Contains(out, "moved since verify") || !strings.Contains(out, "gummi verify "+string(f.ID)) {
-		t.Fatalf("merge of a branch moved past its verify = %v %s, want the refusal naming gummi verify", err, out)
+	if err == nil || !strings.Contains(out, "moved since verify") {
+		t.Fatalf("merge of a branch moved past its verify = %v %s, want the moved-since-verify refusal", err, out)
 	}
 	if cliGit(t, ".", "rev-parse", "HEAD") != before {
 		t.Fatal("an unverified commit landed on main")

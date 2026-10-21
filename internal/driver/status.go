@@ -1,14 +1,17 @@
-// Package driver is gummi's headless run loop: it drives one feature
-// through the same engine gate floor the TUI uses (engine.Advance,
-// engine.Run/RunWith/RunCritique, engine.Attach), but with no human at
-// the keyboard. Each invocation runs the engine forward until the caller
-// must decide, then returns a typed Outcome the CLI maps to an exit code
-// and a final NDJSON line. Any point a human would resolve — a design
-// question, a rerun/critique cap, budget exhaustion, a stalled stage —
-// becomes a durable, resumable escalation with a non-zero exit, never a
-// silent auto-proceed (DESIGN §8.2, deterministic failure over silent
-// degradation). The driver changes *who* approves a gate, not *whether*
-// the quality floor runs.
+// Package driver is gummi's headless session loop, behind `gummi run` and
+// `gummi resume`: a session (a freeform card) started from a prompt, or
+// picked back up, kept moving with no person at the keyboard.
+//
+// The person running `gummi run` pre-authorises the session's crew up to
+// the envelope (DESIGN §24), so a crew the session starts whose plan fits
+// runs without asking. Everything else that needs a person stops the run
+// instead of being decided for them: the session's ask_user question, a
+// crew decision the pre-authorisation does not cover (a plan over it, a
+// widening, a node's question that reached the person), a paused crew,
+// the envelope running dry, a quiet past the timeout. Each stop is a typed
+// Outcome the CLI maps to an exit code, after an NDJSON line that says
+// what to run next. The run is done when the session is idle with no
+// crew open.
 package driver
 
 import "github.com/morphis/gummi/internal/cardops"
@@ -21,13 +24,9 @@ type (
 )
 
 const (
-	StatusVerified   = cardops.StatusVerified
-	StatusError      = cardops.StatusError
-	StatusQuestion   = cardops.StatusQuestion
-	StatusBlocked    = cardops.StatusBlocked
-	StatusEscalation = cardops.StatusEscalation
-	StatusExhausted  = cardops.StatusExhausted
-	StatusTimeout    = cardops.StatusTimeout
-	StatusStopped    = cardops.StatusStopped
-	StatusSaid       = cardops.StatusSaid
+	StatusDone      = cardops.StatusDone
+	StatusError     = cardops.StatusError
+	StatusNeedsYou  = cardops.StatusNeedsYou
+	StatusExhausted = cardops.StatusExhausted
+	StatusTimeout   = cardops.StatusTimeout
 )

@@ -1,4 +1,4 @@
-package driver
+package cardops
 
 import (
 	"context"
@@ -38,11 +38,11 @@ func mainCheckoutFreeform(t *testing.T, h *harness, num int) domain.Feature {
 // nothing this verb could do to work that lives loose in the person's
 // checkout. The refusal names what to do instead, before any git runs.
 func TestMergeRefusesAMainCheckoutCard(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	f := mainCheckoutFreeform(t, h, 31)
 	before := gitHead(t, h.root)
 
-	_, err := h.driver(Options{}).Merge(context.Background(), f.ID,
+	_, err := h.ops().Merge(context.Background(), f.ID,
 		"fix(copilot): drop the pty fd leaked on idle timeout", domain.LandSquash)
 	if err == nil {
 		t.Fatal("a main-checkout card was merged")
@@ -59,16 +59,16 @@ func TestMergeRefusesAMainCheckoutCard(t *testing.T) {
 // It closes the card, commits nothing — the loose work is the person's, in
 // the checkout they work in — and cuts no branch to keep.
 func TestAMainCheckoutHandOffKeepsTheWorkLoose(t *testing.T) {
-	h := newHarness(t, true, nil)
+	h := newHarness(t)
 	f := mainCheckoutFreeform(t, h, 32)
 	ctx := context.Background()
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).HandOff(ctx, f.ID)
+	out, err := h.ops().HandOff(ctx, f.ID)
 	if err != nil {
 		t.Fatalf("HandOff: %v", err)
 	}
-	if out.Status != StatusVerified {
+	if out.Status != StatusDone {
 		t.Errorf("status = %q, want done", out.Status)
 	}
 	stored, err := h.store.GetFeature(ctx, f.ID)

@@ -9,29 +9,18 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
-// runResume implements `gummi resume <FD-id> [--answer <text> | --approve
-// | --request-changes <note>]` (DESIGN §8.2): it rehydrates the parked
-// feature, applies the caller's decision, and drives on — streaming the
-// same NDJSON and exiting with a typed status. With no decision flag it
-// simply re-runs the parked stage (after a timeout, an escalation, or an
-// envelope top-up). The same two flags also resolve a done research
-// card's decompose checkpoint (FD-081): --approve mints its pending
-// proposals into FDs, --request-changes re-runs the decompose pass with
-// the note attached — no new plumbing, the driver dispatches on the
-// card's kind and stage.
+// runResume implements `gummi resume <id|ref> [--answer <text> | "<message>"]`:
+// it picks a stopped session back up, answers its open question or its
+// crew's open decision (--answer) or sends it a turn (the message), and
+// drives on — streaming the same NDJSON and exiting with the same typed
+// status as run. With neither it carries on: a paused crew is resumed,
+// and a raised --envelope tells the session to continue.
 func runResume(fl cliFlags, args []string) error {
-	// resume is id-first (`resume FD-042 --answer no`) and accepts an
-	// external ref in the id slot (resolved against the store below, D11).
-	idArg, err := oneID("resume", args)
-	if err != nil {
-		return err
+	if len(args) < 1 || len(args) > 2 {
+		return fmt.Errorf("resume takes a card and, optionally, one message: resume <id|ref> [\"<message>\"]")
 	}
-
-	in, err := resumeInput(fl)
-	if err != nil {
-		return err
-	}
-	gate, err := gateApproval(fl.String("gate-approval"))
+	idArg := args[0]
+	in, err := resumeInput(fl, args[1:])
 	if err != nil {
 		return err
 	}
@@ -39,40 +28,14 @@ func runResume(fl cliFlags, args []string) error {
 	if envelope < 0 {
 		return fmt.Errorf("--envelope must be a positive dollar amount, got %s", domain.FormatDollars(float64(envelope)))
 	}
-	if err := driver.ValidateUntil(domain.Stage(fl.String("until"))); err != nil {
-		return err
-	}
-	// resume mostly reuses the feature's existing envelope; --envelope raises
-	// it (the only way to clear an exhausted stage headlessly — driver.Resume
-	// treats it as a floor and never lowers). The rest of the driving options
-	// mirror run so the continued tail behaves the same.
 	opts := driver.Options{
-		Envelope:     envelope,
-		GateApproval: gate, GateApprovalSet: fl.Changed("gate-approval"),
-		StageTimeout: fl.Duration("stage-timeout"),
-		Autonomous:   fl.Bool("autonomous"), Verbose: fl.Bool("verbose"), Ref: fl.String("ref"),
-		Until: domain.Stage(fl.String("until")),
+		Envelope: envelope, Timeout: fl.Duration("timeout"),
+		Verbose: fl.Bool("verbose"), Ref: fl.String("ref"),
 	}
-
-	// resolve the id/ref inside the closure, once the store is open; --until
-	// is validated against the resolved feature's route in driver.Resume. The
-	// resolved card's per-card lock guards a single card against double-drive
-	// while independent cards resume concurrently.
 	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
-		}
-		// --say reads a line and reports what the card page would do with
-		// it. It advances nothing, writes nothing and spawns no stage, so
-		// it takes no card lock: taking one made the surface for
-		// rehearsing an intervention unavailable on exactly the cards it
-		// is for — an autopilot card mid-run answered "another gummi
-		// process is already driving this card" for the hour it worked.
-		// It also skips the pid/orphan bookkeeping, which belongs to a
-		// process that is driving.
-		if in.Say != nil {
-			return d.Resume(ctx, f.ID, in)
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
@@ -89,46 +52,23 @@ func runResume(fl cliFlags, args []string) error {
 	}, opts)
 }
 
-// resumeInput builds the ResumeInput from the mutually exclusive decision
-// flags, refusing more than one. All unset means "re-run the parked
-// stage". answerSet/changesSet/noteSet distinguish an explicitly-empty flag
-// from an unset one, so `--answer ""` is still an (empty-answer) decision
-// the driver can reject cleanly rather than silently re-running. --note
-// only composes with --bounce; on its own it is a usage error, not a silent
-// no-op.
-func resumeInput(fl cliFlags) (driver.ResumeInput, error) {
-	bounce, noteSet := fl.Bool("bounce"), fl.Changed("note")
-	n := 0
+// resumeInput builds the ResumeInput: --answer, or a message, not both.
+// An explicitly empty --answer is still an answer, which the driver
+// refuses rather than silently carrying on.
+func resumeInput(fl cliFlags, rest []string) (driver.ResumeInput, error) {
 	var in driver.ResumeInput
-	if fl.Changed("say") {
-		n++
-		sy := fl.String("say")
-		in = driver.ResumeInput{Say: &sy}
-	}
 	if fl.Changed("answer") {
-		n++
 		a := fl.String("answer")
-		in = driver.ResumeInput{Answer: &a}
+		in.Answer = &a
 	}
-	if fl.Bool("approve") {
-		n++
-		in = driver.ResumeInput{Approve: true}
+	if len(rest) == 1 {
+		in.Message = rest[0]
+		if in.Message == "" {
+			return driver.ResumeInput{}, fmt.Errorf("the message is empty")
+		}
 	}
-	if fl.Changed("request-changes") {
-		n++
-		c := fl.String("request-changes")
-		in = driver.ResumeInput{RequestChanges: &c}
-	}
-	if bounce {
-		n++
-		nt := fl.String("note")
-		in = driver.ResumeInput{Bounce: &nt}
-	}
-	if n > 1 {
-		return driver.ResumeInput{}, fmt.Errorf("give at most one of --answer, --approve, --request-changes, --bounce, --say")
-	}
-	if noteSet && !bounce {
-		return driver.ResumeInput{}, fmt.Errorf("--note only applies with --bounce")
+	if in.Answer != nil && in.Message != "" {
+		return driver.ResumeInput{}, fmt.Errorf("give --answer or a message, not both")
 	}
 	return in, nil
 }
