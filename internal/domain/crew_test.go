@@ -13,6 +13,11 @@ func TestParseHandoff(t *testing.T) {
 	if !ParseHandoff("nothing").Empty() {
 		t.Fatal("empty")
 	}
+	// a line saying there is none is no decision: it must not wake the planner
+	h = ParseHandoff("DONE: mapped it\nDECISION: none\nOPEN: N/A.\nDECISION: kept the guard")
+	if len(h.Decisions) != 1 || h.Decisions[0] != "kept the guard" || len(h.Open) != 0 {
+		t.Fatalf("%+v", h)
+	}
 }
 
 func TestParseCrewReview(t *testing.T) {

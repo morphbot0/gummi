@@ -352,7 +352,9 @@ type Handoff struct {
 }
 
 // ParseHandoff reads a node's last reply. Lines are matched after any
-// list marker, case-insensitively on the label.
+// list marker, case-insensitively on the label. A DECISION: or OPEN: line
+// that only says there is none ("none", "n/a") is no line at all: a
+// decision wakes the planner, and a node saying it made none must not.
 func ParseHandoff(text string) Handoff {
 	var h Handoff
 	for _, line := range strings.Split(text, "\n") {
@@ -369,12 +371,25 @@ func ParseHandoff(text string) Handoff {
 		case "DONE":
 			h.Done = append(h.Done, rest)
 		case "DECISION":
-			h.Decisions = append(h.Decisions, rest)
+			if !saysNone(rest) {
+				h.Decisions = append(h.Decisions, rest)
+			}
 		case "OPEN":
-			h.Open = append(h.Open, rest)
+			if !saysNone(rest) {
+				h.Open = append(h.Open, rest)
+			}
 		}
 	}
 	return h
+}
+
+// saysNone reports whether a handoff line's words only say there is nothing.
+func saysNone(s string) bool {
+	switch strings.ToLower(strings.TrimRight(strings.TrimSpace(s), ".!")) {
+	case "none", "n/a", "na", "nothing", "-", "—":
+		return true
+	}
+	return false
 }
 
 // Empty reports whether the reply carried no handoff at all.
