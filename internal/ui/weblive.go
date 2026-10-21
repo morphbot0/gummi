@@ -41,7 +41,7 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 			live.Since = snap.StartedAt
 		}
 		if liveSessionActive(snap) {
-			live.Turns, live.Streaming, live.Tool = webTranscript(snap)
+			live.Turns, live.Omitted, live.Streaming, live.Tool = webTranscript(snap)
 		}
 		if snap.Err != nil {
 			live.Err = threadfold.Sanitize(snap.Err.Error())
@@ -70,11 +70,45 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 		}
 		live.Session = snap.StartedAt
 		live.Spent = snap.SpentCredits
-		live.Turns, live.Streaming, live.Tool = webTranscript(snap)
+		live.Turns, live.Omitted, live.Streaming, live.Tool = webTranscript(snap)
 	}
 	live.Consult = m.webConsult(r)
 	live.Freeform = m.webFreeform(r)
 	return live, true
+}
+
+// WebLiveEarlier is GET /api/cards/{id}/live/earlier: the turns before
+// turn before of one of the card's live conversations — conv "stage" (the
+// run its live block draws) or "freeform" — that the block left out. It
+// reads the same snapshot WebLive does, so the numbers agree. ok is false
+// for a card the board does not have or a conversation it is not having.
+func (m *Shell) WebLiveEarlier(id, conv string, before int) (webapi.Earlier, bool) {
+	r, ok := m.rowByID(domain.FeatureID(id))
+	if !ok {
+		return webapi.Earlier{}, false
+	}
+	switch conv {
+	case "stage":
+		if m.follow != nil && m.follow.feature == r.F.ID {
+			return webEarlier(m.follow.Snapshot(), before), true
+		}
+		if sess := m.sessionFor(r.F.ID); sess != nil && !r.DrivenAbroad {
+			if snap := sess.Snapshot(); liveSessionActive(snap) {
+				return webEarlier(snap, before), true
+			}
+		}
+	case "freeform":
+		if !r.F.IsFreeform() || m.engine == nil {
+			break
+		}
+		if ff := m.engine.Freeform(r.F.ID); ff != nil {
+			return webEarlier(ff.Snapshot(), before), true
+		}
+		if snap, ok := m.engine.FreeformHistory(r.F.ID); ok {
+			return webEarlier(snap, before), true
+		}
+	}
+	return webapi.Earlier{}, false
 }
 
 // liveSessionActive reports whether a local session is still writing the
@@ -118,7 +152,7 @@ func (m *Shell) webConsult(r featureRow) *webapi.Conversation {
 		// answer being written, the call in flight, the line on its way.
 		// Drawn from the snapshot too, a consult asked at todo sat below
 		// every later stage, and was gone after a restart.
-		conv.Turns = nil
+		conv.Turns, conv.Omitted = nil, 0
 		if !conv.Busy && conv.Streaming == "" && conv.Sending == "" && conv.Err == "" {
 			return nil
 		}
@@ -171,7 +205,7 @@ func webConversation(snap engine.Snapshot, sending, verb string) *webapi.Convers
 	// its own, so Busy alone would miss it
 	busy := snap.Busy || snap.Briefing || snap.Auditing
 	c := &webapi.Conversation{Busy: busy, Role: string(snap.Role), Spent: snap.SpentCredits, Model: runModel(snap)}
-	c.Turns, c.Streaming, c.Tool = webTranscript(snap)
+	c.Turns, c.Omitted, c.Streaming, c.Tool = webTranscript(snap)
 	if ctx := snap.Context; ctx.Tokens > 0 {
 		c.Context = &webapi.AgentContext{Tokens: ctx.Tokens, Limit: ctx.Limit}
 	}
@@ -198,10 +232,33 @@ func webConversation(snap engine.Snapshot, sending, verb string) *webapi.Convers
 }
 
 // webTranscript takes a snapshot's transcript apart the way the live
-// block draws it: the settled turns (the newest LiveTurns of them), the
-// assistant message still arriving, and the tool call in flight.
-func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string, tool *webapi.ToolCall) {
-	tr := snap.Transcript
+// block draws it: the settled turns (the newest LiveTurns of them, and how
+// many came before those), the assistant message still arriving, and the
+// tool call in flight.
+func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, omitted int, streaming string, tool *webapi.ToolCall) {
+	tr, streaming, tool, inflight := settledTranscript(snap)
+	idx := turnIndex(tr)
+	omitted = max(0, len(idx)-webapi.LiveTurns)
+	return webTurns(snap, tr, idx[omitted:], inflight), omitted, streaming, tool
+}
+
+// webEarlier is the turns of snap's transcript the live block leaves out
+// that come before turn before: at most LiveTurns of them, and where the
+// first one stands.
+func webEarlier(snap engine.Snapshot, before int) webapi.Earlier {
+	tr, _, _, inflight := settledTranscript(snap)
+	idx := turnIndex(tr)
+	omitted := max(0, len(idx)-webapi.LiveTurns)
+	to := min(max(before, 0), omitted)
+	from := max(0, to-webapi.LiveTurns)
+	return webapi.Earlier{From: from, Turns: webTurns(snap, tr, idx[from:to], inflight), Omitted: omitted}
+}
+
+// settledTranscript is snap's transcript without the message still
+// arriving, which it returns apart, with the tool call in flight and that
+// call's place in the transcript (-1 when there is none).
+func settledTranscript(snap engine.Snapshot) (tr []engine.Message, streaming string, tool *webapi.ToolCall, inflight int) {
+	tr = snap.Transcript
 	// A message is still arriving only while a turn is in flight. One a
 	// pause or a failure cut off is flagged streaming forever, and the
 	// page drew it under "writing" with a spinner for as long as the
@@ -213,7 +270,7 @@ func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string,
 	// Only the newest tool line of a session mid-turn is in flight. A
 	// pending one anywhere else is a note, or a call its backend never
 	// reported back on: its outcome is unknown, not running.
-	inflight := -1
+	inflight = -1
 	for i := len(tr) - 1; i >= 0; i-- {
 		if tr[i].Author == engine.AuthorTool {
 			if tr[i].ToolStatus == engine.ToolPending && snap.Busy {
@@ -223,20 +280,31 @@ func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string,
 			break
 		}
 	}
-	from := 0
-	if len(tr) > webapi.LiveTurns {
-		from = len(tr) - webapi.LiveTurns
+	return tr, streaming, tool, inflight
+}
+
+// turnIndex is where each turn of tr stands in it: every message but the
+// task list, which Conversation.Tasks pins instead. A turn's number — what
+// Omitted counts and Earlier's before names — is its place in this list.
+func turnIndex(tr []engine.Message) []int {
+	idx := make([]int, 0, len(tr))
+	for i, msg := range tr {
+		if msg.Author != engine.AuthorTasks {
+			idx = append(idx, i)
+		}
 	}
-	turns = make([]webapi.Turn, 0, len(tr)-from)
-	for i := from; i < len(tr); i++ {
+	return idx
+}
+
+// webTurns is the transcript messages at idx as the page draws them.
+func webTurns(snap engine.Snapshot, tr []engine.Message, idx []int, inflight int) []webapi.Turn {
+	turns := make([]webapi.Turn, 0, len(idx))
+	for _, i := range idx {
 		msg := tr[i]
 		if msg.Author == engine.AuthorTool {
 			c := webToolCall(msg, i == inflight)
 			turns = append(turns, webapi.Turn{Author: "tool", Tool: &c, Time: msg.At})
 			continue
-		}
-		if msg.Author == engine.AuthorTasks {
-			continue // Conversation.Tasks, pinned
 		}
 		turns = append(turns, webapi.Turn{
 			Author: threadfold.AuthorLabel(string(msg.Author), string(snap.Role)),
@@ -245,7 +313,7 @@ func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string,
 			Time:   msg.At,
 		})
 	}
-	return turns, streaming, tool
+	return turns
 }
 
 // webToolCall is one live tool call. Content holds the call as the

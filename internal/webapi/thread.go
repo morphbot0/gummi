@@ -196,8 +196,10 @@ type Live struct {
 	Model   string    `json:"model,omitempty"`
 	Session time.Time `json:"session,omitzero"`
 	// Turns is the live session's settled transcript, oldest first, at
-	// most the newest LiveTurns of it.
-	Turns []Turn `json:"turns,omitempty"`
+	// most the newest LiveTurns of it; Omitted counts the turns before
+	// them, which GET /api/cards/{id}/live/earlier serves on request.
+	Turns   []Turn `json:"turns,omitempty"`
+	Omitted int    `json:"omitted,omitempty"`
 	// Err is the session's failure, when it failed.
 	Err       string        `json:"err,omitempty"`
 	Consult   *Conversation `json:"consult,omitempty"`
@@ -212,6 +214,19 @@ const (
 	LiveTurns = 200
 	LiveText  = 32 << 10
 )
+
+// Earlier is GET /api/cards/{id}/live/earlier?conv=stage|freeform&before=N:
+// the turns of a live conversation that its block left out, at most
+// LiveTurns of them ending just before turn N. From is the first one's
+// position in the conversation, so a page asks for the ones before it
+// next; Omitted is the block's own count as of this answer, so a page can
+// tell a conversation that was cut back (a rewind, a clear) from one
+// that only grew.
+type Earlier struct {
+	From    int    `json:"from"`
+	Turns   []Turn `json:"turns"`
+	Omitted int    `json:"omitted"`
+}
 
 // Turn is one entry of a live transcript.
 type Turn struct {
@@ -242,7 +257,9 @@ type Conversation struct {
 	// Verb is the busy word the TUI shows under it.
 	Verb      string `json:"verb,omitempty"`
 	Streaming string `json:"streaming,omitempty"`
-	Turns     []Turn `json:"turns,omitempty"`
+	// Turns and Omitted are as on Live.
+	Turns   []Turn `json:"turns,omitempty"`
+	Omitted int    `json:"omitted,omitempty"`
 	// Sending is a line on its way that the session does not hold yet.
 	Sending string `json:"sending,omitempty"`
 	Err     string `json:"err,omitempty"`
