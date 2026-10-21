@@ -19,6 +19,7 @@ package web
 //	routes_system.go   doctor and the fleet's stats
 //	routes_push.go     Web Push subscriptions
 //	routes_attachments.go  image upload and serve
+//	routes_crew.go     a session's crew and its spec's writes
 //
 // Register authenticated routes with s.api and the few that answer without
 // a cookie with s.public. Every write passes the same-origin check in
@@ -29,6 +30,7 @@ func (s *Server) routes() {
 	s.boardRoutes()
 	s.cardRoutes()
 	s.docsRoutes()
+	s.crewRoutes()
 	s.fileRoutes()
 	s.termRoutes()
 	s.createRoutes()
