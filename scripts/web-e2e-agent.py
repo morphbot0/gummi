@@ -81,7 +81,15 @@ turn) gets a short acknowledgement quoting it; a freeform card's turn
 also edits a file so its diff is non-empty. A freeform turn
 containing [watch] starts a Monitor watch it leaves open, one containing
 [ask] asks the person which way with ask_user and says back what they
-answered, and one containing [tasks-done] completes its checklist. A message opening
+answered, and one containing [tasks-done] completes its checklist.
+
+A session turn containing [crew] calls a crew (DESIGN §24): it starts the
+session's spec (spec_start), writes its Done when as one item checked by
+`test -f crew.txt`, and asks for a crew (crew_start, budget 400). The
+crew's planner (its hints name it) writes a one-node plan: t1, an
+implementer that owns crew.txt; the node writes the file it owns and ends
+with its DONE:/DECISION: handoff; every crew reviewer says VERDICT: pass;
+and the session acknowledges the crew's report without touching its tree. A message opening
 with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
@@ -654,6 +662,17 @@ def stage_verify(turn, kickoff):
 
 
 def freeform_turn(turn, text):
+    if re.search(r"You are node t\d+ of a crew", text) or "Your work was sent back" in text:
+        crew_node(turn, text)
+        return
+    if text.startswith("The crew has reported"):
+        # the crew's report reaches the session as a turn; reading it
+        # changes nothing in the session's tree, so the crew can land
+        turn.say("The crew reported; its branch is ready to land.")
+        return
+    if "[crew]" in text:
+        crew_session(turn)
+        return
     if "[delegate]" in text:
         # a session with a delegation budget hands work to a workflow
         # card: card_create blocks until the person says yes or no
@@ -704,6 +723,62 @@ def freeform_turn(turn, text):
     second = "completed" if "[tasks-done]" in text else "in_progress"
     turn.tasks(("Note the fix", "completed"), ("Say what was done", second))
     turn.say("Done: noted it in NOTES.md.")
+
+
+CREW_PLAN = """lanes: 1
+budget: 400
+nodes:
+  - id: t1
+    role: implementer
+    title: Write crew.txt
+    brief: Write crew.txt at the top of the tree.
+    owns: [crew.txt]
+    serves: [DW-1]
+    checks: ["test -f crew.txt"]
+    envelope: 120
+"""
+
+CREW_DONE_WHEN = """```gummi-done-when
+- id: DW-1
+  says: crew.txt exists
+  check: test -f crew.txt
+```
+"""
+
+
+def crew_session(turn):
+    """A session turn asking for a crew: a spec with one done-when item, then crew_start."""
+    # a second [crew] turn finds the spec already there, and carries on
+    call_tool("spec_start", args={"title": "Make the crew file"})
+    call_tool("spec_replace_section", args={"section": "Problem", "body": "crew.txt is missing.\n"})
+    call_tool("spec_replace_section", args={"section": "Approach", "body": "One implementer writes it.\n"})
+    call_tool("spec_replace_section", args={"section": "Done when", "body": CREW_DONE_WHEN})
+    result = call_tool("crew_start", args={"brief": "make the crew file", "budget": 400})
+    turn.say("crew_start: %s" % result.strip())
+
+
+def crew_planner(turn, text):
+    """The crew's planner: the first plan, and nothing to change after."""
+    if "Write the plan now" not in text:
+        turn.say("Nothing to change in the plan.")
+        return
+    result = call_tool("plan_write", args={"plan": CREW_PLAN})
+    turn.say("Planned one node: t1 writes crew.txt. (%s)" % result.strip().splitlines()[0])
+
+
+def crew_node(turn, text):
+    """A crew node: write what it owns, then hand off."""
+    wd = turn.ctx["workdir"]
+    m = re.search(r"You may change only these paths: (.+?)\. A change", text)
+    owns = [p.strip() for p in m.group(1).split(",")] if m else ["crew.txt"]
+    for p in owns:
+        path = os.path.join(wd, p)
+        os.makedirs(os.path.dirname(path) or wd, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("made by the crew\n")
+    turn.tool("edit", ", ".join(owns), "node-edit")
+    turn.tool_result("node-edit", "edit")
+    turn.say("Wrote %s.\nDONE: wrote %s\nDECISION: plain text, one line" % (", ".join(owns), ", ".join(owns)))
 
 
 def ingest(turn):
@@ -794,6 +869,9 @@ def detect(frame):
         "has_verdict_tool": any(t.get("name") == "submit_verdict" for t in frame.get("tools") or []),
         "has_propose_tool": any(t.get("name") == "propose_features" for t in frame.get("tools") or []),
         "card": "", "kind": "", "title": "", "stage": "", "spec": "",
+        # a crew's own turns (DESIGN §24): its planner, and its reviewers
+        "crew_planner": "You are a crew's planner" in hints,
+        "crew_reviewer": "You review one piece of a crew's work" in hints,
     }
     m = re.search(r"You are the \w+ for \w+ ((FD|BG|RS|FF|GL)-\d+): (.*)", hints)
     if m:
@@ -831,6 +909,15 @@ def detect(frame):
 
 def handle_send(ctx, text, first):
     turn = Turn(ctx)
+    if ctx.get("crew_planner") or ctx.get("crew_reviewer"):
+        # a crew's own turn: its prompt quotes the spec, which no scribe
+        # pattern may read as one of its prompts
+        if ctx.get("crew_planner"):
+            crew_planner(turn, text)
+        else:
+            turn.say("Read the change against its brief.\nVERDICT: pass")
+        turn.usage()
+        return
     if text.lstrip().startswith("[slow]"):
         # a line that opens with [slow] asks to be streamed slowly; one that
         # merely quotes a [slow] card's title (a goal lead's turn) does not
