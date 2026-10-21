@@ -1923,6 +1923,9 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 				q = "asks: " + a.Question
 			}
 		}
+		if _, d := m.engine.CrewDecision(context.Background(), ev.Feature); d != nil {
+			q = "the crew asks: " + d.Question
+		}
 		m.raiseAttention(ev.Feature, attnQuestion, q)
 	case engine.EventAnnotations:
 		// the agent resolved a diff comment — refresh an open diff surface

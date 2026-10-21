@@ -187,7 +187,7 @@ func (e *Engine) finalReview(ctx context.Context, id domain.FeatureID) {
 		c.State = domain.CrewFinished
 	} else {
 		fmt.Fprintf(&b, "Crew %d is partial.\n", c.Seq)
-		c.State = domain.CrewPartial
+		c.State, c.Partial = domain.CrewPartial, true
 	}
 	b.WriteString("\nDone when:\n")
 	for _, it := range c.Items {

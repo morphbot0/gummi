@@ -963,7 +963,7 @@ func (e *Engine) CrewVerifiedMark(ctx context.Context, session domain.FeatureID)
 		if c.State != domain.CrewLanded || c.VerifiedSHA == "" {
 			continue
 		}
-		m := CrewMark{Seq: c.Seq, SHA: c.VerifiedSHA, Partial: strings.Contains(c.Report, "Partial")}
+		m := CrewMark{Seq: c.Seq, SHA: c.VerifiedSHA, Partial: c.Partial}
 		if sess, err := e.crewStore().GetFeature(ctx, session); err == nil {
 			if mgr, err := e.mgr(ctx, &sess); err == nil {
 				if n, err := mgr.Ahead(ctx, sess.BranchName(), c.VerifiedSHA); err == nil {

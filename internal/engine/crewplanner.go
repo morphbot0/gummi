@@ -114,7 +114,7 @@ func (e *Engine) runPlannerTurn(id domain.FeatureID) {
 			}
 			e.crewLog(c, why)
 			if fails+1 >= plannerFailCap {
-				c.State = domain.CrewPartial
+				c.State, c.Partial = domain.CrewPartial, true
 				c.Report = "Partial: the planner could not write a plan that passes its checks.\n\n" + strings.Join(pt.failed, "\n")
 				_ = st.UpdateCrew(ctx, c)
 				e.cleanupCrew(ctx, c)

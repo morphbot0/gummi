@@ -288,8 +288,10 @@ type Crew struct {
 	// commit whose done-when checks passed when it landed (§24.8).
 	Report      string
 	VerifiedSHA string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Partial records that the crew ended partial, kept once it lands.
+	Partial   bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // CrewNodeRun is one node's progress.

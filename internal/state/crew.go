@@ -17,14 +17,14 @@ import (
 
 const crewCols = `id, session_id, seq, state, brief, spec_rev, budget,
 	approved, approved_items, plan, items, pending, wake, own_spent, stopping,
-	report, verified_sha, created_at, updated_at`
+	report, verified_sha, partial, created_at, updated_at`
 
 func scanCrew(r rowScanner) (domain.Crew, error) {
 	var c domain.Crew
 	var id, session, st, approved, approvedItems, plan, items, pending, wake, created, updated string
 	err := r.Scan(&id, &session, &c.Seq, &st, &c.Brief, &c.SpecRev, &c.Budget,
 		&approved, &approvedItems, &plan, &items, &pending, &wake, &c.OwnSpent, &c.Stopping,
-		&c.Report, &c.VerifiedSHA, &created, &updated)
+		&c.Report, &c.VerifiedSHA, &c.Partial, &created, &updated)
 	if err != nil {
 		return c, err
 	}
@@ -90,9 +90,9 @@ func (s *Store) CreateCrew(ctx context.Context, c *domain.Crew) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO crews (`+crewCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(c.ID), string(c.Session), c.Seq, string(c.State), c.Brief, c.SpecRev, c.Budget,
-		j[0], j[1], j[2], j[3], j[4], j[5], c.OwnSpent, c.Stopping, c.Report, c.VerifiedSHA,
+		j[0], j[1], j[2], j[3], j[4], j[5], c.OwnSpent, c.Stopping, c.Report, c.VerifiedSHA, c.Partial,
 		c.CreatedAt.UTC().Format(timeFmt), c.UpdatedAt.UTC().Format(timeFmt))
 	if err != nil {
 		return fmt.Errorf("creating crew %s: %w", c.ID, err)
@@ -109,9 +109,9 @@ func (s *Store) UpdateCrew(ctx context.Context, c *domain.Crew) error {
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE crews SET state=?, brief=?, spec_rev=?, budget=?,
 		approved=?, approved_items=?, plan=?, items=?, pending=?, wake=?, own_spent=?, stopping=?,
-		report=?, verified_sha=?, updated_at=? WHERE id=?`,
+		report=?, verified_sha=?, partial=?, updated_at=? WHERE id=?`,
 		string(c.State), c.Brief, c.SpecRev, c.Budget, j[0], j[1], j[2], j[3], j[4], j[5],
-		c.OwnSpent, c.Stopping, c.Report, c.VerifiedSHA, c.UpdatedAt.Format(timeFmt), string(c.ID))
+		c.OwnSpent, c.Stopping, c.Report, c.VerifiedSHA, c.Partial, c.UpdatedAt.Format(timeFmt), string(c.ID))
 	if err != nil {
 		return err
 	}

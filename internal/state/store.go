@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS crews (
 	stopping       INTEGER NOT NULL DEFAULT 0,
 	report         TEXT NOT NULL DEFAULT '',
 	verified_sha   TEXT NOT NULL DEFAULT '',
+	partial        INTEGER NOT NULL DEFAULT 0,
 	created_at     TEXT NOT NULL,
 	updated_at     TEXT NOT NULL,
 	UNIQUE(session_id, seq)
@@ -913,6 +914,7 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN crew_of TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN crew_seq INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN crew_node TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE crews ADD COLUMN partial INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Close releases the database.
