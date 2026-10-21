@@ -46,7 +46,7 @@ Other `run` flags:
 
 Wherever a verb takes a card as `<id>`, its number alone works too:
 `gummi status 42` is `gummi status FD-042`. The stream and `--json` always
-carry the full id. Two flags still want the id itself: `goal --after` and
+carry the full id. One flag still wants the id itself:
 `schedule --heartbeat`.
 
 ## Verbs
@@ -55,7 +55,6 @@ carry the full id. Two flags still want the id itself: `goal --after` and
 |---|---|
 | `gummi run [flags] "<description>"` | create and drive one feature to a verified branch |
 | `gummi research [flags] "<question>"` | create and drive one research card |
-| `gummi goal [flags] "<objective>"` | agree a goal, then let it run its cards on one branch until it is ready for you |
 | `gummi resume <id\|ref> [decision]` | apply a decision and drive on |
 | `gummi resume <id\|ref> --say "<line>"` | read a line the way the card page would and report what it would do, as a `say` event, without acting |
 | `gummi status <id\|ref> [--json]` | stage, blockers, spend, branch state |
@@ -64,11 +63,11 @@ carry the full id. Two flags still want the id itself: `goal --after` and
 | `gummi spec <id\|ref>` | the current spec or report markdown |
 | `gummi diff <id\|ref>` | the worktree diff against main |
 | `gummi verify <id\|ref>` | re-run the checks on a verified branch and finalize its card |
-| `gummi merge <id\|ref> -m <message\|-> [--no-squash] [--keep-branch]` | land a verified branch as one squash commit, or with `--no-squash` as a merge commit keeping its commits, where `-m` is optional and git's own merge message is used (a goal: one merge commit, `-m` optional, no `--no-squash`) |
+| `gummi merge <id\|ref> -m <message\|-> [--no-squash] [--keep-branch]` | land a verified branch as one squash commit, or with `--no-squash` as a merge commit keeping its commits, where `-m` is optional and git's own merge message is used |
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
 | `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch |
-| `gummi handoff <id\|ref> [--keep-branch]` | close a verified card without landing it; its branch is kept while it is the only copy of the work (a goal not yet ready is abandoned) |
-| `gummi clean <id\|ref>` \| `gummi clean --all` | remove a landed or closed card's worktree and branch (a goal: its cards' come out with it; an adopted card keeps its branch, and so does a closed card whose branch is the only copy of its work); `--all` does this for every closed card in one pass instead of naming one |
+| `gummi handoff <id\|ref> [--keep-branch]` | close a verified card without landing it; its branch is kept while it is the only copy of the work |
+| `gummi clean <id\|ref>` \| `gummi clean --all` | remove a landed or closed card's worktree and branch (an adopted card keeps its branch, and so does a closed card whose branch is the only copy of its work); `--all` does this for every closed card in one pass instead of naming one |
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link a card to a PR you opened, or read its status and review comments |
 | `gummi push <id>`, `gummi pr create\|update\|ready\|draft <id> [flags]` | a person publishes a card: push its branch, open or update its PR, mark it ready or draft. Prints the facts and commands and asks at the terminal; without one, `--yes=<fingerprint>` of facts already printed. Refused inside a gummi-spawned session (DESIGN §22) |
 | `gummi deps add\|rm <dependent> <depends-on>`, `gummi deps list <id>` | dependency edges between cards |
@@ -124,8 +123,8 @@ card opens a merge dialog that already holds one instead of waiting
 ~60s for it — the draft is stamped with the branch tip it describes, and
 a branch that moves afterwards is drafted live at the landing as before.
 It is skipped, silently, for a card whose message is written by something
-else: a goal's own, a goal's card (its goal lands it), a card linked to a
-PR, a research card, and one already handed off or dropped. The run stops
+else: a card linked to a PR, a research card, and one already handed
+off. The run stops
 at its verified branch either way — a failed draft costs the landing
 nothing but the wait it was meant to save.
 
@@ -169,14 +168,12 @@ branches on:
 | `0` | `verified` | verified branch ready. Report it and stop |
 | `0` | `stopped` | `--until` reached its stop. `resume --approve` to continue |
 | `0` | `said` | `--say` reported a reading and acted on nothing |
-| `0` | `noted` | a goal decision (`--goal-note`, `--wrap-up`, `--reverse`) was handed to a goal another process is driving; it acts on it, this call drove nothing |
 | `2` | `question` | a delegated question or a design gate. `resume --answer`, `--approve` or `--request-changes` |
 | `3` | `blocked` | open `%%` or diff threads block a gate (resolve them, or `resume --request-changes`), an unmet dependency blocks the coding stage (`blocking_deps` on the event: wait for it to land, or `gummi deps rm`), or the plan's own promises are unmet at the verify→done gate (`reason` names them: an invariant verify never answered or answered fail, or a golden whose quoted input appears nowhere on the branch) |
 | `4` | `escalation` | a rerun or critique cap, or an unclear verdict. Report to a human; resumable |
 | `5` | `exhausted` | envelope dry. `resume --envelope N` with a higher number |
 | `6` | `timeout` | a stage went quiet. Report; resumable |
 | `1` | `error` | setup or agent failure. Nothing partial landed |
-| `1` | `stalled` | a goal stopped on something it can only wait for: its agent backend could not serve it (a quota, a rate limit, an overload), or a verify — a card's, or the goal's own — said this machine cannot run its verification plan. Nothing was dropped and nothing was judged — the event's `reason` says which, and the same `resume` continues it |
 
 `gummi doctor` has its own exit status, outside this table: **7** while any
 check is failing, 0 once the workspace is ready. It applies to `--json` too,
@@ -203,26 +200,6 @@ is not a run that asked a question.
   reports the routing as a `say` event without acting. Use it to see what
   a sentence would do before you commit to a verb.
 
-A goal takes three more, one at a time:
-
-- `--goal-note "<text>"` hands a running goal's lead a note. It lands in the
-  goal doc's Notes and the lead reads it on its next turn; the goal stays
-  silent.
-- `--reverse D-N` reverses a decision for review and sends the goal back to
-  its cards. Add `--request-changes "<why>"` to say why.
-- `--wrap-up` tells a running goal to finish now: nothing new starts,
-  verified cards land, the rest is dropped, and it comes back partial.
-
-All three are for a goal that is running, which is a goal another process
-is driving: each writes one row the conductor reads on its next tick and
-drives nothing itself, so it is delivered while that process keeps the
-card lock and the call exits `noted` (0). Run against a goal nobody is
-driving, the same command delivers the decision and then drives the goal
-on, as any resume does.
-
-On a goal that is ready for you, `--request-changes "<notes>"` sends it back
-to its cards with the notes, and `--envelope N` raises its budget — the one
-move of its ceiling, and only a person makes it.
 
 ## Landing
 
@@ -242,13 +219,13 @@ MSG
 input, and is stricter than the board's dialog: the message must be a
 Conventional Commits `type(scope): summary` with no diff dump and no agent
 attribution, or the command refuses before touching git. On success it
-emits a `merged` event with the landed sha and moves the card to `done`. The event's `method` is `squash` or `merge`; `--no-squash` is refused for a goal or a card in one. With `--no-squash` the `-m` is optional: the merge commit takes git's own merge message, and a `-m` given is validated and used verbatim.
+emits a `merged` event with the landed sha and moves the card to `done`. The event's `method` is `squash` or `merge`; `--no-squash` is refused for a card a session delegated, which lands on its parent as a squash. With `--no-squash` the `-m` is optional: the merge commit takes git's own merge message, and a `-m` given is validated and used verbatim.
 
 Closing a card takes its worktree and branch with it. A branch is a piece
 of work at a point in time, and a closed card has no further use for one,
 so after `merge` (and after `handoff`, below) gummi removes both and emits
 the `cleaned` event `clean` does. `--keep-branch` keeps them. A card with
-uncommitted work, one in a stack, a goal and a goal's own cards are left
+uncommitted work and one in a stack are left
 standing either way; `gummi clean` is there for them afterwards.
 
 ### Ending a card without landing it
@@ -292,8 +269,7 @@ copy of its work: `clean` removes the worktree, keeps the branch, and the
 
 `clean --all` is the headless counterpart of the TUI's close-out sweep
 (`C`): one pass over every closed card that still holds a worktree or a
-deletable branch, instead of naming them one at a time. A goal's own
-cards are left to the goal's own clean. It streams the same `cleaned`
+deletable branch, instead of naming them one at a time. It streams the same `cleaned`
 event per card the single-id form does, and exits non-zero only if a card
 it attempted failed.
 
@@ -304,20 +280,17 @@ must not conflate them:
 |---|---|
 | `verified: true` | the verify gate passed and the branch is ready to land — where a headless run stops, and what a CI caller polls for |
 | `stage: "done"` | the card is **closed**. It does not mean anything merged |
-| `ending` | how it closed: `landed`, `handed_off` or `dropped`; absent while the card is open |
+| `ending` | how it closed: `landed` or `handed_off`; absent while the card is open |
 | `branch_state: "landed"` | the branch is on the trunk — the field to read for "did this merge" |
 
 After a headless run expect `verified:true` with no `ending` until you
 merge or hand off.
 
-The TUI names the same three words on the board badge and in a finished
-card's closing block, and `adopt` (TUI only) takes a `dropped` card back
-onto the open board at the stage the drop closed it from.
+The TUI names the same words on the board badge and in a finished
+card's closing block.
 
 `ending` replaced the `done` and `handed_off` booleans, which took two
-fields to name one fact and could not name a drop at all: a card its goal
-dropped was closed by borrowing the hand-off stamp, so it reported
-`handed_off: true` with no branch and nothing spent.
+fields to name one fact.
 
 `rounds` on the same payload is a **live counter, not a history**. Each
 loop resets its own count when it completes, so a finished card that took
@@ -325,132 +298,6 @@ three plan rounds still reads `{"plan": 0, "review": 0, "corrective": 0}`.
 The tally of critique passes is `review_rounds` on the terminal `verified`
 event. A poller reading `rounds` as "how much rework did this take" will
 read zero every time.
-
-## Goals
-
-A goal is a card whose work is other cards. You describe an outcome and a
-budget, agree what "done" means, and gummi runs the cards that get there on
-one shared branch and comes back when the result is ready for you.
-
-```sh
-gummi goal --envelope 40 "Export works offline"
-gummi goal --envelope 40 --plan-file goal.md "Export works offline"
-```
-
-**Plan.** The goal's plan is a conversation with the architect, and it
-stops at its gate like any card's (`question`, exit 2; `--gate-approval
-autopilot --autonomous` lets the architect settle it unattended). The goal
-doc it writes carries the objective, a **done-when** list — checkable
-statements, each with a `check:` command or `judge: true` — the limits, a
-rough cost per item, the lanes, and the cards, each serving at least one
-done-when item. A row with an existing card's `id:` hands that card to the
-goal. The gate refuses a done-when item nothing can check, an item no card
-serves, and a card list the budget cannot fund.
-
-**Repositories.** `gummi goal` takes no `--repo`: a goal is not in a
-repository. Each card row names its own `repo:` (omit it where the
-workspace has a default), an attached row brings its card's, and a
-done-when item whose `check:` must run somewhere else names that
-repository too. The gate refuses a name the workspace does not manage.
-The goal's own home — where its card, its lead and its review are — is
-settled from its cards when the plan is approved, and it grows a branch of
-the same name in every other repository its cards are in.
-
-**Run.** Approving the plan starts the goal, and from there it runs itself.
-It mints its cards and runs each on autopilot on the goal branch
-`goal/<slug>` **of the card's own repository**, up to its lanes. When
-a card verifies it lands on that goal branch as one commit — after the goal branch catches up with main, and
-after the card is rebased and re-checked if the goal branch moved under
-it. The goal's **lead** (the `lead` role, or the architect's model) answers
-the cards' questions, reads their plans before they implement, re-plans
-stuck and exhausted cards, records **decisions for review** for every call
-a user of the result would notice, declines reviewer findings with a
-reason, and files what it finds outside the goal as open-board cards. The
-stream carries a `goal` event for each step and a `card_verified` event for
-each card; a card's `card_verified` is not the goal's own `verified`.
-
-**Budget.** The envelope is the goal's whole budget and a hard ceiling. Each
-card starts on the lesser of its planned estimate and an even share, and what
-is left over is not handed out until a card proves it needs it: a card that
-runs out is raised from what is available. A landed or dropped card returns
-what it did not spend; the lead's turns count; nothing is ever raised past
-the ceiling. A reserve is held back for the goal's own review and verify.
-
-When there is nothing left to give, the goal stops rather than choosing work
-to abandon: it exits `exhausted` (5) naming the card that is waiting and
-roughly what it needs, with the hand-over on the event's `goal` object and
-the waiting card's done-when items marked `waiting on budget` — unfinished
-and resumable, not given up on. Nothing is dropped and the card keeps its
-branch and its spend, so raising the envelope continues it:
-
-```sh
-gummi resume GL-004 --envelope 60     # more budget, and it carries on
-```
-
-A goal proved by an experiment has a second ceiling — substrate runs and
-minutes — and hitting it ends the same way: `exhausted`, nothing dropped, the
-hand-over's `needs_substrate` saying which run it cannot afford.
-
-```sh
-gummi resume GL-004 --runs 40 --minutes 1800   # more substrate, and it makes the run
-```
-
-One stop is a question rather than a ceiling. When the goal's lead finds that
-an agreed done-when item cannot hold as written — the thing it assumes is not
-so — it may not change the item and must not quietly fail it: it asks. The
-cards that serve only that item freeze, everything else runs on, and when
-nothing else can move the run exits `question` with an `owner_question` event
-carrying the item, what was found and the amendment the lead would propose.
-
-```sh
-gummi resume GL-004 --goal-note "accepted — DW-3 amended in the doc"
-```
-
-A wrap-up you ask for (`--wrap-up`) still drops what is unfinished: that is
-what finishing now means.
-
-A backend that cannot serve the goal at all — a provider quota, a rate
-limit, an overload — is neither a budget question nor the work's fault, so
-it is not a wrap-up either. The run exits `stalled` with the backend's own
-sentence (which usually says when it comes back) on a `stalled` event, every
-card keeps its branch, its spend and its place, and `gummi resume GL-NNN`
-carries on. A goal left running in the board picks itself back up on its own,
-asking the backend again a couple of minutes after each refusal.
-
-A verify that says `VERDICT: blocked` — *this machine cannot run the
-verification plan* — is the same shape, and it is kept apart from a failed
-verify all the way up. A goal card that stops on one is **blocked**, not
-stuck: its lead is shown it once, it is never dropped for it, and its
-done-when items read `waiting on an environment` rather than `not met`. When
-nothing else can move the run exits `stalled` naming the card and what it
-lacked. A goal's own verify that blocks stops at verify the same way — it is
-not sent back to its cards and spends no rework round, because nothing was
-judged. Retrying is a verify session and costs what one costs, so a goal never
-retries on a timer: `gummi resume GL-NNN` (or a note to the goal in the board)
-is what says someone has been there, and the blocked verify runs again.
-
-This is only the verifier's own word. A pass that gummi floored to `blocked`
-— a check failed, a promise is not on the branch — is a statement about the
-work and is handled as before.
-
-**Hand-over.** When its cards have settled, the goal reviews and verifies
-the combined branch. The run exits `verified` with the hand-over on the event's
-`goal` object — done-when items met, partial or whole, cards landed and
-dropped, decisions for review, and the full report — and `status --json`
-carries the same report under `goal`. From there:
-
-A goal across repositories lands once in each — git has no merge that
-spans them — so `merge` walks them home repository first and the
-hand-over's `repos` says which have the goal and which do not. A merge
-that stops half-way leaves the rest to a second `gummi merge GL-NNN`,
-which skips what already landed.
-
-```sh
-gummi merge GL-004                                   # one merge commit on main over its cards' commits, per repository
-gummi resume GL-004 --request-changes "<notes>"     # back to its cards, with the notes
-gummi resume GL-004 --reverse D-2                    # take the other way on a decision
-gummi handoff GL-004                                 # close it, keep the branch
-```
 
 ## Landing through a PR
 
@@ -545,11 +392,10 @@ gummi doctor                 # then check backend, auth and envelope are ready
 
 The skill is a **bundle**: `SKILL.md`, the common path an agent reads on
 every invocation, plus `references/` files it points at —
-`references/setup.md` (first-run readiness), `references/resume.md`
-(choosing a resume verb, and the orphan check before a retry) and
-`references/goals.md` (`gummi goal`). Splitting it is what keeps it cheap:
+`references/setup.md` (first-run readiness) and `references/resume.md`
+(choosing a resume verb, and the orphan check before a retry). Splitting it is what keeps it cheap:
 an agent shipping one card reads SKILL.md and nothing else.
-`gummi skill show` prints SKILL.md; `gummi skill show goals` prints one
+`gummi skill show` prints SKILL.md; `gummi skill show resume` prints one
 reference.
 
 A project-scope install writes `.claude/skills/gummi/` for Claude, Copilot

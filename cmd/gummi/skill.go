@@ -22,8 +22,8 @@ import (
 // The skill ships as a bundle: SKILL.md plus the reference files it points
 // at. Splitting it is what keeps it cheap — SKILL.md is loaded on every
 // invocation by the agent driving gummi, while first-run setup, the long
-// form of the resume verbs, and everything about goals are each needed by
-// a fraction of those invocations. An agent shipping one card reads
+// form of the resume verbs are each needed by a fraction of those
+// invocations. An agent shipping one card reads
 // SKILL.md and nothing else.
 //
 // Every template's command grammar and exit table are generated from the
@@ -39,9 +39,6 @@ var skillSetupTemplate string
 
 //go:embed skill_resume.tmpl.md
 var skillResumeTemplate string
-
-//go:embed skill_goals.tmpl.md
-var skillGoalsTemplate string
 
 const skillName = "gummi"
 
@@ -92,7 +89,6 @@ func skillBundle() []skillFile {
 		{"SKILL.md", renderTmpl("skill", skillTemplate)},
 		{"references/setup.md", renderTmpl("setup", skillSetupTemplate)},
 		{"references/resume.md", renderTmpl("resume", skillResumeTemplate)},
-		{"references/goals.md", renderTmpl("goals", skillGoalsTemplate)},
 	}
 }
 
@@ -103,13 +99,11 @@ func renderTmpl(name, text string) string {
 	tmpl := template.Must(template.New(name).Parse(text))
 	var b strings.Builder
 	data := struct {
-		Grammar     string
-		GoalGrammar string
-		ExitTable   string
+		Grammar   string
+		ExitTable string
 	}{
-		Grammar:     commandGrammar(),
-		GoalGrammar: goalGrammar(),
-		ExitTable:   exitTable(),
+		Grammar:   commandGrammar(),
+		ExitTable: exitTable(),
 	}
 	if err := tmpl.Execute(&b, data); err != nil {
 		// the templates are embedded and covered by tests; a runtime
@@ -226,12 +220,12 @@ type grammarEntry struct {
 
 // coreGrammar is the command surface SKILL.md documents: everything an
 // agent needs to take one card from a description to a verified branch and
-// land it. Goals live in their own reference, and so do their flags.
+// land it.
 func coreGrammar() []grammarEntry {
 	return []grammarEntry{
 		{sigs: []string{`gummi run [flags] "<description>"`}, path: "run"},
 		{sigs: []string{`gummi research [flags] "<brief>"`, `gummi diagnose [flags] "<symptom>"`}, path: "research"},
-		{sigs: []string{"gummi resume <id|ref> [decision]"}, path: "resume", omit: goalResumeFlagNames},
+		{sigs: []string{"gummi resume <id|ref> [decision]"}, path: "resume"},
 		{sigs: []string{"gummi verify <id|ref>"}, path: "verify"},
 		{sigs: []string{"gummi merge <id|ref> -m <message|->"}, path: "merge"},
 		{sigs: []string{"gummi squash <id|ref> -m <message|->"}, path: "squash"},
@@ -272,16 +266,6 @@ func commandGrammar() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// goalGrammar renders the goal surface for the goals reference: `gummi
-// goal` itself plus the `resume` flags that only ever apply to one.
-func goalGrammar() string {
-	var b strings.Builder
-	writeEntry(&b, grammarEntry{sigs: []string{`gummi goal [flags] "<objective>"`}, path: "goal"}, false)
-	b.WriteString("\ngummi resume GL-NNN [decision]   (the goal-only flags; every flag in SKILL.md's\n                                 grammar applies to a goal too)\n")
-	writeFlagLines(&b, flagLines(mustFindCmd("resume"), keepOnly(goalResumeFlagNames)))
-	return strings.TrimRight(b.String(), "\n")
-}
-
 // writeEntry renders one block: its signature lines, then its flags.
 func writeEntry(b *strings.Builder, e grammarEntry, hoistShared bool) {
 	for _, sig := range e.sigs {
@@ -319,15 +303,6 @@ func sharedFlagLines() []flagLine {
 		want[n] = true
 	}
 	return flagLines(mustFindCmd("run"), func(fl flagLine) bool { return want[fl.Name] })
-}
-
-// keepOnly builds a flagLines filter admitting exactly the named flags.
-func keepOnly(names []string) func(flagLine) bool {
-	want := map[string]bool{}
-	for _, n := range names {
-		want[n] = true
-	}
-	return func(fl flagLine) bool { return want[fl.Name] }
 }
 
 // mustFindCmd resolves a space-separated command path against the cobra

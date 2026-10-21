@@ -219,12 +219,6 @@ func roleForStage(f domain.Feature) (agent.Role, bool) {
 		if f.Kind == domain.KindResearch {
 			return agent.RoleArchitect, true
 		}
-		// A goal's build stage is conducted by its lead; no stage session
-		// runs it (Engine.run refuses one), but the role still names who
-		// the stage belongs to.
-		if f.Kind == domain.KindGoal {
-			return agent.RoleLead, true
-		}
 		return agent.RoleImplementer, true
 	case domain.StageVerify:
 		return agent.RoleReviewer, true
@@ -287,8 +281,6 @@ func stageHints(f domain.Feature, specPath, scratch string, flavor runFlavor) []
 		hints = append(hints, buildHints(f)...)
 	case domain.StageVerify:
 		switch f.Kind {
-		case domain.KindGoal:
-			hints = append(hints, goalVerifyHint())
 		case domain.KindResearch:
 			hints = append(hints, researchVerifyHint())
 		default:
@@ -465,12 +457,6 @@ func critiqueHint(f domain.Feature) string {
 			return diagnosisCritiqueHint()
 		}
 		return researchCritiqueHint()
-	}
-	if f.Kind == domain.KindGoal {
-		if f.Stage == domain.StageImplement {
-			return goalReviewHint()
-		}
-		return goalPlanCritiqueHint()
 	}
 	if f.Stage == domain.StageImplement {
 		return reviewHint(f.Kind)
@@ -1019,10 +1005,6 @@ func contractHint(f domain.Feature, specPath string, role agent.Role, flavor run
 		noun, artifact, sections = "bug", "bug report", bugSections
 		short = "bug report"
 	}
-	if f.Kind == domain.KindGoal {
-		noun, artifact, sections = "goal", "goal doc", goalSections
-		short = "goal doc"
-	}
 	// Reviewers (Review, Verify, plan-critique) don't fill design
 	// sections — they read them and add findings — so the "overwrite or
 	// resolve" nudge is either inapplicable or wrong for them.
@@ -1168,8 +1150,6 @@ The user approves the diagnosis to advance — do not start fixing.`),
 		return []string{
 			shapeHint(),
 		}
-	case domain.KindGoal:
-		return []string{goalPlanHint()}
 	default:
 		return []string{
 			planPhasePreamble,
@@ -1261,11 +1241,6 @@ func buildHints(f domain.Feature) []string {
 			return []string{diagnoseInvestigateHint()}
 		}
 		return []string{investigateHint()}
-	}
-	if f.Kind == domain.KindGoal {
-		// never reached for a stage session (run refuses one); kept so the
-		// contract has an honest answer if anything asks
-		return []string{"Stage: Implement — conducted by the goal's lead; there is no stage work to do here."}
 	}
 	if f.Kind == domain.KindBug {
 		return []string{

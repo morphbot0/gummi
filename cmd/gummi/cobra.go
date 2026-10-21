@@ -54,15 +54,6 @@ var resumeCmd = &cobra.Command{
 	},
 }
 
-// goalCmd implements `gummi goal [flags] "<objective>"`.
-var goalCmd = &cobra.Command{
-	Use:   `goal [flags] "<objective>"`,
-	Short: "Agree a goal, then let it run its cards on one branch until it is ready for you",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runGoal(cmdFlags(cmd), args)
-	},
-}
-
 // verifyCmd implements `gummi verify <id|ref>`.
 var verifyCmd = &cobra.Command{
 	Use:   "verify <id|ref>",
@@ -537,7 +528,6 @@ func init() {
 	// diagnose is the same card in the other mode, so it is the same flag
 	// surface — bound from the one definition rather than restated.
 	bindResearchFlags(diagnoseCmd.Flags())
-	bindGoalFlags(goalCmd.Flags())
 	bindResumeFlags(resumeCmd.Flags())
 	bindMergeFlags(mergeCmd.Flags())
 	bindHandoffFlags(handoffCmd.Flags())
@@ -602,29 +592,8 @@ func bindResearchFlags(fs *pflag.FlagSet) {
 	d.bind(fs)
 }
 
-// bindGoalFlags declares `gummi goal`'s flags. A goal spends, plans and
-// stops differently enough from a card that most of the shared surface
-// needs its own wording; no --repo, because a goal is not in a repository
-// (its cards name their own, DESIGN §17.2).
-func bindGoalFlags(fs *pflag.FlagSet) {
-	d := stdDriveFlags()
-	d.envelope = "the goal's whole budget in dollars — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)"
-	d.profile = "profile mapping roles to models, the lead included (default: first configured)"
-	d.gate = "who approves the goal's plan: attended|autopilot (past its plan a goal always runs itself)"
-	d.timeout = "per-stage inactivity timeout for the goal and each of its cards (0 disables)"
-	d.autonomous = "let the architect take its recommended answer instead of asking during the plan conversation"
-	d.base = "branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)"
-	d.until = `stop cleanly before the goal's plan is approved (only "plan" is a valid stop)`
-	d.repo = ""
-	d.bind(fs)
-	fs.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)")
-	fs.String("after", "", "the goal this one continues (GL-NNN): what it came to know — reference, decided constants, findings, its hand-over — comes with it, and this goal's plan cannot be approved until that one has landed")
-	fs.String("reference", "", "documents the goal is agreed against — a design, a table, a spec — as comma-separated paths; copied into the goal's notebook, pinned at the plan gate, and listed in every card's kickoff")
-}
-
 // bindResumeFlags declares `gummi resume`'s flags: the shared driving
-// surface, the decision flags that say why the run stopped, and the
-// goal-only levers.
+// surface and the decision flags that say why the run stopped.
 func bindResumeFlags(fs *pflag.FlagSet) {
 	d := stdDriveFlags()
 	d.envelope = "raise the spend budget before resuming, in dollars (required to clear a card that ran out; never lowers it)"
@@ -641,30 +610,7 @@ func bindResumeFlags(fs *pflag.FlagSet) {
 	fs.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)")
 	fs.String("note", "", "addendum to the reborn stage's kickoff (used with --bounce)")
 	fs.String("say", "", "read a line the way the card page would and report what it would do, as a say event, without acting")
-
-	for _, name := range goalResumeFlagNames {
-		switch name {
-		case "goal-note":
-			fs.String(name, "", "goals: add a note to a running goal; its lead reads it on its next turn")
-		case "reverse":
-			fs.String(name, "", "goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why")
-		case "wrap-up":
-			fs.Bool(name, false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped")
-		case "runs":
-			fs.Int(name, 0, "goals: raise the substrate budget to this many experiment runs before resuming (never lowers it)")
-		case "minutes":
-			fs.Int(name, 0, "goals: raise the substrate budget to this many substrate minutes before resuming (never lowers it)")
-		case "retake":
-			fs.String(name, "", `goals: declare the evidence of an experiment's conclusive runs stale ("*" for all), so the goal takes them again — for when the substrate, not the code, was what failed`)
-		}
-	}
 }
-
-// goalResumeFlagNames are the `resume` flags that only ever apply to a
-// goal. They are named here so the skill's grammar generator can keep them
-// out of the core SKILL.md — an agent shipping one card cannot use any of
-// them — and print them in the goals reference instead.
-var goalResumeFlagNames = []string{"goal-note", "reverse", "wrap-up", "runs", "minutes", "retake"}
 
 func bindCleanFlags(fs *pflag.FlagSet) {
 	fs.Bool("all", false, "clean every closed card in the workspace in one pass, instead of naming one")

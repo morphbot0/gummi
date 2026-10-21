@@ -66,18 +66,6 @@ func (m *Shell) groupOf(r featureRow, splitDone bool) boardGroup {
 	if !m.recentlySettled(r) {
 		return groupArchived
 	}
-	if r.F.GoalDropped() {
-		// A drop is an ending nobody chose, and while it is recent it is
-		// the one with an answer still outstanding: take it back, or let
-		// it go. It gets a group of its own rather than being filed with
-		// the work that finished — and it folds with everything else once
-		// the window passes, because letting it go is what doing nothing
-		// means.
-		if r.F.GoalID != "" {
-			return boardGroup("DROPPED BY " + m.cardName(r.F.GoalID))
-		}
-		return "DROPPED"
-	}
 	// "DONE · today" only earns its qualifier once something is folded
 	// away behind it. On a board with nothing archived it is the same
 	// group it has always been, and a label distinguishing it from an

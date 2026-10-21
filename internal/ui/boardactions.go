@@ -316,11 +316,6 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 			return m.openBugFromCard(r)
 		}
 		return nil
-	case "adopt":
-		if r, ok := m.selected(); ok {
-			return m.openAdopt(r)
-		}
-		return nil
 	case "gate":
 		if r, ok := m.selected(); ok {
 			return m.openAutopilot(r.F)
@@ -429,27 +424,6 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// above cannot catch it — the same shape topup has.
 		if r, ok := m.selected(); ok {
 			return m.openBugFromCard(r)
-		}
-	case "adopt":
-		if r, ok := m.selected(); ok {
-			return m.openAdopt(r)
-		}
-	case "goaltopup":
-		if r, ok := m.selected(); ok && r.Goal != nil {
-			return m.topUpGoalAndContinue(r.F, r.Goal.NeedsBudget)
-		}
-		return nil
-	case "goalstop":
-		if r, ok := m.selected(); ok {
-			return m.confirmStopGoal(r.F)
-		}
-	case "goalreverse":
-		if r, ok := m.selected(); ok {
-			return m.openReverseDecision(r.F)
-		}
-	case "goalpage":
-		if r, ok := m.selected(); ok {
-			return m.openGoalPage(r.F)
 		}
 	case "profile":
 		return m.openCardProfilePicker()

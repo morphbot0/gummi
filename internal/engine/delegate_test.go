@@ -157,11 +157,7 @@ func TestDelegationRules(t *testing.T) {
 	if err := child.Validate(); err != nil {
 		t.Errorf("a feature under a freeform card: %v", err)
 	}
-	child.GoalID = "GL-001"
-	if err := child.Validate(); err == nil {
-		t.Error("a delegated card in a goal validated")
-	}
-	child.GoalID, child.ParentID = "", "FD-001"
+	child.ParentID = "FD-001"
 	if err := child.Validate(); err == nil {
 		t.Error("a card delegated by a non-freeform card validated")
 	}

@@ -11,7 +11,6 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -1126,16 +1125,6 @@ func currentSpecSection(kind domain.Kind, stage domain.Stage) string {
 		case domain.StageVerify:
 			return "Verification"
 		}
-	case domain.KindGoal:
-		switch stage {
-		case domain.StagePlan:
-			// the plan gate is judged on the done-when list first
-			return spec.GoalSectionDoneWhen
-		case domain.StageImplement:
-			return spec.GoalSectionCards
-		case domain.StageVerify:
-			return spec.GoalSectionVerify
-		}
 	case domain.KindResearch:
 		switch stage {
 		case domain.StagePlan:
@@ -1591,12 +1580,6 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 	if r.DrivenAbroad {
 		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
 		pad(-1)
-	} else if r.conducted() {
-		// the same sentence a foreign drive gets, for the driver one
-		// level in: without it a conducted card reads as a chat whose
-		// composer has stopped working for no stated reason.
-		lines = append(lines, "  "+s.Faint.Render("run by "+goalDriver(r.F.GoalID)+" — read-only here · "+m.cardName(r.F.GoalID)+" takes your notes"))
-		pad(-1)
 	}
 	return lines, anchorAt, evAt
 }
@@ -2043,19 +2026,6 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		// p.Mode, and it renders as exactly that one fact (threadfold.ModeLine
 		// says how an old spelling reads).
 		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(threadfold.ModeLine(p), max(w-2, 8), "…"))
-	case state.EventGoal:
-		// A goal's log — every landing, drop, raise, decision and lead
-		// turn — is written as card_events rows on the goal card itself
-		// (state.AppendGoalEvent), stamped with whatever stage the goal
-		// stood at when it happened, which for a conducted goal is
-		// implement. Without an arm here every one of them fell through to
-		// the default below and rendered as the bare word "goal", one row
-		// each: a column of nothing where the goal's own history belongs.
-		var p state.GoalPayload
-		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || p.Action == "" {
-			return s.Faint.Render(ev.Kind)
-		}
-		return eventMarker(s, ev.Status) + s.Subtle.Render(ansi.Truncate(threadfold.GoalSentence(p), max(w-2, 8), "…"))
 	default:
 		return s.Faint.Render(ev.Kind)
 	}

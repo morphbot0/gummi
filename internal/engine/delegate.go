@@ -307,7 +307,7 @@ func (e *Engine) DelegateLand(ctx context.Context, parentID, id domain.FeatureID
 	default:
 		return "", fmt.Errorf("%s could not cross its landing gate: %s", id, describeAdvance(adv))
 	}
-	msg := e.goalCardMessage(ctx, card)
+	msg := e.delegateCardMessage(ctx, card)
 	cur, _ := e.cfg.Store.GetFeature(ctx, card.ID)
 	sha, err := m.SquashMerge(ctx, &cur, msg)
 	if err != nil {
@@ -360,4 +360,23 @@ func (e *Engine) SetDelegation(ctx context.Context, id domain.FeatureID, d domai
 	}
 	e.send(Event{Feature: id, Stage: domain.StageOpen, Kind: EventUpdated})
 	return nil
+}
+
+// delegateCardMessage is the commit message a delegated card lands on its
+// parent's branch with: the scribe's draft when it validates, a plain one
+// built from the card otherwise. Nobody is at a form to fix a bad draft
+// here, so a draft that fails validation is never used.
+func (e *Engine) delegateCardMessage(ctx context.Context, card domain.Feature) string {
+	if msg, err := e.DraftCommitMessage(ctx, card); err == nil && ValidateCommitMessage(msg) == nil {
+		return msg
+	}
+	typ := "feat"
+	if card.Kind == domain.KindBug {
+		typ = "fix"
+	}
+	title := strings.TrimSpace(card.Title)
+	if title != "" {
+		title = strings.ToLower(title[:1]) + title[1:]
+	}
+	return fmt.Sprintf("%s: %s\n\n%s", typ, title, strings.TrimSpace(card.OneLiner))
 }

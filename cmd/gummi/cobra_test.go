@@ -214,27 +214,6 @@ func TestSkillGrammarResolvesAgainstTheTree(t *testing.T) {
 	if got := commandGrammar(); got == "" {
 		t.Fatal("commandGrammar() is empty")
 	}
-	if got := goalGrammar(); got == "" {
-		t.Fatal("goalGrammar() is empty")
-	}
-}
-
-// A flag that only ever applies to a goal must stay out of SKILL.md's core
-// grammar: an agent shipping one card cannot use any of them, and they
-// were a fifth of `resume`'s listing.
-func TestCoreGrammarOmitsGoalOnlyFlags(t *testing.T) {
-	grammar := commandGrammar()
-	for _, name := range goalResumeFlagNames {
-		if strings.Contains(grammar, "--"+name+" ") || strings.Contains(grammar, "--"+name+"\n") {
-			t.Errorf("core grammar mentions the goal-only flag --%s; it belongs in references/goals.md", name)
-		}
-	}
-	goals := goalGrammar()
-	for _, name := range goalResumeFlagNames {
-		if !strings.Contains(goals, "--"+name) {
-			t.Errorf("the goals reference is missing --%s", name)
-		}
-	}
 }
 
 // TestInitCmdRegistered catches a forgotten rootCmd.AddCommand(initCmd) the

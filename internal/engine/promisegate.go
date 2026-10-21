@@ -199,10 +199,8 @@ func goldenIsPinned(ctx context.Context, workDir, literal string) (pinned, known
 // skip-on-error behaviour, and like that gate it runs before any
 // merge/landing work so a blocked card has changed nothing.
 func (e *Engine) promiseGateBlocksAdvance(ctx context.Context, f domain.Feature) (string, bool) {
-	if f.Kind == domain.KindResearch || f.IsGoal() {
-		// Research writes a document and has its own citation floor; a
-		// goal is judged by its done-when list, which is this same idea
-		// with its own machinery.
+	if f.Kind == domain.KindResearch || f.Kind == domain.KindGoal {
+		// Research writes a document and has its own citation floor.
 		return "", false
 	}
 	workDir, specPath, err := e.locate(ctx, f)
@@ -230,7 +228,7 @@ func (e *Engine) gatePromiseVerdict(s *Session) {
 	if s == nil || s.Feature.Stage != domain.StageVerify {
 		return
 	}
-	if s.Feature.Kind == domain.KindResearch || s.Feature.IsGoal() {
+	if s.Feature.Kind == domain.KindResearch || s.Feature.Kind == domain.KindGoal {
 		return
 	}
 	ctx := context.Background()

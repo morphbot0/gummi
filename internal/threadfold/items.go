@@ -432,13 +432,6 @@ func eventItem(ev state.CardEvent, inStretch bool) (Item, bool) {
 			return Item{}, false // a boundary: the stretch rule says it
 		}
 		return receiptItem(ev, Receipt{Kind: "autopilot", OK: true, Text: ModeLine(p)}), true
-	case state.EventGoal:
-		var p state.GoalPayload
-		text := ev.Kind
-		if err := json.Unmarshal([]byte(ev.Payload), &p); err == nil && p.Action != "" {
-			text = GoalSentence(p)
-		}
-		return Item{Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), T: ItemNote, At: ev.At, Stage: ev.Stage, Text: text, Outcome: ev.Status}, true
 	default:
 		return Item{Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), T: ItemNote, At: ev.At, Stage: ev.Stage, Text: ev.Kind}, true
 	}

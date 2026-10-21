@@ -487,16 +487,17 @@ func TestCommitDialogDefaultSubmitSquashes(t *testing.T) {
 	}
 }
 
-// TestCommitDialogNoMethodToggleForGoalCard: a goal's card lands as a squash
-// only, so the dialog offers no toggle and ctrl+t does nothing.
-func TestCommitDialogNoMethodToggleForGoalCard(t *testing.T) {
-	d := newCommitMsgDialog(domain.Feature{ID: "FD-002", Slug: "x", GoalID: "GL-001"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil }, nil)
+// TestCommitDialogNoMethodToggleForDelegatedCard: a card a session
+// delegated lands on its parent as a squash only, so the dialog offers no
+// toggle and ctrl+t does nothing.
+func TestCommitDialogNoMethodToggleForDelegatedCard(t *testing.T) {
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-002", Slug: "x", ParentID: "FF-001"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil }, nil)
 	if d.canToggle() {
-		t.Fatal("a card in a goal offers a method toggle")
+		t.Fatal("a delegated card offers a method toggle")
 	}
 	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if d.method != domain.LandSquash {
-		t.Fatalf("ctrl+t changed a goal card's method to %q", d.method)
+		t.Fatalf("ctrl+t changed a delegated card's method to %q", d.method)
 	}
 }
 

@@ -3,18 +3,11 @@ package web
 import (
 	"net/http"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
-func (s *Server) goalRoutes() {
-	s.api("GET /api/goals", s.handleGoals)
-	s.api("POST /api/goals", s.handleCreateGoal)
-	s.api("GET /api/goals/{id}", s.handleGoal)
-	s.api("POST /api/goals/{id}/actions/{action}", s.handleGoalAction)
-
+func (s *Server) stackRoutes() {
 	s.api("GET /api/stacks", s.handleStacks)
 	s.api("POST /api/stacks", s.handleCreateStack)
 	s.api("GET /api/stacks/{id}", s.handleStack)
@@ -24,51 +17,6 @@ func (s *Server) goalRoutes() {
 	s.api("POST /api/stacks/{id}/move", s.handleStackMove)
 	s.api("POST /api/stacks/{id}/rename", s.handleStackRename)
 	s.api("POST /api/stacks/{id}/restack", s.handleRestack)
-}
-
-// handleGoals is GET /api/goals: the goal rows, from the board's memory.
-func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
-	var g webapi.Goals
-	if !s.do(w, r, func(m *ui.Shell) tea.Cmd { g = m.WebGoals(); return nil }) {
-		return
-	}
-	writeJSON(w, http.StatusOK, g)
-}
-
-// handleGoal is GET /api/goals/{id}: the goal page.
-func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
-	g, err := s.opt.Board.Goal(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, g)
-}
-
-// handleCreateGoal is POST /api/goals.
-func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
-	var req webapi.GoalCreateRequest
-	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, bodyError(err, "bad request body: "+err.Error()))
-		return
-	}
-	out, err := s.opt.Board.CreateGoal(r.Context(), req)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.answer(w, out)
-}
-
-// handleGoalAction is POST /api/goals/{id}/actions/{action}.
-func (s *Server) handleGoalAction(w http.ResponseWriter, r *http.Request) {
-	var req webapi.GoalActionRequest
-	if !readBody(w, r, &req) {
-		return
-	}
-	id, action := r.PathValue("id"), r.PathValue("action")
-	by := person(r)
-	s.intent(w, r, func(m *ui.Shell) (tea.Cmd, error) { return m.WebGoalAction(id, action, req, by) })
 }
 
 // handleStacks is GET /api/stacks.

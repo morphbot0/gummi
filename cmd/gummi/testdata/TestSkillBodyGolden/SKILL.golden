@@ -20,9 +20,7 @@ enough that you'd open a PR for it, it's big enough for gummi.
 
 **Oversized asks:** if the request spans several independently shippable pieces,
 don't push it through one run. Decompose it into PR-sized features yourself and
-loop `gummi run` once per feature, sequentially — one verified branch each. When
-the pieces only make sense together, a **goal** runs them as one unit:
-`references/goals.md`.
+loop `gummi run` once per feature, sequentially — one verified branch each.
 
 ## Before the first run
 
@@ -329,4 +327,3 @@ Read these only when you need them; SKILL.md above is the whole common path.
 - `references/setup.md` — first-run readiness: backend, profile, auth, envelope.
 - `references/resume.md` — choosing a `resume` verb yourself, and the
   orphan-process check to run before any retry.
-- `references/goals.md` — `gummi goal`: one card whose work is other cards.

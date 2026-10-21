@@ -24,7 +24,7 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	}
 	doc := bundle.String()
 
-	for _, path := range []string{"run", "research", "diagnose", "goal", "resume", "merge", "squash", "commit", "log", "rewrite", "status", "watch", "doctor"} {
+	for _, path := range []string{"run", "research", "diagnose", "resume", "merge", "squash", "commit", "log", "rewrite", "status", "watch", "doctor"} {
 		cmd, _, err := rootCmd.Find(strings.Fields(path))
 		if err != nil {
 			t.Fatalf("finding %q: %v", path, err)
@@ -48,9 +48,6 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 		if !strings.Contains(skillBody(), cmd) {
 			t.Errorf("SKILL.md does not mention command %q", cmd)
 		}
-	}
-	if !strings.Contains(doc, "gummi goal") {
-		t.Error("the skill bundle does not mention `gummi goal`")
 	}
 }
 

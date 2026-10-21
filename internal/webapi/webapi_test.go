@@ -40,7 +40,7 @@ func TestBoardShape(t *testing.T) {
 				ID: "BG-003", Kind: "bug", Type: "Bug", Title: "Crash on empty board", Stage: "implement", Status: StatusRunning,
 				Running: &RowRunning{Verb: "editing board.go", Autopilot: true},
 				Spend:   3, Envelope: 500, Severity: "high", Autopilot: true,
-				Goal: &RowGoal{ID: "GL-001", Title: "Stable board"}, Waits: []string{"FD-010"},
+				Waits: []string{"FD-010"},
 			},
 			{ID: "FD-001", Kind: "feature", Type: "Feature", Title: "Landed thing", Stage: "done", Status: StatusDone, Landed: true, PR: "#12 merged"},
 			{ID: "FF-020", Kind: "freeform", Type: "Agent", Title: "Watch the nightly CI", Stage: "open", Status: StatusIdle, Home: ".gummi/homes/FF-020"},

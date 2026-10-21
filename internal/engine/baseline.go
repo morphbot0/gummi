@@ -48,11 +48,6 @@ func (e *Engine) BaselineChecks(ctx context.Context, f domain.Feature) ([]verify
 		return nil, nil
 	}
 	results, err := verify.RunWithBudget(ctx, workDir, baselineEligible(checks), verifyStageTimeout)
-	if f.IsGoal() {
-		// the goal tree is the tree its cards land on, so a check that
-		// regenerates a tracked file there must not outlive the check
-		e.tidyGoalTree(ctx, f, workDir)
-	}
 	if err != nil {
 		return nil, err
 	}

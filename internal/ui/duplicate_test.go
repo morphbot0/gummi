@@ -168,7 +168,6 @@ func TestDuplicateCarriesIdentity(t *testing.T) {
 		Branch:       "somebody-elses/branch",
 		StackID:      "carried-stack",
 		StackPos:     1,
-		GoalID:       "GL-001",
 		GateApproval: domain.GateAutopilot,
 		ExternalRef:  "https://github.com/o/r/issues/7",
 		CreatedAt:    now, UpdatedAt: now,
@@ -210,9 +209,6 @@ func TestDuplicateCarriesIdentity(t *testing.T) {
 	}
 	if dup.StackID != "" || dup.StackPos != 0 {
 		t.Errorf("copy inherited stack position %q/%d", dup.StackID, dup.StackPos)
-	}
-	if dup.GoalID != "" {
-		t.Errorf("copy inherited goal membership %q", dup.GoalID)
 	}
 	if !dup.Spend.Zero() {
 		t.Errorf("copy inherited spend: %+v", dup.Spend)

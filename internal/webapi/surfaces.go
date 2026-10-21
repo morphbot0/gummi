@@ -2,8 +2,6 @@ package webapi
 
 import (
 	"time"
-
-	"github.com/morphis/gummi/internal/engine"
 )
 
 // Outcome is the body of a surface write that ran: what the TUI's status
@@ -12,138 +10,8 @@ import (
 type Outcome struct {
 	OK   bool   `json:"ok"`
 	Text string `json:"text,omitempty"`
-	// ID names what the write made or touched: a new goal's card id, a
-	// stack's id.
+	// ID names what the write made or touched: a stack's id.
 	ID string `json:"id,omitempty"`
-}
-
-// Goals is GET /api/goals: every goal on the board, in the board's order.
-type Goals struct {
-	Goals []GoalSummary `json:"goals"`
-}
-
-// GoalSummary is one goal's rail row plus the progress its board row
-// shows: done-when met, cards landed, budget spent.
-type GoalSummary struct {
-	Row
-	// State is the goal page's one word: "todo", "agreeing the plan",
-	// "running", "wrapping up", "ready for you" or "done".
-	State    string `json:"state"`
-	Met      int    `json:"met"`
-	DoneWhen int    `json:"doneWhen"`
-	// Landed and Cards count the goal's cards, dropped ones left out.
-	Landed int `json:"landed"`
-	Cards  int `json:"cards"`
-	// Spent is the goal's whole spend, its cards' included.
-	Spent   float64 `json:"spent"`
-	Partial string  `json:"partial,omitempty"`
-}
-
-// Goal is GET /api/goals/{id}: the goal page. Report is the goal's
-// hand-over exactly as `gummi status` prints it for a goal
-// (engine.GoalReport is already the JSON shape the headless driver emits,
-// snake_case included); the rest is what the TUI's goal page shows beside
-// it.
-type Goal struct {
-	Report engine.GoalReport `json:"report"`
-	// State is GoalSummary.State.
-	State string `json:"state"`
-	// Cards are the rail rows of the cards the goal is conducting.
-	Cards []Row `json:"cards"`
-	// Log is the lead's log, oldest first, the last 200 entries.
-	Log      []GoalLogEntry `json:"log"`
-	Notebook GoalNotebook   `json:"notebook"`
-	// Actions is the goal's menu, offered when the TUI would offer it.
-	// Each id is a POST /api/goals/{id}/actions/{action}.
-	Actions []Action `json:"actions"`
-}
-
-// GoalLogEntry is one line of the lead's log.
-type GoalLogEntry struct {
-	Seq    int64     `json:"seq"`
-	At     time.Time `json:"at"`
-	Action string    `json:"action"`
-	Card   string    `json:"card,omitempty"`
-	// Ref is a decision's D-N, or what the entry answers.
-	Ref    string `json:"ref,omitempty"`
-	Item   string `json:"item,omitempty"`
-	Detail string `json:"detail,omitempty"`
-	By     string `json:"by,omitempty"`
-}
-
-// GoalNotebook is what the goal knows that no card owns (§17.10): its
-// pinned reference documents and its findings.
-type GoalNotebook struct {
-	References []GoalReference `json:"references"`
-	Findings   []GoalFinding   `json:"findings"`
-}
-
-// GoalReference is one reference document the plan was agreed against.
-type GoalReference struct {
-	Name    string `json:"name"`
-	Changed bool   `json:"changed,omitempty"`
-	Missing bool   `json:"missing,omitempty"`
-}
-
-// GoalFinding is one thing that turned out to be true.
-type GoalFinding struct {
-	Ref      string `json:"ref"`
-	Claim    string `json:"claim"`
-	Evidence string `json:"evidence,omitempty"`
-	Card     string `json:"card,omitempty"`
-	Status   string `json:"status"`
-}
-
-// GoalCreateRequest is POST /api/goals: mint a goal the way `gummi goal`
-// and the new-card form do. The goal is created in todo; Autopilot hands
-// it to autopilot at once, which is what the form's start button offers.
-type GoalCreateRequest struct {
-	// Description is the objective.
-	Description string `json:"description"`
-	// Envelope is the goal's whole budget; nil takes the board's default.
-	Envelope *int   `json:"envelope,omitempty"`
-	Profile  string `json:"profile,omitempty"`
-	// After continues another goal (a programme, §17.12).
-	After string `json:"after,omitempty"`
-	// References are paths to documents the plan is agreed against.
-	References []string `json:"references,omitempty"`
-	Autopilot  bool     `json:"autopilot,omitempty"`
-}
-
-// The goal actions, POST /api/goals/{id}/actions/{action}.
-const (
-	GoalActionNote      = "note"      // Text: a line for the lead
-	GoalActionBudget    = "budget"    // Envelope: the new, higher envelope
-	GoalActionSubstrate = "substrate" // Runs, Minutes: the substrate budget
-	GoalActionTopUp     = "topup"     // raise by what the waiting card asked, carry on
-	GoalActionStop      = "stop"      // finish now; comes back partial
-	GoalActionSendBack  = "sendback"  // Text: notes for the lead
-	GoalActionReverse   = "reverse"   // Ref (D-N), Why
-	GoalActionLand      = "land"      // Text: the merge message ("" drafts one)
-	GoalActionAbandon   = "abandon"   // close without landing; branch kept
-)
-
-// The inputs only a goal's actions ask for, beside card.go's.
-const (
-	// ActionNeedsDecision: pick one of the report's decisions for review
-	// (Report.Decisions[].ref) and say why.
-	ActionNeedsDecision ActionNeeds = "decision"
-	// ActionNeedsSubstrate: a substrate budget, runs and minutes.
-	ActionNeedsSubstrate ActionNeeds = "substrate"
-)
-
-// GoalActionRequest is POST /api/goals/{id}/actions/{action}.
-type GoalActionRequest struct {
-	// Text is a note, a send-back's notes, or a landing message.
-	Text string `json:"text,omitempty"`
-	// Envelope is a budget action's new envelope.
-	Envelope *int `json:"envelope,omitempty"`
-	// Ref and Why name the decision a reversal reverses, and why.
-	Ref string `json:"ref,omitempty"`
-	Why string `json:"why,omitempty"`
-	// Runs and Minutes are a substrate action's new budget.
-	Runs    *int `json:"runs,omitempty"`
-	Minutes *int `json:"minutes,omitempty"`
 }
 
 // Stack is one entry of GET /api/stacks and the body of

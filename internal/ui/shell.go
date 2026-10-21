@@ -237,9 +237,6 @@ type Shell struct {
 	// a card nothing is going to move.
 	autopilotAnswering map[domain.FeatureID]bool
 
-	// The goal loop (goalloop.go): goals queued for a tick by this update,
-	// goals whose tick is running, and goals owed one more when it lands.
-	goalTickQueue map[domain.FeatureID]bool
 	// stackTickQueue is the same seam for stacks (stackboard.go): a card
 	// whose branch moved wakes its stack, and the engine replays the
 	// cards above it. Coalesced per stack, drained by Update.
@@ -250,9 +247,7 @@ type Shell struct {
 	repoBranches map[string][]string
 	// stackRows is each stacked card's position and staleness, derived in
 	// loadRows (it asks git) and read by cardLine (which may not).
-	stackRows     map[domain.FeatureID]stackRow
-	goalTicking   map[domain.FeatureID]bool
-	goalTickAgain map[domain.FeatureID]bool
+	stackRows map[domain.FeatureID]stackRow
 	// crewTicking and crewTickAgain coalesce crew ticks (crewloop.go).
 	crewTicking   map[domain.FeatureID]bool
 	crewTickAgain map[domain.FeatureID]bool
@@ -270,17 +265,6 @@ type Shell struct {
 	// ephemeral, like sortMode: the board opens with history folded away,
 	// which is the state that makes the list about today.
 	archiveOpen bool
-	// goalOpen names the goals whose cards are unfolded under them on the
-	// board. Folded is the default: a goal is one row until you look.
-	goalOpen map[domain.FeatureID]bool
-	// goalPage is the mounted goal page (goalpage.go), nil when closed.
-	goalPage *goalPageView
-	// goalReturn is the goal whose page sent the reader into the card
-	// they are watching, so esc goes back to it (goalpage.go's
-	// backToGoalPage). Empty whenever the open card was reached any other
-	// way — the board, the inbox, a notice — since esc there has always
-	// meant the board.
-	goalReturn domain.FeatureID
 	// stats is the mounted stats tab (statsview.go), nil when closed:
 	// where the selected card's credits and hours went.
 	stats *statsView
@@ -751,7 +735,7 @@ func (m *Shell) openRepoPicker(id domain.FeatureID) {
 	if i < 0 {
 		return
 	}
-	if r := m.rows[i]; r.F.IsGoal() || r.F.Home || r.HasWorktree {
+	if r := m.rows[i]; r.F.Home || r.HasWorktree {
 		return
 	}
 	if len(m.repoNames) == 0 {
@@ -791,7 +775,7 @@ func readBranches(ctx context.Context, wt *worktree.Pool) (map[string]string, ma
 // resolved to nothing and for a Shell that was never attached (the test
 // scaffolds), so a sentence built from it is never missing a word.
 func (m *Shell) baseBranch(f domain.Feature) string {
-	if name := m.goalBranchOf(f); name != "" {
+	if name := m.parentBranchOf(f); name != "" {
 		return name
 	}
 	if f.Base != "" && (f.StackID == "" || f.StackPos == 0) {
@@ -815,59 +799,18 @@ func (m *Shell) repoBaseBranch(f domain.Feature) string {
 	return worktree.DefaultBaseBranchName
 }
 
-// conducted answers featureRow.conducted for a caller holding only the
-// feature, off the card's own loaded row — the row is where the goal's
-// liveness is resolved (loadRows). A card with no row loaded falls back to
-// its own half of the predicate.
-func (m *Shell) conducted(f domain.Feature) bool {
-	if i := m.rowIndex(f.ID); i >= 0 {
-		return m.rows[i].conducted()
-	}
-	return f.Conducted()
-}
-
-// goalBranchOf names the goal branch f lands on, or "" for a card that
-// lands on its repository's trunk.
-//
-// A goal's cards do not land on main: they resolve to a manager rooted at
-// the goal's worktree, so their branches fork from and squash-merge onto
-// the goal branch (worktree.Pool.ManagerFor). Every sentence built from
-// baseBranch used to name the trunk anyway — a landed card of a goal cut
-// from `setup-publishing` read "Landed on setup-publishing", which is
-// where the GOAL lands, one merge later and under the goal's own message.
-//
-// It reads the goal card off the loaded rows, which is where the branch
-// name lives; loadRows resolves the same rule from the features it is
-// already holding, since the rows it is building are not on the Shell yet.
-func (m *Shell) goalBranchOf(f domain.Feature) string {
-	if f.ParentID != "" {
-		// a card a freeform session created forks from and lands on that
-		// card's branch while it is open (worktree.Pool.ManagerFor)
-		if i := m.rowIndex(f.ParentID); i >= 0 && m.rows[i].F.Stage != domain.StageDone {
-			return m.rows[i].F.BranchName()
-		}
+// parentBranchOf names the branch f lands on when that is not its
+// repository's trunk: a card a freeform session created forks from and
+// lands on that card's branch while it is open (worktree.Pool.ManagerFor).
+// "" for every other card.
+func (m *Shell) parentBranchOf(f domain.Feature) string {
+	if f.ParentID == "" {
 		return ""
 	}
-	if f.GoalID == "" {
-		return ""
+	if i := m.rowIndex(f.ParentID); i >= 0 && m.rows[i].F.Stage != domain.StageDone {
+		return m.rows[i].F.BranchName()
 	}
-	i := m.rowIndex(f.GoalID)
-	if i < 0 {
-		return ""
-	}
-	return goalLandingBranch(m.rows[i].F)
-}
-
-// goalLandingBranch is that rule stated on the goal card itself: its
-// branch while the goal is live, and nothing once the goal is done —
-// a finished goal's trees are removed and its cards resolve to their own
-// repository again (worktree.Pool.managerForGoalCard), so the trunk is
-// the honest answer from then on.
-func goalLandingBranch(goal domain.Feature) string {
-	if !goal.IsGoal() || goal.Stage == domain.StageDone {
-		return ""
-	}
-	return goal.GoalBranchName()
+	return ""
 }
 
 // baseBranchOf is baseBranch keyed by card id, for the callers that hold
@@ -1116,9 +1059,6 @@ func (m *Shell) reconstructInbox() {
 		return
 	}
 	for id, s := range m.engine.Sessions() {
-		if m.goalOf(id) != "" {
-			continue // a goal card's stops are its goal's, never yours
-		}
 		snap := s.Snapshot()
 		switch {
 		case snap.Err != nil:
@@ -1199,14 +1139,6 @@ func (m *Shell) raiseBlocked(id domain.FeatureID, text string) {
 }
 
 func (m *Shell) raiseEscalationAs(id domain.FeatureID, reason, text string) {
-	// a goal card's stop is its goal's to handle: record it where the goal
-	// reads it and wake the goal, but never queue it for you
-	if g := m.goalOf(id); g != "" {
-		m.logPark(id, reason, text)
-		m.logDecisionAs(id, decisionKindForStage(m.recordStage(id)), text, true)
-		m.queueGoalTick(g)
-		return
-	}
 	if m.inbox.addEscalated(id, attnGate, text) {
 		m.alert(id, text)
 		m.logPark(id, reason, text)
@@ -1249,12 +1181,6 @@ func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) 
 // so parking after a blocked Advance must add the inbox item without
 // minting a second decision row for the same stop.
 func (m *Shell) parkAttentionItem(id domain.FeatureID, kind attnKind, text string) bool {
-	if g := m.goalOf(id); g != "" {
-		// silent, like raiseEscalation's goal arm: the goal hears it
-		m.logPark(id, state.ParkReasonNeedsYou, text)
-		m.queueGoalTick(g)
-		return false
-	}
 	if !m.inbox.add(id, kind, text) {
 		return false
 	}
@@ -1648,7 +1574,7 @@ func (m *Shell) Init() tea.Cmd {
 		// badges them (and withholds the actions that would fight them)
 		// instead of presenting a card it cannot touch as idle.
 		cmds = append(cmds, foreignTick())
-		cmds = append(cmds, goalPollTick(), crewPollTick())
+		cmds = append(cmds, crewPollTick())
 		// The stats tab's own slow refresh. It reads the record rather
 		// than the event stream, so nothing wakes it when a running lane
 		// grows or a wait is answered — a tick does, only while the tab
@@ -1729,12 +1655,7 @@ func (m *Shell) crossCardOpen(id domain.FeatureID) bool {
 // needs-attention queue, and the automatic review loop. It returns a
 // command for any automatic follow-up (review→fix→review), or nil.
 func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
-	m.goalCardEvent(ev)
 	switch ev.Kind {
-	case engine.EventGoal:
-		// a goal asked to be conducted: it entered implement, took a note,
-		// was sent back or stopped
-		return tea.Batch(m.goalTickCmd(ev.Feature), m.loadRows)
 	case engine.EventBriefReady:
 		// a freeform card's handoff brief has landed. An open writespec
 		// dialog for it reads the brief in, wherever it sits on the stack
@@ -1884,14 +1805,6 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// below, which is about where a *parked* question is shown, not
 		// whether one gets parked at all.
 		if autopilotAnswers(m.autopilotModeFor(ev.Feature), decisionAsk) {
-			// a goal card's question goes to its goal's lead
-			if m.goalOf(ev.Feature) != "" {
-				if s := m.engine.Get(ev.Feature); s != nil {
-					if ask := s.Snapshot().PendingAsk; ask != nil {
-						return m.goalAnswerAsk(ev.Feature, ask)
-					}
-				}
-			}
 			if s := m.engine.Get(ev.Feature); s != nil {
 				if ask := s.Snapshot().PendingAsk; ask != nil {
 					if rec := engine.RecommendedOption(ask); rec != "" {
@@ -2073,9 +1986,6 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	if tick := m.drainGoalTicks(); tick != nil {
-		cmd = tea.Batch(cmd, tick)
-	}
 	if tick := m.drainStackTicks(); tick != nil {
 		cmd = tea.Batch(cmd, tick)
 	}
@@ -2088,7 +1998,7 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if cmd, ok := m.updateGoal(msg); ok {
+	if cmd, ok := m.updateDelegate(msg); ok {
 		return m, cmd
 	}
 	if cmd, ok := m.updateCrew(msg); ok {
@@ -2279,9 +2189,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		f, thenDone := msg.f, msg.thenDone
 		var d *commitMsgDialog
 		d = newCommitMsgDialog(f, func(message string, method domain.LandMethod) tea.Cmd {
-			if f.IsGoal() {
-				return m.landGoal(f, message)
-			}
 			return m.landFeature(f, message, method, thenDone, d.keepBranch)
 		}, func(dctx context.Context, feature domain.Feature, fresh bool) (string, error) {
 			// best-effort: a nil engine or any drafting failure yields an
@@ -2290,10 +2197,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.engine == nil {
 				return "", nil
 			}
-			if feature.IsGoal() {
-				// a goal lands as a merge commit gummi writes from its cards
-				return m.engine.GoalMergeMessage(dctx, feature), nil
-			}
 			// fresh=false takes the message the verify gate pre-drafted for
 			// this branch, so the common landing opens on a filled box
 			// instead of on a ~60s pass; Redraft passes true.
@@ -2301,8 +2204,8 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		d.baseBranch = m.baseBranch(f) // see openSquashDialog's own wiring
 		// the cards a closing takes the worktree and branch of: the ones
-		// this landing closes (or finds closed), outside a stack or a goal
-		d.closes = (thenDone || f.Stage == domain.StageDone) && !f.IsGoal() && !f.InGoal() && !f.Stacked() && !f.MainCheckout
+		// this landing closes (or finds closed), outside a stack
+		d.closes = (thenDone || f.Stage == domain.StageDone) && !f.Stacked() && !f.MainCheckout
 		m.Overlay.Push(d)
 		// start the draft pass off the render loop; the dialog is already
 		// open and editable, and the draft fills only while unmodified.
@@ -3257,9 +3160,6 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.deps != nil {
 			return m.handleDepsKey(key)
 		}
-		if m.goalPage != nil {
-			return m.handleGoalPageKey(key)
-		}
 		if m.stats != nil {
 			m.clearTransientNotice()
 			return m.handleStatsKey(key)
@@ -3511,25 +3411,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			return m.runChecks(r.F)
 		}
-	case "P":
-		// the goal's page, from the goal row or from any of its cards —
-		// a reader watching one card wants the next one, and the page is
-		// where the cards are. It was reachable only through the action
-		// inventory, which is a poor place for the one surface a person
-		// opens to look in on a running goal.
-		if r, ok := m.selected(); ok {
-			m.clearTransientNotice()
-			goal := r.F
-			if !goal.IsGoal() {
-				i := m.rowIndex(r.F.GoalID)
-				if i < 0 {
-					m.notice = noticeMsg{text: r.F.Name() + " is not in a goal — nothing to open", isErr: true, id: r.F.ID}
-					return nil
-				}
-				goal = m.rows[i].F
-			}
-			return m.openGoalPage(goal)
-		}
 	case "t":
 		if r, ok := m.selected(); ok {
 			m.clearTransientNotice()
@@ -3712,13 +3593,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "o":
 		if r, ok := m.selected(); ok {
-			if r.F.IsGoal() {
-				// A goal's home repo is derived from its cards at its plan
-				// gate, not chosen: retargeting it here would be moving the
-				// branch its cards fork from out from under them.
-				m.notice = noticeMsg{text: r.F.Name() + ": a goal's repository follows its cards — set each card's `repo:` in the goal doc", isErr: true}
-				return nil
-			}
 			if r.HasWorktree {
 				m.notice = noticeMsg{text: r.F.Name() + ": repo is fixed once a worktree exists", isErr: true}
 				return nil
@@ -3787,9 +3661,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			// — it has work to do, or a `D` coming. The other verbs on this
 			// screen are things you do to a card mid-flight; this one closes
 			// it, so it asks the same question the landing gate asks.
-			if r.F.IsGoal() && r.F.Stage != domain.StageVerify {
-				return m.confirmAbandonGoal(r.F)
-			}
 			// A freeform card is the one card whose hand-off is not gated on
 			// a stage, because it has none: only the person can say when its
 			// work is finished, and saying so IS the ending (DESIGN §19).
@@ -3878,11 +3749,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			f := r.F
 			detail := f.Title + " — removes worktree, branch, and record"
-			// a goal's cards go with it (deleteFeature says why), so the
-			// dialog says so before the key that cannot be undone.
-			if n := m.goalCardCount(f); n > 0 {
-				detail += ", and the same for its " + itoa(n) + " card" + plural(n)
-			}
 			m.Overlay.Push(&confirmDialog{
 				card:         f.ID,
 				id:           "confirm-delete",
@@ -3972,26 +3838,9 @@ func (m *Shell) jumpSel(n int) {
 // every other column keeps chronological order regardless.
 func (m *Shell) displayOrder(mode SortMode) []int {
 	var order []int
-	// a goal's cards sit folded under their goal, not in the groups; a card
-	// whose goal is not loaded falls back to its own group
-	goals := map[domain.FeatureID]bool{}
-	for _, r := range m.rows {
-		if r.F.IsGoal() {
-			goals[r.F.ID] = true
-		}
-	}
-	children := map[domain.FeatureID][]int{}
-	for i, r := range m.rows {
-		if r.F.GoalID != "" && goals[r.F.GoalID] {
-			children[r.F.GoalID] = append(children[r.F.GoalID], i)
-		}
-	}
 	for _, super := range domain.SuperStates {
 		var idxs []int
 		for i, r := range m.rows {
-			if r.F.GoalID != "" && goals[r.F.GoalID] {
-				continue
-			}
 			// A folded archive row is not in the order at all, which is
 			// what keeps the jump numbers contiguous and stops alt+j/alt+k
 			// from walking through the graveyard — half of what made the
@@ -4013,14 +3862,7 @@ func (m *Shell) displayOrder(mode SortMode) []int {
 				return m.rows[idxs[a]].F.CreatedAt.Before(m.rows[idxs[b]].F.CreatedAt)
 			})
 		}
-		for _, idx := range idxs {
-			order = append(order, idx)
-			if id := m.rows[idx].F.ID; m.goalOpen[id] {
-				kids := children[id]
-				sort.SliceStable(kids, func(a, b int) bool { return m.rows[kids[a]].F.Num < m.rows[kids[b]].F.Num })
-				order = append(order, kids...)
-			}
-		}
+		order = append(order, idxs...)
 	}
 	return order
 }
@@ -4254,13 +4096,6 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 	// honestly do with enter is watch it.
 	if _, ok := m.foreignFor(f.ID); ok {
 		return m.watchForeign(f)
-	}
-	// its goal's lead owns this one: the conductor starts it, answers it
-	// and lands it (§17), so running the stage by hand here would put a
-	// second driver on a card that already has one. enter opens it to
-	// watch, which is the same answer, one level in.
-	if m.conducted(f) {
-		return m.watchConducted(f)
 	}
 	if m.engine == nil {
 		m.notice = noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)"), isErr: true}
@@ -4680,17 +4515,8 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 		m.notice = noticeMsg{text: m.noAgent(" — budgets meter agent spend"), isErr: true}
 		return nil
 	}
-	actor := m.humanActor()
 	name := m.cardName(id)
 	return func() tea.Msg {
-		if id.Kind() == domain.KindGoal {
-			// a goal's budget is its ceiling: only raised, and the goal is
-			// told, so a wrap-up it forced can be reconsidered
-			if err := m.engine.RaiseGoalBudget(engine.WithActor(context.Background(), actor), id, to); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-			return noticeMsg{text: fmt.Sprintf("%s: goal budget raised to %s", name, domain.FormatDollars(float64(to))), reload: true}
-		}
 		if err := m.engine.RaiseEnvelope(context.Background(), id, to); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
@@ -4798,9 +4624,6 @@ func (m *Shell) mainView(w, h int) string {
 		}
 		if m.deps != nil {
 			return m.depPickerView(w, h)
-		}
-		if m.goalPage != nil {
-			return m.goalPageRender(w, h)
 		}
 		if m.ingestRun != nil && !m.ingestRun.hidden {
 			return m.ingestRunRender(w, h)

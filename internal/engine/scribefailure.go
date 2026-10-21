@@ -176,7 +176,7 @@ func checksKind(f domain.Feature) bool {
 	case domain.KindResearch, domain.KindGoal, domain.KindFreeform:
 		return false
 	}
-	return !f.IsGoal()
+	return true
 }
 
 // noteNoChecks says, once per card, that discovery left the card with no

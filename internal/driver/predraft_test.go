@@ -67,21 +67,21 @@ func TestDriveStopsAtVerifiedWithALandingMessage(t *testing.T) {
 	}
 }
 
-// TestDriveNarratesNoDraftItWillNotMake: a goal's card is landed by its
-// goal, not by a person, so the pass is skipped — and a stream line
-// announcing a draft that was never going to happen is worse than no line
-// at all.
+// TestDriveNarratesNoDraftItWillNotMake: a card linked to a pull request
+// lands through it, not locally, so the pass is skipped — and a stream
+// line announcing a draft that was never going to happen is worse than no
+// line at all.
 func TestDriveNarratesNoDraftItWillNotMake(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{})
 	d := h.driver(Options{})
 	f := domain.Feature{
-		ID: "FD-001", Num: 1, Title: "a goal's card", Slug: "a-goals-card",
-		Stage: domain.StageVerify, GoalID: domain.FeatureID("GL-001"),
+		ID: "FD-001", Num: 1, Title: "a linked card", Slug: "a-linked-card",
+		Stage: domain.StageVerify, PullRequest: domain.PullRequestRef{Repo: "o/r", Number: 7, URL: "https://x/7"},
 	}
 
 	d.predraftLanding(context.Background(), f)
 
 	if strings.Contains(h.buf.String(), "drafting the landing message") {
-		t.Errorf("announced a draft for a card whose goal writes its message; stream=%s", h.buf.String())
+		t.Errorf("announced a draft for a card that lands through its PR; stream=%s", h.buf.String())
 	}
 }

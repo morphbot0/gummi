@@ -18,7 +18,6 @@ func TestWeekGroupsByEndingNotByCount(t *testing.T) {
 		ByEnding: map[domain.Ending]int{
 			domain.EndingLanded:    2,
 			domain.EndingHandedOff: 1,
-			domain.EndingDropped:   1,
 		},
 		Spend:  31.8,
 		Rework: 6, Redone: 4, Open: 1,
@@ -32,7 +31,7 @@ func TestWeekGroupsByEndingNotByCount(t *testing.T) {
 	d := &weekDialog{report: &rep}
 	got := stripANSI(d.View(m.styles, 100, 40))
 	for _, want := range []string{
-		"landed", "handed off", "dropped",
+		"landed", "handed off",
 		"branches kept, nothing merged",
 		"6 rounds across 4 cards",
 		"still in flight",

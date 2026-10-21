@@ -94,10 +94,6 @@ func (m *Shell) refreshInboxFromDecisions(open map[domain.FeatureID][]state.Open
 // Init even asked.
 func (m *Shell) seedInboxFromDecisions(open map[domain.FeatureID][]state.OpenDecision) {
 	for id, decs := range open {
-		// a goal card's stops are its goal's, after a restart as before it
-		if m.goalOf(id) != "" {
-			continue
-		}
 		dec, ok := decisions.Rank(decs)
 		if !ok {
 			continue

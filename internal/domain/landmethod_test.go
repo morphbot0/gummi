@@ -15,17 +15,13 @@ func TestParseLandMethod(t *testing.T) {
 	}
 }
 
-func TestLandMethodsForGoalCards(t *testing.T) {
+func TestLandMethodsForDelegatedCards(t *testing.T) {
 	card := &Feature{ID: "FD-001"}
 	if got := card.LandMethods(); len(got) != 2 || !card.Offers(LandMerge) {
 		t.Errorf("plain card methods = %v, want squash and merge", got)
 	}
-	inGoal := &Feature{ID: "FD-002", GoalID: "GL-001"}
-	if inGoal.Offers(LandMerge) || !inGoal.Offers(LandSquash) {
-		t.Errorf("card in a goal offers %v, want squash only", inGoal.LandMethods())
-	}
-	goal := &Feature{ID: "GL-001", Kind: KindGoal}
-	if goal.Offers(LandMerge) {
-		t.Errorf("goal offers %v, want squash only", goal.LandMethods())
+	delegated := &Feature{ID: "FD-002", ParentID: "FF-001"}
+	if delegated.Offers(LandMerge) || !delegated.Offers(LandSquash) {
+		t.Errorf("delegated card offers %v, want squash only", delegated.LandMethods())
 	}
 }

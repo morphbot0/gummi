@@ -99,29 +99,6 @@ func TestUndatableCardStaysVisible(t *testing.T) {
 	}
 }
 
-// A drop is the one ending with an answer still outstanding, so it gets a
-// group of its own — and folds with everything else once the window
-// passes, because letting it go is what doing nothing means.
-func TestDroppedCardGroupsUnderItsGoalThenFolds(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0-test")
-	recent := settledRow("FD-007", time.Hour, false)
-	recent.F.GoalID = "GL-004"
-	recent.F.GoalDroppedAt = time.Now().Add(-time.Hour)
-	recent.F.LandedSHA = ""
-	old := settledRow("FD-008", 96*time.Hour, false)
-	old.F.GoalID = "GL-004"
-	old.F.GoalDroppedAt = time.Now().Add(-96 * time.Hour)
-	old.F.LandedSHA = ""
-	m.rows = []featureRow{recent, old}
-
-	if got := m.groupOf(m.rows[0], true); got != "DROPPED BY #4" {
-		t.Fatalf("group = %q, want DROPPED BY GL-004", got)
-	}
-	if got := m.groupOf(m.rows[1], true); got != groupArchived {
-		t.Fatalf("an old drop folds with everything else: %q", got)
-	}
-}
-
 // Closing the archive while the cursor is inside it must not leave the
 // cursor on a line nothing draws.
 func TestClosingTheArchiveMovesTheCursorOut(t *testing.T) {

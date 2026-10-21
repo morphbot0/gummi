@@ -37,13 +37,7 @@ func TestMayLandAtBindsTheVerifyToItsRevision(t *testing.T) {
 		t.Errorf("an unverified card: MayLandAt = %v, want plain ErrNotVerified and not stale", err)
 	}
 
-	// a goal re-checks its own branches when its landing moves them, and
 	// a freeform card has no verify to be stale
-	goal := f
-	goal.ID, goal.Kind, goal.VerifiedRev = "GL-001", KindGoal, ""
-	if err := goal.MayLandAt(moved); err != nil {
-		t.Errorf("a verified goal: MayLandAt = %v, want nil", err)
-	}
 	ff := Feature{ID: "FF-001", Kind: KindFreeform, Stage: StageOpen}
 	if err := ff.MayLandAt(moved); err != nil {
 		t.Errorf("a freeform card: MayLandAt = %v, want nil", err)

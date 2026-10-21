@@ -329,8 +329,4 @@ func TestWebAnswersTheLinkAndReverseDialogs(t *testing.T) {
 	if len(got) != 2 || got[0] != "7" || got[1] != "12" {
 		t.Fatalf("link submitted %q, want [7 12]", got)
 	}
-	res := (&reverseDialog{f: domain.Feature{ID: "GL-001"}}).webAnswer(nil, &webInput{})
-	if res.needs != webapi.ActionNeedsDecision || res.cmd != nil {
-		t.Fatalf("reverse answered %+v, want it to ask for the decision", res)
-	}
 }

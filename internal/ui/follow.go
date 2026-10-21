@@ -144,33 +144,6 @@ func (m *Shell) watchForeign(f domain.Feature) tea.Cmd {
 	return tea.Batch(open, m.startFollow(f))
 }
 
-// watchConducted opens the read-only view of a card its goal's lead is
-// driving: the card's own page, with its live stage block streaming from
-// the session this process is already running for the goal. There is no
-// tail to start — unlike a foreign drive, the run is right here — so the
-// difference from an ordinary open is entirely what is withheld
-// (featureRow.watchOnly) and the one line that says why.
-func (m *Shell) watchConducted(f domain.Feature) tea.Cmd {
-	var open tea.Cmd
-	if !m.cardOpen {
-		open = m.openCard()
-	}
-	// A card its goal already landed is watched for the same reason and
-	// says so in the past tense: the goal is still running, so the card is
-	// still the goal's, but nothing is driving it any more.
-	drives := "drives it"
-	if f.Stage == domain.StageDone {
-		drives = "conducted it"
-	}
-	m.notice = noticeMsg{text: fmt.Sprintf("watching %s — %s %s (read-only; type into %s to reach its lead)", f.Name(), goalDriver(f.GoalID), drives, m.cardName(f.GoalID))}
-	return open
-}
-
-// goalDriver names the driver of a card inside a goal, for the sentences
-// a watched card owes its reader. One phrase, one place: the refusal
-// notice, the action inventory and the thread footer all say it.
-func goalDriver(domain.FeatureID) string { return "its goal's lead" }
-
 // noteWatching says who owns the run being watched, so the read-only
 // pane never reads as a broken chat.
 func (m *Shell) noteWatching(id domain.FeatureID) {

@@ -215,16 +215,16 @@ func (e *Engine) plannerPrompt(ctx context.Context, c *domain.Crew, reasons []st
 func (pt *plannerTurn) tools() []agent.ToolDef {
 	node := str("A node id, e.g. t3.")
 	return []agent.ToolDef{
-		leadTool("crew_doc", "Read the crew doc, or one section of it (Brief, Done when, Plan, Limits, Run log).",
+		mkTool("crew_doc", "Read the crew doc, or one section of it (Brief, Done when, Plan, Limits, Run log).",
 			map[string]any{"section": str("A section title; empty for the whole doc.")}),
-		leadTool("plan_write", "Write the crew's plan: the gummi-crew block as YAML (lanes, budget, nodes with id, role, title, brief, needs, owns, serves, checks, tier, envelope). "+
+		mkTool("plan_write", "Write the crew's plan: the gummi-crew block as YAML (lanes, budget, nodes with id, role, title, brief, needs, owns, serves, checks, tier, envelope). "+
 			"Optionally a revised done-when list as YAML (id, says, check or judge). Returns what fails the plan checks, or what happens next.",
 			map[string]any{"plan": str("The gummi-crew block's YAML."), "done_when": str("Optional: the done-when list's YAML, when it changes.")}, "plan"),
-		leadTool("node_rework", "Send a node back to work with a note.", map[string]any{"node": node, "note": str("What to change.")}, "node", "note"),
-		leadTool("node_drop", "Drop a node: it lands nothing more.", map[string]any{"node": node, "why": str("Why.")}, "node", "why"),
-		leadTool("node_raise", "Raise a node's envelope, inside the crew's budget.", map[string]any{"node": node, "to": num("The new envelope.")}, "node", "to"),
-		leadTool("answer", "Answer a node's question from the frozen spec.", map[string]any{"node": node, "text": str("The answer.")}, "node", "text"),
-		leadTool("ask_person", "Pass a node's question to the person: the spec does not settle it.", map[string]any{"node": node}, "node"),
+		mkTool("node_rework", "Send a node back to work with a note.", map[string]any{"node": node, "note": str("What to change.")}, "node", "note"),
+		mkTool("node_drop", "Drop a node: it lands nothing more.", map[string]any{"node": node, "why": str("Why.")}, "node", "why"),
+		mkTool("node_raise", "Raise a node's envelope, inside the crew's budget.", map[string]any{"node": node, "to": num("The new envelope.")}, "node", "to"),
+		mkTool("answer", "Answer a node's question from the frozen spec.", map[string]any{"node": node, "text": str("The answer.")}, "node", "text"),
+		mkTool("ask_person", "Pass a node's question to the person: the spec does not settle it.", map[string]any{"node": node}, "node"),
 	}
 }
 

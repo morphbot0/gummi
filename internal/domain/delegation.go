@@ -57,15 +57,12 @@ func (f *Feature) validateDelegation() error {
 		return nil
 	case f.kind() == KindFreeform || f.kind() == KindGoal:
 		return fmt.Errorf("feature %s: a %s card cannot be delegated", f.ID, f.kind())
-	case f.GoalID != "":
-		return fmt.Errorf("feature %s: a delegated card cannot also belong to %s", f.ID, f.GoalID)
 	}
 	return nil
 }
 
 // DelegateHeld is what one delegated card holds of its parent's
-// delegation budget, the goal ledger's rule (DESIGN §17.3) applied to a
-// freeform parent: an unfinished card holds the larger of its envelope and
+// delegation budget: an unfinished card holds the larger of its envelope and
 // what it has spent; a finished one — landed on the parent, or dropped —
 // holds what it spent and gives the rest back.
 func DelegateHeld(c Feature) float64 {

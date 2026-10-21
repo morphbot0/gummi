@@ -434,7 +434,7 @@ async function submit ({ asLine = false, confirm = '' } = {}) {
     clearSent(text, body.attachments)
     setNote('')
     if (r?.card && state.sel === id) set({ card: r.card })
-    const where = { steer: 'Steered the agent', consult: 'Asked a consult session', freeform: 'Sent to the session', goalnote: 'Noted on the goal', verb: 'Ran the command', answer: 'Answered', read: 'Sent — the board reads it to place it' }[r?.route]
+    const where = { steer: 'Steered the agent', consult: 'Asked a consult session', freeform: 'Sent to the session', verb: 'Ran the command', answer: 'Answered', read: 'Sent — the board reads it to place it' }[r?.route]
     if (where) toast(where)
     ctxRef.refresh?.(id)
   } catch (err) {

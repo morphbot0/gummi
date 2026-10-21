@@ -25,6 +25,15 @@ const (
 	CrewSectionReport   = "Report"
 )
 
+// doneWhenScaffold ships with a blank session spec so the block's shape
+// is never improvised.
+const doneWhenScaffold = "```gummi-done-when\n" +
+	"# id / says / check (a command) or judge: true\n" +
+	"- id: DW-1\n" +
+	"  says: \"\"\n" +
+	"  check: \"\"\n" +
+	"```"
+
 var (
 	crewFenceRe     = regexp.MustCompile("(?s)```gummi-crew[ \\t]*\\n(.*?)```")
 	doneWhenFenceRe = regexp.MustCompile("(?s)```gummi-done-when[ \\t]*\\n(.*?)```")

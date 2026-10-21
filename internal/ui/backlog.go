@@ -196,13 +196,6 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 	if !m.cardOpen {
 		switch key {
 		case "f":
-			// One fold key, two things to fold, and no ambiguity between
-			// them: on a goal or one of its cards it folds that goal, and
-			// anywhere else the only other fold on the board is the
-			// archive.
-			if m.toggleGoalFold() {
-				return nil, true
-			}
 			m.toggleArchive()
 			return nil, true
 		case "enter", "right", "l":
@@ -217,9 +210,7 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 	switch key {
 	case "esc", "left":
 		m.closeCard()
-		// a card entered from a goal's page goes back to that page, not
-		// to the board underneath it (goalpage.go's backToGoalPage)
-		return m.backToGoalPage(), true
+		return nil, true
 	case "j", "down":
 		m.moveAction(1)
 		return nil, true
@@ -227,12 +218,8 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 		m.moveAction(-1)
 		return nil, true
 	case "J":
-		// stepping to the next card leaves the goal's page behind: the
-		// reader is walking the board now, and esc means the board again
-		m.goalReturn = ""
 		return m.stepCard(1), true
 	case "K":
-		m.goalReturn = ""
 		return m.stepCard(-1), true
 	case "right":
 		return nil, true
@@ -329,12 +316,6 @@ func (m *Shell) backlogEntries() []backlogEntry {
 	var last boardGroup
 	splitDone := m.archiveCount() > 0
 	for i, idx := range m.displayOrder(m.sortMode) {
-		if m.isFoldedChild(idx) {
-			// a goal's unfolded card rides under its goal, whatever group
-			// its own stage belongs to
-			out = append(out, backlogEntry{card: true, row: idx, shortcut: i + 1})
-			continue
-		}
 		if group := m.groupOf(m.rows[idx], splitDone); i == 0 || group != last {
 			if i > 0 {
 				out = append(out, backlogEntry{})

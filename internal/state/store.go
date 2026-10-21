@@ -949,13 +949,13 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			budget_envelope, created_at, updated_at,
 			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, commit_draft, commit_draft_sha, repo,
 			pr_repo, pr_number, pr_url, pr_head_sha,
-			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
+			found_by,
 			research_mode,
 			base, branch_scheme, branch, stack_id, stack_pos,
 			session_backend, session_model, main_checkout, home,
 			parent_id, delegate_budget, delegate_all,
 			crew_of, crew_seq, crew_node)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -965,8 +965,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		string(kind), f.ExternalRef, false, false, false, f.GateApproval,
 		string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.CommitDraft, f.CommitDraftSHA, f.Repo,
 		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA,
-		string(f.GoalID), f.GoalAttached, formatOptTime(f.GoalDroppedAt), string(f.FoundBy),
-		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
+		// the goal_* columns are vestigial: goals are gone
+		string(f.FoundBy),
 		string(f.Mode),
 		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
 		f.SessionBackend, f.SessionModel, f.MainCheckout, f.Home,
@@ -994,7 +994,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	created_at, updated_at,
 	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, commit_draft, commit_draft_sha, repo,
 	pr_repo, pr_number, pr_url, pr_head_sha,
-	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
+	found_by,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
 	session_backend, session_model, main_checkout, home, verified_rev, continued_as,
@@ -1022,7 +1022,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
-	var goalID, goalDropped, foundBy, goalWrapUp, mode string
+	var foundBy, mode string
 	var stackID, continuedAs, parentID, crewOf string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
@@ -1037,7 +1037,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&created, &updated,
 		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.CommitDraft, &f.CommitDraftSHA, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
-		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
+		&foundBy,
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
 		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.Home, &f.VerifiedRev, &continuedAs,
@@ -1051,7 +1051,6 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	f.ParentID = domain.FeatureID(parentID)
 	f.Crew.Of = domain.FeatureID(crewOf)
 	f.Mode = domain.ResearchMode(mode)
-	f.GoalID = domain.FeatureID(goalID)
 	f.FoundBy = domain.FeatureID(foundBy)
 	f.Severity = domain.Severity(severity)
 	f.ID = domain.FeatureID(id)
@@ -1076,12 +1075,6 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		if f.HandedOffAt, err = time.Parse(timeFmt, handedOff); err != nil {
 			return f, fmt.Errorf("feature %s: corrupt handed_off_at %q: %w", id, handedOff, err)
 		}
-	}
-	if f.GoalDroppedAt, err = parseOptTime(goalDropped); err != nil {
-		return f, fmt.Errorf("feature %s: corrupt goal_dropped_at %q: %w", id, goalDropped, err)
-	}
-	if f.Goal.WrapUpAt, err = parseOptTime(goalWrapUp); err != nil {
-		return f, fmt.Errorf("feature %s: corrupt goal_wrapup_at %q: %w", id, goalWrapUp, err)
 	}
 	// A corrupt row (hand-edited DB, bad migration) must fail here, not
 	// flow onward: IDs and slugs feed branch names and worktree paths.
@@ -1956,24 +1949,6 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	gateInserted, err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now, answerID)
 	if err != nil {
 		return f, err
-	}
-	// A goal arriving at implement is being put back to work, so it is no
-	// longer finishing now and no longer partial. Engine.SendBackGoal
-	// said this itself, which covered its own verb and nothing else: the
-	// composer's rewind walks the same edge with a plain transition, and
-	// left a goal that had wrapped up with its wrap-up stamp and its
-	// "partial: the lead kept failing" standing. The conductor read those
-	// on its first tick, finished the goal again, and handed back the
-	// identical partial result — twice on the measured drive, at a full
-	// critique and verify round each time. Every caller reaches a
-	// crossing through here, which is what makes this the place to say it
-	// once.
-	if f.Kind == domain.KindGoal && to == domain.StageImplement {
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE features SET goal_wrapup_at='', goal_partial='', verified_at='', verified_rev='' WHERE id=?`, string(id)); err != nil {
-			return f, fmt.Errorf("lifting %s's wrap-up: %w", id, err)
-		}
-		f.Goal.WrapUpAt, f.Goal.Partial, f.VerifiedAt = time.Time{}, "", time.Time{}
 	}
 	if err := tx.Commit(); err != nil {
 		return f, err

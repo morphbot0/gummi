@@ -1,7 +1,6 @@
 // views/index.js — the surfaces that plug into the views registry. Each
 // module registers itself with registerView on import; app.js imports this
 // file once, so adding a surface is one module here and one line below.
-import './goals.js?v=__ASSET_V__'
 import './stacks.js?v=__ASSET_V__'
 import './repos.js?v=__ASSET_V__'
 import './ingest.js?v=__ASSET_V__'

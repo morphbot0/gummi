@@ -330,12 +330,6 @@ func (m *Shell) openStackForm() tea.Cmd {
 			return noticeMsg{text: f.Name() + " is a goal — its own cards already share one branch", isErr: true}
 		}
 	}
-	if f.GoalID != "" {
-		goal := m.cardName(f.GoalID)
-		return func() tea.Msg {
-			return noticeMsg{text: f.Name() + " belongs to " + goal + " — a goal's cards share its branch rather than stacking", isErr: true}
-		}
-	}
 	form := m.openCardForm(domain.CardType{Kind: domain.KindFeature})
 	form.stackOn(f.ID, f.Title, "")
 	// The new card must live in the same repository as the card it forks

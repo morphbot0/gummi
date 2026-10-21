@@ -78,10 +78,10 @@ type cardStatusItem struct {
 	SpendCredits float64 `json:"spend_credits"`
 	Envelope     int     `json:"envelope"`
 	Verified     bool    `json:"verified"`
-	// Ending is how the card left gummi: "landed", "handed_off",
-	// "dropped", or empty while it is still open — the same word every
+	// Ending is how the card left gummi: "landed" or "handed_off",
+	// or empty while it is still open — the same word every
 	// other surface uses. It replaces the `done`/`handed_off` pair, which
-	// took two booleans to name one fact and still could not name a drop.
+	// took two booleans to name one fact.
 	// "is the card closed" is stage == "done".
 	Ending           domain.Ending `json:"ending,omitempty"`
 	Running          bool          `json:"running"`

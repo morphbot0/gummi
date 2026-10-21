@@ -43,11 +43,6 @@ func TestClosedCardOffersAnswersForItsEnding(t *testing.T) {
 			[]string{"merge", "newbug"},
 		},
 		{
-			"dropped by its goal",
-			nextInput{stage: domain.StageDone, ending: domain.EndingDropped, droppedBy: "GL-004"},
-			[]string{"adopt", "newbug"},
-		},
-		{
 			// a goal's follow-up is not a bug card: its work is other cards.
 			"a goal",
 			nextInput{stage: domain.StageDone, kind: domain.KindGoal, ending: domain.EndingLanded},
@@ -101,10 +96,6 @@ func TestClosingParagraphNamesTheOtherTwoEndings(t *testing.T) {
 		!strings.Contains(got, "still available") {
 		// landing a handed-off card has always been legal and was never offered
 		t.Fatalf("hand-off paragraph = %q", got)
-	}
-	dropped := nextInput{stage: domain.StageDone, ending: domain.EndingDropped, droppedBy: "GL-004", branch: "gummi/FD-109-y"}
-	if got := plainClaims(closingClaims(dropped)); !strings.Contains(got, "Dropped by GL-004") {
-		t.Fatalf("a drop names the goal that made it: %q", got)
 	}
 }
 

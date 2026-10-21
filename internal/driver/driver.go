@@ -39,17 +39,7 @@ const (
 // Options configures one run. Envelope is required (D6); a missing agent
 // or envelope fails loud before any work starts.
 type Options struct {
-	Envelope int
-	// SubstrateRuns and SubstrateMinutes raise a goal's substrate budget on
-	// resume; zero leaves that ceiling where it is. Like Envelope they only
-	// ever raise.
-	SubstrateRuns, SubstrateMinutes int
-	// Retake declares the evidence of a goal's conclusive runs stale
-	// before it resumes: the named experiment's, or every experiment's
-	// when it is "*". Only an owner knows this — a run that failed
-	// because the substrate was steadily wrong reproduces faithfully and
-	// is recorded as a verdict on the work.
-	Retake       string
+	Envelope     int
 	Profile      string
 	GateApproval string // GateAttended (default) | GateAutopilot
 	// GateApprovalSet reports that the caller passed --gate-approval
@@ -73,9 +63,6 @@ type Options struct {
 	// Adopt is an existing branch to mint the card ONTO instead of cutting
 	// one for it (--adopt, DESIGN §10 D22). Empty creates an ordinary card.
 	Adopt string
-	// GoalDoc, for a goal, is a complete goal doc to start the plan from
-	// (--plan-file) instead of the template seeded with the objective.
-	GoalDoc string
 }
 
 // Driver runs one feature through the engine's gate floor headlessly. It
@@ -100,14 +87,9 @@ type Driver struct {
 	// (which records the ask's round trip and closes the decision) rather
 	// than Send (a plain turn, what --request-changes sends).
 	openingIsAnswer bool
-	bounceNote      string // one-shot addendum to the next plan/implement kickoff after a --bounce resume
-	// replannedFor is the goal-plan refusal the architect has already been
-	// sent back with. A gate refusal it has not seen is worth another
-	// plan round; the same one twice means the architect cannot fix it
-	// and a person has to.
-	replannedFor string
-	curStage     domain.Stage // stage currently being driven (for verbose activity lines)
-	activityCur  int          // cursor into the live session's activity feed
+	bounceNote      string       // one-shot addendum to the next plan/implement kickoff after a --bounce resume
+	curStage        domain.Stage // stage currently being driven (for verbose activity lines)
+	activityCur     int          // cursor into the live session's activity feed
 	// resumePrimed is the one-shot "skip what is already there" flag a
 	// resume sets before it streams anything. See emitActivity.
 	resumePrimed bool
@@ -121,15 +103,6 @@ type Driver struct {
 	// of the run's spend, ran silent under --verbose.
 	activitySession time.Time
 	sentTurn        bool // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
-
-	// events is the stream this driver reads when it is not the engine's
-	// own (a goal's cards share one process, split by hub); nil reads
-	// engine.Events() directly.
-	events <-chan engine.Event
-	hub    *eventHub
-	// ownsHub marks the driver that started hub, as against a goal card's
-	// driver that was handed it: only the owner stops it.
-	ownsHub bool
 }
 
 // roundKey is the fast-path round-counter map's key: one entry per
@@ -154,12 +127,6 @@ func (d *Driver) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
 func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interface{ Write([]byte) (int, error) }, opts Options) *Driver {
 	if opts.GateApproval == "" {
 		opts.GateApproval = GateAttended
-	}
-	// The goal conductor's quiet backstop has to stay clear of whatever
-	// this run lets a stage be silent for; the engine cannot know that
-	// on its own.
-	if eng != nil {
-		eng.SetStageTimeout(opts.StageTimeout)
 	}
 	d := &Driver{
 		eng:        eng,
@@ -265,41 +232,6 @@ type ResumeInput struct {
 	// stops without acting. It is how a script sees a reading without a
 	// screen to read a chip off; the explicit flags stay the way to act.
 	Say *string
-	// Goals only. Note adds one of your notes to a running goal (its lead
-	// reads it next); Reverse reverses a decision for review ("D-3") and
-	// sends the goal back; WrapUp tells a running goal to finish now. A
-	// RequestChanges on a goal that is ready for you sends it back with
-	// the notes, and Envelope raises the goal budget.
-	Note    *string
-	Reverse *string
-	WrapUp  bool
-	// Deliver reports that this resume may only hand its goal decision
-	// over: another process holds the card lock and is conducting the
-	// goal, so the decision is recorded for that conductor to read on its
-	// next tick and nothing is driven here. The CLI sets it when the lock
-	// is busy; a free lock drives as usual.
-	Deliver bool
-}
-
-// goalDecisionName names the decision for the `noted` event.
-func (in ResumeInput) goalDecisionName() string {
-	switch {
-	case in.Note != nil:
-		return "note"
-	case in.WrapUp:
-		return "wrap-up"
-	case in.Reverse != nil:
-		return "reverse " + *in.Reverse
-	}
-	return ""
-}
-
-// GoalDecision reports that this resume carries a goal-only decision —
-// the three verbs whose whole point is to reach a goal WHILE it runs.
-// They write a row the conductor reads and drive nothing themselves,
-// which is what lets them be delivered without the card lock.
-func (in ResumeInput) GoalDecision() bool {
-	return in.Note != nil || in.Reverse != nil || in.WrapUp
 }
 
 // Resume rehydrates the engine's persisted sessions, applies the caller's
@@ -360,26 +292,6 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 			return d.fail(ctx, string(id), fmt.Errorf(
 				"%s has no open question to answer — it waits at a design gate (--approve/--request-changes) or an escalation (--bounce)", id))
 		}
-	}
-
-	if f.IsGoal() {
-		if out, handled, err := d.resumeGoal(ctx, f, in); handled || err != nil {
-			if err != nil {
-				return d.fail(ctx, string(id), err)
-			}
-			return out, nil
-		}
-		if in.Deliver {
-			// another process is conducting this goal: the decision is
-			// recorded and that conductor acts on it. Driving it here
-			// would be a second driver on the same cards.
-			d.out.emit(notedEvent{Event: "noted", ID: string(id), What: in.goalDecisionName()})
-			return Outcome{Status: StatusNoted, ID: string(id)}, nil
-		}
-		return d.drive(ctx, id)
-	}
-	if in.Note != nil || in.Reverse != nil || in.WrapUp {
-		return d.fail(ctx, string(id), fmt.Errorf("%s is not a goal; --note, --reverse and --wrap-up apply to goals", id))
 	}
 
 	// --envelope raises the feature's credit budget before the parked stage
@@ -513,14 +425,14 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string,
 	if err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	// Refused before any mutation, goal or not: a card that may not keep its
-	// history has no merge-commit landing to fall back on.
+	// Refused before any mutation: a card that may not keep its history
+	// has no merge-commit landing to fall back on.
 	if !f.Offers(method) {
 		return d.fail(ctx, string(id),
-			fmt.Errorf("%s cannot land as %s — a goal's history is one squash commit per card; drop --no-squash", id, method))
+			fmt.Errorf("%s cannot land as %s — it lands on its parent's branch as one squash commit; drop --no-squash", id, method))
 	}
-	if f.IsGoal() {
-		return d.mergeGoal(ctx, f, message)
+	if f.Kind == domain.KindGoal {
+		return d.fail(ctx, string(id), fmt.Errorf("%s is a goal, and goals no longer land", id))
 	}
 	// A main-checkout freeform card holds no branch: there is nothing to
 	// squash and nothing this command could do to its work, which lives
@@ -598,9 +510,9 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string,
 	// reason before any git mutation.
 	// the branch this card actually lands on, read off the manager it
 	// resolved to rather than written as the literal "main": a `master`
-	// repo is one case, and a card inside a goal — whose manager is rooted
-	// at the GOAL's worktree, so it lands on the goal branch — is the
-	// other.
+	// repo is one case, and a card a session delegated — whose manager is
+	// rooted at the parent's worktree, so it lands on the parent's branch —
+	// is the other.
 	base := wt.BaseBranch(ctx)
 	if dirty, err := wt.MainTrackedDirty(ctx); err != nil {
 		return d.fail(ctx, string(id), err)
@@ -761,16 +673,6 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 			}
 		}
 	}
-	// A goal's cards resolve to a manager rooted at the goal's tree, so
-	// they come out before it does: after this remove their checkouts are
-	// unreachable and their branches read as unlanded for good
-	// (Engine.CleanGoalCards). A sweep that fails is not fatal to the
-	// goal's own cleanup — it leaves checkouts behind, which is what
-	// happened before it existed.
-	var swept engine.GoalCardCleanup
-	if f.IsGoal() {
-		swept, _ = d.eng.CleanGoalCards(ctx, id)
-	}
 	if hasWT {
 		if err := wt.Remove(ctx, &f, true); err != nil {
 			return d.fail(ctx, string(id), err)
@@ -820,23 +722,8 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	if err := rmtree.RemoveAll(dir); err != nil {
 		return d.fail(ctx, string(id), fmt.Errorf("removing card files %s: %w", dir, err))
 	}
-	d.out.emit(cleanedEvent{
-		Event: "cleaned", ID: string(id), Branch: f.BranchName(),
-		Cards: idStrings(swept.Took), Kept: idStrings(swept.Left), BranchKept: keptBranch,
-	})
+	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName(), BranchKept: keptBranch})
 	return Outcome{Status: StatusVerified, ID: string(id)}, nil
-}
-
-// idStrings is a card-id slice as the NDJSON surface carries it.
-func idStrings(ids []domain.FeatureID) []string {
-	if len(ids) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, string(id))
-	}
-	return out
 }
 
 // HandOff ends a card without landing it — the headless counterpart of the
@@ -861,19 +748,6 @@ func (d *Driver) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, err
 	if f.Kind == domain.KindResearch {
 		return d.fail(ctx, string(id),
 			fmt.Errorf("%s carries no branch to hand off; advance it instead", id))
-	}
-	if f.IsGoal() && (f.Stage != domain.StageVerify || f.VerifiedAt.IsZero()) {
-		// a goal handed off before it is ready is abandoned: its unfinished
-		// cards are dropped and its branch is kept
-		res, err := d.eng.AbandonGoal(ctx, id, d.actor)
-		if err != nil {
-			return d.fail(ctx, string(id), err)
-		}
-		if res.Status != engine.StatusAdvanced {
-			return d.fail(ctx, string(id), handOffRefusal(id, res))
-		}
-		d.out.emit(handedOffEvent{Event: "handed off", ID: string(id), Branch: f.BranchName()})
-		return Outcome{Status: StatusVerified, ID: string(id)}, nil
 	}
 	// the same precondition Merge applies, through the same predicate: a
 	// card in the workflow is handed off from a verified branch, and a
@@ -1045,7 +919,6 @@ func (d *Driver) OpenReviewThreads(ctx context.Context, id domain.FeatureID) (co
 // under --gate-approval=auto, so one call streams the whole tail and
 // returns only at done or an escalation.
 func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error) {
-	defer d.releaseHub()
 	tookOver := false
 	for {
 		if err := ctx.Err(); err != nil {
@@ -1085,9 +958,6 @@ func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error
 
 		var out Outcome
 		switch {
-		case f.IsGoal() && f.Stage == domain.StageImplement:
-			// a goal's implement stage is conducted, not written
-			out, err = d.driveGoal(ctx, f)
 		case f.Stage == domain.StagePlan:
 			out, err = d.driveDesign(ctx, f)
 		case f.Stage == domain.StageTodo:
@@ -1416,17 +1286,6 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 			// stop at the verified branch: Advance reports NeedsMerge (branch
 			// ahead) or transitions to Done (nothing to land). Never merges.
 			return d.crossGate(ctx, f)
-		case out.Reason == gatepolicy.ReasonNoEnvironment && f.IsGoal():
-			// Before the rework path, not after it: a verify that could
-			// not run judged nothing, and sending the goal back to its
-			// cards over it spends a rework round on work nobody found
-			// fault with. Two of those used to end a goal partial.
-			return d.goalVerifyBlocked(ctx, f), nil
-		case f.IsGoal():
-			// a goal's verify that did not pass goes back to its cards, or —
-			// partial already, or out of rework rounds — stops ready for you
-			// with what was not met on the report
-			return d.goalVerifyNotPassed(ctx, f, out.Reason)
 		case out.Reason == gatepolicy.ReasonNoEnvironment:
 			return d.blockedEscalation(f, "verify BLOCKED — the environment cannot run the verification plan; see the artifact"), nil
 		case out.Reason == "verify-blocked":
@@ -1500,7 +1359,6 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 		Corrective:    d.round(f.ID, kind),
 		CorrectiveMax: max,
 		WorkStage:     domain.StageImplement,
-		GoalSettled:   f.GoalSettled(),
 	})
 	switch out.Action {
 	case gatepolicy.RaiseGate:
@@ -1530,17 +1388,6 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 		}
 		d.setRound(f.ID, kind, 0)
 		return d.stepTo(ctx, f.ID, out.Stage)
-	case gatepolicy.HandOver:
-		// A goal's review asked for changes nothing can make — it has
-		// wrapped up or has already given an item up, or it has spent its
-		// rounds proving the same thing. The request belongs on the
-		// hand-over, not in a retry. gatepolicy owns which of those it
-		// was; this arm only carries it out.
-		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
-			return Outcome{}, err
-		}
-		d.setRound(f.ID, kind, 0)
-		return d.goalReviewUnactionable(ctx, f, out.Reason)
 	case gatepolicy.BounceToWork:
 		if err := rounds.Bump(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
@@ -1551,11 +1398,6 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 			return Outcome{}, err
 		}
 		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: reworkLabel(f.Stage), Round: d.round(f.ID, kind)})
-		if f.IsGoal() && f.Stage == domain.StageImplement {
-			// a goal's rework is its lead's, recorded by RunWith: conduct
-			// the stage again rather than await a session that never runs
-			return Outcome{}, nil
-		}
 		return d.awaitRework(ctx, f)
 	default: // Park: the cap was hit, or the verdict was unclear
 		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
@@ -1602,14 +1444,6 @@ func (d *Driver) answerAsk(ctx context.Context, f domain.Feature) (out Outcome, 
 	}
 	if d.opts.Autonomous {
 		rec := engine.RecommendedOption(ask)
-		// a goal card's question goes to its goal's lead first; the
-		// answerer on record stays the unattended loop (no person typed
-		// it), and the goal's log names the lead
-		if f.InGoal() {
-			if ans, ok, gerr := d.eng.GoalAnswer(ctx, f.ID, ask); gerr == nil && ok && ans != "" {
-				rec = ans
-			}
-		}
 		// the answerer declares itself: the record must say an unattended
 		// loop took it, whoever's stored mode the card runs under, or the
 		// morning receipt under-counts it.
@@ -1751,14 +1585,6 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 		})
 		return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 	}
-	// a goal card's plan is read by its goal's lead before it implements
-	if f.InGoal() && f.Stage == domain.StagePlan {
-		if approve, note, ok, err := d.eng.GoalPlanCheck(ctx, f.ID); err == nil && ok && !approve {
-			d.opening = "The goal's lead sent this plan back before implementation: " + note
-			d.out.emit(gateEvent{Event: "gate", ID: string(f.ID), From: string(f.Stage), To: string(f.Stage), Decision: "sent back by the goal's lead"})
-			return Outcome{}, nil
-		}
-	}
 	return d.autoAdvance(ctx, f)
 }
 
@@ -1793,33 +1619,6 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Document: newDocumentSummary(res.DocumentReport), Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusBlockedOmission:
-		d.recordBlocked(f, res.Reason)
-		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Reason: res.Reason, Resume: string(f.ID)})
-		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
-	case engine.StatusBlockedGoalPlan:
-		// The goal plan gate names the first thing wrong with the doc —
-		// an item nothing can check, a card in a repository the
-		// workspace does not manage, an envelope that is not a number.
-		// Without this case it fell to the default below, which reports
-		// "unexpected gate status" and drops the one sentence that says
-		// what to fix.
-		//
-		// Telling the operator is not enough, because the one who can
-		// fix it is the architect and nothing was telling the architect.
-		// A goal whose plan said `envelope: ""` was refused, parked, and
-		// refused again on every resume: each one ran a whole plan pass,
-		// returned "pass", and left the doc exactly as it was. So an
-		// unattended run sends the refusal back as a replan round, and
-		// parks only when the same refusal comes back — which means the
-		// architect has seen it and a person is needed.
-		if d.opts.GateApproval == GateAutopilot && res.Reason != "" && d.replannedFor != res.Reason {
-			d.replannedFor = res.Reason
-			if err := d.eng.RunWith(f, verdict.ReplanNote+"\n\nThe plan gate refused this plan: "+res.Reason); err != nil {
-				return Outcome{}, err
-			}
-			d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "replanning"})
-			return d.awaitRework(ctx, f)
-		}
 		d.recordBlocked(f, res.Reason)
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Reason: res.Reason, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
@@ -1992,13 +1791,6 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 	if got, err := d.store.GetFeature(ctx, f.ID); err == nil {
 		f = got
 	}
-	if f.InGoal() && f.Stage != domain.StageDone {
-		// a goal card's verified branch is its goal's to land, not a stop
-		// for a person: no park, and no terminal event a caller could
-		// mistake for the goal's own
-		d.out.emit(cardVerifiedEvent{Event: "card_verified", ID: string(f.ID), Goal: string(f.GoalID), Branch: f.BranchName(), Spent: f.Spend.Credits})
-		return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
-	}
 	// the landing gate is a person's decision (the TUI's review loop
 	// raises the same gate when verify passes), so it leaves the row
 	// §10.18 requires; landing moves the card and closes it
@@ -2021,9 +1813,6 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 		UnprovenFiles:    unprovenPaths(f),
 		Message:          f.PullRequest.NextStepsHint(true),
 		PullRequest:      f.PullRequest.StatusPayload(),
-	}
-	if f.IsGoal() {
-		ev.Goal = d.goalDone(ctx, f)
 	}
 	d.out.emit(ev)
 	return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
@@ -2308,14 +2097,11 @@ func (d *Driver) resumeCmd(id string, args ...string) string {
 // The stop is a design gate left for a person, so it records its decision
 // like every other checkpoint (§10.18): without the row the log's readers
 // (OpenDecisions, the fleet's waits) saw nothing waiting on a card the
-// board showed as needs-you. A goal's own card is the exception, as it is
-// in the TUI: its stops are its goal's to handle, never queued for you.
+// board showed as needs-you.
 func (d *Driver) stopped(f domain.Feature) Outcome {
 	question := "stopped early at " + string(f.Stage) + ", where the run was asked to stop."
 	d.logPark(f, state.ParkReasonNeedsYou, question)
-	if !f.InGoal() {
-		d.openDecisionOnce(context.Background(), f, state.DecisionKindGate, question)
-	}
+	d.openDecisionOnce(context.Background(), f, state.DecisionKindGate, question)
 	d.out.emit(stoppedEvent{
 		Event: "stopped", ID: string(f.ID), Stage: string(f.Stage), Resume: string(f.ID),
 		Next: d.resumeCmd(string(f.ID), "--approve"),
@@ -2474,19 +2260,11 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 // to a cardmint.Input.
 func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc string) (domain.Feature, error) {
 	repo := d.opts.Repo
-	if ct.Kind == domain.KindGoal && repo == "" {
-		// A goal names no repository — its cards do, and its plan gate
-		// settles its own home from them. Until then its branch has to be
-		// cut somewhere, and in a `repos:`-only workspace there is no
-		// default to cut it in.
-		repo = d.eng.ProvisionalRepo()
-	}
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
 		Kind: ct.Kind, Mode: ct.Mode, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
 		Repo: repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
 		Adopt: d.opts.Adopt, InspectAdopted: d.eng.AdoptInspector(ctx, repo, d.opts.Base),
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
-		GoalDoc: d.opts.GoalDoc,
 	})
 }
 
@@ -2712,7 +2490,7 @@ func (d *Driver) awaitStage(ctx context.Context, id domain.FeatureID) (stageEnd,
 			return stageEnd{}, ctx.Err()
 		case <-tick:
 			return stageEnd{kind: endTimeout}, nil
-		case ev, ok := <-d.stream():
+		case ev, ok := <-d.eng.Events():
 			if !ok {
 				return stageEnd{kind: endError, err: errors.New("engine event stream closed")}, nil
 			}

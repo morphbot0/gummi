@@ -84,18 +84,6 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		// routes a foreign card's line to its consult session instead.
 		return nil
 	}
-	if r.conducted() {
-		// A card inside a goal has an answerer already: its goal's lead
-		// (goalloop.go's goalAnswerAsk takes every ask such a card
-		// raises, and goalPlanCheck its plan gate). Offering the same
-		// question to a person here would be a race with a turn that is
-		// probably already in flight — and the person answering it would
-		// be steering a card the conductor is accounting for. The stop is
-		// not swallowed: the thread renders the ask in the live stage
-		// block like any other, and the goal's own page is where a
-		// reader acts.
-		return nil
-	}
 	if d := crewDecision(r); d != nil {
 		return d
 	}
@@ -418,8 +406,6 @@ func endingWord(e domain.Ending) string {
 		return "landed"
 	case domain.EndingHandedOff:
 		return "handed off"
-	case domain.EndingDropped:
-		return "dropped"
 	}
 	return "nothing landed"
 }
@@ -453,9 +439,6 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			if r.F.Kind == domain.KindResearch {
 				return "verification passed — decide whether the research is done."
 			}
-			if in.goal != nil {
-				return "the goal is ready for you (" + goalMetClause(in.goal) + ") — decide how it leaves gummi."
-			}
 			// Not "ready to land": the picker beneath this offers three
 			// endings and landing is only one of them, so the question
 			// has to be the one the rows actually answer.
@@ -484,13 +467,6 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		// gate earlier, over the answer set stageActions reorders to
 		// match.
 		if critiqueUnsettled(in) {
-			// A goal's review is answered by its conductor, so the card's
-			// sentence — which invites a reader to cross or send back —
-			// describes a decision the rows beneath it do not offer. Say
-			// whose the answer was and what is left instead.
-			if r.F.IsGoal() && r.F.Stage == domain.StageImplement {
-				return "the goal's review asked for changes its cards did not answer — decide how it finishes."
-			}
 			return string(r.F.Stage) + " " + critiqueVerdict(in) + " — choose what happens next."
 		}
 		return string(r.F.Stage) + " is ready for your decision."
@@ -535,11 +511,6 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			// reattach the conversation is in the picker just below
 			// (talkAction), where enter's own label already says so.
 			return "no agent attached — choose what happens next."
-		}
-		if r.F.IsGoal() && r.F.Stage == domain.StageImplement {
-			// a goal's implement stage has no session of its own: its cards
-			// run, and the goal comes back to you when they are done
-			return "the goal is running its cards — it comes back to you when they are done."
 		}
 		return "nothing is running — choose what happens next."
 	}

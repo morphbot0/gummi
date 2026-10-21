@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -123,9 +122,6 @@ type nextInput struct {
 	// as well as a squash (domain.Feature.Offers), so the landing's wording
 	// says both are on offer
 	mergeChoice bool
-	// goal is a goal card's report, nil for every other card: a goal's
-	// verify pass is a hand-over whose sentence names what was met
-	goal *engine.GoalReport
 	// mainCheckout is a freeform card minted into the main checkout: no
 	// branch, no worktree, its turns loose in the checkout the person
 	// works in (DESIGN §19). It is what the answer set reads instead of
@@ -280,8 +276,6 @@ type nextInput struct {
 	// were work done again.
 	spend      float64
 	corrective int
-	// droppedBy names the goal that dropped the card, empty otherwise.
-	droppedBy domain.FeatureID
 
 	// --- answers the server would refuse --------------------------------
 	//
@@ -533,7 +527,6 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		stage:            r.F.Stage,
 		kind:             r.F.Kind,
 		mergeChoice:      r.F.Offers(domain.LandMerge),
-		goal:             r.Goal,
 		landed:           r.Landed,
 		mainCheckout:     r.F.MainCheckout,
 		home:             r.F.Home,
@@ -557,7 +550,6 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		commit:           r.F.LandedSHA,
 		spend:            r.F.Spend.Credits,
 		corrective:       m.round(r.F.ID, domain.RoundKindCorrective),
-		droppedBy:        r.F.GoalID,
 		endedAt:          doneAt(r.History),
 		depBlockers:      r.DepBlockers,
 		stackBlocker:     m.stackLandBlocker(r.F.ID),
@@ -1276,51 +1268,6 @@ func stageAnswers(in nextInput) []nextAction {
 		return append(acts, stopHere(in)...)
 
 	case domain.StageImplement:
-		if in.kind == domain.KindGoal {
-			// A goal that has stopped is offered its endings, not a stop.
-			// "Stop the goal" promises that verified work lands and the
-			// rest is dropped — acts only a running conductor performs —
-			// and this arm used to offer it whatever the goal was doing,
-			// including to a goal whose conductor had already given up.
-			// The row was then the recommendation, and taking it stamped a
-			// wrap-up nothing would carry out.
-			// Stopped on a budget question: the answer is a number only
-			// you can give, so it leads. The goal did not choose work to
-			// abandon — nothing is dropped and the waiting card keeps its
-			// branch and its spend — so "take it to verify" is the answer
-			// for someone who would rather ship what landed.
-			if in.goal != nil && in.goal.NeedsBudget.Waiting() {
-				need := in.goal.NeedsBudget
-				return []nextAction{
-					nextStep("goaltopup", "", "top up and continue",
-						fmt.Sprintf("%s needs about %s — raise the goal's envelope and it carries on from where it stopped", need.Card, domain.FormatDollars(float64(need.Needs)))),
-					nextStep("advance", "g", "finish without it",
-						"take what landed to verify — the waiting card's items come back not met"),
-					nextStep("goalpage", "P", "open the goal page",
-						"the done-when list, the cards (enter watches one), the budget and the lead's log"),
-				}
-			}
-			if goalStopped(in) {
-				return []nextAction{
-					nextStep("advance", "g", "take it to verify",
-						"cross the gate — its done-when checks run and it comes back as your hand-over"),
-					sendBackStep("bounce", "b", "its cards", "your line goes to its lead"),
-					nextStep("goalpage", "P", "open the goal page",
-						"the done-when list, the cards (enter watches one), the budget and the lead's log"),
-				}
-			}
-			// a goal's implement stage is conducted: nothing to run by
-			// hand, and typing into the composer is a note to its lead.
-			//
-			// The page leads and the stop follows, because the first row
-			// is the one `enter` takes: a running goal is a healthy card
-			// with nothing to decide, and the reflex keystroke on it was
-			// dropping its unfinished work and ending it partial.
-			return []nextAction{
-				nextStep("goalpage", "P", "open the goal page", "the done-when list, the cards (enter watches one), the budget and the lead's log"),
-				nextStep("goalstop", "", "stop the goal", "finish now — verified work lands, the rest is dropped, and it comes back partial"),
-			}
-		}
 		if !finished {
 			// nothing has been produced yet, so there is nothing to send
 			// back: the rewind to plan is /bounce, in the inventory.
@@ -1447,23 +1394,6 @@ func stageAnswers(in nextInput) []nextAction {
 				nextStep("advance", "g", "land anyway", "overrule if the failures do not hold up"),
 			}, stopOrResume(in)...)
 		}
-		if in.kind == domain.KindGoal {
-			out := []nextAction{
-				nextStep("advance", "g", "land on "+in.landBase(), "one merge commit over its cards' commits, after a last catch-up with "+in.landBase()),
-				sendBackStep("bounce", "b", "its cards", "your line goes to its lead"),
-			}
-			// reversing takes a decision to reverse: offered only when the
-			// lead logged one for review, which is exactly the set the
-			// reverse dialog would list (the report's Decisions are the
-			// goal log's decision entries)
-			if in.goal != nil && len(in.goal.Decisions) > 0 {
-				out = append(out, nextStep("goalreverse", "", "reverse a decision", "pick a decision for review and have the lead take the other way"))
-			}
-			return append(out,
-				nextStep("handoff", "h", "hand off", "close the goal and keep its branch — nothing lands"),
-				nextStep("goalpage", "P", "open the goal page", "the report: done-when, cards (enter watches one), decisions, declined findings, spend"),
-			)
-		}
 		if in.kind == domain.KindResearch {
 			return append([]nextAction{
 				nextStep("advance", "g", "mark done", "verify passed — advance to done"),
@@ -1588,9 +1518,6 @@ func closedActions(in nextInput) []nextAction {
 			out = append(out, nextStep("merge", "m", "land it after all",
 				"changed your mind — "+landWhy(in.mergeChoice, "squash-merge "+in.keptBranch()+" onto "+in.landBase(), "land "+in.keptBranch()+" onto "+in.landBase())))
 		}
-	case domain.EndingDropped:
-		out = append(out, nextStep("adopt", "", "adopt it",
-			"take it back onto the board with its work kept — it is yours now"))
 	}
 	// The follow-up, on every ending. A landed card that breaks ten
 	// minutes later is the most ordinary thing that happens after done,
@@ -1636,19 +1563,6 @@ func closedActions(in nextInput) []nextAction {
 // pending ask keep the full answer set": it replaces it.
 func answerIt() nextAction {
 	return nextStep("run", "enter", "answer it", "the agent asked a question and is blocked on your reply")
-}
-
-// goalStopped reports a goal whose conductor is not conducting: it has
-// stopped for a reader (an attention item), or a finished session of its
-// own is registered against it — which is exactly what the conductor
-// reads as "reviewing" and refuses to tick behind
-// (engine.goalView's Reviewing, goalpolicy.Decide's first line).
-//
-// It is the goal's half of the judgement stopHere makes for a card, and
-// exists for the same reason: an action that has already happened, or
-// that nothing would carry out, is not an answer to offer.
-func goalStopped(in nextInput) bool {
-	return in.attn != "" || (in.sess != "" && !in.live)
 }
 
 // stopHere is the "stop here" answer, or nothing when there is nothing

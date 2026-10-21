@@ -41,7 +41,7 @@ function stackable (ctx) {
   }
   return rows.filter(r =>
     !['RS', 'GL'].includes(kindTag(r)) && r.kind !== 'research' && r.kind !== 'goal' &&
-    !r.goal && !r.stack && !r.landed && !(r.kind === 'freeform' && r.stage === 'done'))
+    !r.stack && !r.landed && !(r.kind === 'freeform' && r.stage === 'done'))
 }
 
 registerView('stacks', {

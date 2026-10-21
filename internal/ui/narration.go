@@ -254,13 +254,6 @@ func endingSentence(in nextInput) string {
 		}
 		return "Handed off" + when + " — nothing landed, and " + in.keptBranch() +
 			" is yours. Landing it after all is still available while the branch exists."
-	case domain.EndingDropped:
-		by := "its goal"
-		if in.droppedBy != "" {
-			by = string(in.droppedBy)
-		}
-		return "Dropped by " + by + when + " — nothing landed, and whatever it had written is kept on " +
-			in.keptBranch() + "."
 	}
 	// Done, with no ending any record can name: a card closed before the
 	// stamps existed, or a research card, which never had a branch to end
@@ -526,9 +519,6 @@ func verifyStopped(in nextInput, art string) string {
 	if in.verdict == verdictUnclear && in.escalated {
 		return "Verify gave no clear verdict, and the loop gave up rather than passing it." + loopBreaker(in)
 	}
-	if in.verdict == verdictPass && in.goal != nil {
-		return "The goal is ready for you — " + goalMetClause(in.goal) + ". Read the report on the goal page, then decide how it leaves gummi."
-	}
 	if in.verdict == verdictPass {
 		// "ready to land" named one of the three answers below it as
 		// though it were the state itself. The work being ready is the
@@ -545,17 +535,6 @@ func verifyStopped(in nextInput, art string) string {
 			". Decide how it leaves gummi."
 	}
 	return ""
-}
-
-// goalMetClause says how much of a goal's done-when list was met, and why
-// it is partial when it is.
-func goalMetClause(g *engine.GoalReport) string {
-	met, total := g.Met()
-	clause := itoa(met) + " of " + itoa(total) + " done-when met"
-	if g.Partial != "" {
-		clause += ", partial: " + sanitize(g.Partial)
-	}
-	return clause
 }
 
 // excusedClause names the checks a clean verify did not actually hold to,

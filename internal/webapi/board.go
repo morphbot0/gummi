@@ -117,9 +117,8 @@ type Row struct {
 	Elsewhere bool `json:"elsewhere,omitempty"`
 	// Severity is a bug's severity.
 	Severity string `json:"severity,omitempty"`
-	// Stack and Goal place the card in a stack or under a goal.
+	// Stack places the card in a stack.
 	Stack *RowStack `json:"stack,omitempty"`
-	Goal  *RowGoal  `json:"goal,omitempty"`
 	// Objective is a freeform card's objective state (active, paused, met,
 	// stuck, exhausted, capped, failed), empty when it has none: the row's
 	// mark, coloured by it.
@@ -176,12 +175,6 @@ type RowStack struct {
 	Pos   int    `json:"pos"`
 	Of    int    `json:"of"`
 	Stale bool   `json:"stale,omitempty"`
-}
-
-// RowGoal names the goal a card belongs to.
-type RowGoal struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
 }
 
 // Settings is GET /api/settings and PUT /api/settings' answer: the

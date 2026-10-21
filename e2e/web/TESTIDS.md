@@ -57,7 +57,7 @@ request once).
 | `rail-filtered` | compact rail only: a filter still applies; opens the full rail |
 | `rail-foot`, `rail-new-session`, `rail-new-agent`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new-agent`, behind the button's arrow, the same draft as an agent's, `rail-new` the new-card form) |
 | `rail-group-agents` | the agents' own group, above the status groups |
-| `rail-more-menu`, `menu-goals`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
+| `rail-more-menu`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
 ## Resume offer
 
@@ -258,39 +258,9 @@ first answer as one button, while the bar is folded),
 | `keys-help` | the `?` sheet |
 | `menu` | a popup menu opened with `openMenu` (its `testid` option overrides `menu`, e.g. `rail-more-menu`, `card-actions-menu`) |
 | `modal`, `modal-close` | a dialog opened with `openModal` (its `testid` option overrides `modal`) |
-| `view-<name>`, `view-<name>-body` | a registered view (`newcard`, `fleet`, `goals`, `goal`, `stacks`, `ingest`, `bugs`, `doctor`) |
+| `view-<name>`, `view-<name>-body` | a registered view (`newcard`, `fleet`, `stacks`, `ingest`, `bugs`, `doctor`) |
 | `not-available` | body of a view nobody registered yet |
 | `unpair-dialog`, `unpair-confirm` | unpairing |
-
-## Goals (`views/goals.js`)
-List: `goals-list`, `goals-count`, `goals-new` (toggles the form), `goals-empty`,
-`goals-error`, `goal-row-<ID>` (`data-state` = the goal's one word: `todo`,
-`agreeing the plan`, `running`, `wrapping up`, `ready for you`, `done`),
-`goal-row-met`, `goal-row-landed`, `goal-row-spent`.
-Form: `goal-form-slot`, `goal-form`, `goal-form-desc`, `goal-form-budget`,
-`goal-form-profile`, `goal-form-after` (continues another goal),
-`goal-form-refs` (one path per line), `goal-form-autopilot`,
-`goal-form-error`, `goal-form-cancel`, `goal-form-submit`.
-Page: `goal-head`, `goal-back`, `goal-id`, `goal-title`, `goal-state`,
-`goal-met`, `goal-after`, `goal-open-card`, `goal-partial`; callouts
-`goal-plan`, `goal-plan-open`, `goal-needs-budget`, `goal-needs-substrate`,
-`goal-needs-owner`, `goal-waiting-on`, `goal-unread`; `goal-gone` (the goal was deleted while its page was open), `goal-error` (the goal
-page did not load, with why).
-Verbs: `goal-actions`, `goal-action-<id>` (`note`, `budget`, `substrate`,
-`topup`, `stop`, `sendback`, `reverse`, `land`, `abandon`), `goal-action-slot`,
-`goal-panel-<id>` (the inline confirmation), `goal-action-input`,
-`goal-action-runs`, `goal-action-minutes`, `goal-action-ref`,
-`goal-action-why`, `goal-action-error`, `goal-action-cancel`,
-`goal-action-confirm`.
-Ledger: `goal-ledger`, `ledger-envelope`, `ledger-total`,
-`ledger-seg-<own|held|reserve|left>`, `ledger-goal-spend`, `ledger-held`,
-`ledger-card-spend`, `ledger-reserve`, `ledger-left`, `ledger-substrate`.
-Sections: `goal-done-when`, `done-when-<DW-N>` (`data-status`), `goal-cards`,
-`goal-card-<ID>` (`data-state`; click selects the card and closes the view),
-`goal-decisions`, `goal-decision-<D-N>`, `goal-reverse-<D-N>`,
-`goal-declined`, `goal-found`, `goal-notebook`, `goal-reference`,
-`goal-finding-<ref>`, `goal-try-it`, `goal-log`, `goal-log-entry`
-(`data-action`), `goal-log-more`.
 
 ## Stacks (`views/stacks.js`)
 `stacks-list`, `stacks-count`, `stacks-new`, `stacks-empty`, `stacks-error`;
@@ -310,8 +280,7 @@ Chain: `stack-chain`, `stack-base`, `stack-member-<ID>` (`data-pos`, and
 Restack answer: `stack-result`, `stack-result-close`, `stack-replayed`,
 `stack-conflict`, `stack-waiting`, `stack-push`, `stack-push-line`,
 `stack-push-copy`, `stack-push-copy-all`.
-Card head: `card-goal` (opens the goal page — the card's goal, or on a goal's
-own card its page), `card-stack` (opens the stacks view on the card's stack).
+Card head: `card-stack` (opens the stacks view on the card's stack).
 
 ## Schedules (`views/schedules.js`)
 `schedules-list`, `schedules-count`, `schedules-new`, `schedules-empty`,

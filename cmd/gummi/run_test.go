@@ -112,10 +112,9 @@ func TestDriverOptionsGateValidation(t *testing.T) {
 }
 
 // A verb that does not offer one of the shared driving flags still
-// assembles its options: goal takes no --repo, and resume changes neither
-// repo nor base. Reading an absent flag must be "" rather than a panic.
+// assembles its options: resume changes neither repo nor base. Reading an absent flag must be "" rather than a panic.
 func TestDriverOptionsToleratesAbsentSharedFlags(t *testing.T) {
-	for _, verb := range []string{"goal", "resume"} {
+	for _, verb := range []string{"resume"} {
 		opts, err := driverOptions(parsedFlags(t, verb, "--envelope", "100"), "")
 		if err != nil {
 			t.Fatalf("%s: driverOptions: %v", verb, err)

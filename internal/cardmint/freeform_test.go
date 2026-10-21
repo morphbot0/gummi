@@ -78,20 +78,3 @@ func TestAFreeformCardCannotAdoptABranch(t *testing.T) {
 	}
 }
 
-// TestAGoalCannotHoldAFreeformCard: a goal's cards land on its branch one
-// commit each and its lead reasons about their stages, so a card with no
-// stage is invisible to it.
-func TestAGoalCannotHoldAFreeformCard(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	_, err := Mint(context.Background(), store, ws, Input{
-		Kind:        domain.KindFreeform,
-		Description: "a card the goal wants",
-		Goal:        "GL-001",
-	})
-	if err == nil {
-		t.Fatal("a goal minted a freeform card")
-	}
-	if !strings.Contains(err.Error(), "GL-001") {
-		t.Errorf("the refusal does not name the goal: %v", err)
-	}
-}

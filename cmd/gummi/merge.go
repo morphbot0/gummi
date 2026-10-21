@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
@@ -26,15 +25,13 @@ func runMerge(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	// a goal lands as a merge commit gummi writes from the goal and its
-	// cards, so -m is optional for one. A merge commit of a card takes git's
-	// own message when -m is absent; only a squash needs one.
-	isGoal := strings.HasPrefix(strings.ToUpper(idArg), "GL-")
+	// A merge commit takes git's own message when -m is absent; only a
+	// squash needs one.
 	method := domain.LandSquash
 	if fl.Bool("no-squash") {
 		method = domain.LandMerge
 	}
-	message, err := commitMessage(fl, "merge", !isGoal && method == domain.LandSquash)
+	message, err := commitMessage(fl, "merge", method == domain.LandSquash)
 	if err != nil {
 		return err
 	}

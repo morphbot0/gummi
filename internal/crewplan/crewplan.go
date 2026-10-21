@@ -298,7 +298,7 @@ func Compare(approved domain.CrewPlan, approvedItems []domain.DoneWhen, revised 
 			add("adds done-when %s", id)
 		case strings.TrimSpace(old.Says) != strings.TrimSpace(it.Says):
 			add("rewords done-when %s", id)
-		case strings.TrimSpace(old.Check) != strings.TrimSpace(it.Check) || old.Judge != it.Judge || old.Experiment != it.Experiment:
+		case strings.TrimSpace(old.Check) != strings.TrimSpace(it.Check) || old.Judge != it.Judge:
 			add("changes how done-when %s is checked", id)
 		}
 	}

@@ -66,11 +66,6 @@ A rebase-resolve pass (the board's "let the agent resolve them") runs
 the command its kickoff names; a conflicted path takes the card's side,
 and an untracked file in the way is moved aside and folded back in.
 
-A goal (GL-*) is started from a complete doc (`gummi goal --plan-file`):
-its plan stage agrees it untouched, its critique and review pass, and its
-lead's turns are acknowledged; the cards the doc names take their own
-keywords.
-
 An ingest pass (`gummi ingest`, the board's ingest dialog) proposes one
 feature per `## ` heading of the source document; a heading that starts
 `Unmapped:` is reported in the coverage map as a requirement no proposal
@@ -534,18 +529,9 @@ def plan_research(turn):
     turn.say("The question, its constraints and the direction are set.")
 
 
-def plan_goal(turn):
-    """A goal's plan is the doc `gummi goal --plan-file` started it from:
-    the architect reads it and agrees, touching nothing."""
-    turn.tool("read", os.path.basename(turn.ctx["spec"]) or "goal doc")
-    turn.say("The goal doc is complete: every done-when item is checked and served by a card.")
-
-
 def stage_plan(turn, answer=None):
     kind = turn.ctx["kind"]
-    if kind == "GL":
-        plan_goal(turn)
-    elif kind == "RS":
+    if kind == "RS":
         plan_research(turn)
     elif kind == "BG":
         plan_bug(turn)
@@ -873,7 +859,7 @@ def detect(frame):
         "crew_planner": "You are a crew's planner" in hints,
         "crew_reviewer": "You review one piece of a crew's work" in hints,
     }
-    m = re.search(r"You are the \w+ for \w+ ((FD|BG|RS|FF|GL)-\d+): (.*)", hints)
+    m = re.search(r"You are the \w+ for \w+ ((FD|BG|RS|FF)-\d+): (.*)", hints)
     if m:
         ctx["card"], ctx["kind"], ctx["title"] = m.group(1), m.group(2), m.group(3).strip().rstrip(".")
     else:
@@ -885,10 +871,8 @@ def detect(frame):
         ctx["stage"] = "rebase"
     elif "a freeform card" in hints:
         ctx["stage"] = "open"
-    elif re.search(r"^(Stage: Plan critique|Stage: Goal plan critique|Research critique)", hints, re.M):
+    elif re.search(r"^(Stage: Plan critique|Research critique)", hints, re.M):
         ctx["stage"] = "critique"
-    elif re.search(r"^Stage: Goal review", hints, re.M):
-        ctx["stage"] = "review"
     else:
         m = re.search(r"^Stage: (\w+)", hints, re.M)
         if m:
@@ -901,9 +885,7 @@ def detect(frame):
         ctx["spec"] = m.group(1).rstrip(".")
     # the scenario keywords, from the title/brief in the hints and the artifact
     blob = (hints + "\n" + read_doc(ctx["spec"])).lower()
-    # a goal's doc names its cards, keywords and all; those are the cards'
-    # scenarios, not the goal's own
-    ctx["keywords"] = [] if ctx["kind"] == "GL" else [k for k in KEYWORDS if k in blob]
+    ctx["keywords"] = [k for k in KEYWORDS if k in blob]
     return ctx
 
 
@@ -920,7 +902,7 @@ def handle_send(ctx, text, first):
         return
     if text.lstrip().startswith("[slow]"):
         # a line that opens with [slow] asks to be streamed slowly; one that
-        # merely quotes a [slow] card's title (a goal lead's turn) does not
+        # merely quotes a [slow] card's title does not
         turn.slow = True
     reply = scribe(ctx, text)
     if reply is not None:

@@ -169,7 +169,7 @@ func staleSentence(f domain.Feature, head string) string {
 // freeform one has no verify; their floors are the ones landingRefusal
 // reads.
 func (m *Shell) verifiedTipRefusal(ctx context.Context, f domain.Feature) string {
-	if f.IsFreeform() || f.HandedOff() || f.IsGoal() || m.store == nil || m.wt == nil {
+	if f.IsFreeform() || f.HandedOff() || f.Kind == domain.KindGoal || m.store == nil || m.wt == nil {
 		return ""
 	}
 	cur, err := m.store.GetFeature(ctx, f.ID)

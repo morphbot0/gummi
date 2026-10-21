@@ -90,10 +90,6 @@ func (d *closeOutDialog) readyCards() []featureRow {
 		if r.F.Stage != domain.StageVerify || r.F.VerifiedAt.IsZero() || d.skipped[r.F.ID] {
 			continue
 		}
-		if r.F.InGoal() {
-			// a goal card's branch is its goal's to land, never a person's
-			continue
-		}
 		out = append(out, r)
 	}
 	return out

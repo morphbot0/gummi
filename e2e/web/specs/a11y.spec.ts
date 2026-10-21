@@ -58,7 +58,7 @@ test('the main surfaces pass axe in both themes', async ({ pairedPage: page, ser
       await expect(page.getByTestId('panel-loading')).toHaveCount(0);
       await audit(page, at(`tab ${tab}`), found);
     }
-    for (const id of [b.gate, b.ask, b.running!, b.freeform!, b.goal, b.landed]) {
+    for (const id of [b.gate, b.ask, b.running!, b.freeform!, b.landed]) {
       await open(page, id);
       await audit(page, at(`card ${id}`), found);
     }
@@ -77,7 +77,7 @@ test('the main surfaces pass axe in both themes', async ({ pairedPage: page, ser
       ['newcard', async () => { await page.getByTestId('rail-new-menu').click(); await page.getByTestId('rail-new').click(); }],
       ['fleet', () => page.getByTestId('rail-fleet').click()],
     ];
-    for (const name of ['goals', 'stacks', 'repos', 'ingest', 'bugs', 'doctor']) {
+    for (const name of ['stacks', 'repos', 'ingest', 'bugs', 'doctor']) {
       views.push([name, async () => { await page.getByTestId('rail-more').click(); await page.getByTestId(`menu-${name}`).click(); }]);
     }
     for (const [name, go] of views) {
@@ -89,12 +89,6 @@ test('the main surfaces pass axe in both themes', async ({ pairedPage: page, ser
       await page.keyboard.press('Escape');
       await expect(v).toHaveCount(0);
     }
-    await page.getByTestId('rail-more').click();
-    await page.getByTestId('menu-goals').click();
-    await page.getByTestId(`goal-row-${b.goal}`).click();
-    await expect(page.getByTestId('view-goal')).toBeVisible();
-    await audit(page, at('view goal'), found);
-    await page.keyboard.press('Escape');
   }
 
   console.log(`axe: ${found.length} serious or critical\n${found.join('\n')}`);

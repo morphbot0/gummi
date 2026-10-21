@@ -132,7 +132,7 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await expect(page.getByTestId('live')).toBeVisible();
     await L.snap('running-thread');
 
-    // landed, backlog with a dependency, a bug, freeform, research, a goal, a stack
+    // landed, backlog with a dependency, a bug, freeform, research, a stack
     await L.open(b.landed);
     await L.snap('landed-thread');
     await L.tab('stats');
@@ -147,8 +147,6 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await L.snap('research-thread');
     await L.tab('spec');
     await L.snap('research-spec');
-    await L.open(b.goal);
-    await L.snap('goal-thread');
     await L.open(b.stacked[0]);
     await L.snap('stacked-thread');
 
@@ -193,12 +191,6 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
 
     // the board's other surfaces
     await L.view('newcard', async () => { await L.rail(); await page.getByTestId('rail-new-menu').click(); await page.getByTestId('rail-new').click(); });
-    await L.view('goals', () => L.more('goals'));
-    await L.more('goals');
-    await page.getByTestId(`goal-row-${b.goal}`).click();
-    await expect(page.getByTestId('view-goal')).toBeVisible();
-    await L.snap('view-goal');
-    await page.keyboard.press('Escape');
     await L.view('stacks', () => L.more('stacks'));
     await L.view('ingest', () => L.more('ingest'));
     await L.view('bugs', () => L.more('bugs'));
@@ -211,7 +203,7 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await L.theme_('light');
     for (const [w, hgt] of [[1280, 720], [1024, 768], [1440, 900]]) {
       await page.setViewportSize({ width: w, height: hgt });
-      for (const id of [b.failed, b.ask, b.goal]) {
+      for (const id of [b.failed, b.ask]) {
         await L.open(id);
         const thread = await page.getByTestId('thread').boundingBox();
         expect(thread!.height, `${id} at ${w}×${hgt}: the thread keeps room`).toBeGreaterThan(hgt * 0.3);

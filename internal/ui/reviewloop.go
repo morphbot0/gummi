@@ -103,19 +103,9 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		// rule as dormant; this keeps it switched off).
 		VerifyMayBounce: false,
 	})
-	if id.Kind() == domain.KindGoal {
-		return tea.Batch(m.goalVerifyOutcome(id, out), m.loadRows)
-	}
 	var stamp tea.Cmd
 	switch {
 	case out.Action == gatepolicy.RaiseGate:
-		if m.goalOf(id) != "" {
-			// raising the gate wakes the card's goal, which reads the
-			// verified stamp to tell a card ready to land from one stuck at
-			// a stop; stamped by the async command below, the goal's tick
-			// could read the park first and drop a card that just passed
-			m.stampVerified(id)
-		}
 		m.raiseAttention(id, attnGate, gateReason(domain.StageVerify, id.Kind(), true, m.baseBranchOf(id)))
 		// The excused-checks cache is otherwise filled on a board load, so
 		// the frame that first says "verify passed" — the one most likely
@@ -214,17 +204,6 @@ func (m *Shell) markVerified(id domain.FeatureID) tea.Cmd {
 	}
 }
 
-// stampVerified is markVerified done in place, for the one caller whose
-// next step reads the stamp: a goal card's gate wakes its goal.
-func (m *Shell) stampVerified(id domain.FeatureID) {
-	if m.store == nil || id.Kind() == domain.KindResearch {
-		return
-	}
-	if msg := m.writeVerified(id); msg != nil {
-		m.notice = msg.(noticeMsg)
-	}
-}
-
 // writeVerified stamps VerifiedAt with the branch tip the pass ran on,
 // unless that very tip is already stamped, returning a notice when the
 // store refuses. A pass on a tip the stamp does not name — the card was
@@ -237,7 +216,7 @@ func (m *Shell) writeVerified(id domain.FeatureID) tea.Msg {
 		return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 	}
 	rev := ""
-	if m.wt != nil && !f.IsGoal() {
+	if m.wt != nil {
 		rev, _ = m.wt.Head(ctx, &f)
 	}
 	if !f.VerifiedAt.IsZero() && f.VerifiedRev == rev {
@@ -307,7 +286,6 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		Corrective:    m.round(id, kind),
 		CorrectiveMax: maxRounds,
 		WorkStage:     domain.StageImplement,
-		GoalSettled:   snap.Feature.GoalSettled(),
 	})
 	switch out.Action {
 	case gatepolicy.RaiseGate:
@@ -373,18 +351,6 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		}
 		m.setRound(id, kind, 0)
 		return m.autoStep(id, out.Stage, "critique passed → "+string(out.Stage), "review")
-	case gatepolicy.HandOver:
-		// A goal's own review asked for changes nothing can make. This
-		// loop used to have no goal arm at all: the rounds burned against
-		// a conductor that had finished, and the cap handed the goal to a
-		// reader whose picker has no row that answers it. gatepolicy owns
-		// the rule now, so this loop and the driver end a goal the same
-		// way — on its report, which is where a person meets a goal.
-		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
-			return m.writeHalt(id, err)
-		}
-		m.setRound(id, kind, 0)
-		return m.goalReviewUnactionable(id, out)
 	case gatepolicy.BounceToWork:
 		// persist the burned round before it lands in the fast path, so a
 		// mid-loop resume observes it.

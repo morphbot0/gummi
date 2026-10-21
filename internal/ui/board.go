@@ -228,9 +228,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		tint = s.Info
 	}
 	id := tint.Render(cardLead(r.F))
-	if m.isFoldedChild(m.rowIndex(r.F.ID)) {
-		id = faint.Render("└") + " " + id
-	}
 	badge := ""
 	// a card the Advance gate would block on an unmet direct dependency
 	// shows a blocked badge alongside the severity badge — read-only
@@ -272,9 +269,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	// carry one.
 	if r.F.IsDiagnosis() {
 		badge += " " + s.CardIDResearch.Render("dx")
-	}
-	if g := goalRowTag(s, r, m.goalOpen[r.F.ID]); g != "" {
-		badge += " " + g
 	}
 	// A stacked card says where it sits and what it forks from. It is a
 	// map lookup, never a git call: loadRows derived it.
@@ -323,10 +317,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	landed := ""
 	if r.Landed || r.F.LandedSHA != "" {
 		landed = " " + s.Success.Render("landed")
-	} else if r.F.GoalDropped() {
-		// a card its goal dropped stays listed under the goal; its ending
-		// is the drop, not a hand-off anyone chose
-		landed = " " + faint.Render("⊘ dropped")
 	} else if r.F.HandedOff() {
 		// The other half of the same permanent question. Without it a
 		// deliberate hand-off and an abandoned card read identically in
@@ -519,7 +509,7 @@ func formatCount(super domain.SuperState, n int) string {
 func (m *Shell) closeOutText() string {
 	var ready, holding int
 	for _, r := range m.rows {
-		if r.F.Stage == domain.StageVerify && !r.F.VerifiedAt.IsZero() && !r.F.InGoal() {
+		if r.F.Stage == domain.StageVerify && !r.F.VerifiedAt.IsZero() {
 			ready++
 		}
 		if r.Landed {

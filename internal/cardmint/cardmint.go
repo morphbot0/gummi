@@ -163,31 +163,21 @@ type Input struct {
 	// stored field. Mint writes the resolved value rather than the empty
 	// string so nothing downstream has to resolve it again.
 	GateApproval string
-	// Goal mints the card into that goal: its branch will fork from the
-	// goal branch and its budget is carved out of the goal's. Empty mints
-	// an open-board card. A goal cannot be minted into a goal.
-	Goal domain.FeatureID
 	// Unattended marks a mint with nobody present to retitle a colliding
 	// card — a schedule firing on a cadence mints the same description
 	// every fire, and the collision surfaces at the fire, after the
 	// person has gone home. A title that is taken takes the next free
-	// variant silently, exactly as a goal's cards do. A person's mint
+	// variant silently. A person's mint
 	// never sets it: the fix is a word in the title, and the person
 	// should be the one to type it.
 	Unattended bool
 	// Parent mints the card under a freeform card's delegation: its branch
 	// forks from the freeform branch and lands back on it, and its envelope
-	// is carved out of that card's delegation budget. Excludes Goal.
+	// is carved out of that card's delegation budget.
 	Parent domain.FeatureID
-	// FoundBy records the card that filed this one: a goal that found the
-	// work along the way, or a finished card whose follow-up this is.
-	// Provenance only — it blocks and schedules nothing. Ignored when
-	// Goal is set.
+	// FoundBy records the card that filed this one: a finished card whose
+	// follow-up this is. Provenance only — it blocks and schedules nothing.
 	FoundBy domain.FeatureID
-	// GoalDoc, for a goal, is a complete goal doc to start from (headless
-	// --plan-file) instead of the template seeded with the description.
-	// Ignored for every other kind.
-	GoalDoc string
 }
 
 // Mint validates in, mints the next sequence number, builds the
@@ -205,16 +195,9 @@ type Input struct {
 //
 // Telling a person to retitle a card is the right answer when a person is
 // naming one: the fix is a word in the title and nothing else. It is the
-// wrong answer to a goal minting its own cards, because there is nobody
-// there to retitle anything — the collision surfaces after the plan gate,
-// with the plan's spend already gone, and a resume runs into it again
-// unless the architect happens to invent a different title. A goal that
-// runs the same shape of work twice in one workspace (the second tier of
-// a programme, a re-run after a wrap-up) will collide by nature: the good
-// title for the work is the title the last one used.
-//
-// So a goal's card takes the next free variant and says nothing; a
-// person's card still gets told.
+// wrong answer to an unattended mint (a schedule's fire), because there is
+// nobody there to retitle anything — so that card takes the next free
+// variant and says nothing; a person's card still gets told.
 func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (string, error) {
 	branchFor := func(s string) string {
 		f := domain.Feature{Kind: in.Kind, Slug: s, BranchScheme: domain.DefaultBranchScheme}
@@ -227,7 +210,7 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 	if !taken {
 		return slug, nil
 	}
-	if in.Goal == "" && !in.Unattended {
+	if !in.Unattended {
 		return "", fmt.Errorf(
 			"%s already uses the branch %s — retitle this card so it gets a different one", owner, branchFor(slug))
 	}
@@ -330,11 +313,6 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	// card that turns out to be worth landing is promoted the same way.
 	if in.Kind == domain.KindFreeform && in.Adopt != "" {
 		return domain.Feature{}, fmt.Errorf("a freeform card cannot adopt %s: an adopted card walks the whole workflow (DESIGN §10 D22) and a freeform card has none — mint a feature onto that branch instead", in.Adopt)
-	}
-	// A goal's cards land on its branch one commit each and its lead
-	// reasons about their stages; a card with no stage is invisible to it.
-	if in.Kind == domain.KindFreeform && in.Goal != "" {
-		return domain.Feature{}, fmt.Errorf("goal %s cannot hold a freeform card: a goal conducts cards through the workflow, and a freeform card is not in it", in.Goal)
 	}
 	// An agent is in no repository: everything that names one, or a
 	// branch in one, is a mint that lost track of what it was making.
@@ -443,43 +421,8 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		f.Severity = in.Severity
 	}
 	f.ParentID = in.Parent
-	if in.Goal != "" {
-		f.GoalID = in.Goal
-	} else {
-		f.FoundBy = in.FoundBy
-	}
-	if in.Kind == domain.KindGoal {
-		// A goal's objective is the whole description, and the plan
-		// conversation starts from it — so a goal always has a draft, even
-		// from a one-line description, exactly as a research card always
-		// has its document. A caller-supplied goal doc replaces the
-		// template outright; the plan gate checks it like any other.
-		content := in.GoalDoc
-		if strings.TrimSpace(content) == "" {
-			content = spec.SeededGoalTemplate(&f, spec.GoalSeed{Objective: in.Description})
-		}
-		if err := f.Validate(); err != nil {
-			return domain.Feature{}, err
-		}
-		draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-		if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
-			return domain.Feature{}, err
-		}
-		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
-			return domain.Feature{}, err
-		}
-		// The draft is what the plan conversation edits, so it stops being
-		// what the owner wrote the moment the architect touches it. Keep
-		// what they submitted, unchanged, so the gate can say what it did
-		// differently — a plan approved unattended is otherwise agreed by
-		// nobody who can see what changed.
-		if strings.TrimSpace(in.GoalDoc) != "" {
-			submitted := filepath.Join(ws.DraftsDir(), string(f.ID)+".submitted.md")
-			if err := atomicfile.Write(submitted, []byte(in.GoalDoc), 0o600); err != nil {
-				return domain.Feature{}, err
-			}
-		}
-	} else if in.Kind == domain.KindResearch {
+	f.FoundBy = in.FoundBy
+	if in.Kind == domain.KindResearch {
 		artifact := filepath.Join(ws.Root, f.ArtifactPath())
 		seed := domain.ResearchSeed{Brief: in.Description}
 		prov := domain.DraftProvenance{Source: in.Source}

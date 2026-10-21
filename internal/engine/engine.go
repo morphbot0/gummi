@@ -17,7 +17,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,7 +33,6 @@ import (
 	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/substrate"
 	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -212,13 +210,6 @@ type Config struct {
 	// taken from .gummi/config.yaml. Empty means a profile that also omits
 	// a value falls back to the built-in default (warn).
 	Sandbox string
-	// StageTimeout is how long a stage may be silent before its driver
-	// cuts it off (the headless --stage-timeout; zero disables it). The
-	// engine does not enforce it — the driver does — but a goal's quiet
-	// backstop has to stay clear of it, or a stage the operator gave
-	// longer than goalpolicy.MaxQuiet to be silent in trips a backstop
-	// meant for goals that have genuinely stopped.
-	StageTimeout time.Duration
 	// Persist writes session transcripts to Store so they survive a
 	// restart (Restore reloads them).
 	Persist bool
@@ -247,11 +238,7 @@ type Config struct {
 // Engine orchestrates all live sessions and the autonomous runs.
 type Engine struct {
 	cfg Config
-	// stageTimeoutMu guards cfg.StageTimeout, the one Config field a
-	// driver sets after construction (SetStageTimeout) while goal cards
-	// start drivers concurrently.
-	stageTimeoutMu sync.Mutex
-	now            func() time.Time // injectable clock (spec-capture timestamps)
+	now func() time.Time // injectable clock (spec-capture timestamps)
 
 	// raw carries events from pump goroutines to the forwarder; events
 	// is the UI-facing stream, owned solely by the forwarder.
@@ -268,9 +255,7 @@ type Engine struct {
 	// the card cost. Everything that asks "is this card still working?"
 	// asked e.live and was told no, so the board rendered a live card as
 	// "autopilot stopped without saying so" and offered to restart the
-	// stage, and a goal
-	// declared its own healthy child stuck and spent a lead turn
-	// restarting it. Refcounted, not a flag: baseline follows discovery
+	// stage. Refcounted, not a flag: baseline follows discovery
 	// and a card can be re-entered.
 	oneShots map[domain.FeatureID]int
 	// oneShotLogs holds the live file those passes share, one per card;
@@ -429,18 +414,6 @@ type Engine struct {
 	// same mutex and with the same lifetime as repoCards.
 	repoInstructions map[string]string
 
-	// goalLocks serializes the conductor per goal (goal.go's goalLock).
-	// spawnExperiment starts the process that makes a prepared run; nil
-	// means spawnDetached
-	spawnExperiment ExperimentSpawner
-
-	// substrates remembers the last reading of each substrate, so a goal
-	// that ticks every few seconds does not probe real machines that often
-	substrates substrateCache
-
-	goalLocksMu sync.Mutex
-	goalLocks   map[domain.FeatureID]*sync.Mutex
-
 	// discoverLocks serializes check discovery per repository root
 	// (checkscache.go's discoveryLock), so two cards crossing their plan
 	// gates at once survey the repo once between them instead of each
@@ -479,11 +452,6 @@ func New(cfg Config) *Engine {
 	pool := cfg.Pool
 	if pool == nil && cfg.Worktrees != nil {
 		pool = worktree.WrapSingle(cfg.Worktrees)
-	}
-	if pool != nil && cfg.Store != nil {
-		// a goal card resolves through its goal's worktree; the pool
-		// asks the store whether a goal whose worktree is gone has ended
-		pool.SetGoalLookup(cfg.Store.GetFeature)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &Engine{
@@ -873,36 +841,9 @@ func (e *Engine) RunRebaseStopped(ctx context.Context, f domain.Feature, files [
 // run is the shared autonomous-run path behind RunWith, RunCritique,
 // and RunRebase.
 func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
-	// A goal's implement stage is conducted, not written: there is no
-	// stage agent to run. A run of it — the driving loop starting the
-	// stage, or a review's changes and a failed verify sending the goal
-	// back — records the note as work the goal owes and asks the loop to
-	// tick the goal instead.
-	if f.IsGoal() && f.Stage == domain.StageImplement && flavor == flavorStage {
-		// A review that just asked for changes said what it found in its
-		// own words, and those words — not the loop's generic rework note,
-		// which speaks to an implementer about threads — are what the lead
-		// has to act on.
-		if s := e.Get(f.ID); s != nil {
-			if snap := s.Snapshot(); snap.Critique {
-				if found := lastAssistantText(snap.Transcript); found != "" {
-					note = "The goal's review of the combined branch asked for changes. What it found:\n\n" + found
-				}
-			}
-		}
-		if strings.TrimSpace(note) != "" && e.cfg.Store != nil {
-			e.goalLog(context.Background(), f.ID, state.GoalPayload{Action: state.GoalRework, Detail: note, By: ActorGoal})
-		}
-		e.Drop(f.ID)
-		e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventGoal})
-		return nil
-	}
-	// A card its goal dropped does not run on: the drop can land between two
-	// steps of a driving loop that still holds the card from before it.
-	if f.GoalID != "" && e.cfg.Store != nil {
-		if cur, err := e.cfg.Store.GetFeature(context.Background(), f.ID); err == nil && cur.GoalDropped() {
-			return fmt.Errorf("%s was dropped by %s and does not run on", f.ID, cur.GoalID)
-		}
+	// Goals are retired: a legacy goal card is read, never run.
+	if f.Kind == domain.KindGoal {
+		return fmt.Errorf("%s is a goal, and goals no longer run", f.ID)
 	}
 	role, ok := roleForStage(f)
 	if !ok {
@@ -1279,12 +1220,8 @@ func (e *Engine) probeCleanPresent(ctx context.Context, f *domain.Feature) bool 
 	if len(cfg.EnvProbes()) == 0 {
 		return false
 	}
-	m, err := e.Substrates()
-	if err != nil {
-		return false
-	}
 	workDir := filepath.Join(e.pool.Root(), f.WorktreePath())
-	for _, r := range probeEnvironment(ctx, cfg, m, workDir) {
+	for _, r := range envprobe.Run(ctx, workDir, cfg.EnvProbes()) {
 		if r.Err == nil && r.Present {
 			return true
 		}
@@ -1299,10 +1236,6 @@ func (e *Engine) probeCleanPresent(ctx context.Context, f *domain.Feature) bool 
 // command source is operator config from outside the worktree.
 func (e *Engine) runEnvProbes(s *Session) string {
 	cfg, err := e.layeredConfig()
-	var m *substrate.Manager
-	if err == nil {
-		m, err = e.Substrates()
-	}
 	if err != nil {
 		msg := "Environment prerequisites could not be probed: " + err.Error()
 		s.appendActivity(msg)
@@ -1313,7 +1246,7 @@ func (e *Engine) runEnvProbes(s *Session) string {
 		return ""
 	}
 	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())
-	results := probeEnvironment(context.Background(), cfg, m, workDir)
+	results := envprobe.Run(context.Background(), workDir, cfg.EnvProbes())
 	s.mu.Lock()
 	s.envProbes = results
 	s.mu.Unlock()
@@ -1323,35 +1256,6 @@ func (e *Engine) runEnvProbes(s *Session) string {
 	}
 	e.persist(s)
 	return "Environment prerequisites probed in this worktree:\n" + envprobe.FormatReport(results)
-}
-
-// withDoneWhenChecks makes a goal's check list carry one check per
-// commanded done-when item, with the item's own command. The done-when
-// block is where those commands are agreed (and repaired, by
-// done_when_check_fix); the copy in gummi-checks is only how they reach
-// the runner, and agents edit that block. A copy rewritten into a shape
-// that no longer parses, or into another command, must not silently stop
-// the goal proving its items.
-func withDoneWhenChecks(doc string, checks []domain.Check) []domain.Check {
-	items, _, err := spec.ParseDoneWhen(doc)
-	if err != nil {
-		return checks
-	}
-	out := append([]domain.Check(nil), checks...)
-	no := false
-	for _, it := range items {
-		if it.Check == "" {
-			continue
-		}
-		// an agent's copy may have renamed it to the bare item id
-		i := slices.IndexFunc(out, func(c domain.Check) bool { return c.Name == it.CheckName() || c.Name == it.ID })
-		if i < 0 {
-			out = append(out, domain.Check{Name: it.CheckName(), Cmd: it.Check, Baseline: &no})
-			continue
-		}
-		out[i].Name, out[i].Cmd = it.CheckName(), it.Check
-	}
-	return out
 }
 
 // runSpecChecks executes the artifact's gummi-checks commands in the
@@ -1371,23 +1275,10 @@ func (e *Engine) runSpecChecks(s *Session) string {
 		return ""
 	}
 	checks, _, parseErr := spec.ParseChecks(string(raw))
-	if parseErr != nil && !s.Feature.IsGoal() {
+	if parseErr != nil {
 		return "gummi could not run the artifact's gummi-checks: " + parseErr.Error() +
 			"\nThis is a plan defect. Repair the block in the Verification section, append a bullet there reading " +
 			"`finding: gummi-checks does not parse`, run the repaired commands yourself, and set your verdict to fail."
-	}
-	if s.Feature.IsGoal() {
-		// a goal's done-when checks run whatever its checks block says
-		checks = withDoneWhenChecks(string(raw), checks)
-	}
-	// A goal's items may be proved by an experiment rather than a command.
-	// gummi does not run one here — a run is long, remote and exclusive,
-	// and the conductor made it before the goal finished — it reads what
-	// the runs say about the heads the goal has now, as results that sit
-	// beside the commands' and count exactly as they do.
-	var proven []verify.Result
-	if s.Feature.IsGoal() {
-		proven = e.goalExperimentResults(context.Background(), s.Feature, string(raw))
 	}
 	// A card that reaches verify with no block at all is one whose
 	// discovery failed or found nothing at approval — best-effort, and
@@ -1408,7 +1299,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 			}
 		}
 	}
-	if len(checks) == 0 && len(proven) == 0 {
+	if len(checks) == 0 {
 		if ownVerify {
 			s.appendActivity(NoChecksRow + " — this card has no gummi-checks block, so " + NoChecksConsequence)
 			e.persist(s)
@@ -1420,19 +1311,10 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	// checks' own timeouts (or the package default) plus a small slack,
 	// bounded below by verifyStageTimeout. Each check also gets its own
 	// per-check bound so one hung command cannot starve the rest.
-	var results []verify.Result
-	if s.Feature.IsGoal() {
-		// A goal's checks do not all run in one place: a done-when item
-		// names the repository its command proves the goal in, and each
-		// group runs in that repository's goal tree (goalchecks.go).
-		results, err = e.runGoalChecks(context.Background(), s.Feature, string(raw), checks)
-	} else {
-		results, err = verify.RunWithBudget(context.Background(), workDir, checks, verifyStageTimeout)
-	}
+	results, err := verify.RunWithBudget(context.Background(), workDir, checks, verifyStageTimeout)
 	if err != nil {
 		return ""
 	}
-	results = append(results, proven...)
 
 	// An excusal is a claim about the commit it was measured on; a card
 	// whose base moved since (a rebase, a restack) has its excused checks
@@ -1458,29 +1340,9 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	var b strings.Builder
 	preexisting := false
 	var liveFailures []string
-	var recorded []goalCheckResult
-	defer func() {
-		if s.Feature.Stage == domain.StageVerify {
-			e.recordGoalChecks(s.Feature, recorded)
-		}
-	}()
 	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
 	for _, r := range results {
 		var status string
-		switch {
-		case strings.HasPrefix(r.Cmd, experimentCmdPrefix) && r.Status == verify.StatusNotRun:
-			status = "NOT PROVEN (no conclusive run on these heads)"
-			liveFailures = append(liveFailures, r.Name)
-		case strings.HasPrefix(r.Cmd, experimentCmdPrefix) && r.Status == verify.StatusFail:
-			status = "FAIL (the experiment's verdict)"
-			liveFailures = append(liveFailures, r.Name)
-		}
-		if status != "" {
-			s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
-			recorded = append(recorded, goalCheckResult{Name: r.Name, OK: r.OK, Status: status, Evidence: r.Output})
-			fmt.Fprintf(&b, "- %s: %s\n%s\n", r.Name, status, indentLines(r.Output))
-			continue
-		}
 		switch r.Status {
 		case verify.StatusPass:
 			status = "pass"
@@ -1500,10 +1362,6 @@ func (e *Engine) runSpecChecks(s *Session) string {
 			}
 		}
 		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
-		recorded = append(recorded, goalCheckResult{
-			Name: r.Name, OK: r.OK, Status: status,
-			Evidence: firstNonEmpty(experimentEvidence(r), checkFailureNote(r)),
-		})
 		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
 		if !r.OK && len(r.Output) > 0 {
 			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))
@@ -1518,10 +1376,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	// model's self-reported pass can never outrank gummi's own machine
 	// judgement — mirrors the floor gateVerifyVerdict already stamps for
 	// the env-omission condition.
-	// A goal's review is the exception: its checks include the done-when
-	// commands, which a partial goal fails by definition — the review judges
-	// the combined diff, and verify is where an unmet item counts.
-	if len(liveFailures) > 0 && (!s.Feature.IsGoal() || !s.Critique) {
+	if len(liveFailures) > 0 {
 		s.setVerdictFloor(FloorChecks, "blocked", fmt.Sprintf("check %s failed", strings.Join(liveFailures, ", ")))
 	}
 	// What the branch SHIPS, read from the tree rather than from the diff.
@@ -1734,33 +1589,6 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	hints := stageHints(f, specPath, scratch, flavor)
 	if h := coAuthorHint(); h != "" && !readOnly {
 		hints = append(hints, h)
-	}
-	if nb := e.notebookHint(f); nb != "" {
-		// what the goal knows that this card does not own: a line per
-		// entry, however much that comes to
-		hints = append(hints, nb)
-	}
-	if f.IsGoal() {
-		// A goal may span repositories, and nothing else in its contract
-		// says so: its plan has to know it may put a card in one, and its
-		// review and verify have to know the combined change is in
-		// several trees rather than the one they are standing in.
-		if card := e.goalReposCard(ctx, f); card != "" {
-			hints = append(hints, card)
-		}
-		// What a card has actually cost here. An architect asked to size
-		// work it has not done yet is guessing, and one that knows it is
-		// guessing writes nothing: "I have no prior run of this harness
-		// to anchor a number on, so rather than invent one" is what one
-		// wrote into a goal doc, leaving an envelope the gate refused.
-		// The workspace knows the answer and had never been asked.
-		if typical := e.typicalCardCredits(ctx); typical > 0 {
-			hints = append(hints, fmt.Sprintf(
-				"Cards completed in this workspace have cost about %d credits each, "+
-					"median plus headroom. That is the anchor for both the Budget "+
-					"section's ranges and any envelope you put on a gummi-cards row.",
-				typical))
-		}
 	}
 	// The repository orientation card sits directly under the operator's
 	// environment card: the operator's own words lead, because they are a
@@ -2151,9 +1979,6 @@ type imagesSupporter interface {
 // refusal then surfaces at the send, with the line restored. The same
 // structural answer covers a freeform card whose session nothing has
 // opened yet — a restart before its first turn.
-//
-// A goal takes no turns at all — its notes ride the lead's next turn — so
-// it is false here.
 func (e *Engine) SessionTakesImages(ctx context.Context, id domain.FeatureID) bool {
 	if s := e.Get(id); s != nil {
 		return e.imageCapable(ctx, s)
@@ -2176,7 +2001,7 @@ func (e *Engine) SessionTakesImages(ctx context.Context, id domain.FeatureID) bo
 		_, backend := e.sessionRole(f)
 		return e.structurallyTakesImages(backend)
 	}
-	if f.IsGoal() {
+	if f.Kind == domain.KindGoal {
 		return false
 	}
 	if c := e.Consult(id); c != nil {
@@ -3038,14 +2863,6 @@ func (e *Engine) checkpoint(s *Session) error {
 	// reader its checkpoint had failed, for a condition the design
 	// guarantees and no reader can act on.
 	if s.Feature.Kind == domain.KindResearch {
-		return nil
-	}
-	// A goal's branch takes only its cards' landings and gummi's own
-	// catch-up merges. The goal's own sessions — its plan, review and
-	// verify — write nothing that belongs there; what they leave in the
-	// goal worktree is scratch (a binary built to run a check, a captured
-	// stderr), and a checkpoint would commit it onto the branch that lands.
-	if s.Feature.IsGoal() {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)

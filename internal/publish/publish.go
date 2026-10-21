@@ -47,7 +47,6 @@ const (
 	CodeAgentSession     Code = "agent-session"
 	CodeNoBranch         Code = "no-branch"
 	CodeStacked          Code = "stacked"
-	CodeGoalMember       Code = "goal-member"
 	CodeLanded           Code = "landed"
 	CodeContinued        Code = "continued"
 	CodeBusy             Code = "agent-busy"
@@ -161,16 +160,14 @@ func Refusal(c Card) *Error {
 		return fail(CodeNoBranch, "no card", "")
 	case f.Kind == domain.KindResearch:
 		return fail(CodeNoBranch, "a research card works in a scratch tree and has no branch to publish", "")
-	case f.IsGoal():
-		return fail(CodeNoBranch, "a goal lands its own branch through `gummi goal`; publishing a goal branch is not supported yet", "")
+	case f.Kind == domain.KindGoal:
+		return fail(CodeNoBranch, "goals are retired; a goal's branch is not published", "")
 	case f.MainCheckout:
 		return fail(CodeNoBranch, "this card works in "+f.CheckoutName()+" and has no branch of its own", "")
 	case f.Stage == domain.StageTodo:
 		return fail(CodeNoBranch, "this card has not started, so its branch is not cut yet", "")
 	case f.StackID != "":
 		return fail(CodeStacked, "a stacked card's PR needs the stack's order and a retarget on every replay, which gummi does not do yet (DESIGN §18.5)", "push the stack yourself with the printed --force-with-lease lines")
-	case f.InGoal() && !f.GoalDropped():
-		return fail(CodeGoalMember, "this card lands on its goal's branch; publishing it would go around the goal", "")
 	case c.Landed:
 		return fail(CodeLanded, "this card has landed: its commits are already on its base", "")
 	case f.ContinuedAs != "":

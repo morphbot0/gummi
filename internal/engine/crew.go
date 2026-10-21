@@ -119,7 +119,7 @@ func (e *Engine) crewStore() *state.Store       { return e.cfg.Store }
 
 func crewTools() []agent.ToolDef {
 	return []agent.ToolDef{
-		leadTool(crewStartToolName,
+		mkTool(crewStartToolName,
 			"Ask for a crew: a planner turns this session's spec into a plan of nodes (scouts, a contractor, "+
 				"implementers, testers, a scribe), each checked and reviewed, on a branch of the crew's own. "+
 				"The person approves the plan. Returns at once; the crew's report arrives later as a turn. "+
@@ -129,12 +129,12 @@ func crewTools() []agent.ToolDef {
 				"brief":  str("What the crew is for, beyond the spec: what matters, what to watch."),
 				"budget": num("Credits the crew may spend in all, planner and reviews included."),
 			}, "brief", "budget"),
-		leadTool(crewStatusToolName, "The crew's state, its nodes, spend and open questions.", map[string]any{}),
-		leadTool(crewSteerToolName, "Send a note to the crew's planner, which wakes it.",
+		mkTool(crewStatusToolName, "The crew's state, its nodes, spend and open questions.", map[string]any{}),
+		mkTool(crewSteerToolName, "Send a note to the crew's planner, which wakes it.",
 			map[string]any{"note": str("The note.")}, "note"),
-		leadTool(crewStopToolName, "Wind the crew down. What has landed on its branch stays and can be landed.",
+		mkTool(crewStopToolName, "Wind the crew down. What has landed on its branch stays and can be landed.",
 			map[string]any{"reason": str("Why.")}, "reason"),
-		leadTool(crewLandToolName, "Land the finished (or partial) crew's branch on this session's branch as one commit, "+
+		mkTool(crewLandToolName, "Land the finished (or partial) crew's branch on this session's branch as one commit, "+
 			"then run its done-when checks there. Refused while this session's tree has uncommitted changes.", map[string]any{}),
 	}
 }

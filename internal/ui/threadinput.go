@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -130,13 +129,6 @@ const freeformMainPlaceholderText = "say what to do next — it works in the mai
 // rather than advertising verbs and an inventory that would silently
 // do nothing here.
 const drivenAbroadPlaceholderText = "ask a question — read-only while another process drives this card"
-
-// conductedPlaceholderText is the composer's placeholder on a card its
-// goal's lead drives. Unlike a foreign card there is no consult session
-// to ask — the card is right here and the lead is mid-turn on it — so
-// the line has one honest destination, and the placeholder names it
-// rather than inviting a line this surface would have to refuse.
-const conductedPlaceholderText = "read-only — %s conducts this card; type into %s to reach its lead"
 
 // threadInputMaxHeight caps how many rows the composer (newThreadInput's
 // DynamicHeight) can grow to before it scrolls internally instead of
@@ -535,10 +527,6 @@ type lineRoute int
 const (
 	// lineConsult: a card another process drives — consult, verbatim.
 	lineConsult lineRoute = iota
-	// lineConducted: a card its goal's lead conducts takes no line here.
-	lineConducted
-	// lineGoalNote: prose into a running goal is a note for its lead.
-	lineGoalNote
 	// lineFreeformTurn: prose on a freeform card is a turn.
 	lineFreeformTurn
 	// lineAskAnswer: prose (or the armed channel) at an open ask is its
@@ -578,20 +566,7 @@ func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *thr
 	if r.DrivenAbroad {
 		return lineClass{route: lineConsult, consumer: -1}
 	}
-	// A card its goal's lead conducts takes no line here. Not a turn (the
-	// lead is mid-turn on this very card and the backend would refuse the
-	// second one), not an answer (goalAnswerAsk is already answering),
-	// and not a consult session either — that would spend the goal's
-	// budget on a conversation the conductor never sees.
-	if r.conducted() {
-		return lineClass{route: lineConducted, consumer: -1}
-	}
 	prose := parseInput(text).Kind == verbNone
-	// a line typed into a running goal is a note for its lead: the goal
-	// has no stage agent to talk to, and the lead reads notes next turn
-	if r.F.IsGoal() && r.F.Stage == domain.StageImplement && m.engine != nil && prose {
-		return lineClass{route: lineGoalNote, consumer: -1}
-	}
 	// EVERY PROSE LINE ON A FREEFORM CARD IS A TURN. It must not reach the
 	// decision reader below, and the reason is not only that the answer is
 	// always the same: the reader is a MODEL PASS. On a card whose answer
@@ -694,18 +669,6 @@ func (m *Shell) routeThreadLine(r featureRow, text string, decide func() *thread
 	switch c.route {
 	case lineConsult:
 		return m.sendConsultMessage(r.F, text, m.intentImages())
-	case lineConducted:
-		// The line is kept, not discarded: it stays in the composer so it
-		// can be retyped where it lands, which is the goal's own thread.
-		m.notice = noticeMsg{
-			text:  fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.Name(), goalDriver(r.F.GoalID), m.cardName(r.F.GoalID)),
-			isErr: true,
-			id:    r.F.ID,
-		}
-		return nil
-	case lineGoalNote:
-		m.threadInput.Reset()
-		return m.goalNote(r.F, text)
 	case lineFreeformTurn:
 		return m.sendThreadMessage(r.F, text)
 	case lineAskAnswer:
@@ -1332,8 +1295,6 @@ type consultSentMsg struct {
 func (m *Shell) inputBlock(_ *theme.Styles, r featureRow, w int) string {
 	if r.DrivenAbroad {
 		m.threadInput.Placeholder = drivenAbroadPlaceholderText
-	} else if r.conducted() {
-		m.threadInput.Placeholder = fmt.Sprintf(conductedPlaceholderText, goalDriver(r.F.GoalID), r.F.GoalID)
 	} else if r.F.IsFreeform() && r.F.Home {
 		m.threadInput.Placeholder = agentPlaceholderText
 	} else if r.F.IsFreeform() && r.F.MainCheckout {

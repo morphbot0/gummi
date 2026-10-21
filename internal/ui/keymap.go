@@ -78,8 +78,6 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "import bugs", m.bugIngest.bindings()
 	case live && m.deps != nil:
 		return "dependencies", m.deps.bindings()
-	case live && m.goalPage != nil:
-		return "goal", m.goalPage.bindings()
 	case live && m.ingestRun != nil && !m.ingestRun.hidden:
 		return "ingest", ingestRunBindings
 	// the inbox owns the main pane whenever it's active. It has its own
@@ -333,8 +331,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "L", label: "schedules", help: "schedules and heartbeats — what comes back on a clock without a person typing"},
 		{key: "E", label: "skills", help: "the skill pack and its curator — pin, revert, run now"},
 		{key: "n", label: "new", help: "new card — feature, bug, research or goal, or paste an issue link to import one", bar: true},
-		{key: "f", label: "fold goal", help: "fold or unfold a goal's cards under it"},
-		{key: "P", label: "goal page", help: "a goal's page — done-when, cards, budget, lead's log"},
+		{key: "f", label: "fold archive", help: "fold or unfold the archive of cards that settled a while ago"},
 		{key: "B", label: "bug", help: "same screen as n, straight to the bug preset"},
 		{key: "R", label: "research", help: "same screen as n, straight to the research preset"},
 		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},
@@ -346,8 +343,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "q", label: "quit"},
 	}
 	if r, ok := m.selected(); ok && r.watchOnly() {
-		// something else is driving this card — another gummi process, or
-		// the lead of its goal: every verb that would write to it is
+		// another gummi process is driving this card: every verb that would write to it is
 		// refused (shell.go's boardVerb), so the bar and the ? help
 		// overlay must stop offering them — the same reasoning as the
 		// research-card filter below. enter still works, as the way to

@@ -251,30 +251,3 @@ func TestObserverNilIsNoop(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func TestObserverCloseGoalDroppedReports(t *testing.T) {
-	s := openStore(t)
-	ctx := context.Background()
-	obs := &observer{}
-	s.SetObserver(obs.handle)
-
-	f := feat(8, "Dropped")
-	if err := s.CreateFeature(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	for _, to := range []domain.Stage{domain.StagePlan, domain.StageImplement} {
-		if _, err := s.Transition(ctx, f.ID, to, "user"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	obs.events = nil
-	if err := s.CloseGoalDropped(ctx, f.ID, "auto", time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(obs.kinds(), []string{EventGate}) {
-		t.Fatalf("kinds = %v, want [gate] (a dropped card's stop, never a verified landing)", obs.kinds())
-	}
-	if got := obs.events[0].Stage; got != domain.StageImplement {
-		t.Errorf("gate stage = %q, want the stage it was dropped from (implement)", got)
-	}
-}

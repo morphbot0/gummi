@@ -228,7 +228,6 @@ const (
 	RouteSteer    Route = "steer"
 	RouteConsult  Route = "consult"
 	RouteFreeform Route = "freeform"
-	RouteGoalNote Route = "goalnote"
 	RouteAnswer   Route = "answer"
 	RouteVerb     Route = "verb"
 	RouteBlocked  Route = "blocked"

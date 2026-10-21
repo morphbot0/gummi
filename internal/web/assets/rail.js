@@ -117,7 +117,7 @@ function matches (r, repo) {
   if (repo !== 'all' && (r.home || (r.repo || '') !== repo)) return false
   if (!state.filter) return true
   const group = GROUPS.find(g => g[0] === r.status)?.[1] || ''
-  return `${r.id} ${ref(r.id)} ${typeName(r)} ${r.title} ${r.stage} ${word(r)} ${group} ${KINDS[kindTag(r)] || ''} ${r.repo || ''} ${r.pr || ''} ${r.stack?.name || ''} ${r.goal?.title || ''}`.toLowerCase().includes(state.filter)
+  return `${r.id} ${ref(r.id)} ${typeName(r)} ${r.title} ${r.stage} ${word(r)} ${group} ${KINDS[kindTag(r)] || ''} ${r.repo || ''} ${r.pr || ''} ${r.stack?.name || ''}`.toLowerCase().includes(state.filter)
 }
 
 // visibleIds is the rail's rows in on-screen order: what j and k walk.
@@ -374,7 +374,6 @@ function showHover (id) {
       fact('Repository', r.repo),
       fact('Home', r.home),
       fact('Stack', r.stack ? `${r.stack.name || 'stack'} · ${r.stack.pos + 1} of ${r.stack.of}${r.stack.stale ? ' · base moved' : ''}` : ''),
-      fact('Goal', r.goal ? `${ref(r.goal.id)}${r.goal.title ? ' · ' + r.goal.title : ''}` : ''),
       fact('Waits on', r.waits?.map(ref).join(', ')),
       fact('Pull request', r.pr),
       fact('Profile', r.profile),
@@ -392,7 +391,6 @@ function renderFoot (unpair, newSession) {
   const more = h('button', { class: 'iconbtn', testid: 'rail-more', title: 'More', 'aria-label': 'More', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('more'))
   more.addEventListener('click', () => {
     const items = [
-      item('goals', 'Goals', 'goal'),
       item('stacks', 'Stacks', 'stack'),
       item('repos', 'Repositories', 'repo'),
       item('schedules', 'Schedules', 'clock'),

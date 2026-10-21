@@ -832,7 +832,7 @@ func EnsureDraft(path string, f *domain.Feature) error {
 func BlankTemplate(f *domain.Feature) string { return blankTemplate(f) }
 
 // blankTemplate is the initial artifact for a work item: a bug report for
-// bugs, a research document for research cards, a goal doc for goals, a
+// bugs, a research document for research cards, a
 // spec draft for features.
 func blankTemplate(f *domain.Feature) string {
 	if f.Kind == domain.KindBug {
@@ -843,9 +843,6 @@ func blankTemplate(f *domain.Feature) string {
 			return DiagnosisTemplate(f)
 		}
 		return ResearchTemplate(f)
-	}
-	if f.Kind == domain.KindGoal {
-		return GoalTemplate(f)
 	}
 	return Template(f)
 }

@@ -26,10 +26,4 @@ func TestDoneWhenValidate(t *testing.T) {
 			t.Errorf("%+v: want error containing %q, got %v", c.in, c.want, err)
 		}
 	}
-	if id, ok := DoneWhenIDForCheck(DoneWhen{ID: "DW-7"}.CheckName()); !ok || id != "DW-7" {
-		t.Fatalf("check name does not round-trip: %q %v", id, ok)
-	}
-	if _, ok := DoneWhenIDForCheck("go test"); ok {
-		t.Fatalf("a repo check is not a done-when item")
-	}
 }

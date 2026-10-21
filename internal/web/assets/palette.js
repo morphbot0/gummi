@@ -20,12 +20,12 @@ export function palette (select, extra = []) {
   let hi = 0
   const commands = [
     ...extra.map(c => ({ cmd: c.id, label: c.label, run: c.run })),
-    ...Object.entries(VIEW_LABELS).filter(([k]) => k !== 'goal').map(([k, label]) => ({ cmd: k, label, run: () => openView(k) }))
+    ...Object.entries(VIEW_LABELS).map(([k, label]) => ({ cmd: k, label, run: () => openView(k) }))
   ]
   const list = () => {
     const q = input.value.toLowerCase().trim()
     // the words a card matches on are the rail filter's (rail.js matches)
-    const cards = rows().filter(r => !q || `${r.id} ${ref(r.id)} ${r.type || ''} ${r.title} ${r.stage} ${r.goal?.title || ''}`.toLowerCase().includes(q))
+    const cards = rows().filter(r => !q || `${r.id} ${ref(r.id)} ${r.type || ''} ${r.title} ${r.stage}`.toLowerCase().includes(q))
       .sort((a, b) => (b.status === 'needs') - (a.status === 'needs'))
       .map(r => ({ card: r }))
     // the commands are listed after the cards from the start, so what the

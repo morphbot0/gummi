@@ -165,7 +165,6 @@ func TestStackCandsAreTheCardsWithABranch(t *testing.T) {
 		{F: domain.Feature{ID: "FD-003", Kind: domain.KindFeature, Stage: domain.StageDone}, Landed: true},
 		{F: domain.Feature{ID: "RS-001", Kind: domain.KindResearch}},
 		{F: domain.Feature{ID: "GL-001", Kind: domain.KindGoal}},
-		{F: domain.Feature{ID: "FD-002", Kind: domain.KindFeature, GoalID: "GL-001"}},
 		{F: domain.Feature{ID: "BG-001", Kind: domain.KindBug, UpdatedAt: time.Now()}},
 	}
 	cands := m.stackCands()

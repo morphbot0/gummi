@@ -10,7 +10,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
-	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verifydoc"
 	"github.com/morphis/gummi/internal/workflow"
 )
@@ -33,6 +32,10 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		return AdvanceResult{}, err
 	}
 	res := AdvanceResult{Feature: f, From: f.Stage}
+	// Goals are retired: a legacy goal card is read, never advanced.
+	if f.Kind == domain.KindGoal {
+		return res, fmt.Errorf("%s is a goal, and goals no longer run", id)
+	}
 
 	next := e.nextStage(f)
 	if next == f.Stage {
@@ -107,16 +110,6 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		}
 	}
 
-	// A goal's design gate also owes a plan gummi can run: a checkable
-	// done-when list, a card list that serves it, and a budget that can
-	// fund the cards. The prose check above cannot see the fenced blocks.
-	if f.IsGoal() && f.Stage == domain.StagePlan && next == domain.StageImplement {
-		if problem := e.goalPlanProblems(ctx, f); problem != "" {
-			res.Status, res.Reason = StatusBlockedGoalPlan, problem
-			return res, nil
-		}
-	}
-
 	// Advancing out of Verify is the "this feature is done" decision: the
 	// branch lands on main as one squash commit before the record moves to
 	// Done. Advance never merges — it reports that a landing is owed. A
@@ -157,14 +150,7 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 			return res, nil
 		}
 
-		// The fifth skip, beside the hand-off one: a card its goal dropped.
-		// The drop closes the card where it stood and keeps whatever the
-		// branch had written, so no landing is owed — nobody is going to
-		// merge work the goal gave up on. It used to reach this floor by
-		// stamping HandedOffAt, which crossed the gate at the cost of every
-		// later surface reporting the card as handed off; the stamp it
-		// really needed was its own.
-		if !f.HandedOff() && !f.GoalDropped() {
+		if !f.HandedOff() {
 			wt, err := e.mgr(ctx, &f)
 			if err != nil {
 				return res, err
@@ -187,24 +173,16 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 						// Once per revision: re-reaching the gate on the same tip
 						// keeps the first pass's time stable, and a pass on a new
 						// tip records that tip. Every door that lands by crossing
-						// here (the board's g, a goal landing a card) refuses or
+						// here (the board's g) refuses or
 						// re-verifies a moved branch before it asks, so the
 						// crossing is a pass on the tip it records.
-						rev := ""
-						if !f.IsGoal() {
-							rev, _ = wt.Head(ctx, &f)
-						}
+						rev, _ := wt.Head(ctx, &f)
 						if f.VerifiedAt.IsZero() || f.VerifiedRev != rev {
 							now := time.Now().UTC()
 							if err := e.cfg.Store.SetVerifiedAt(ctx, id, now, rev); err != nil {
 								return res, err
 							}
 							res.Feature.VerifiedAt, res.Feature.VerifiedRev = now, rev
-						}
-						// a goal ready for you hands over: its report is
-						// written into the goal doc at the moment it is
-						if f.IsGoal() {
-							_, _ = e.WriteGoalReport(ctx, id)
 						}
 						return res, nil
 					}
@@ -255,21 +233,6 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		// (DESIGN §5.1). This is the design→work crossing, which is the
 		// only place it was ever owed.
 		res.EstimatedCredits, res.EstimateSamples = e.estimateEnvelope(ctx, &f)
-		// A goal starts here: its cards are minted or attached, its
-		// done-when commands join its checks, and it hands itself to
-		// autopilot. Before the transition, so a goal that could not start
-		// stays at plan rather than conducting nothing.
-		if f.IsGoal() {
-			gctx := ctx
-			if state.IsPersonActor(actor) {
-				// what the goal records as agreed at this crossing, it
-				// records as agreed by whoever crossed it
-				gctx = WithActor(ctx, actor)
-			}
-			if gerr := e.startGoal(gctx, &f); gerr != nil {
-				return res, fmt.Errorf("starting goal %s: %w", f.ID, gerr)
-			}
-		}
 	}
 
 	// Leaving the work stage hands the diff to something that judges it —
@@ -298,9 +261,6 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	res.Feature = f
 	res.Feature.Stage = next
 	res.Status = StatusAdvanced
-	if f.IsGoal() && next == domain.StageImplement {
-		e.send(Event{Feature: id, Stage: next, Kind: EventGoal})
-	}
 	return res, nil
 }
 
@@ -581,17 +541,6 @@ func requiredSections(ct domain.CardType, from, to domain.Stage) []string {
 	// what a diagnosis must have either way.
 	case ct.Mode == domain.ModeDiagnosis && to == domain.StageDone:
 		return []string{spec.DiagSectionEvidence}
-
-	// The goal design gate owes the objective in agreed words. The
-	// done-when list and the card list are structured blocks rather than
-	// prose, so "undrafted" cannot see them — the goal plan gate
-	// (goalPlanProblems) parses and checks those instead.
-	case kind == domain.KindGoal && from == domain.StagePlan && to == domain.StageImplement:
-		return []string{"Objective"}
-	// The goal done gate consumes the verification story of the combined
-	// branch, the same as a feature's.
-	case kind == domain.KindGoal && to == domain.StageDone:
-		return []string{"Verification plan"}
 
 	default:
 		return nil

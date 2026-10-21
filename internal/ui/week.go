@@ -210,7 +210,7 @@ func (d *weekDialog) View(s *theme.Styles, _, _ int) string {
 
 	// The headline is the endings, not the total: "seven landed, two kept,
 	// one given up on" is the answer; "ten cards" is not.
-	for _, e := range []domain.Ending{domain.EndingLanded, domain.EndingHandedOff, domain.EndingDropped} {
+	for _, e := range []domain.Ending{domain.EndingLanded, domain.EndingHandedOff} {
 		n := rep.ByEnding[e]
 		if n == 0 {
 			continue
@@ -286,8 +286,6 @@ func weekEndingNote(e domain.Ending, rep *weekReport) string {
 		return fmt.Sprintf("on the base branch · %d commit%s gummi wrote", n, plural(n))
 	case domain.EndingHandedOff:
 		return "branches kept, nothing merged"
-	case domain.EndingDropped:
-		return "a goal gave up on them"
 	}
 	return ""
 }

@@ -24,8 +24,7 @@ type NamedRepo struct {
 // ErrRepoNotConfigured reports a card whose repository cannot be reached
 // by name: either it was dropped from `repos:` after the card was minted
 // into it, or it names the workspace default and none is configured.
-// Nothing on disk answers for it any more — same shape as
-// ErrGoalWorktreeMissing — so a caller that cannot reach the card's
+// Nothing on disk answers for it any more, so a caller that cannot reach the card's
 // worktree or branch this way can still fall back to removing the record.
 var ErrRepoNotConfigured = errors.New("repository is not configured")
 
@@ -67,9 +66,6 @@ type Pool struct {
 	// that is gone is asked about on every board tick, and must not walk
 	// the disk each time.
 	scanned time.Time
-	// goalLookup resolves a goal card by id, so a card whose goal worktree
-	// is gone can tell an ended goal from a broken one (see goal.go).
-	goalLookup GoalLookup
 	// baseLookup resolves the revision a card forks from, installed on
 	// every manager the pool builds. Nil leaves every card on its repo's
 	// HEAD, which is what happened before bases were selectable.
@@ -290,24 +286,6 @@ func (p *Pool) Known(name string) bool {
 	return ok
 }
 
-// ProvisionalRepo is the repository a card gets when nobody named one: the
-// workspace default when there is one, else the first configured name.
-//
-// Only a goal takes it. A goal is not in a repository — its cards name
-// their own — but its own branch has to be cut somewhere while its plan
-// is still being agreed, and in a repos:-only workspace there is no
-// default to cut it in. The plan gate settles the goal's home for real,
-// from the repos its cards turned out to be in.
-func (p *Pool) ProvisionalRepo() string {
-	if p.Known("") {
-		return ""
-	}
-	if names := p.Names(); len(names) > 0 {
-		return names[0]
-	}
-	return ""
-}
-
 // Names returns the sorted configured repo names (excluding the empty
 // default), for the creation surfaces that offer an explicit selector.
 func (p *Pool) Names() []string {
@@ -324,17 +302,13 @@ func (p *Pool) Names() []string {
 // ManagerFor resolves f's repository (the empty name selects the default) and
 // returns the cached manager for that repo, creating it on first use. A
 // stored-but-unconfigured repo name is a resolution-time error. A card that
-// belongs to a goal resolves to the manager rooted at the goal's worktree
-// instead, so its branch forks from and lands on the goal branch, and a
-// card a freeform session created resolves to the manager rooted at that
-// freeform card's worktree, for the same reason. An agent names no
+// a freeform session created resolves to the manager rooted at that
+// freeform card's worktree instead, so its branch forks from and lands on
+// the freeform branch. An agent names no
 // repository at all and resolves to the manager rooted at its home.
 func (p *Pool) ManagerFor(ctx context.Context, f *domain.Feature) (*Manager, error) {
 	if f.Home {
 		return p.managerForHome(ctx, f)
-	}
-	if f.GoalID != "" {
-		return p.managerForGoalCard(ctx, f)
 	}
 	if f.ParentID != "" {
 		return p.managerForDelegatedCard(ctx, f)
@@ -590,15 +564,14 @@ func (p *Pool) Spent(ctx context.Context, f *domain.Feature) (bool, error) {
 
 // Cleanable reports whether a closed card still holds something a clean
 // would remove: a worktree, or a branch whose work exists elsewhere. It
-// leaves out a goal and a goal's own cards (a goal's clean sweeps its
-// cards itself), a main-checkout card, which has neither, and anything
+// leaves out a main-checkout card, which has neither, and anything
 // holding uncommitted work. A branch that is the only copy of its work
 // (Manager.Spent) does not make a card cleanable on its own: a clean
 // would keep it, and a card with nothing else left is already tidy. A
 // read that fails answers no — this picks which cards are worth handing
 // to a clean, and the clean repeats every check on the card it is given.
 func (p *Pool) Cleanable(ctx context.Context, f *domain.Feature) bool {
-	if f.Stage != domain.StageDone || f.IsGoal() || f.InGoal() || f.MainCheckout {
+	if f.Stage != domain.StageDone || f.MainCheckout {
 		return false
 	}
 	spent, err := p.Spent(ctx, f)
@@ -793,73 +766,17 @@ func (p *Pool) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
 	return wt.ReanchorOnMain(ctx, f)
 }
 
-// Remove removes the card's worktree. A goal has one per repository it
-// touched (goal.go), and a cleanup that took only the one named after the
-// card would leave the others checked out forever — so the siblings go
-// first, each with the branch it was holding.
+// Remove removes the card's worktree.
 func (p *Pool) Remove(ctx context.Context, f *domain.Feature, force bool) error {
 	// an agent has no worktree, and its home is never a cleanup's to take
 	if f.Home {
 		return nil
-	}
-	if f.IsGoal() {
-		if err := p.removeGoalTrees(ctx, f); err != nil {
-			return err
-		}
 	}
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {
 		return err
 	}
 	return wt.Remove(ctx, f, force)
-}
-
-// removeGoalTrees removes a goal's trees in every repository but its home,
-// and the branch each was holding when that branch is fully merged. A
-// branch git refuses to delete (commits nothing has) is left alone with
-// its tree gone: the cleanup's job is the checkouts, and unmerged work is
-// never a cleanup's to discard.
-func (p *Pool) removeGoalTrees(ctx context.Context, goal *domain.Feature) error {
-	return p.sweepGoalTrees(ctx, goal, false)
-}
-
-// DeleteGoalTrees removes a goal's trees in every repository but its
-// home, branch and all. It is removeGoalTrees for the caller that is
-// destroying the goal rather than tidying up after it (the board's D):
-// there, a branch left standing belongs to a card, a tree and a record
-// that are all gone, so nothing will ever offer to remove it again.
-//
-// The home repo's tree is the goal card's own worktree and goes the way
-// every card's does, through Remove — which, finding no siblings left on
-// disk, has nothing more to sweep.
-func (p *Pool) DeleteGoalTrees(ctx context.Context, goal *domain.Feature) error {
-	return p.sweepGoalTrees(ctx, goal, true)
-}
-
-// sweepGoalTrees is both of the above, over every repository the goal
-// has a tree in but its home.
-func (p *Pool) sweepGoalTrees(ctx context.Context, goal *domain.Feature, force bool) error {
-	for _, repo := range p.goalTreeRepos(*goal) {
-		if repo == goal.Repo {
-			continue
-		}
-		m, err := p.ManagerForName(ctx, repo)
-		if err != nil {
-			return err
-		}
-		remove := m.RemoveGoalTree
-		if force {
-			remove = m.DeleteGoalTree
-		}
-		if err := remove(ctx, goal, goalTreeName(*goal, repo)); err != nil {
-			var unmerged *unmergedBranchError
-			if errors.As(err, &unmerged) {
-				continue
-			}
-			return err
-		}
-	}
-	return nil
 }
 
 // DiskSize reports the bytes f's worktree holds. See Manager.DiskSize —
@@ -888,7 +805,36 @@ func (p *Pool) ProvenanceWarnings(ctx context.Context, f *domain.Feature) ([]str
 func (p *Pool) managerForDelegatedCard(ctx context.Context, f *domain.Feature) (*Manager, error) {
 	dir := filepath.Join(p.root, ".gummi", "worktrees", string(f.ParentID))
 	if _, err := os.Stat(dir); err == nil {
-		return p.goalManagerAt(ctx, dir)
+		return p.managerAt(ctx, dir)
 	}
 	return p.ManagerForName(ctx, f.Repo)
+}
+
+// managerAt returns the cached manager rooted at a linked worktree of a
+// managed repository — a freeform card's, whose delegated and crew cards
+// fork from it. It never runs the .gummi exclusion pass: the worktree is
+// a linked worktree of an already-excluded repository.
+func (p *Pool) managerAt(ctx context.Context, dir string) (*Manager, error) {
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	if m, ok := p.byRoot[real]; ok {
+		p.mu.Unlock()
+		return m, nil
+	}
+	p.mu.Unlock()
+	m, err := NewManager(ctx, p.root, real, p.fs)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	if cur, ok := p.byRoot[real]; ok {
+		m = cur
+	} else {
+		p.byRoot[real] = m
+	}
+	p.mu.Unlock()
+	return m, nil
 }

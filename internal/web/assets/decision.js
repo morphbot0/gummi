@@ -191,7 +191,6 @@ function optionButtons (d, compact) {
 const SURFACES = {
   spec: () => ctx.setTab('spec'),
   diff: () => ctx.setTab('diff'),
-  goalpage: () => openView('goal', { id: state.sel }),
   // the card's own menu entry, which asks for the profile the way the
   // menu does (a failed stage offers "change profile")
   profile: () => {
@@ -224,7 +223,7 @@ function onOption (i, compact) {
   const o = d.options[i]
   if (SURFACES[o.id]) {
     set({ hi: i })
-    if (isMobile() && o.id !== 'goalpage' && o.id !== 'profile') set({ view: 'panel' })
+    if (isMobile() && o.id !== 'profile') set({ view: 'panel' })
     SURFACES[o.id]()
     return
   }
@@ -536,7 +535,7 @@ export async function answer ({ picked = false } = {}) {
     return
   }
   if (SURFACES[o.id] && !text) {
-    if (isMobile() && o.id !== 'goalpage' && o.id !== 'profile') set({ view: 'panel' })
+    if (isMobile() && o.id !== 'profile') set({ view: 'panel' })
     SURFACES[o.id]()
     return
   }
@@ -650,14 +649,6 @@ function refused (id, err, body, label, tookWords, danger) {
       reveal = true
       return
     case 'needs':
-      if (e.needs === 'decision') {
-        // which decision to reverse is picked on the goal's page, which
-        // lists them with the lead's reasons
-        landing?.close()
-        note(sentence(e.text) || 'Pick the decision on the goal’s page.', { testid: 'decision-needs' })
-        openView('goal', { id })
-        return
-      }
       if (e.needs === 'message' && e.draft !== undefined && e.draft !== null) {
         // a landing stopped to have its message read: into the dialog the
         // press opened when one is up (a second one on top of it would
@@ -761,8 +752,7 @@ function openLanding (id, d, o, draft, question = '') {
     })
     landMessageBox(control, input, hint)
   }
-  // a goal's landing sweeps its own cards and keeps its own rules
-  const keep = state.card?.kind === 'goal' ? null : keepBranchControl()
+  const keep = keepBranchControl()
   // where the repository closes cards by push, the base push follows the
   // landing (pushbase.js)
   const pushAfter = o.pushTo ? pushAfterControl(o.pushTo, state.card?.base) : null

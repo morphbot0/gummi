@@ -103,15 +103,6 @@ type featureRow struct {
 	// refresh would be unbounded IO, which is exactly what the row
 	// snapshot above exists to avoid.
 	Events []state.CardEvent
-	// Goal is a goal's hand-over as it stands at load: done-when progress,
-	// its cards and its budget tree. Nil for every other kind, and for a
-	// goal on a board with no engine to read it through.
-	Goal *engine.GoalReport
-	// GoalLive says the goal this card belongs to is still conducting —
-	// it has not reached done. Resolved in loadRows, which holds every
-	// feature and can therefore read the goal's stage; false for a card in
-	// no goal, and in a scaffold that builds rows by hand. See conducted().
-	GoalLive bool
 	// Drift is the card's fork drift as its worktree stands at load — its
 	// base no longer carries the commit it forked from — nil when there is
 	// none or no worktree. Every stage session refuses a drifted card
@@ -133,50 +124,17 @@ func (r featureRow) baseBranch() string {
 }
 
 // watchOnly reports whether this board may watch the card but not steer
-// it, because something else is already driving it: another gummi process
-// (DrivenAbroad) or, one level in, the lead of the goal the card belongs
-// to (domain.Feature.Conducted). The two are the same relationship seen
-// from the same side — a card has one driver, and this board is not it —
-// so every place that withholds a verb, a key, a decision or the composer
-// asks this rather than either half, and the two never drift apart.
-//
-// What differs is only who to name when saying so, which is why the
-// notices and the labels branch on watchDriver rather than on this.
-func (r featureRow) watchOnly() bool { return r.DrivenAbroad || r.conducted() }
-
-// conducted is domain.Feature.Conducted plus the half no card can see for
-// itself: whether its goal is still conducting.
-//
-// The card alone gets exactly one case wrong, and it is the case a reader
-// meets most — one the goal LANDED. Conducted() releases a card at done
-// (§17.6), which handed a person the full inventory on a card whose
-// branch sits inside the running goal's own worktree: a clean-up there
-// removes a checkout the conductor is still working beside, and every
-// sentence on the page invited it. A card of a live goal is the goal's
-// until the goal is over, whatever stage the card itself reached.
-//
-// A card the goal DROPPED is unchanged and deliberately so: it is closed
-// where it stands and the person may adopt it back, which is the one
-// thing the full inventory is needed for.
-//
-// Without GoalLive (a test scaffold, or a card whose goal never loaded)
-// this is the card's own half, exactly as it was.
-func (r featureRow) conducted() bool {
-	if r.GoalLive && r.F.InGoal() && !r.F.GoalDropped() {
-		return true
-	}
-	return r.F.Conducted()
-}
+// it, because another gummi process is already driving it (DrivenAbroad).
+// Every place that withholds a verb, a key, a decision or the composer
+// asks this; watchDriver names who to defer to when saying so.
+func (r featureRow) watchOnly() bool { return r.DrivenAbroad }
 
 // watchDriver names the driver watchOnly is deferring to, for the one
 // sentence each refusal owes the reader. Empty when the row is this
 // board's to drive.
 func (r featureRow) watchDriver() string {
-	switch {
-	case r.DrivenAbroad:
+	if r.DrivenAbroad {
 		return fmt.Sprintf("pid %d", r.Foreign.PID)
-	case r.conducted():
-		return goalDriver(r.F.GoalID)
 	}
 	return ""
 }
@@ -333,16 +291,11 @@ func (m *Shell) loadRows() tea.Msg {
 	if err != nil {
 		return rowsMsg{err: err}
 	}
-	// The goal branches in play, resolved from the features this load is
+	// The open sessions' branches, resolved from the features this load is
 	// already holding rather than from m.rows: the rows being built here
-	// are not on the Shell yet, so a first load would have every goal
-	// card's member read as landing on the trunk (Shell.goalBranchOf).
-	goalBranches := map[domain.FeatureID]string{}
+	// are not on the Shell yet.
 	openSessions := map[domain.FeatureID]string{}
 	for _, f := range feats {
-		if name := goalLandingBranch(f); name != "" {
-			goalBranches[f.ID] = name
-		}
 		if f.IsFreeform() && !f.MainCheckout && f.Stage != domain.StageDone {
 			openSessions[f.ID] = f.BranchName()
 		}
@@ -360,6 +313,10 @@ func (m *Shell) loadRows() tea.Msg {
 		if f.InCrew() {
 			continue
 		}
+		// goals are retired: a legacy goal card is not on the board
+		if f.Kind == domain.KindGoal {
+			continue
+		}
 		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f)}
 		if c := crews[f.ID]; c != nil {
 			row.Crew = c
@@ -375,12 +332,6 @@ func (m *Shell) loadRows() tea.Msg {
 			// a card a freeform session created lands on that session's
 			// branch while it is open (worktree.Pool.ManagerFor)
 			row.BaseBranch = name
-		}
-		if name := goalBranches[f.GoalID]; name != "" {
-			// The same lookup answers both questions, because it is the
-			// same fact: a goal still conducting, and the branch its cards
-			// land on while it is (goalLandingBranch).
-			row.BaseBranch, row.GoalLive = name, true
 		}
 		if hist, err := m.store.History(ctx, f.ID); err == nil {
 			row.History = hist
@@ -419,11 +370,6 @@ func (m *Shell) loadRows() tea.Msg {
 		if events, err := m.store.Events(ctx, f.ID); err == nil {
 			row.AutopilotDriving = threadfold.Driving(threadfold.LiveStretches(f, events, m.ws))
 			row.ExitVerdict, row.Exited = stageExited(events, row.History, f.Stage)
-		}
-		if f.IsGoal() && m.engine != nil {
-			if rep, err := m.engine.GoalReport(ctx, f.ID); err == nil {
-				row.Goal = &rep
-			}
 		}
 		rows = append(rows, row)
 	}
@@ -586,13 +532,6 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			env = *res.Envelope
 		}
 		repo := res.Repo
-		if kind == domain.KindGoal {
-			// A goal is not in a repository (DESIGN §17.2): the dialog
-			// never asked, and its home is settled from its cards at its
-			// plan gate. Until then its own branch has to be cut
-			// somewhere, which is what a provisional home is.
-			repo = m.provisionalRepo()
-		}
 		if res.Home {
 			// an agent is in no repository, whatever the form's row held
 			repo = ""
@@ -637,15 +576,6 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 		}
 		return created
 	}
-}
-
-// provisionalRepo is the repository a goal is minted into before its plan
-// says where its cards are. See worktree.Pool.ProvisionalRepo.
-func (m *Shell) provisionalRepo() string {
-	if m.wt == nil {
-		return ""
-	}
-	return m.wt.ProvisionalRepo()
 }
 
 // requireRepo is cardmint's repository check for this workspace: a name
@@ -1050,7 +980,7 @@ func (m *Shell) discoverChecks(id domain.FeatureID) tea.Cmd {
 // does not parse is not "missing" — verify reports that as a plan defect.
 func (m *Shell) checksBlockMissing(f domain.Feature) bool {
 	switch {
-	case f.Kind == domain.KindResearch, f.IsGoal(), f.IsFreeform():
+	case f.Kind == domain.KindResearch, f.Kind == domain.KindGoal, f.IsFreeform():
 		return false
 	case f.Stage != domain.StageImplement && f.Stage != domain.StageVerify:
 		return false
@@ -1278,9 +1208,6 @@ func (m *Shell) tidy(ctx context.Context, f domain.Feature) noticeMsg {
 		}
 	}
 	m.dropSession(f.ID)
-	// what a goal's sweep took with it, for the closing notice; the
-	// zero value for every other kind.
-	var cards engine.GoalCardCleanup
 	if ok, err := m.wt.Exists(ctx, &f); err != nil {
 		return noticeMsg{text: sanitize(err.Error()), isErr: true}
 	} else if ok {
@@ -1302,17 +1229,6 @@ func (m *Shell) tidy(ctx context.Context, f domain.Feature) noticeMsg {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			} else if dirty {
 				return noticeMsg{text: f.Name() + " was neither landed nor pushed and its worktree holds uncommitted work — commit or discard it before cleanup", isErr: true}
-			}
-		}
-		// A goal's cards resolve to a manager rooted at THIS tree, so
-		// they come out before it does: after this remove their
-		// checkouts are unreachable and their branches read as
-		// unlanded for good (Engine.CleanGoalCards). While the goal
-		// ran, its landed cards did not offer the verb themselves
-		// (featureRow.conducted) — this is where it went.
-		if f.IsGoal() && m.engine != nil {
-			if swept, cerr := m.engine.CleanGoalCards(ctx, f.ID); cerr == nil {
-				cards = swept
 			}
 		}
 		// force: only disposable untracked artifacts remain now, and a
@@ -1353,12 +1269,6 @@ func (m *Shell) tidy(ctx context.Context, f domain.Feature) noticeMsg {
 	case !landed:
 		text = f.Name() + " cleaned up — worktree and branch removed"
 	}
-	if n := len(cards.Took); n > 0 {
-		text += ", with " + itoa(n) + " of its card" + plural(n)
-	}
-	if n := len(cards.Left); n > 0 {
-		text += " · " + idList(cards.Left) + " kept — work no merge has"
-	}
 	return noticeMsg{text: text, reload: true}
 }
 
@@ -1383,15 +1293,6 @@ func (m *Shell) closeOut(ctx context.Context, id domain.FeatureID, keep bool) st
 		return "worktree removed"
 	}
 	return "worktree and branch removed"
-}
-
-// idList spells a handful of card ids for one notice.
-func idList(ids []domain.FeatureID) string {
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, string(id))
-	}
-	return strings.Join(out, ", ")
 }
 
 // dropSession ends and forgets a feature's engine session and clears
@@ -1511,9 +1412,6 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 	if err != nil {
 		return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
 	}
-	if f.IsGoal() && (f.Stage == domain.StageVerify || f.Stage == domain.StageImplement) {
-		return m.sendBackGoal(f, note)
-	}
 	if f.Stage == domain.StagePlan {
 		it, ok := m.inbox.get(id)
 		if !ok || it.Kind != attnGate || !it.Escalated {
@@ -1570,22 +1468,9 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 	}
 }
 
-// deleteFeature removes worktree, branch, and record — and, for a goal,
-// its cards' too.
-//
-// A goal is deleted with its cards because it cannot be deleted without
-// them: a card of a goal resolves to a manager rooted at the GOAL's tree
-// in the card's own repository (worktree.Pool.managerForGoalCard), so
-// the moment those trees come out, every card's checkout is gone with
-// them and its branch is measured against a trunk that never took its
-// commits. Cards kept back would be rows pointing at a goal that no
-// longer exists, holding branches no surface would ever offer to remove
-// again. So they go first, while the trees that reach them are still
-// standing, and the goal follows.
-//
-// Nothing is touched until everything can be: a card another card
-// outside the goal depends on, or one another gummi process is driving,
-// refuses the whole delete rather than half-doing it.
+// deleteFeature removes worktree, branch, and record. Nothing is touched
+// when a card outside the delete depends on this one: the edge is the
+// outsider's, and the delete refuses rather than drop it.
 func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 	return m.cardLocked(id, func() tea.Msg {
 		ctx := context.Background()
@@ -1593,100 +1478,25 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		var cards []domain.Feature
-		if f.IsGoal() {
-			if cards, err = m.store.ListGoalCards(ctx, f.ID); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-		}
-		// the cards' locks, for the same reason the goal's was taken: a
-		// card a headless run is driving is not this board's to delete.
-		for _, c := range cards {
-			release, lerr := m.locks.Acquire(c.ID)
-			if lerr != nil {
-				return noticeMsg{text: cardLockedNotice(c.ID, lerr), isErr: true}
-			}
-			defer release()
-		}
-		if notice := m.dependentsOutside(ctx, f, cards); notice != nil {
+		if notice := m.dependentsOutside(ctx, f, nil); notice != nil {
 			return *notice
 		}
-		// the edges among the set are the set's own business and go with
-		// it; after this every remaining dependent is outside, and there
-		// are none (dependentsOutside).
-		for _, c := range append(append([]domain.Feature(nil), cards...), f) {
-			deps, derr := m.store.ListDependents(ctx, c.ID)
-			if derr != nil {
-				return noticeMsg{text: sanitize(derr.Error()), isErr: true}
-			}
-			for _, d := range deps {
-				if err := m.store.RemoveDependency(ctx, d, c.ID); err != nil {
-					return noticeMsg{text: sanitize(err.Error()), isErr: true}
-				}
-			}
+		// the card's own edges go with it; after this every remaining
+		// dependent is outside, and there are none (dependentsOutside).
+		deps, derr := m.store.ListDependents(ctx, f.ID)
+		if derr != nil {
+			return noticeMsg{text: sanitize(derr.Error()), isErr: true}
 		}
-		// a goal tree removed by hand takes its cards out of reach —
-		// checkout, branch and all — so it comes back for as long as the
-		// sweep needs it, on the branch that is still there, and goes
-		// again with the rest below. Best effort: whatever cannot be cut
-		// is reported by the card that needed it. A goal with no cards
-		// needs no tree recut to remove one.
-		if len(cards) > 0 {
-			for _, repo := range goalRepos(f, cards) {
-				_, _ = m.wt.EnsureGoalTree(ctx, &f, repo)
-			}
-		}
-		var unreachable []domain.FeatureID
-		for _, c := range cards {
-			err := m.deleteCard(ctx, &c)
-			if errors.Is(err, worktree.ErrGoalWorktreeMissing) {
-				// nothing on disk answers for this card any more. Its row
-				// still does, and a row pointing at a goal that is gone is
-				// the worse of the two things to leave behind.
-				if derr := m.store.DeleteFeature(ctx, c.ID); derr != nil {
-					return noticeMsg{text: sanitize(derr.Error()), isErr: true}
-				}
-				m.dropSession(c.ID)
-				unreachable = append(unreachable, c.ID)
-				continue
-			}
-			if err != nil {
+		for _, d := range deps {
+			if err := m.store.RemoveDependency(ctx, d, f.ID); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 		}
 		if err := m.deleteCard(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		text := fmt.Sprintf("%s deleted", f.Name())
-		if n := len(cards); n > 0 {
-			ids := make([]domain.FeatureID, 0, n)
-			for _, c := range cards {
-				ids = append(ids, c.ID)
-			}
-			text += ", with its " + itoa(n) + " card" + plural(n) + " — " + idList(ids)
-		}
-		if n := len(unreachable); n > 0 {
-			text += " · " + idList(unreachable) + ": no goal tree left to reach, so branch" +
-				plural(n) + " kept"
-		}
-		return noticeMsg{text: text, reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s deleted", f.Name()), reload: true}
 	})
-}
-
-// goalRepos names every repository a goal has work in: its own and its
-// cards'. Empty for anything but a goal, which has no cards to name.
-func goalRepos(f domain.Feature, cards []domain.Feature) []string {
-	if !f.IsGoal() {
-		return nil
-	}
-	out, seen := []string{f.Repo}, map[string]bool{f.Repo: true}
-	for _, c := range cards {
-		if !seen[c.Repo] {
-			seen[c.Repo] = true
-			out = append(out, c.Repo)
-		}
-	}
-	return out
 }
 
 // dependentsOutside refuses the delete when a card outside the set being
@@ -1698,7 +1508,7 @@ func (m *Shell) dependentsOutside(ctx context.Context, f domain.Feature, cards [
 	for _, c := range cards {
 		inSet[c.ID] = true
 	}
-	// the goal first, then its cards in the order they were minted, so
+	// the card first, then the rest in the order they were minted, so
 	// two runs of the same board report the same pair.
 	for _, c := range append([]domain.Feature{f}, cards...) {
 		id := c.ID
@@ -1719,8 +1529,7 @@ func (m *Shell) dependentsOutside(ctx context.Context, f domain.Feature, cards [
 // repository: its worktree, its scratch tree and its branch.
 func (m *Shell) deleteCardTrees(ctx context.Context, f *domain.Feature) error {
 	// a card whose repository was dropped from `repos:` after it was
-	// minted has nothing on disk left to reach — same story as a goal
-	// card whose tree is gone (ErrGoalWorktreeMissing) — so the record
+	// minted has nothing on disk left to reach, so the record
 	// and workspace files below are all that is left to remove, rather
 	// than refusing the delete outright.
 	if ok, err := m.wt.Exists(ctx, f); err != nil {
@@ -1753,15 +1562,8 @@ func (m *Shell) deleteCardTrees(ctx context.Context, f *domain.Feature) error {
 }
 
 // deleteCard takes one card off disk and out of the store: its worktree,
-// its branch, its record, and the workspace files keyed to it. A goal's
-// trees in the repositories it spans go too — its home one is its own
-// card's worktree and goes with every other card's.
+// its branch, its record, and the workspace files keyed to it.
 func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
-	if f.IsGoal() {
-		if err := m.wt.DeleteGoalTrees(ctx, f); err != nil {
-			return err
-		}
-	}
 	// an agent has no tree and no branch, and its home is kept: there is
 	// nothing on disk to take, and asking would make the home of an agent
 	// that never ran
@@ -1791,11 +1593,6 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 	// Best effort: an orphan is only clutter. Through rmtree: an agent's
 	// build can leave a read-only Go module cache in it.
 	_ = rmtree.RemoveAll(m.ws.ScratchFilesDir(f.ID))
-	// what a goal knew that no card owned is keyed to the record in the
-	// same way (state.Workspace.GoalNotebookDir).
-	if f.IsGoal() {
-		_ = os.RemoveAll(m.ws.GoalNotebookDir(f.ID))
-	}
 	m.dropSession(f.ID)
 	return nil
 }

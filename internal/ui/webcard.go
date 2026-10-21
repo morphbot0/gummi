@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"slices"
 	"strconv"
@@ -316,14 +315,8 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 	// a page has this card open: watch its branch and artifact for the
 	// writes the store never hears of (freshness.go)
 	m.watchCard(r.F)
-	titles := map[domain.FeatureID]string{}
-	if r.F.GoalID != "" {
-		if g, ok := m.rowByID(r.F.GoalID); ok {
-			titles[g.F.ID] = g.F.Title
-		}
-	}
 	st := webCardState{f: r.F, card: webapi.Card{
-		Row:      m.webRow(r, titles),
+		Row:      m.webRow(r),
 		Branch:   r.F.BranchName(),
 		Base:     r.baseBranch(),
 		Adopted:  r.F.Adopted(),
@@ -413,7 +406,7 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 // landing's second half. It reads the repository's config, so it runs off
 // the loop.
 func (m *Shell) webClosePush(ctx context.Context, f domain.Feature, c *webapi.Card) {
-	if m.wt == nil || f.InGoal() || f.IsGoal() {
+	if m.wt == nil || f.Kind == domain.KindGoal {
 		return
 	}
 	mgr, err := m.wt.ManagerFor(ctx, &f)
@@ -588,9 +581,6 @@ func (m *Shell) webActionDefaults(ctx context.Context, f domain.Feature, acts []
 func (m *Shell) webLandingDraft(ctx context.Context, f domain.Feature) string {
 	if m.engine == nil {
 		return ""
-	}
-	if f.IsGoal() {
-		return m.engine.GoalMergeMessage(ctx, f)
 	}
 	return m.engine.PendingCommitDraft(ctx, f)
 }
@@ -837,9 +827,9 @@ func (m *Shell) repoPickable(r featureRow) bool {
 }
 
 // repoMovable is repoPickable without the names: a card whose repository can
-// still move — not a goal, no worktree yet, not watch-only.
+// still move — no worktree yet, not watch-only.
 func (m *Shell) repoMovable(r featureRow) bool {
-	return !r.F.IsGoal() && !r.F.Home && !r.HasWorktree && !r.watchOnly()
+	return !r.F.Home && !r.HasWorktree && !r.watchOnly()
 }
 
 // refreshReposFor reads the repositories off the loop before the card id's
@@ -957,10 +947,6 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 	switch c.route {
 	case lineConsult:
 		return webapi.RouteConsult, "asks " + r.F.Name() + "'s consult agent — " + r.watchDriver() + " is driving it, so this never steers"
-	case lineConducted:
-		return webapi.RouteBlocked, fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.Name(), goalDriver(r.F.GoalID), m.cardName(r.F.GoalID))
-	case lineGoalNote:
-		return webapi.RouteGoalNote, "a note for the goal's lead — it reads it next turn"
 	case lineFreeformTurn:
 		if cmd, ok := m.projectCommandFor(r, text); ok {
 			if cmd.Backend != "" {

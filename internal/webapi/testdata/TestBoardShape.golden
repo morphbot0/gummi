@@ -55,10 +55,6 @@
       "envelope": 500,
       "autopilot": true,
       "severity": "high",
-      "goal": {
-        "id": "GL-001",
-        "title": "Stable board"
-      },
       "waits": [
         "FD-010"
       ]

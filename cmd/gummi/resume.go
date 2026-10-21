@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -32,19 +31,13 @@ func runResume(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	if in, err = goalResumeInput(fl, in); err != nil {
-		return err
-	}
 	gate, err := gateApproval(fl.String("gate-approval"))
 	if err != nil {
 		return err
 	}
-	envelope, runs, minutes := fl.Budget("envelope"), fl.Int("runs"), fl.Int("minutes")
+	envelope := fl.Budget("envelope")
 	if envelope < 0 {
 		return fmt.Errorf("--envelope must be a positive dollar amount, got %s", domain.FormatDollars(float64(envelope)))
-	}
-	if runs < 0 || minutes < 0 {
-		return fmt.Errorf("--runs and --minutes must be positive, got %d and %d", runs, minutes)
 	}
 	if err := driver.ValidateUntil(domain.Stage(fl.String("until"))); err != nil {
 		return err
@@ -54,9 +47,7 @@ func runResume(fl cliFlags, args []string) error {
 	// treats it as a floor and never lowers). The rest of the driving options
 	// mirror run so the continued tail behaves the same.
 	opts := driver.Options{
-		Envelope:      envelope,
-		SubstrateRuns: runs, SubstrateMinutes: minutes,
-		Retake:       fl.String("retake"),
+		Envelope:     envelope,
 		GateApproval: gate, GateApprovalSet: fl.Changed("gate-approval"),
 		StageTimeout: fl.Duration("stage-timeout"),
 		Autonomous:   fl.Bool("autonomous"), Verbose: fl.Bool("verbose"), Ref: fl.String("ref"),
@@ -84,16 +75,6 @@ func runResume(fl cliFlags, args []string) error {
 			return d.Resume(ctx, f.ID, in)
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
-		if errors.Is(err, state.ErrLocked) && in.GoalDecision() {
-			// --goal-note, --wrap-up and --reverse exist to reach a goal
-			// WHILE it runs, and a running goal is exactly the card whose
-			// lock is held. Each writes one row the conductor reads on its
-			// next tick and drives nothing itself, so a busy lock is the
-			// case they are for: hand the decision over and report it,
-			// instead of refusing on the only card they apply to.
-			in.Deliver = true
-			return d.Resume(ctx, f.ID, in)
-		}
 		if err != nil {
 			return driver.Outcome{}, err
 		}
@@ -106,44 +87,6 @@ func runResume(fl cliFlags, args []string) error {
 		defer clearPID()
 		return d.Resume(ctx, f.ID, in)
 	}, opts)
-}
-
-// goalResumeInput folds the goal-only resume flags into in. --goal-note and
-// --wrap-up stand alone; --reverse may carry a --request-changes reason.
-func goalResumeInput(fl cliFlags, in driver.ResumeInput) (driver.ResumeInput, error) {
-	noteSet, reverseSet := fl.Changed("goal-note"), fl.Changed("reverse")
-	wrapUp := fl.Bool("wrap-up")
-	n := 0
-	if noteSet {
-		n++
-	}
-	if reverseSet {
-		n++
-	}
-	if wrapUp {
-		n++
-	}
-	if n == 0 {
-		return in, nil
-	}
-	if n > 1 {
-		return in, fmt.Errorf("give at most one of --goal-note, --reverse, --wrap-up")
-	}
-	others := in.Answer != nil || in.Approve || in.Bounce != nil || in.Say != nil || (in.RequestChanges != nil && !reverseSet)
-	if others {
-		return in, fmt.Errorf("--goal-note, --reverse and --wrap-up do not combine with another decision flag")
-	}
-	switch {
-	case noteSet:
-		note := fl.String("goal-note")
-		in.Note = &note
-	case reverseSet:
-		ref := fl.String("reverse")
-		in.Reverse = &ref
-	case wrapUp:
-		in.WrapUp = true
-	}
-	return in, nil
 }
 
 // resumeInput builds the ResumeInput from the mutually exclusive decision

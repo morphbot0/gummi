@@ -11,7 +11,7 @@ package web
 //	routes_files.go    a card's worktree files, opened in the browser
 //	routes_term.go     a shell in a card's worktree (--terminal)
 //	routes_create.go   the new-card form
-//	routes_goals.go    goals and stacks
+//	routes_stacks.go   stacks
 //	routes_repos.go    repositories and their branches
 //	routes_schedules.go  schedules and heartbeats
 //	routes_curator.go  the skill pack and its curator
@@ -34,7 +34,7 @@ func (s *Server) routes() {
 	s.fileRoutes()
 	s.termRoutes()
 	s.createRoutes()
-	s.goalRoutes()
+	s.stackRoutes()
 	s.repoRoutes()
 	s.scheduleRoutes()
 	s.curatorRoutes()

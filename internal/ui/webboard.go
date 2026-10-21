@@ -40,12 +40,8 @@ func (m *Shell) WebBoard() webapi.Board {
 		b.Today.Spent = m.today.credits
 	}
 	b.Resume = m.webResumeOffer()
-	titles := make(map[domain.FeatureID]string, len(m.rows))
 	for _, r := range m.rows {
-		titles[r.F.ID] = r.F.Title
-	}
-	for _, r := range m.rows {
-		row := m.webRow(r, titles)
+		row := m.webRow(r)
 		switch row.Status {
 		case webapi.StatusNeeds:
 			b.Counts.Needs++
@@ -57,8 +53,8 @@ func (m *Shell) WebBoard() webapi.Board {
 	return b
 }
 
-// webRow projects one board row. titles resolves a goal id to its title.
-func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.Row {
+// webRow projects one board row.
+func (m *Shell) webRow(r featureRow) webapi.Row {
 	f := r.F
 	row := webapi.Row{
 		ID:        string(f.ID),
@@ -82,9 +78,6 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 	}
 	if c := m.liveCardContext(f.ID); c.Tokens > 0 {
 		row.Context = &webapi.AgentContext{Tokens: c.Tokens, Limit: c.Limit}
-	}
-	if f.GoalID != "" {
-		row.Goal = &webapi.RowGoal{ID: string(f.GoalID), Title: titles[f.GoalID]}
 	}
 	for _, id := range r.DepBlockers {
 		row.Waits = append(row.Waits, string(id))

@@ -52,7 +52,7 @@ func (m *Shell) stackCands() []stackCand {
 	var out []stackCand
 	for _, r := range m.rows {
 		f := r.F
-		if f.Kind == domain.KindResearch || f.Kind == domain.KindGoal || f.GoalID != "" {
+		if f.Kind == domain.KindResearch || f.Kind == domain.KindGoal {
 			continue
 		}
 		if f.Kind == domain.KindFreeform && (f.MainCheckout || f.Stage == domain.StageDone) {

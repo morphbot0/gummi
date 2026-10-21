@@ -285,13 +285,6 @@ func (d *prLinkDialog) webAnswer(_ *Shell, in *webInput) webAnswer { //nolint:un
 	return webAnswer{cmd: cmd}
 }
 
-// Reversing one of a goal's decisions is picked from the list the goal's
-// page shows, with the lead's reasons beside each; the request is told to
-// go there.
-func (d *reverseDialog) webAnswer(_ *Shell, _ *webInput) webAnswer {
-	return webAnswer{needs: webapi.ActionNeedsDecision, question: "pick the decision to reverse on " + d.f.Name() + "'s page"}
-}
-
 // tooLong is the refusal for a value longer than the terminal's input
 // takes, or "" when it fits. A web request is never cut down to fit: a
 // landing message trimmed at its limit, or a budget losing a digit, is a

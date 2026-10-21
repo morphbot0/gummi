@@ -101,15 +101,6 @@ type stageEvent struct {
 	Result string `json:"result,omitempty"`
 }
 
-// notedEvent reports a goal decision handed to a goal another process is
-// conducting: the row is written, that conductor acts on it, and this
-// invocation drove nothing.
-type notedEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id"`
-	What  string `json:"what"`
-}
-
 type gateEvent struct {
 	Event    string `json:"event"`
 	ID       string `json:"id"`
@@ -364,22 +355,6 @@ type verifiedEvent struct {
 	// PullRequest mirrors the linked PullRequestRef verbatim, same shape as
 	// `status --json`'s pull_request object; absent when unlinked.
 	PullRequest any `json:"pull_request,omitempty"`
-	// Goal is a goal's hand-over: how many done-when items were met,
-	// whether it is partial, which cards landed and which were dropped.
-	// Absent for every other kind.
-	Goal *goalDoneEvent `json:"goal,omitempty"`
-}
-
-// cardVerifiedEvent reports a goal card reaching its verified branch: its
-// goal lands it on the goal branch next. It is a notification mid-run, not
-// a terminal event — the run continues afterwards — which is why it does
-// not share a name with the `verified` the run itself ends on.
-type cardVerifiedEvent struct {
-	Event  string  `json:"event"`
-	ID     string  `json:"id"`
-	Goal   string  `json:"goal"`
-	Branch string  `json:"branch"`
-	Spent  float64 `json:"spent_credits"`
 }
 
 // mergedEvent reports a successful headless landing: the feature branch
@@ -413,11 +388,6 @@ type cleanedEvent struct {
 	Event  string `json:"event"`
 	ID     string `json:"id"`
 	Branch string `json:"branch"`
-	// Cards are the goal's own cards this cleanup took with it, and Kept
-	// the ones it left standing because they carry work no merge has.
-	// Both are empty for every card but a goal (Engine.CleanGoalCards).
-	Cards []string `json:"cards,omitempty"`
-	Kept  []string `json:"kept,omitempty"`
 	// BranchKept marks a clean that deliberately left the card's branch
 	// alone: gummi did not cut it (DESIGN §10 D22), or the card was closed
 	// without landing or pushing and the branch is the only copy of its

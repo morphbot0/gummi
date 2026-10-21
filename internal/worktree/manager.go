@@ -2162,14 +2162,12 @@ func (m *Manager) Diff(ctx context.Context, f *domain.Feature) (string, error) {
 // the copy; with nothing untracked the environment is empty and the diff
 // runs exactly as before.
 //
-// Two trees are the exception. What a goal's own sessions leave in its
-// tree is scratch by design (a binary built to run a check), never part
-// of the branch. And a main-checkout card works in the person's own
-// checkout, where an untracked file is theirs rather than the card's.
-// Both diffs stay the committed and tracked work alone.
+// A main-checkout card is the exception: it works in the person's own
+// checkout, where an untracked file is theirs rather than the card's. Its
+// diff stays the committed and tracked work alone.
 func (m *Manager) withUntracked(ctx context.Context, f *domain.Feature, p string) (env []string, done func(), err error) {
 	done = func() {}
-	if f.IsGoal() || f.MainCheckout {
+	if f.MainCheckout {
 		return nil, done, nil
 	}
 	list, err := runGitRaw(ctx, p, "ls-files", "--others", "--exclude-standard", "-z")
@@ -2482,6 +2480,26 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 		line = strings.TrimSpace(line)
 		if rest, ok := strings.CutPrefix(line, "worktree "); ok && strings.HasPrefix(rest, prefix) {
 			paths = append(paths, rest)
+		}
+	}
+	return paths, nil
+}
+
+// trackedChanges names the tracked files a checkout has modified, staged
+// or not, ignoring .gummi for the same reason MainTrackedDirty does. It
+// reads the diff against HEAD rather than porcelain status because that
+// gives bare paths: status prefixes each line with its two-letter code,
+// and the leading space of an unstaged change does not survive the
+// trimming every command in this package does.
+func trackedChanges(ctx context.Context, dir string) ([]string, error) {
+	out, err := runGit(ctx, dir, "diff", "--name-only", "HEAD", "--", ":(exclude).gummi")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			paths = append(paths, line)
 		}
 	}
 	return paths, nil

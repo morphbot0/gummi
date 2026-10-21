@@ -39,7 +39,6 @@ func TestRefusalNamesEveryCardThatIsNotPublishable(t *testing.T) {
 		{"main checkout", func(c *Card) { c.F.MainCheckout = true }, CodeNoBranch},
 		{"todo", func(c *Card) { c.F.Stage = domain.StageTodo }, CodeNoBranch},
 		{"stacked", func(c *Card) { c.F.StackID = "S1" }, CodeStacked},
-		{"goal member", func(c *Card) { c.F.GoalID = "GL-1" }, CodeGoalMember},
 		{"landed", func(c *Card) { c.Landed = true }, CodeLanded},
 		{"continued", func(c *Card) { c.F.ContinuedAs = "FD-9" }, CodeContinued},
 		{"busy", func(c *Card) { c.Busy = true }, CodeBusy},
@@ -55,11 +54,6 @@ func TestRefusalNamesEveryCardThatIsNotPublishable(t *testing.T) {
 	}
 	if r := Refusal(Card{F: base()}); r != nil {
 		t.Fatalf("a verified card is refused: %v", r)
-	}
-	dropped := base()
-	dropped.GoalID, dropped.GoalDroppedAt = "GL-1", time.Unix(2, 0)
-	if r := Refusal(Card{F: dropped}); r != nil {
-		t.Fatalf("a card its goal dropped is refused: %v", r)
 	}
 }
 
@@ -156,7 +150,7 @@ func TestRepoOfURL(t *testing.T) {
 // must not import it (DESIGN §22.7).
 func TestOnlyPersonFacingCodeImportsPublish(t *testing.T) {
 	root := filepath.Join("..", "..")
-	for _, pkg := range []string{"engine", "driver", "mcp", "goalpolicy", "schedule", "agent", "verify", "spec", "workflow", "state", "worktree"} {
+	for _, pkg := range []string{"engine", "driver", "mcp", "schedule", "agent", "verify", "spec", "workflow", "state", "worktree"} {
 		p, err := build.ImportDir(filepath.Join(root, "internal", pkg), 0)
 		if err != nil {
 			t.Fatalf("%s: %v", pkg, err)

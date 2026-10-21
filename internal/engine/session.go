@@ -62,10 +62,6 @@ const (
 	// node's turn ended, a decision was answered, the planner finished.
 	// The driving loop ticks the session's crew on it (Engine.CrewTick).
 	EventCrew EventKind = "crew"
-	// EventGoal asks the driving loop to tick a goal (Feature is the goal):
-	// it has work to conduct — it just entered implement, you added a note,
-	// it was sent back or stopped.
-	EventGoal EventKind = "goal"
 )
 
 // Event is one item in the engine's UI-facing stream.
