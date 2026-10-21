@@ -916,34 +916,6 @@ func TestThreadDecisionMultiPickNeverTogglesChatAboutThis(t *testing.T) {
 	}
 }
 
-// TestGateAnswerCrosses is the interaction change's whole point stated as
-// a rule: the gate is a question in the conversation, and answering it
-// with the advance option IS the crossing. Every other answer to it — and
-// every answer to an ordinary ask — leaves the card where it is.
-func TestGateAnswerCrosses(t *testing.T) {
-	gate := &engine.Ask{Question: "may this move on?", Gate: true, Options: engine.GateAskOptions()}
-	plain := &engine.Ask{Question: "which approach?", Options: []engine.AskOption{
-		{Label: engine.GateAdvanceLabel}, {Label: "b"},
-	}}
-
-	if !decisions.GateAnswerCrosses(gate, engine.GateAdvanceLabel) {
-		t.Error("the advance option on a gate did not read as the crossing")
-	}
-	for _, answer := range []string{"Not yet", "the migration step is missing", ""} {
-		if decisions.GateAnswerCrosses(gate, answer) {
-			t.Errorf("%q on a gate read as a crossing; only the advance option may", answer)
-		}
-	}
-	// an ordinary ask never crosses, even when a label happens to match:
-	// the flag is what makes a question a gate, not its wording.
-	if decisions.GateAnswerCrosses(plain, engine.GateAdvanceLabel) {
-		t.Error("a non-gate ask crossed the gate on a matching label")
-	}
-	if decisions.GateAnswerCrosses(nil, engine.GateAdvanceLabel) {
-		t.Error("a workflow decision (no ask at all) read as a gate crossing")
-	}
-}
-
 // A freeform card mid-turn offers one answer — stop the turn — through its
 // menu; it is not pinned as a composer decision, which would have nothing
 // honest to say it was raised "against" (there is no revision in question,

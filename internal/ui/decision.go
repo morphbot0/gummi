@@ -915,13 +915,6 @@ func (m *Shell) answerDecisionAt(r featureRow, d *threadDecision, cursor int, pi
 		if d.crew != nil {
 			return m.answerCrew(r, d, answer)
 		}
-		// A gate ask IS the crossing: answering it with the advance option
-		// has to move the card, or the question would be a control that
-		// looks like a decision and does nothing. Everything else about it
-		// — recording the answer, resolving the agent's blocked call —
-		// goes through the ordinary answer path first, so the transcript
-		// and the spec anchor read the same as any other answer.
-		crossing := decisions.GateAnswerCrosses(d.ask, answer)
 		if answer == "" {
 			// Belt to parseAsk's braces. Nothing that reaches here should
 			// be able to resolve to an empty answer, but if it ever does,
@@ -935,7 +928,7 @@ func (m *Shell) answerDecisionAt(r featureRow, d *threadDecision, cursor int, pi
 		}
 		sess := liveSessionFor(m.engine, r)
 		eng, actor := m.engine, m.humanActor()
-		answerCmd := func() tea.Msg {
+		return func() tea.Msg {
 			if sess == nil || liveSessionFor(eng, r) != sess {
 				return noticeMsg{text: "session is no longer active", isErr: true}
 			}
@@ -944,14 +937,6 @@ func (m *Shell) answerDecisionAt(r featureRow, d *threadDecision, cursor int, pi
 			}
 			return noticeMsg{clearInbox: r.F.ID, reseedInbox: true}
 		}
-		if !crossing {
-			return answerCmd
-		}
-		// Sequenced, not batched: the crossing must see the answer already
-		// recorded, and the gate's own blocker checks (open threads, the
-		// undrafted floor) still run inside Advance — answering a gate
-		// asks for the crossing, it does not force one.
-		return tea.Sequence(answerCmd, m.advanceStageAs(r.F.ID, actor))
 	}
 	if cursor < 0 || cursor >= len(d.actions) {
 		return nil

@@ -1,13 +1,10 @@
 package ui
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // The narration is the short paragraph above the answer set: what a
@@ -167,14 +164,6 @@ func (m *Shell) cardNarration(in nextInput, r featureRow) []claim {
 	if in.closed() {
 		return closingClaims(in)
 	}
-	// The log is read from m.cardEvents rather than from r.Events, and
-	// the difference matters: featureRow.Events is filled at RENDER time
-	// (thread.go) and is nil on a row handed straight out of m.selected,
-	// so a caller outside the render path — openCitation counting the
-	// marks, ensureNarration keying the cache — would see a different
-	// paragraph from the one on screen and number it differently. One
-	// source, and it is the durable one.
-	events := m.cardEvents[r.F.ID]
 	var out []claim
 	if s := whyItStopped(in); s != "" {
 		// The failing check is the claim's own evidence and the anchor is
@@ -185,15 +174,6 @@ func (m *Shell) cardNarration(in nextInput, r featureRow) []claim {
 		} else {
 			out = append(out, sentence(s))
 		}
-	}
-	// threadfold.LiveStretches, not threadfold.Stretches: a period the driving process
-	// abandoned, or one autopilot ended by carrying the card into a stage
-	// it may not drive, are both closed by query-time judgement rather
-	// than by any row in the log (stretch.go). Reading the raw stretches
-	// here would report a period as still running while the card sits in
-	// front of you waiting.
-	if c := unattendedClaim(threadfold.LiveStretches(r.F, events, m.ws), events); c.text != "" {
-		out = append(out, c)
 	}
 	// The third question, and the only one that costs anything. It is
 	// read from the cache and never generated here: rendering must stay
@@ -580,49 +560,6 @@ func loopBreaker(in nextInput) string {
 	return " It has now failed " + n + " times, so sending it back has already bought a full rework round that changed nothing — check the environment and the verification plan before spending another."
 }
 
-// unattendedSentence is the second sentence: what the card decided while
-// nobody was watching.
-//
-// It reports the newest period only — the one that led to this stop.
-// Summing every period a card ever ran would make the sentence grow
-// without bound and stop being about the stop you are looking at, and
-// the older ones are already drawn where they happened, bracketed among
-// the history (stretch.go).
-func unattendedClaim(stretches []threadfold.Stretch, events []state.CardEvent) claim {
-	if len(stretches) == 0 {
-		return claim{}
-	}
-	st := stretches[len(stretches)-1]
-	if st.DecidedNothing() {
-		// "it ran a stage while you were out" is worth a rule in the
-		// history, but it is not worth a sentence at the stop: the folded
-		// receipt above already says which stage ran, and a sentence that
-		// reports two zeroes is noise where the reader is deciding.
-		return claim{}
-	}
-	var parts []string
-	if n := len(st.Gates); n > 0 {
-		parts = append(parts, "crossed "+itoa(n)+" gate"+plural(n))
-	}
-	if n := len(st.Answers); n > 0 {
-		parts = append(parts, "took "+itoa(n)+" answer"+plural(n))
-	}
-	lead := "Before that, autopilot "
-	if st.Running() {
-		lead = "Autopilot has the card and has "
-	}
-	text := lead + strings.Join(parts, " and ") + " without you."
-	// The period's OPENING event is the citation: it is the row in the
-	// thread where the stretch begins, and from there the crossings the
-	// sentence counts are drawn in order below it. st.from indexes the
-	// same slice threadfold.Stretches walked, so the seq is always a real
-	// event on this card.
-	if st.From >= 0 && st.From < len(events) {
-		return cite(text, "event", itoa64(events[st.From].Seq))
-	}
-	return sentence(text)
-}
-
 // isAre agrees a verb with a count, so the sentences above read as
 // English at one and at many.
 func isAre(n int) string {
@@ -705,6 +642,3 @@ func joinList(parts []string) string {
 		return strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1]
 	}
 }
-
-// itoa64 formats an event sequence for an anchor.
-func itoa64(n int64) string { return strconv.FormatInt(n, 10) }

@@ -42,7 +42,6 @@ func populatedShell(w, h int) *Shell {
 		row(39, "onboarding", domain.StageDone, "premium", false),
 		row(46, "billing sync", domain.StageImplement, "thrifty", false),
 	}
-	m.rows[6].AutopilotDriving = true
 	m.rows[1].History = []state.TransitionRecord{
 		{FeatureID: "FD-042", From: domain.StageTodo, To: domain.StagePlan, Actor: "user", At: fixedTime},
 		{FeatureID: "FD-042", From: domain.StagePlan, To: domain.StagePlan, Actor: "user", At: fixedTime},
@@ -218,31 +217,6 @@ func TestCardLineLandedSurvivesCleanup(t *testing.T) {
 	}
 }
 
-// TestCardLineGateMarker: the ⚡ badge marks only an explicit "auto"
-// gate-approval mode. Empty reads as auto everywhere else in the code
-// (domain.ValidGateApproval). Attended is the default and what empty
-// reads as, so it badges nothing — a marker on every card is not a
-// marker. Autopilot is the opted-in state, and the only one where the
-// board moves without you.
-func TestCardLineGateMarker(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	autopilot := row(1, "autopilot card", domain.StageTodo, "", false)
-	autopilot.F.GateApproval = domain.GateAutopilot
-	empty := row(2, "empty card", domain.StageTodo, "", false)
-	attended := row(3, "attended card", domain.StageTodo, "", false)
-	attended.F.GateApproval = domain.GateAttended
-
-	if !strings.Contains(m.cardLine(autopilot, 1, false, true, 80), "⚡") {
-		t.Error("an autopilot card should show the ⚡ marker")
-	}
-	if strings.Contains(m.cardLine(empty, 2, false, true, 80), "⚡") {
-		t.Error("empty gate mode reads as attended and must not show the marker")
-	}
-	if strings.Contains(m.cardLine(attended, 3, false, true, 80), "⚡") {
-		t.Error("attended is the default — it must not show the marker")
-	}
-}
-
 // TestNeedsAttention: the board's lookup agrees with attnIcon's own
 // per-kind glyph for every attention kind, and reports ok=false for a
 // feature with no pending item.
@@ -411,36 +385,6 @@ func TestCardLineForeignRows(t *testing.T) {
 	}
 
 	golden.RequireEqual(t, []byte(m.cardLine(busy, 1, false, true, 80)+"\n"+m.cardLine(idle, 2, false, true, 80)))
-}
-
-// TestCardLineAutopilotBadge: a card with AutopilotDriving true wears the
-// "◐ autopilot" badge, a card with it false does not, and on a card that
-// is both foreign-driven and autopilot-driving the elsewhere badge comes
-// first — the two read closest in meaning and sit next to each other by
-// construction, not by accident of append order.
-func TestCardLineAutopilotBadge(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	driving := row(1, "driven card", domain.StageImplement, "", false)
-	driving.AutopilotDriving = true
-	idle := row(2, "idle card", domain.StageImplement, "", false)
-	idle.AutopilotDriving = false
-
-	if !strings.Contains(m.cardLine(driving, 1, false, true, 80), "◐ autopilot") {
-		t.Error("AutopilotDriving=true should show the ◐ autopilot badge")
-	}
-	if strings.Contains(m.cardLine(idle, 2, false, true, 80), "◐ autopilot") {
-		t.Error("AutopilotDriving=false must not show the ◐ autopilot badge")
-	}
-
-	both := row(3, "both card", domain.StageImplement, "", false)
-	both.DrivenAbroad = true
-	both.AutopilotDriving = true
-	line := m.cardLine(both, 3, false, true, 100)
-	elsewhereAt := strings.Index(line, "◉ elsewhere")
-	autopilotAt := strings.Index(line, "◐ autopilot")
-	if elsewhereAt < 0 || autopilotAt < 0 || elsewhereAt > autopilotAt {
-		t.Errorf("card line = %q, want elsewhere badge before autopilot badge", line)
-	}
 }
 
 // TestCardLineNarrowWidthGolden locks in BG-037's shed order: as the row

@@ -37,7 +37,7 @@ func TestPauseAndRebaseAreReceiptsNamingWhoDidIt(t *testing.T) {
 		pause(domain.StageImplement, state.PersonActor("Yuki")).
 		rebase(domain.StageImplement, state.RebasePayload{Onto: "main", By: state.PersonActor("Simon")}).
 		rebase(domain.StageImplement, state.RebasePayload{Onto: "trunk", Agent: true})
-	got := receipts(Items(l.evs, Options{Live: true}))
+	got := receipts(Items(l.evs, Options{}))
 	want := []Receipt{
 		{Kind: "park", Text: "you parked it", By: "you"},
 		{Kind: "park", Text: "Yuki parked it", By: "Yuki"},
@@ -54,27 +54,6 @@ func TestPauseAndRebaseAreReceiptsNamingWhoDidIt(t *testing.T) {
 	}
 }
 
-// A pause inside a period autopilot ran ends it, taken back, and the rule
-// says who — the pause is not said a second time beside it.
-func TestAPauseClosesAnAutopilotPeriod(t *testing.T) {
-	l := newLog().enter(domain.StageImplement, "implementer", "stage").
-		autopilot(domain.StageImplement, state.AutopilotTookOver, domain.GateAutopilot, "").
-		say(domain.StageImplement, string(engine.AuthorAssistant), "working").
-		pause(domain.StageImplement, state.PersonActor("Yuki"))
-	sts := Stretches(l.evs)
-	if len(sts) != 1 || sts[0].Closed != StretchTakenBack || sts[0].Reason != "Yuki parked it" {
-		t.Fatalf("stretches = %+v, want one taken back by Yuki", sts)
-	}
-	items := Items(l.evs, Options{Live: true})
-	if r := receipts(items); len(r) != 0 {
-		t.Errorf("the pause is said twice: %+v", r)
-	}
-	last := items[len(items)-1]
-	if last.T != ItemStretch || last.Stretch.Edge != "close" || last.Stretch.Reason != "Yuki parked it" {
-		t.Errorf("last item = %s, want the closing rule naming Yuki", brief(last))
-	}
-}
-
 // A headless run's --until stop and the board's own gate decision can
 // both sit at one stage; the crossing carries one id and passes both.
 // Neither renders as the stop still waiting, and the crossing's receipt
@@ -87,7 +66,7 @@ func TestACrossingPassesEveryStopAtItsStage(t *testing.T) {
 		decision(domain.StagePlan, "gate:driver", state.DecisionKindGate, "stopped early at plan").
 		decision(domain.StagePlan, "gate:board", state.DecisionKindGate, "plan is ready").
 		gate(domain.StagePlan, domain.StagePlan, domain.StageImplement, state.PersonActor("Simon"), "gate:board")
-	items := Items(l.evs, Options{Live: true})
+	items := Items(l.evs, Options{})
 	for _, it := range items {
 		if it.T == ItemDecision {
 			t.Errorf("a passed stop still reads as waiting: %s", brief(it))
@@ -114,7 +93,7 @@ func TestACrossingPassesEveryStopAtItsStage(t *testing.T) {
 func TestASupersededStopIsDeliveredAgain(t *testing.T) {
 	l := newLog().enter(domain.StagePlan, "architect", "stage").
 		decision(domain.StagePlan, "budget:1", state.DecisionKindBudget, "Out of credits")
-	before := Items(l.evs, Options{Live: true})
+	before := Items(l.evs, Options{})
 	last := before[len(before)-1]
 	if last.T != ItemDecision {
 		t.Fatalf("last item = %s, want the open decision", brief(last))
@@ -122,7 +101,7 @@ func TestASupersededStopIsDeliveredAgain(t *testing.T) {
 	seen := l.evs[len(l.evs)-1].Seq
 	l.decision(domain.StagePlan, "gate:1", state.DecisionKindGate, "plan is ready")
 	var again *Item
-	for _, it := range Since(Items(l.evs, Options{Live: true}), seen) {
+	for _, it := range Since(Items(l.evs, Options{}), seen) {
 		if it.Key == last.Key {
 			again = &it
 		}

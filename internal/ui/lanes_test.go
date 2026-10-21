@@ -29,9 +29,6 @@ func TestBoardFooterHasNoLaneCounts(t *testing.T) {
 
 	attended := mkFeature(t, m.store, 20, "attended card", domain.StageImplement)
 	auto := mkFeature(t, m.store, 21, "autopilot card", domain.StageImplement)
-	if err := m.store.SetGateApproval(ctx, auto.ID, domain.GateAutopilot); err != nil {
-		t.Fatal(err)
-	}
 	for _, f := range []domain.Feature{attended, auto} {
 		ff := f
 		if _, err := m.wt.Create(ctx, &ff); err != nil {

@@ -5,7 +5,6 @@ todo ─ plan ─  implement  ─ verify ─ done
 
 ⌄ spec · Implementation notes ────────────────── alt+s
 
-── autopilot took over ────────────────────── 23:40 ──
 plan · architect · 1 turn · $1.80 ──────────── ✓ 00:04
   ✓ autopilot answered “q?” — stream rows, don't buff…
   ✓ autopilot crossed plan → implement          00:04
@@ -14,18 +13,19 @@ plan · architect · 1 turn · $1.80 ──────────── ✓ 00
 
   implementer  00:10
     wired the theme layer through the pane.
-── autopilot parked it ────────────────────── 00:11 ──
-  implement finished, review it
-  2 gates · 1 answer
-
+  · parked — implement finished, review it
   you  00:20
     hold on, I want to look at the diff first
   implementer  00:21
     sure — nothing else is running.
 
 
- Before that, autopilot crossed 2 gates and took 1
- answer without you. [alt+a]
+
+
+
+
+
+
 
 gummi
  nothing is running — choose what happens next.

@@ -40,9 +40,6 @@ const (
 	// ItemNote is any other logged fact: a goal's log entry, or a row of
 	// a kind this fold has no sentence for (its kind, verbatim).
 	ItemNote ItemType = "note"
-	// ItemStretch is a rule opening or closing a period autopilot ran
-	// the card.
-	ItemStretch ItemType = "stretch"
 )
 
 // How a person's turn reached the card, where the log can say.
@@ -97,11 +94,10 @@ type Item struct {
 	// Attachments are the images an ItemYou turn carried, in order.
 	Attachments []engine.AttachmentRef `json:"attachments,omitempty"`
 
-	Tools    []ToolCall   `json:"tools,omitempty"`
-	Receipt  *Receipt     `json:"receipt,omitempty"`
-	Checks   []Check      `json:"checks,omitempty"`
-	Decision *Decision    `json:"decision,omitempty"`
-	Stretch  *StretchMark `json:"stretch,omitempty"`
+	Tools    []ToolCall `json:"tools,omitempty"`
+	Receipt  *Receipt   `json:"receipt,omitempty"`
+	Checks   []Check    `json:"checks,omitempty"`
+	Decision *Decision  `json:"decision,omitempty"`
 
 	// Supersedes names the keys of items this one takes the place of: the
 	// decisions a gate or ask receipt answered. A client that drew such a
@@ -161,34 +157,16 @@ type Decision struct {
 	Question string `json:"question"`
 }
 
-// StretchMark is an ItemStretch's rule.
-type StretchMark struct {
-	// Edge is "open" or "close".
-	Edge  string `json:"edge"`
-	Label string `json:"label"`
-	// How, Reason and Tally are a closing rule's: how the period ended,
-	// the sentence its closing event carried, and what autopilot decided
-	// inside it ("2 gates · 1 answer", empty when nothing).
-	How    StretchClose `json:"how,omitempty"`
-	Reason string       `json:"reason,omitempty"`
-	Tally  string       `json:"tally,omitempty"`
-	Mode   string       `json:"mode,omitempty"`
-}
-
 // Options is what Items needs besides the log.
 type Options struct {
 	// Spend is the card's stage_spend rows (Store.StageBreakdown), the
 	// meter a stage divider's credits fall back to (ReceiptCredits).
 	Spend []state.StageSpend
-	// Live reports whether a session is driving the card right now
-	// (state.CardIsLive) — what decides whether a period the log still
-	// calls running is running or orphaned (CloseOrphaned).
-	Live bool
 }
 
 // Items folds a card's event log into the items a page draws, oldest
 // first. It reads the same segment fold (Segments), answered-decision
-// set and stretches the TUI thread renders from, and every sentence it
+// set the TUI thread renders from, and every sentence it
 // carries is the one the TUI prints for the same row.
 //
 // Unlike the TUI, which folds every stage but the live one to a single
@@ -199,7 +177,6 @@ type Options struct {
 func Items(events []state.CardEvent, opt Options) []Item {
 	events = state.FoldToolResults(events)
 	segs := Segments(events)
-	stretches := CloseOrphaned(Stretches(events), events, opt.Live)
 	answered := AnsweredDecisions(events)
 
 	credits := segmentCredits(segs, opt.Spend)
@@ -209,19 +186,6 @@ func Items(events []state.CardEvent, opt Options) []Item {
 		enterAt[seg.EnterIdx] = k
 		for _, idx := range seg.EvIdx {
 			segOf[idx] = k
-		}
-	}
-	opens := map[int]Stretch{}
-	closes := map[int]Stretch{}
-	var trailing []Stretch // closed by judgement, not by a row
-	for _, st := range stretches {
-		opens[st.From] = st
-		switch {
-		case st.Running():
-		case st.To < len(events):
-			closes[st.To] = st
-		default:
-			trailing = append(trailing, st)
 		}
 	}
 	current := currentDecision(events, answered)
@@ -239,19 +203,6 @@ func Items(events []state.CardEvent, opt Options) []Item {
 		if k, ok := enterAt[i]; ok {
 			emit(stageItem(segs[k], credits[k], ev, events))
 		}
-		if st, ok := opens[i]; ok {
-			emit(Item{
-				Seq: ev.Seq, Key: "open:" + seqKey(ev.Seq), T: ItemStretch, At: st.OpenedAt, Stage: ev.Stage,
-				Stretch: &StretchMark{Edge: "open", Label: StretchOpenLabel, Mode: st.Mode},
-			})
-		}
-		closedHere := false
-		if st, ok := closes[i]; ok {
-			emit(closeItem(st, ev.Seq, events))
-			// A park or a handback is said by the rule itself; printing the
-			// event too would say one ending twice (the TUI's live block).
-			closedHere = ev.Kind == state.EventPark || ev.Kind == state.EventAutopilot || ev.Kind == state.EventPause
-		}
 		if ev.Kind == state.EventConsult {
 			// a consult turn goes where it was asked, whatever stage the
 			// card was in and whether or not any stage had started yet
@@ -259,7 +210,7 @@ func Items(events []state.CardEvent, opt Options) []Item {
 			continue
 		}
 		k, inSeg := segOf[i]
-		if !inSeg || closedHere {
+		if !inSeg {
 			continue
 		}
 		seg := segs[k]
@@ -347,20 +298,12 @@ func Items(events []state.CardEvent, opt Options) []Item {
 			}
 			emit(it)
 		default:
-			if it, ok := eventItem(ev, InStretch(stretches, i)); ok {
+			if it, ok := eventItem(ev); ok {
 				for _, k := range answers[i] {
 					it.Supersedes = append(it.Supersedes, "ev:"+seqKey(events[k].Seq))
 				}
 				emit(it)
 			}
-		}
-	}
-	// A period nothing in the log closed, closed instead by the judgement
-	// that its driver is gone: its rule goes after everything, dated from
-	// the last thing the run wrote.
-	if n := len(events); n > 0 {
-		for _, st := range trailing {
-			emit(closeItem(st, events[n-1].Seq, events))
 		}
 	}
 	return out
@@ -383,25 +326,20 @@ func Since(items []Item, after int64) []Item {
 // note: gates, asks, parks, pauses, rebases, mode changes, goal log
 // entries, and whatever
 // kind this fold has no sentence for. false for an event the thread
-// deliberately draws nothing for (an autopilot boundary, drawn as a
-// stretch rule instead).
-func eventItem(ev state.CardEvent, inStretch bool) (Item, bool) {
+// deliberately draws nothing for (a legacy autopilot boundary).
+func eventItem(ev state.CardEvent) (Item, bool) {
 	switch ev.Kind {
 	case state.EventGate:
 		var p state.GatePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		if line := DecisionLine(ev, inStretch); line != "" {
-			by := p.Actor
-			if inStretch {
-				by = "autopilot"
-			}
-			return receiptItem(ev, Receipt{Kind: "gate", OK: true, Text: Sanitize(line), By: by}), true
+		if line := DecisionLine(ev); line != "" {
+			return receiptItem(ev, Receipt{Kind: "gate", OK: true, Text: Sanitize(line), By: p.Actor}), true
 		}
 		return receiptItem(ev, Receipt{Kind: "gate", OK: true, Text: GateLine(p), By: GateCrosser(p)}), true
 	case state.EventAsk:
 		var p state.AskPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		if line := DecisionLine(ev, inStretch); line != "" {
+		if line := DecisionLine(ev); line != "" {
 			return receiptItem(ev, Receipt{Kind: "ask", OK: true, Text: Sanitize(line), By: "autopilot"}), true
 		}
 		return receiptItem(ev, Receipt{Kind: "ask", OK: true, Text: AskLine(p), By: AskAnswerer(p)}), true
@@ -429,7 +367,7 @@ func eventItem(ev state.CardEvent, inStretch bool) (Item, bool) {
 		var p state.AutopilotPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
 		if p.Event != "" {
-			return Item{}, false // a boundary: the stretch rule says it
+			return Item{}, false // a boundary of a legacy autopilot period
 		}
 		return receiptItem(ev, Receipt{Kind: "autopilot", OK: true, Text: ModeLine(p)}), true
 	default:
@@ -485,16 +423,6 @@ func stageItem(seg Segment, credits float64, enter state.CardEvent, events []sta
 		it.Seq = max(it.Seq, events[seg.ExitIdx].Seq)
 	}
 	return it
-}
-
-func closeItem(st Stretch, seq int64, events []state.CardEvent) Item {
-	return Item{
-		Seq: seq, Key: "close:" + seqKey(events[st.From].Seq), T: ItemStretch, At: st.ClosedAt,
-		Stretch: &StretchMark{
-			Edge: "close", Label: StretchLabel(st.Closed), How: st.Closed,
-			Reason: Sanitize(st.Reason), Tally: st.Tally(), Mode: st.Mode,
-		},
-	}
 }
 
 // segmentCredits is what each segment's divider says it cost, resolved

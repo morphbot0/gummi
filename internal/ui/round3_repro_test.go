@@ -2,9 +2,6 @@ package ui
 
 import (
 	"testing"
-
-	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/state"
 )
 
 // The three round-3 defects whose repro needs a live stage on a pty, pinned
@@ -81,40 +78,5 @@ func TestInboxRowKeyDoesWhatItSays(t *testing.T) {
 	cmd := m.inboxKey(key)
 	if cmd == nil && m.notice.text == "" && m.sel == before && m.Overlay.Len() == 0 {
 		t.Errorf("the inbox row advertises %q but pressing it does nothing", key)
-	}
-}
-
-// An event citation is only ever generated for an autopilot stretch's own
-// opening event, and openAnchor resolves it through scrollThreadToEvent,
-// which walks featureRow.Events. threadView populates that field on a COPY
-// of the row and never writes it back, so a row out of m.selected() carried
-// an empty slice and every event citation answered "nothing on this page
-// opens at that citation" — including while the status bar was advertising
-// "alt+a open cited". The mark is generated from m.cardEvents, so the
-// opener has to read the same cache.
-func TestEventCitationResolvesFromTheCache(t *testing.T) {
-	m := populatedShell(120, 40)
-	r := m.rows[m.sel]
-	events := []state.CardEvent{
-		evTookOver(domain.GateAutopilot, at(0)),
-		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, at(1)),
-	}
-	for i := range events {
-		events[i].Seq = int64(i + 1)
-	}
-	m.cardEvents[r.F.ID] = events
-
-	// The row as m.selected() hands it over: no Events, so the resolver has
-	// nothing to walk and the citation is refused.
-	if m.scrollThreadToEvent(r, 1) {
-		t.Fatal("scaffold assumption broken: an eventless row resolved a citation")
-	}
-	// The row with the cache applied, which is what cardCitationKey does now.
-	r.Events = m.cardEvents[r.F.ID]
-	if !m.scrollThreadToEvent(r, 1) {
-		t.Error("the stretch's own opening event does not resolve — alt+a still refuses its own mark")
-	}
-	if m.anchorTo != r.F.ID || m.anchorFrom != 0 {
-		t.Errorf("anchor landed at %s/%d, want %s/0", m.anchorTo, m.anchorFrom, r.F.ID)
 	}
 }

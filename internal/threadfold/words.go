@@ -287,31 +287,20 @@ func ModeLine(p state.AutopilotPayload) string {
 	return "autopilot set to " + Sanitize(AutopilotLabel(mode))
 }
 
-// DecisionLine is one crossing or answer autopilot made, pulled out of a
-// folded stage so it keeps the position it happened at: "autopilot
-// crossed plan → implement", "autopilot answered “q” — a". Empty for any
-// event that is not such a decision — a person's crossing or answer, or
-// any other kind.
-//
-// who comes from whether the event fell inside a period, never from the
-// actor alone. Inside one it is autopilot's, whatever name the crossing
-// was filed under — the review loop's own actor reaches this path for
-// cards started by the switch before that was corrected. Outside one it
-// keeps the actor's own name, because an unattended crossing on a card
-// nobody handed over is the review loop's work and saying otherwise
-// would claim a handover that never happened.
-func DecisionLine(ev state.CardEvent, inStretch bool) string {
+// DecisionLine is one crossing or answer a loop made on a legacy
+// workflow card, pulled out of a folded stage so it keeps the position it
+// happened at: "auto crossed plan → implement", "autopilot answered “q”
+// — a". Empty for any event that is not such a decision — a person's
+// crossing or answer, or any other kind. The crossing keeps its actor's
+// own name.
+func DecisionLine(ev state.CardEvent) string {
 	switch ev.Kind {
 	case state.EventGate:
 		var p state.GatePayload
 		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || HumanGateActor(p.Actor) {
 			return ""
 		}
-		who := p.Actor
-		if inStretch {
-			who = "autopilot"
-		}
-		return who + " crossed " + p.From + " → " + p.To
+		return p.Actor + " crossed " + p.From + " → " + p.To
 	case state.EventAsk:
 		var p state.AskPayload
 		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || AskedBy(p) != state.ActorAutopilot {

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"encoding/json"
-	"slices"
 	"strings"
 	"time"
 
@@ -220,103 +219,6 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// per-line renderer would redo the same scan of r.Events once per
 	// line for no reason.
 	answered := threadfold.AnsweredDecisions(r.Events)
-	// The periods this card ran itself (stretch.go), derived once from the
-	// same event slice the segments came from so both are indexed against
-	// it. Folding a stage to one receipt loses its position, and the rules
-	// that bracket a period are placed by position, so the two have to be
-	// resolved together or not at all.
-	stretches := threadfold.LiveStretches(f, r.Events, m.ws)
-	// segOf answers which folded segment an event index fell in, and -1
-	// for an index before the first stage ever started — where the switch
-	// writes its takeover when it starts a card sitting in todo, since
-	// nothing has entered a stage yet at that moment.
-	segOf := func(idx int) int {
-		seg := -1
-		for i := range segs {
-			if segs[i].EnterIdx <= idx {
-				seg = i
-			}
-		}
-		return seg
-	}
-	// A period opening before any stage started still opens above the
-	// first one: max(_, 0). Its rule cannot be drawn earlier than the
-	// history it brackets.
-	openSeg := func(st threadfold.Stretch) int { return max(segOf(st.From), 0) }
-	// closeSeg clamps the same way openSeg does, and for the same reason.
-	// A period can both open and close before any stage ever started —
-	// hand a card in todo to autopilot with no agent configured, then
-	// switch it straight back off — and without the clamp its opening
-	// rule would be drawn against the first segment while its closing
-	// rule matched no segment at all, leaving a period on screen that
-	// never ends.
-	closeSeg := func(st threadfold.Stretch) int { return max(segOf(st.To), 0) }
-	live := len(segs) - 1
-	// The period this card should open on rather than on its newest line,
-	// and where its opening rule ends up in the body. anchorIdx stays -1
-	// unless that rule is actually drawn, so a period whose rule the
-	// render never reaches cannot move the scroll to a row that is not
-	// there. Two different callers arm m.anchorTo/m.anchorFrom for this:
-	// markSeen (shell.go), for the unread-period jump on opening a card,
-	// and openCitation → openAnchor's "event" case (citations.go), for
-	// alt+a on a narration claim that cites the period's opening event —
-	// both just want the same rule found and scrolled to, so both share
-	// one mechanism rather than each inventing its own.
-	// markSeen (shell.go) already resolved which period this is and left
-	// its opening index behind; the render only has to notice when it
-	// draws that period's rule. It must not put the question again here:
-	// markSeen advances the read mark at the same moment it sets the
-	// anchor, so by the time this runs the honest answer to "what is
-	// unread" is always "nothing". openCitation resolves its own index
-	// the same way, against the same stretches (scrollThreadToEvent), and
-	// for the same reason: this render pass draws the rule, it does not
-	// decide whether one exists to draw.
-	//
-	// markAnchor below sets anchorIdx directly for a rule drawn in the
-	// folded-segment loop; a rule the live stage draws instead reports
-	// its own row back through liveStageBlock's anchorAt return (folded
-	// in just below, at "if at >= 0 && anchorIdx < 0"), because that is
-	// the one block with no access to this closure. Both paths write the
-	// same field, so whichever one actually draws the rule is the one
-	// that gets to set it — including appendStretchCloses, now, for a
-	// period that opened and closed entirely inside the live stage or a
-	// followed tail (§2.2 of the 2026-09-10 round-2 review): before that
-	// fix this render drew the rule but never told anchorIdx where, and
-	// alt+a on such a period cleared the anchor and moved nothing.
-	anchoring := !measure && m.anchorTo == f.ID
-	anchorIdx := -1
-	markAnchor := func(st threadfold.Stretch) {
-		if anchoring && st.From == m.anchorFrom {
-			anchorIdx = len(body)
-		}
-	}
-	// Which periods open inside the live stage rather than above it, so
-	// the live block can draw their rules where the folded loop cannot
-	// reach. The two must partition: the folded loop covers segments
-	// before the live one, this covers the live one, and openSeg's own
-	// clamp to 0 is what puts a takeover written before any stage
-	// started — the switch pressed on a card sitting in todo — into
-	// whichever of the two owns the first segment. A card with a single
-	// stage has no folded loop at all, so that is this one.
-	var liveOpens []threadfold.Stretch
-	for _, st := range stretches {
-		if live >= 0 && openSeg(st) == live {
-			liveOpens = append(liveOpens, st)
-		}
-	}
-	// The same partition for the rules that close a period. The folded
-	// loop closes the ones whose ending fell in a stage it draws; these
-	// ended in the stage still on screen, and only the live block can
-	// place them. The log branch below finds them again by event index
-	// and draws them exactly where they happened — this slice is what
-	// the two branches that render from a session snapshot instead have,
-	// since a snapshot carries no event indices to place a rule against.
-	var liveCloses []threadfold.Stretch
-	for _, st := range stretches {
-		if live >= 0 && !st.Running() && closeSeg(st) == live {
-			liveCloses = append(liveCloses, st)
-		}
-	}
 	if len(segs) > 1 {
 		spend := threadfold.SpendByStage(r.StageSpend)
 		// how many segments each stage folds to a receipt for — the review
@@ -342,97 +244,34 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		// explain 39% of one card's bill, most of it this.
 		sessionless := threadfold.SessionlessSpend(r.StageSpend, folded)
 		printed := map[domain.Stage]bool{}
-		for i, seg := range folded {
+		for _, seg := range folded {
 			if !printed[seg.Stage] {
 				printed[seg.Stage] = true
 				for _, row := range sessionless[seg.Stage] {
 					add(sessionlessReceiptLine(s, row, inner))
 				}
 			}
-			// A period already running when this stage began brackets the
-			// whole of it, so its rule is the one thing that belongs above
-			// the receipt. Everything else that fell in this segment
-			// happened after the stage started, and goes below in the order
-			// the log recorded it.
-			for _, st := range stretches {
-				if openSeg(st) == i && st.From < seg.EnterIdx {
-					markAnchor(st)
-					add(stretchOpenLine(s, st, inner))
-				}
-			}
 			add(foldedReceiptLine(s, seg, spend, counts[seg.Stage],
 				threadfold.Remainder(seg, unclaimed, unknown), inner))
-			// The rest of the segment, sorted by the event that produced
-			// it. Drawing all the openings first and all the closings last
-			// was what let a card handed to autopilot twice read as one
-			// period nested inside another, with its timestamps running
-			// backwards: the moment one run ends and the next begins is a
-			// single fold apart, so the close and the open that follows it
-			// land in the same segment, and grouping by kind put them on
-			// the page in the opposite order to the log.
-			//
-			// The decisions autopilot made inside the stage are pulled back
-			// out of the fold and printed here too (stretch.go's
-			// stretchDecisionLine) — under the receipt they came from, so
-			// the group reads as "this stage, and what it decided inside
-			// it", but among the rules rather than always before them: a
-			// crossing made after a handover belongs under the rule saying
-			// the card changed hands, not above it.
-			var inside []segItem
-			for _, st := range stretches {
-				if openSeg(st) == i && st.From >= seg.EnterIdx {
-					inside = append(inside, segItem{at: st.From, open: st, isOpen: true})
-				}
-			}
-			for _, st := range stretches {
-				if !st.Running() && closeSeg(st) == i {
-					inside = append(inside, segItem{at: st.To, lines: stretchCloseLines(s, st, inner)})
-				}
-			}
-			for k, ev := range seg.Events {
-				_, in := threadfold.StretchAt(stretches, seg.EvIdx[k])
-				if l := stretchDecisionLine(s, ev, in, inner-2); l != "" {
-					inside = append(inside, segItem{at: seg.EvIdx[k], lines: []string{"  " + l}})
-				}
-			}
-			// stable, so an event that both closes a period and is itself
-			// a decision keeps the closing rule above its own line — the
-			// order the live stage block draws that pair in.
-			slices.SortStableFunc(inside, func(a, b segItem) int { return a.at - b.at })
-			for _, it := range inside {
-				if it.isOpen {
-					markAnchor(it.open)
-					add(stretchOpenLine(s, it.open, inner))
-					continue
-				}
-				for _, l := range it.lines {
-					add(l)
+			// The decisions a loop made inside the stage are pulled back
+			// out of the fold and printed under the receipt they came from
+			// (stretch.go's stretchDecisionLine), in log order.
+			for _, ev := range seg.Events {
+				if l := stretchDecisionLine(s, ev, inner-2); l != "" {
+					add("  " + l)
 				}
 			}
 		}
 		blank()
 	}
 
-	// The live stage draws the rules for periods that reach into it, so it
-	// is the only one that knows where inside its own block the anchored
-	// one landed — and that is the ordinary case, since a period usually
-	// opens and parks inside the stage still on screen. It reports the
-	// offset back rather than the caller guessing, and the offset is
-	// translated into a body index here, where the body's length is known.
-	anchorWant := -1
-	if anchoring {
-		anchorWant = m.anchorFrom
-	}
-	if ls, at, evAt := m.liveStageBlock(s, r, segs, inner, answered, stretches, liveOpens, liveCloses, anchorWant); len(ls) > 0 {
+	if ls, evAt := m.liveStageBlock(s, r, segs, inner, answered); len(ls) > 0 {
 		base := len(body)
 		for i, l := range ls {
 			add(l)
 			if i < len(evAt) {
 				bodyEventAt[base+i] = evAt[i]
 			}
-		}
-		if at >= 0 && anchorIdx < 0 {
-			anchorIdx = base + at
 		}
 		blank()
 	}
@@ -475,31 +314,6 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		}
 	}
 
-	// What a card decided while nobody was watching used to be summarised
-	// here, in a block appended after the live stage. It is drawn as a
-	// bounded period among the history above instead (stretch.go), where
-	// it happened: a rollup pinned below everything was permanently the
-	// newest thing on the page, so it sat under your own turns describing
-	// a period that had ended hours earlier.
-	//
-	// A card that never entered a stage has no segment for a rule to be
-	// placed against, and both placement paths above bail out on that —
-	// so a card handed to autopilot and taken straight back, with the
-	// advance never producing a stage, would silently lose the record
-	// that it changed hands at all. There is no position to resolve here,
-	// only an order, so the rules go down in the order they happened.
-	if len(segs) == 0 && len(stretches) > 0 {
-		for _, st := range stretches {
-			add(stretchOpenLine(s, st, inner))
-			if !st.Running() {
-				for _, l := range stretchCloseLines(s, st, inner) {
-					add(l)
-				}
-			}
-		}
-		blank()
-	}
-
 	// todo and done are the two stages currentSpecSection has no anchor
 	// for, and todo is exactly the stage where "what is this card about"
 	// is the whole question — with nothing run yet there is no receipt,
@@ -528,20 +342,6 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		}
 		m.threadBodyCard = f.ID
 		m.threadBodyLen = len(body)
-	}
-
-	// Consume the anchor. threadScroll counts rows back from the end of
-	// the body, so landing the period's opening rule at the top of the
-	// window means scrolling back by everything below it. It is clamped
-	// by composeThread on this very render, so an anchor larger than the
-	// body can hold simply lands at the oldest line rather than off the
-	// end — and it is cleared either way, because the jump is a thing
-	// that happens once when you arrive, not a position the page holds.
-	if anchoring {
-		if anchorIdx >= 0 {
-			m.threadScroll = max(len(body)-anchorIdx-1, 0)
-		}
-		m.anchorTo = ""
 	}
 
 	// --- foot: pinned to the bottom ---
@@ -1137,12 +937,6 @@ func foldedReceiptLine(s *theme.Styles, seg threadfold.Segment, spend map[domain
 // last session did. A card another process drives without an open tail
 // has only that fallback either way — watching it is what opens the tail
 // (follow.go's watchForeign, via enter).
-// stretches carries the periods this card ran itself, so the rules
-// bracketing one that reaches into the live stage are drawn here rather
-// than around this whole block. That matters most for the ordinary case:
-// autopilot works, parks, and you come back and start typing — all
-// inside one stage. Bracketing the block as a whole would put the turns
-// you typed after the handback above the rule announcing it.
 // evAt tags each returned line with the index (into r.Events) of the
 // event that rendered it, or -1 for a line that belongs to no single
 // event (a boundary rule, a period's own rule, blanks). It is only
@@ -1152,51 +946,6 @@ func foldedReceiptLine(s *theme.Styles, seg threadfold.Segment, spend map[domain
 // return a nil evAt. A resize (BG-057) uses it to find whichever event
 // was at the top of the scrolled window before the reflow, so it can ask
 // for that same event again after.
-// appendStretchCloses draws the closing rules for periods that ended in
-// the stage the block is rendering, separated from what came before by a
-// row of air the way every other rule in the thread is. It exists for
-// the two branches of liveStageBlock that render from a live session's
-// snapshot rather than from the event log: those have no indices to
-// place a rule against, so the rules go last, and without them a closed
-// period had no ending anywhere on the page.
-//
-// anchorFrom/anchorAt carry the event-citation anchor (see thread.go's
-// own doc comment on it, and liveStageBlock's callers below) through
-// this, the one place that can still satisfy it in the sess/follow
-// branches: a period that opened AND closed inside the session or
-// followed tail those branches are rendering has no other rule drawn
-// for it anywhere in them — their own open-loops only place a period
-// that began before the session started (2026-09-10 round-2 review,
-// §2.2, "alt+a — open cited — is dead") — so
-// without checking here, alt+a on such a period's opening citation armed
-// an anchor this function was the only place left that could have drawn
-// it, found nothing, and cleared itself unnoticed. anchorAt is threaded
-// through rather than recomputed because the caller may already have
-// found the row from an earlier, unrelated loop (the "before this
-// session" one) and a later match here must never overwrite that one.
-func appendStretchCloses(s *theme.Styles, lines []string, opens, closes []threadfold.Stretch, anchorFrom, anchorAt int, w int) ([]string, int) {
-	for _, st := range closes {
-		lines = append(lines, "")
-		// A period that also opened in this stage has had no rule drawn
-		// for it anywhere — the folded loop never reached it and the
-		// snapshot has no position to hang it off — so its opening rule
-		// goes here too, immediately above its closing one. Half a period
-		// is worse than a period drawn without room inside it: the pair
-		// at least reads as one run that began and ended in this stage.
-		for _, op := range opens {
-			if op.From == st.From {
-				if op.From == anchorFrom && anchorAt < 0 {
-					anchorAt = len(lines)
-				}
-				lines = append(lines, stretchOpenLine(s, st, w))
-				break
-			}
-		}
-		lines = append(lines, stretchCloseLines(s, st, w)...)
-	}
-	return lines, anchorAt
-}
-
 // liveBusyLabel is the live stage's busy line: what is actually running,
 // plus how long this run has been at it. It is not simply
 // m.runningLabel(snap, since) (loopline.go), for two reasons — a bug fix
@@ -1234,7 +983,7 @@ func (m *Shell) liveBusyLabel(snap engine.Snapshot, since time.Time) string {
 	return withElapsed(verb, m.now(), since)
 }
 
-func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.Segment, w int, answered map[string]bool, stretches, liveOpens, liveCloses []threadfold.Stretch, anchorFrom int) (lines []string, anchorAt int, evAt []int) {
+func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.Segment, w int, answered map[string]bool) (lines []string, evAt []int) {
 	f := r.F
 	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
 		snap := sess.Snapshot()
@@ -1245,36 +994,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 		// the rule names a context reset; the blank line under it is what
 		// makes it read as a boundary rather than a heading glued to the
 		// first thing that happened after it
-		anchorAt = -1
 		lines = []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w), ""}
-		// A live session renders from its own snapshot rather than the
-		// event log, so there are no indices here to place a rule against
-		// a period that is STILL RUNNING (to == len(events)) — this loop
-		// only ever places one that began before this session, at the
-		// top, because that is the one position a snapshot can justify: a
-		// switch pressed part-way through the session has no honest
-		// place to draw the rule, and putting it at the top would claim
-		// it happened before turns that came first. Such a period is left
-		// undrawn until the session ends and the log renders it in its
-		// own place — the masthead already names the card's autopilot
-		// now-state meanwhile, so nothing about it goes unsaid.
-		//
-		// A period that has already CLOSED is a different question with a
-		// different answer, and does not go through this loop at all: it
-		// gets its rule from appendStretchCloses below, whether it opened
-		// before this session or inside it, because a closed period's
-		// whole span is known and a rule for it does not have to guess at
-		// a position the way a still-running one would.
-		if len(segs) > 0 {
-			for _, st := range liveOpens {
-				if st.Running() && st.From < segs[len(segs)-1].EnterIdx {
-					if st.From == anchorFrom {
-						anchorAt = len(lines)
-					}
-					lines = append(lines, stretchOpenLine(s, st, w), "")
-				}
-			}
-		}
 		lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
 		if meta := sessionMeta(snap); meta != "" {
 			lines = append(lines, "  "+s.Faint.Render(meta))
@@ -1288,8 +1008,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 		}
 		// The status line names the session's now-state. It is live-computed
 		// per frame, so it does not outlive the state it names.
-		switch {
-		case snap.Busy:
+		if snap.Busy {
 			// at, not r.F.UpdatedAt: the row field names when the STAGE
 			// began, which a retry after a failed run does not move, so a
 			// run that failed at 20:35 and restarted at 20:37 read
@@ -1301,17 +1020,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 			// no longer disagree about when this run began.
 			lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+m.liveBusyLabel(snap, at)))
 		}
-		// A period that ended in this stage still says so. The session
-		// object outlives the run that filled it — the engine keeps a
-		// finished one, and a restart restores it — so "there is a
-		// session here" is not "a machine is driving this card", and
-		// reading it as the latter left the newest thing the page said
-		// about an unattended run being that it started. The rules go
-		// under the transcript because that is the only honest place a
-		// snapshot can put them: it carries no event indices, and the
-		// period covered the work above.
-		lines, anchorAt = appendStretchCloses(s, lines, liveOpens, liveCloses, anchorFrom, anchorAt, w)
-		return lines, anchorAt, nil
+		return lines, nil
 	}
 
 	// an open tail is the freshest thing this board has for this card, so
@@ -1329,7 +1038,6 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 		if stage == "" {
 			stage = r.F.Stage
 		}
-		anchorAt = -1
 		lines = []string{boundaryRule(s, string(stage), string(snap.Role), runModel(snap), at, w), ""}
 		lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
 		if meta := sessionMeta(snap); meta != "" {
@@ -1337,15 +1045,13 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 		}
 		lines = append(lines, "  "+s.Warning.Render(m.follow.marker())+
 			s.Faint.Render(" — "+m.follow.footer(snap)))
-		lines, anchorAt = appendStretchCloses(s, lines, liveOpens, liveCloses, anchorFrom, anchorAt, w)
-		return lines, anchorAt, nil
+		return lines, nil
 	}
 
 	if len(segs) == 0 {
-		return nil, -1, nil
+		return nil, nil
 	}
 	last := segs[len(segs)-1]
-	anchorAt = -1
 	lines = []string{boundaryRule(s, string(last.Stage), last.Role, last.Model, last.EnterAt, w), ""}
 	// pad fills evAt up to len(lines) with idx, so every append above can
 	// stay exactly as it was and the tagging happens as a single extra
@@ -1356,34 +1062,6 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 		}
 	}
 	pad(-1)
-	// A period that opened inside this stage rather than before it — the
-	// switch pressed on a card already sitting here — gets its rule where
-	// it happened, above the first thing it did.
-	// A period that began before this stage did opens at the top, because
-	// there is nothing earlier here to place it against. One that began
-	// inside the stage opens inline, at its own event, further down —
-	// pressing the switch after working on a card by hand for a while is
-	// ordinary, and hoisting that rule to the top of the stage would put
-	// it above the turns you typed before you pressed it.
-	for _, st := range liveOpens {
-		if st.From >= last.EnterIdx {
-			continue
-		}
-		if st.From == anchorFrom {
-			anchorAt = len(lines)
-		}
-		lines = append(lines, stretchOpenLine(s, st, w), "")
-		// A period whose end also predates this stage — handed over and
-		// handed straight back before anything ran — closes here too. The
-		// inline loop below can only close periods whose closing event is
-		// one of this stage's own, so without this its rule would have no
-		// end anywhere on the page.
-		if !st.Running() && st.To < last.EnterIdx {
-			lines = append(lines, stretchCloseLines(s, st, w)...)
-			lines = append(lines, "")
-		}
-		pad(-1)
-	}
 	// the whole session, not the last few events: capping this to a recent
 	// tail was how the (now-gone) transcript view earned its keep, and
 	// without it the cap just hid history with no way back to it. The body
@@ -1391,42 +1069,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 	// still reachable — it just does not require a second view to see.
 	for k, ev := range last.Events {
 		idx := last.EvIdx[k]
-		// A period that ends inside this stage closes exactly where it
-		// ended, so everything after it — the turns you typed once the
-		// card was yours again — falls below the rule saying so. The
-		// closing event itself is not rendered as a line: for a park the
-		// rule already carries its sentence, and printing both would say
-		// one ending twice.
-		for _, st := range liveOpens {
-			if st.From == idx {
-				if st.From == anchorFrom {
-					anchorAt = len(lines)
-				}
-				lines = append(lines, stretchOpenLine(s, st, w), "")
-			}
-		}
-		pad(-1)
-		closed := false
-		for _, st := range stretches {
-			if st.Running() || st.To != idx {
-				continue
-			}
-			// The rules sit at column 0 like the session boundary above
-			// them, not indented with the conversation: they bracket the
-			// stage's contents rather than being one of them. Their reason
-			// and tally lines carry their own indent already.
-			lines = append(lines, stretchCloseLines(s, st, w)...)
-			// a row of air before the conversation resumes: what follows a
-			// handback is yours, and running it flush against the tally
-			// reads as more of the same block
-			lines = append(lines, "")
-			closed = closed || ev.Kind == state.EventPark || ev.Kind == state.EventAutopilot || ev.Kind == state.EventPause
-		}
-		pad(-1)
-		if closed {
-			continue
-		}
-		if dl := stretchDecisionLine(s, ev, threadfold.InStretch(stretches, idx), w-2); dl != "" {
+		if dl := stretchDecisionLine(s, ev, w-2); dl != "" {
 			lines = append(lines, "  "+dl)
 			pad(idx)
 			continue
@@ -1436,26 +1079,11 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 		}
 		pad(idx)
 	}
-	// A period nothing in the log ever closed, closed instead by the
-	// render-time judgement — threadfold.CloseOrphaned, when the driver went away
-	// without writing a thing — has no closing event to be placed
-	// against: its `to` is the end of the log, past every index the loop
-	// above walks. Its rule closes here, after everything this stage
-	// holds, or it is derived and never drawn at all and the page still
-	// says a machine has the card (BG-085).
-	for _, st := range stretches {
-		if st.Running() || st.To < len(r.Events) {
-			continue
-		}
-		lines = append(lines, "")
-		lines = append(lines, stretchCloseLines(s, st, w)...)
-		pad(-1)
-	}
 	if r.DrivenAbroad {
 		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
 		pad(-1)
 	}
-	return lines, anchorAt, evAt
+	return lines, evAt
 }
 
 // consultBlock renders the card's consult exchange, if any, as its own
@@ -1880,14 +1508,8 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		var p state.AutopilotPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
 		if p.Event != "" {
-			// A took-over/handed-back boundary (AutopilotPayload.Event is
-			// AutopilotTookOver or AutopilotHandedBack) is the edge of a
-			// period the card ran unattended, not a single fact about a
-			// mode. It is drawn as a rule bracketing that period, the way
-			// boundaryRule marks a fresh session — stretch.go owns that,
-			// and thread.go places it. Returning nothing here is what
-			// stops the same boundary being said twice, once as a rule and
-			// once as a line among the tool calls inside it.
+			// a took-over/handed-back boundary of a legacy autopilot
+			// period: the thread draws nothing for it
 			return ""
 		}
 		// Event == "" is appendAutopilotEvent's shape (state/cardevents.go):
@@ -1915,18 +1537,6 @@ func eventMarker(s *theme.Styles, status string) string {
 	default:
 		return s.Faint.Render("· ")
 	}
-}
-
-// segItem is one thing drawn under a folded stage's receipt, tagged with
-// the event index that produced it so the whole group can be put back
-// into log order. A period's opening rule carries the period itself
-// rather than pre-rendered lines, because drawing it is also what sets
-// the unread anchor and that has to happen at the position it lands in.
-type segItem struct {
-	at     int
-	lines  []string
-	open   threadfold.Stretch
-	isOpen bool
 }
 
 // sessionlessReceiptLine draws one of those rows the way a folded session

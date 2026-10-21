@@ -1186,25 +1186,6 @@ func (s *Store) ClearHandedOffAt(ctx context.Context, id domain.FeatureID) error
 	return nil
 }
 
-// SetGateApproval persists a feature's gate-approval mode (who crosses its
-// design gates on an unattended resume). Like SetVerifiedAt it is a
-// side-channel write — it neither touches updated_at nor moves the stage —
-// so `run` records the chosen mode at creation and a later `resume` that
-// re-passes --gate-approval can override it without a full-feature write.
-// An empty mode reads as domain.GateAttended.
-func (s *Store) SetGateApproval(ctx context.Context, id domain.FeatureID, mode string) error {
-	if !domain.ValidGateApproval(mode) {
-		return fmt.Errorf("setting gate-approval for %s: unknown mode %q", id, mode)
-	}
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE features SET gate_approval = ? WHERE id = ?`, mode, string(id))
-	if err != nil {
-		return fmt.Errorf("setting gate-approval for %s: %w", id, err)
-	}
-	s.appendAutopilotEvent(ctx, id, mode)
-	return nil
-}
-
 // SetCommitDraftFail durably records why a squash-merge scribe pass last
 // failed to produce a draft (a backend/config fault, a guard rejection, or
 // a timeout). It is a side-channel write (it neither touches updated_at nor

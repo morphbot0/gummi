@@ -241,9 +241,9 @@ const (
 // distinction survives.
 //
 // Event is additive, in the same sense as GatePayload.ID and
-// AskPayload.ID/Choice/By: appendAutopilotEvent (below) predates the
-// took-over/handed-back vocabulary and, on every SetGateApproval mode
-// change, writes a row with only Mode set and Event left as "". That row
+// AskPayload.ID/Choice/By: the gate-approval mode changes recorded before
+// the took-over/handed-back vocabulary existed are rows with only Mode
+// set and Event left as "". That row
 // records a different fact — the card's stored gate-approval mode
 // changed to X — not a takeover or a handback, so a reader must check
 // Event and not treat every EventAutopilot row as a boundary crossing.
@@ -592,31 +592,6 @@ func (s *Store) QuitStopped(ctx context.Context) (map[domain.FeatureID]bool, err
 	return out, rows.Err()
 }
 
-// appendAutopilotEvent records a gate-approval mode change in the card's
-// own event log. SetGateApproval is the single write path every caller
-// (TUI and driver) already funnels through, so calling this there means
-// no future caller can change a card's mode without it appearing in the
-// card's own history. Best-effort: a log failure never unwinds the
-// already-committed mode change. Deduped at second granularity on the
-// (card, mode) pair, loose enough that a caller retrying the identical
-// SetGateApproval call within the same second can't double-write, while
-// a later, deliberate change back to the same mode still gets its own
-// event.
-//
-// This predates AppendAutopilot's took-over/handed-back vocabulary and
-// leaves Event unset on purpose — see the note on AutopilotPayload.Event.
-func (s *Store) appendAutopilotEvent(ctx context.Context, id domain.FeatureID, mode string) {
-	payload, err := json.Marshal(AutopilotPayload{Mode: mode})
-	if err != nil {
-		return
-	}
-	now := time.Now().UTC()
-	_ = s.AppendEvent(ctx, CardEvent{
-		Feature: id, Kind: EventAutopilot, At: now, Payload: string(payload),
-		Dedupe: string(id) + ":autopilot:" + mode + ":" + now.Format("2006-01-02T15:04:05"),
-	})
-}
-
 // PruneStageOutput applies the log's retention rule to a stage that is
 // no longer live: every event is kept forever, but the two fields that
 // can grow without bound are kept only where they still earn their place.
@@ -821,34 +796,4 @@ func (s *Store) AppendRebase(ctx context.Context, id domain.FeatureID, stage dom
 		return fmt.Errorf("encoding rebase event for %s: %w", id, err)
 	}
 	return s.AppendEvent(ctx, CardEvent{Feature: id, Stage: stage, Kind: EventRebase, At: at, Payload: string(payload)})
-}
-
-// AppendAutopilot records the autonomous loop taking a card over (event
-// = AutopilotTookOver) or handing it back (event = AutopilotHandedBack),
-// with why and under which gate-approval mode. Best-effort by contract,
-// like AppendPark: the takeover or handback is something the caller has
-// already acted on, so a log failure must never unwind it — callers
-// discard the error.
-//
-// dedupe may be empty; pass a key only where the same boundary can
-// otherwise be recorded twice (e.g. a retried save re-observing the same
-// takeover).
-func (s *Store) AppendAutopilot(ctx context.Context, id domain.FeatureID, stage domain.Stage, event, reason, mode, dedupe string, at time.Time) error {
-	return s.AppendAutopilotBy(ctx, id, stage, event, reason, mode, "", dedupe, at)
-}
-
-// AppendAutopilotBy is AppendAutopilot for a gesture a named person made
-// (AutopilotPayload.By).
-func (s *Store) AppendAutopilotBy(ctx context.Context, id domain.FeatureID, stage domain.Stage, event, reason, mode, by, dedupe string, at time.Time) error {
-	if by == ActorUser {
-		by = ""
-	}
-	payload, err := json.Marshal(AutopilotPayload{Event: event, Reason: reason, Mode: mode, By: by})
-	if err != nil {
-		return fmt.Errorf("encoding autopilot event for %s: %w", id, err)
-	}
-	return s.AppendEvent(ctx, CardEvent{
-		Feature: id, Stage: stage, Kind: EventAutopilot, At: at,
-		Payload: string(payload), Dedupe: dedupe,
-	})
 }

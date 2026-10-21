@@ -2,7 +2,7 @@
 // which of several a card shows (Rank), which attention lane it belongs
 // in (Attention), how an ask_user question is offered as options
 // (AskOptions), and what answering it with a picked option says
-// (AnswerText, GateAnswerCrosses).
+// (AnswerText).
 //
 // They are the same rules whichever face asks. The TUI's inbox and its
 // pinned decision control read them, and the web face reads them to offer
@@ -163,15 +163,6 @@ func AskOptions(ask *engine.Ask) []Option {
 // ChatDetailRestored is the chat row's detail on a question restored
 // without its options (engine.Ask.Restored).
 const ChatDetailRestored = "the options the agent offered did not survive the restart of the run that asked — answer in your own words"
-
-// GateAnswerCrosses reports whether answering ask with this text is the
-// gate crossing itself, rather than an ordinary answer the stage then
-// acts on. Only a gate ask can cross, and only its advance option does —
-// "not yet" and any free-form reply are answers that leave the card
-// exactly where it is.
-func GateAnswerCrosses(ask *engine.Ask, answer string) bool {
-	return ask != nil && ask.Gate && answer == engine.GateAdvanceLabel
-}
 
 // AnswerText is the answer an ask receives when the option at cursor is
 // taken — or, for a multi-pick ask with anything picked, the picked

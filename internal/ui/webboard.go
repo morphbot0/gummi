@@ -67,7 +67,6 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 		Profile:   f.Profile,
 		Repo:      f.Repo,
 		Home:      webHome(m.ws, f),
-		Autopilot: f.GateApproval == domain.GateAutopilot,
 		Elsewhere: r.DrivenAbroad,
 		Severity:  string(f.Severity),
 		Landed:    r.Landed || f.LandedSHA != "",
@@ -101,7 +100,7 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 		row.Needs = webNeeds(it, f.Stage, m.flooredVerifyPass(f.ID))
 	case m.cardBusy(r):
 		row.Status = webapi.StatusRunning
-		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r), Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}
+		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r), Pausing: m.pausing[f.ID]}
 	case m.freeformWatching(r):
 		row.Status = webapi.StatusWatching
 	case sess != nil && sess.State() == engine.StatePaused:

@@ -24,7 +24,6 @@ import (
 	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/layout"
 	"github.com/morphis/gummi/internal/ui/logo"
 	"github.com/morphis/gummi/internal/ui/overlay"
@@ -350,35 +349,13 @@ type Shell struct {
 	pendingScrollAnchorCard  domain.FeatureID
 	pendingScrollAnchorEvent int
 	// lastSeen is how far through each card's event log this machine has
-	// already read (state's card_last_seen), and anchorTo names the one
-	// card whose thread should open on its newest unread period instead
-	// of on its newest line.
-	//
-	// The anchor is a one-shot: it is set when a card's events land and
-	// consumed by the next real render, because that render is the only
-	// place that knows how many rows the period's opening rule ended up
-	// being from the bottom. Everything about the body's height — folding,
-	// wrapping, whether a session is live — is decided there.
+	// already read (state's card_last_seen).
 	lastSeen map[domain.FeatureID]int64
 	// pendingSeen holds marks written by markSeen before fetchLastSeen's
-	// reply lands. It exists so that mark can't flip lastSeen non-nil for
-	// every *other* card too: markSeen's anchor check gates on lastSeen ==
-	// nil to mean "not loaded yet, don't know, don't anchor" per card, and
-	// if writing card A's mark lazily initialised lastSeen to {}, card B
-	// opened later in the same window would read lastSeen[B] == 0 —
-	// indistinguishable from "loaded, confirmed unread" — and false-anchor
-	// (BG-056 review). Kept separate until lastSeenMsg merges it in.
+	// reply lands, so that mark can't flip lastSeen non-nil for every
+	// *other* card too (BG-056 review). Kept separate until lastSeenMsg
+	// merges it in.
 	pendingSeen map[domain.FeatureID]int64
-	anchorTo    domain.FeatureID
-	// anchorFrom is the event index the anchored period opens at. The
-	// period is resolved once, by markSeen, and carried here rather than
-	// asked again at render time — markSeen advances the read mark in the
-	// same breath as it sets the anchor, so putting the question a second
-	// time afterwards puts it to a card that has just been marked read,
-	// and the answer is always "nothing unread". Carrying the decision is
-	// what stops the two halves disagreeing about a question only one of
-	// them is still in a position to answer.
-	anchorFrom int
 
 	// narration caches the one model-written claim a card's narration can
 	// carry, keyed by the card state it describes (citations.go). It is
@@ -1123,38 +1100,14 @@ func (m *Shell) logPark(id domain.FeatureID, reason, detail string) {
 	_ = m.store.AppendPark(context.Background(), id, m.recordStage(id), reason, detail, "", time.Now())
 }
 
-// markSeen decides whether this card has unread autopilot history worth
-// opening on, and records that it has now been read.
-//
-// The order matters and is the whole of the subtlety here: the anchor is
-// computed against the mark as it was *before* this look, and the mark
-// is moved afterwards. Reading them the other way round would mean a
-// card was always already seen by the time anything asked, and the
-// divider would never fire once.
-//
-// Only the card actually on screen anchors. Events load for the selected
-// card alone, but a card can be selected without its page being open,
-// and moving the board's cursor past a card is not reading it.
+// markSeen records that this card's log has been read up to its newest
+// event.
 func (m *Shell) markSeen(id domain.FeatureID, events []state.CardEvent) tea.Cmd {
-	// m.lastSeen is nil until fetchLastSeen's reply lands (see lastSeenMsg
-	// below); that is "not loaded yet", distinct from "loaded, nothing
-	// seen". A card opened in that window has no read position to compare
-	// against, so it must not anchor as unread — computing the anchor
-	// against a lazily-zeroed map would treat every such card as unread,
-	// even one read in a previous session (BG-056).
-	if m.cardOpen && m.lastSeen != nil {
-		if r, ok := m.selected(); ok && r.F.ID == id {
-			if st, unread := threadfold.UnseenStretch(threadfold.LiveStretches(r.F, events, m.ws), events, m.lastSeen[id]); unread {
-				m.anchorTo, m.anchorFrom = id, st.From
-			}
-		}
-	}
 	seq := newestSeq(events)
 	// Marks made before lastSeen has loaded go into pendingSeen instead of
-	// lazily initialising lastSeen itself — doing the latter would make
-	// this card's write flip lastSeen non-nil for every other card too,
-	// reviving the same false-unread-anchor bug one level down (BG-056
-	// review).
+	// lazily initialising lastSeen itself — m.lastSeen is nil until
+	// fetchLastSeen's reply lands, which is "not loaded yet", distinct
+	// from "loaded, nothing seen" (BG-056).
 	if m.lastSeen != nil {
 		if seq <= m.lastSeen[id] {
 			return nil

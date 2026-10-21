@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -209,9 +208,6 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 	// off-screen, which is a viewport artifact this golden isn't for.
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
 	m = model.(*Shell)
-	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateAttended); err != nil {
-		t.Fatal(err)
-	}
 	m = pump(t, m, m.loadRows)
 	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
@@ -240,9 +236,6 @@ func TestThreadConsultBlockSaysWhenUnconfined(t *testing.T) {
 	m, eng := agentWorkspace(t, ag)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
 	m = model.(*Shell)
-	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateAttended); err != nil {
-		t.Fatal(err)
-	}
 	m = pump(t, m, m.loadRows)
 	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)

@@ -12,7 +12,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // The code-vs-plan sentence, its cache, and the contract that lets it on
@@ -394,23 +393,9 @@ func (m *Shell) openAnchor(r featureRow, a anchor) tea.Cmd {
 		m.diffJump = diffTarget{path: path, line: line}
 		return m.openDiff(r.F)
 	case "event":
-		n, err := strconv.ParseInt(a.ref, 10, 64)
-		if err != nil {
-			return nil
-		}
-		m.spec, m.diff, m.logv = nil, nil, nil
-		if !m.scrollThreadToEvent(r, n) {
-			// The claim named a real event — gatherEvidence already checked
-			// that — but not one any stretch opens, which is the only shape
-			// an event citation is ever generated for. Without this the key
-			// would arm an anchor the render can never place, clear it on
-			// the very next frame, and answer alt+a with nothing: the same
-			// silent drop this whole fix exists to remove, just moved one
-			// step earlier. Diff citations already refuse to swallow the
-			// key this way (the cardHasDiff branch above); this is that
-			// same refusal for the event kind.
-			m.notice = noticeMsg{text: r.F.Name() + ": nothing on this page opens at that citation"}
-		}
+		// an event citation named the opening of a legacy autopilot
+		// period, which the thread no longer draws
+		m.notice = noticeMsg{text: r.F.Name() + ": nothing on this page opens at that citation"}
 		return nil
 	}
 	return nil
@@ -500,35 +485,4 @@ func diffPathMatches(have, want string) bool {
 		return false
 	}
 	return have == want || strings.HasSuffix(have, "/"+want) || strings.HasSuffix(want, "/"+have)
-}
-
-// scrollThreadToEvent points the thread at the event a claim cited,
-// reporting whether it found somewhere to point it.
-//
-// It reuses the anchor the unread-period jump already has (thread.go's
-// anchorTo/anchorFrom): that machinery lands a stretch's opening rule at
-// the top of the window, which is exactly where an event citation wants
-// the reader — an event anchor is only ever generated for an autopilot
-// stretch's own opening event (the code-vs-plan pass cites "before that,
-// autopilot crossed N gates…" at the seq that opened the stretch it is
-// describing), never an arbitrary transcript line. The seq is mapped
-// back to its index in the card's log because that is what the render
-// compares against, and confirmed against the card's own stretches here
-// rather than left for the render to discover: the render's anchorIdx
-// stays -1 for an index that opens nothing, and openAnchor needs the
-// false back before it decides whether to arm the anchor or say so.
-func (m *Shell) scrollThreadToEvent(r featureRow, seq int64) bool {
-	for i, ev := range r.Events {
-		if ev.Seq != seq {
-			continue
-		}
-		for _, st := range threadfold.LiveStretches(r.F, r.Events, m.ws) {
-			if st.From == i {
-				m.anchorTo, m.anchorFrom = r.F.ID, i
-				return true
-			}
-		}
-		return false
-	}
-	return false
 }

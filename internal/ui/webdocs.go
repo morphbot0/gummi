@@ -170,7 +170,7 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 	if err != nil {
 		spend = nil
 	}
-	items := threadfold.Items(evs, threadfold.Options{Spend: spend, Live: state.CardIsLive(d.ws, d.f.ID)})
+	items := threadfold.Items(evs, threadfold.Options{Spend: spend})
 	var held []threadfold.Item
 	if !d.liveStart.IsZero() {
 		for k := len(items) - 1; k >= 0; k-- {
@@ -263,10 +263,6 @@ func webItem(it threadfold.Item, cmds map[string]string) webapi.Item {
 		out.Decision = &webapi.ThreadDecision{
 			ID: it.Decision.ID, Kind: webapi.DecisionKind(it.Decision.Kind), Question: it.Decision.Question,
 		}
-	}
-	if st := it.Stretch; st != nil {
-		out.Edge, out.Label, out.How, out.Reason, out.Tally, out.Mode =
-			st.Edge, st.Label, string(st.How), st.Reason, st.Tally, st.Mode
 	}
 	return out
 }

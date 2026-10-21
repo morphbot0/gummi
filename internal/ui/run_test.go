@@ -267,14 +267,6 @@ func TestThreadActivityGolden(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	// off, explicitly: this golden's subject is what a finished stage
-	// looks like in the thread — the boundary rule, the tool lines, the
-	// reply and the gate it parks at. On any other mode autopilot crosses
-	// that gate and runs the stage behind it, which is autopilot's own
-	// contract (autopilot_gate_test.go) and not what this frame is for.
-	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateAttended); err != nil {
-		t.Fatal(err)
-	}
 	m = pump(t, m, m.loadRows)
 	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)

@@ -9,8 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/livelog"
-	"github.com/morphis/gummi/internal/state"
 )
 
 // TestLoadRowsDerivesBlockedFromStore: the board badge snapshot derives
@@ -103,65 +101,5 @@ func TestAdvanceBlockedByDependency(t *testing.T) {
 	}
 	if !strings.Contains(m.notice.text, "FD-002@implement") {
 		t.Errorf("notice = %q, want it to name the unmet dependency", m.notice.text)
-	}
-}
-
-// TestLoadRowsDerivesAutopilotDrivingFromStore: the board badge snapshot
-// derives from the same event log the card thread renders — a card with an
-// open took-over row loads AutopilotDriving:true, and once the matching
-// handed-back row lands the same card reloads AutopilotDriving:false. The
-// flag is recomputed, never persisted.
-func TestLoadRowsDerivesAutopilotDrivingFromStore(t *testing.T) {
-	m, _ := newWorkspace(t)
-	m.now = func() time.Time { return fixedTime }
-	ctx := context.Background()
-	f := &domain.Feature{
-		ID: "FD-001", Num: 1, Title: "driven", Slug: "driven",
-		Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime,
-	}
-	if err := m.store.CreateFeature(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-
-	drivingOf := func(msg tea.Msg) *featureRow {
-		rm, ok := msg.(rowsMsg)
-		if !ok {
-			t.Fatalf("loadRows returned %T", msg)
-		}
-		for i := range rm.rows {
-			if rm.rows[i].F.ID == f.ID {
-				return &rm.rows[i]
-			}
-		}
-		t.Fatal("row missing from load")
-		return nil
-	}
-
-	// The board's own switch binds a live file under its own pid the
-	// instant it takes a card over (engine.Engine.bindLiveLog); loadRows'
-	// liveness check (BG-059) needs that file to tell this genuinely open
-	// period from one whose driving process is simply gone.
-	w, err := livelog.Create(m.ws.LiveFile(f.ID), livelog.Record{
-		Feature: string(f.ID), Stage: string(domain.StageImplement),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { w.Close() })
-
-	if err := m.store.AppendAutopilot(ctx, f.ID, domain.StageImplement,
-		state.AutopilotTookOver, "", domain.GateAutopilot, "", fixedTime); err != nil {
-		t.Fatal(err)
-	}
-	if row := drivingOf(m.loadRows()); !row.AutopilotDriving {
-		t.Fatal("open period loaded AutopilotDriving=false, want true")
-	}
-
-	if err := m.store.AppendAutopilot(ctx, f.ID, domain.StageImplement,
-		state.AutopilotHandedBack, "", domain.GateAutopilot, "", fixedTime.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if row := drivingOf(m.loadRows()); row.AutopilotDriving {
-		t.Fatal("card still AutopilotDriving after handback")
 	}
 }

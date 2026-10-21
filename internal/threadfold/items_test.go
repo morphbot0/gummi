@@ -62,10 +62,6 @@ func (l *cardLog) ask(stage domain.Stage, id, q, answer, by string) *cardLog {
 	return l.add(stage, state.EventAsk, "", state.AskPayload{Question: q, Answer: answer, Actor: by, By: by, ID: id}, "")
 }
 
-func (l *cardLog) autopilot(stage domain.Stage, event, mode, reason string) *cardLog {
-	return l.add(stage, state.EventAutopilot, "", state.AutopilotPayload{Event: event, Mode: mode, Reason: reason}, "")
-}
-
 func (l *cardLog) park(stage domain.Stage, reason, detail string) *cardLog {
 	return l.add(stage, state.EventPark, "", state.ParkPayload{Reason: reason, Detail: detail}, "")
 }
@@ -97,12 +93,6 @@ func brief(it Item) string {
 		return fmt.Sprintf("verify verdict=%q %s", it.Verdict, strings.Join(cs, "; "))
 	case ItemDecision:
 		return "decision " + it.Decision.Kind + " " + it.Decision.ID + ": " + it.Decision.Question
-	case ItemStretch:
-		m := it.Stretch
-		if m.Edge == "open" {
-			return "── " + m.Label
-		}
-		return fmt.Sprintf("── %s · reason=%q tally=%q", m.Label, m.Reason, m.Tally)
 	default:
 		return string(it.T) + " " + it.Text
 	}
@@ -173,59 +163,7 @@ func TestItems(t *testing.T) {
 				"decision verify v1: Verify failed on 1 of 2 checks.",
 			},
 		},
-		{
-			name: "an autopilot stretch that parked",
-			log: newLog().
-				enter(plan, "architect", "stage").
-				autopilot(plan, state.AutopilotTookOver, "autopilot", "").
-				say(plan, "assistant", "Plan written.").
-				gate(plan, plan, impl, "autopilot", "").
-				enter(impl, "implementer", "stage").
-				ask(impl, "a2", "Which rig?", "rig-a", state.ActorAutopilot).
-				park(impl, state.ParkReasonNeedsYou, "implement finished, review it"),
-			opt: Options{Live: true},
-			want: []string{
-				`stage plan · architect · stage · exited=false verdict="" credits=0 mark=""`,
-				"── autopilot took over",
-				"message architect: Plan written.",
-				`receipt gate ok=true by="autopilot": autopilot crossed plan → implement`,
-				`stage implement · implementer · stage · exited=false verdict="" credits=0 mark=""`,
-				`receipt ask ok=true by="autopilot": autopilot answered “Which rig?” — rig-a`,
-				`── autopilot parked it · reason="implement finished, review it" tally="1 gate · 1 answer"`,
-			},
-		},
-		{
-			name: "a steer takes the card back from autopilot",
-			log: newLog().
-				enter(impl, "implementer", "stage").
-				autopilot(impl, state.AutopilotTookOver, "autopilot", "").
-				say(impl, "assistant", "Working.").
-				say(impl, "user", "stop, use the other API").
-				autopilot(impl, "", "attended", ""),
-			opt: Options{Live: true},
-			want: []string{
-				`stage implement · implementer · stage · exited=false verdict="" credits=0 mark=""`,
-				"── autopilot took over",
-				"message implementer: Working.",
-				`── you took back control · reason="" tally=""`,
-				"you (steered): stop, use the other API",
-				`receipt autopilot ok=true by="": autopilot set to off`,
-			},
-		},
-		{
-			name: "a period whose driver died without a word",
-			log: newLog().
-				enter(impl, "implementer", "stage").
-				autopilot(impl, state.AutopilotTookOver, "autopilot", "").
-				say(impl, "assistant", "Working."),
-			opt: Options{Live: false},
-			want: []string{
-				`stage implement · implementer · stage · exited=false verdict="" credits=0 mark=""`,
-				"── autopilot took over",
-				"message implementer: Working.",
-				`── autopilot stopped without saying so · reason="" tally=""`,
-			},
-		},
+
 		{
 			name: "a decision superseded before anyone answered it",
 			log: newLog().
