@@ -133,6 +133,9 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 	reload := m.reloadSpec()
 	f, path := sv.f, sv.path
 	return func() tea.Msg {
+		if err := m.sessionSpecClosed(f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
 		if err := writeSpecNote(path, line, m.now().Format("2006-01-02"), text); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
@@ -148,9 +151,8 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 // terminal's mirror of the web page's own writer (WebDocs.noteSessionRevision),
 // so a comment, a resolution or an $EDITOR save made here reaches a
 // running crew as a steer the same way a web edit does. A no-op for
-// every card that is not such a session, or when no engine is wired (a
-// static board still reads and writes the file directly; there is
-// nothing to record a revision with).
+// every card that is not such a session; a static board records the
+// revision through withEngine's own short-lived engine.
 func (m *Shell) noteSessionSpecRevision(f domain.Feature, path string) error {
 	if !hasSessionSpec(f) {
 		return nil
@@ -170,6 +172,19 @@ func (m *Shell) noteSessionSpecRevision(f domain.Feature, path string) error {
 		return nil
 	})
 	return writeErr
+}
+
+// sessionSpecClosed refuses a write to a closed session's spec, read from
+// the store rather than the view's load-time copy — the same refusal the
+// web page's writers give (closedToReview).
+func (m *Shell) sessionSpecClosed(f domain.Feature) error {
+	if !hasSessionSpec(f) {
+		return nil
+	}
+	if got, err := m.store.GetFeature(context.Background(), f.ID); err == nil {
+		f = got
+	}
+	return closedToReview(f, "its spec takes no more edits")
 }
 
 // writeSpecNote writes one `@user` note under line of the document at
@@ -211,6 +226,9 @@ func (m *Shell) resolveSpecComment(line int, reason string) tea.Cmd {
 	reload := m.reloadSpec()
 	f, path := sv.f, sv.path
 	return func() tea.Msg {
+		if err := m.sessionSpecClosed(f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
 		if err := writeSpecResolution(path, line, m.now().Format("2006-01-02"), reason, nil); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
@@ -408,10 +426,21 @@ func (m *Shell) editSpec() tea.Cmd {
 			return noticeMsg{text: "$EDITOR is not set", isErr: true}
 		}
 	}
+	if hasSessionSpec(sv.f) {
+		if err := closedToReview(sv.f, "its spec takes no more edits"); err != nil {
+			return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
+		}
+	}
 	reload := m.reloadSpec()
 	f, path, before := sv.f, sv.path, sv.content
 	cmd := exec.CommandContext(context.Background(), editor, path) //nolint:gosec // $EDITOR is the user's own trusted setting
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+	return tea.ExecProcess(cmd, m.specEdited(f, path, before, reload))
+}
+
+// specEdited is what follows the editor's exit: a session's spec saved
+// with a change becomes a revision, then the view reloads.
+func (m *Shell) specEdited(f domain.Feature, path, before string, reload tea.Cmd) func(error) tea.Msg {
+	return func(err error) tea.Msg {
 		if err != nil {
 			return noticeMsg{text: fmt.Sprintf("editor: %v", err), isErr: true}
 		}
@@ -424,7 +453,7 @@ func (m *Shell) editSpec() tea.Cmd {
 			}
 		}
 		return reload()
-	})
+	}
 }
 
 // threadAtCursor returns the thread whose markers include the cursor

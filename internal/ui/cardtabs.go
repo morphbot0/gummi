@@ -291,7 +291,7 @@ func (m *Shell) cardTabBindings() []binding {
 	)
 	switch {
 	case haveCard && cardHasSessionSpec(r):
-		bs[len(bs)-1].help = "the session's spec — comment, resolve and approve in place"
+		bs[len(bs)-1].help = "the session's spec — comment, resolve or edit it; each write is a revision"
 	case haveCard && artifactNoun(r.F.Kind) != "":
 		bs[len(bs)-1].help = "the " + artifactNoun(r.F.Kind) + " — comment, resolve and approve in place"
 	case haveCard && hasSessionSpec(r.F):
