@@ -8,6 +8,7 @@ import { $, h, icon, clear, kindTag, typeName, repoSlot, needsWord, STAGES, cr, 
 import { on, set, state, rows } from './store.js?v=__ASSET_V__'
 import { openView, openMenu, retickMenu } from './views.js?v=__ASSET_V__'
 import { openPush } from './push.js?v=__ASSET_V__'
+import { crewSquares } from './crew.js?v=__ASSET_V__'
 
 const GROUPS = [
   ['needs', 'Needs you'],
@@ -314,6 +315,7 @@ function rowEl (r, wide) {
     w ? h('span', { class: ['word', `q-${q}`, r.status === 'running' && 'shimmer'], testid: `rail-row-word-${r.id}` }, w) : null,
     staged ? h('span', { class: 'stage' }, r.stage) : null,
     r.severity && r.status === 'todo' ? h('span', null, r.severity) : null,
+    r.crew ? crewSquares(r.crew, `rail-row-crew-${r.id}`) : null,
     r.objective ? h('span', { class: ['badge obj', `obj-${r.objective}`], title: `objective ${r.objective}`, testid: `rail-row-objective-${r.id}` }, `◆ ${r.objective}`) : null,
     r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.map(ref).join(', ')}`) : null,
     r.stack && show.includes('stack') ? h('span', { class: ['stackpos', r.stack.stale && 'stale'], title: r.stack.stale ? `${r.stack.name} — its base has moved` : r.stack.name }, `stack ${r.stack.pos + 1}/${r.stack.of}`) : null,

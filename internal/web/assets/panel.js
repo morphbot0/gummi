@@ -1,5 +1,5 @@
 // panel.js — the right side: a rail of icons that opens one surface at a
-// time beside the conversation (never over it) — Memory, Spec, Changes
+// time beside the conversation (never over it) — Memory, Spec, Crew, Changes
 // (the diff, the commits and the pull request, behind one switch), Run and
 // Terminal. It starts closed; an icon opens its surface, the open one's
 // icon or `]` closes it, and every surface shares one width, which the
@@ -21,8 +21,9 @@ import { treeTab } from './tree.js?v=__ASSET_V__'
 import { prTab } from './pr.js?v=__ASSET_V__'
 import { statsTab } from './stats.js?v=__ASSET_V__'
 import { terminalTab } from './terminal.js?v=__ASSET_V__'
+import { crewTab } from './crew.js?v=__ASSET_V__'
 
-const TABS = [memoryTab, specTab, diffTab, logTab, treeTab, prTab, statsTab, terminalTab]
+const TABS = [memoryTab, specTab, crewTab, diffTab, logTab, treeTab, prTab, statsTab, terminalTab]
 const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 
 // SURFACES is what the icons open. One with several tabs shows a switch
@@ -30,6 +31,8 @@ const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 const SURFACES = [
   { name: 'memory', label: 'Memory', icon: 'memory', tabs: [memoryTab] },
   { name: 'spec', label: 'Spec', icon: 'doc', tabs: [specTab] },
+  // a session's crew (DESIGN §24.9), shown once the session has called one
+  { name: 'crew', label: 'Crew', icon: 'crew', tabs: [crewTab] },
   { name: 'changes', label: 'Changes', icon: 'branch', tabs: [diffTab, logTab, treeTab, prTab], as: { diff: 'Files', log: 'Commits', tree: 'Working tree', pr: 'Pull request' } },
   { name: 'run', label: 'Run', icon: 'fleet', tabs: [statsTab] },
   { name: 'terminal', label: 'Terminal', icon: 'terminal', tabs: [terminalTab] }
@@ -357,14 +360,15 @@ function isClosed () { return state.card?.stage === 'done' || !!state.card?.land
 // none
 let drawnClosed = null
 // paneKey is what the tabs read of the card's head besides their own
-// document — its stage, whether it landed, its title, its decision and its
+// document — its stage, whether it landed, its title, its decision, its
+// crew's state (the spec tab offers a crew only while none is open) and its
 // actions (a tab's buttons are the card's own actions) — and drawnKey is
 // it as the pane was last drawn. A head that moved otherwise (what a run
 // spent, its busy word) leaves the pane as the reader has it.
 function paneKey (c) {
   if (!c) return ''
   return JSON.stringify([c.id, c.stage, !!c.landed, c.title, c.kind, !!c.scratch, !!c.home, c.terminal ?? null,
-    c.decision ? (c.decision.options || []).map(o => !!o.carriesComments) : null, c.actions || []])
+    c.decision ? (c.decision.options || []).map(o => !!o.carriesComments) : null, c.actions || [], c.crew?.state || null])
 }
 let drawnKey = ''
 

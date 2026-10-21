@@ -1311,3 +1311,116 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .pb-facts dt{color:var(--fg3)} .pb-facts dd{margin:0;overflow-wrap:anywhere}
 .pb-cmds{margin:10px 0 0;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;overflow-wrap:anywhere}
 .btn.ghost{border-color:transparent;background:none;color:var(--fg3)} .btn.ghost:hover{border-color:var(--line2);color:var(--fg)} .btn.ghost.danger{color:var(--err)}
+
+/* ---- a session's crew (DESIGN §24.9): crew.js ---- */
+/* node states share one palette: landed and ready read ok, working the
+   running hue, waiting on the person the needs hue, stuck the failure hue */
+.crew-sq,.crew-node,.crew-cm{--ct-ok:var(--ok);--ct-run:var(--q-run);--ct-you:var(--q-needs);--ct-bad:var(--q-fail);--ct-wait:var(--fg4);--ct-off:var(--line2)}
+.crew-sq{display:inline-flex;align-items:center;gap:2px}
+.crew-sq > i{width:7px;height:7px;border-radius:2px;background:var(--ct-wait)}
+.crew-sq > i.t-ok{background:var(--ct-ok)} .crew-sq > i.t-run{background:var(--ct-run)} .crew-sq > i.t-bad{background:var(--ct-bad)} .crew-sq > i.t-off{background:var(--ct-off)}
+.crew-sq .crew-sqw{margin-left:4px;font-family:var(--mono);font-size:11px}
+/* the head's verified mark */
+.subline > .crew-mark{flex-shrink:0}
+.crew-mark{display:inline-flex;align-items:baseline;gap:4px;padding:1px 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--ok) 40%,var(--line));font-size:12px;color:var(--fg2);white-space:nowrap}
+.crew-mark.stale{border-color:color-mix(in srgb,var(--q-needs) 50%,var(--line));background:color-mix(in srgb,var(--q-needs) 7%,transparent)}
+.crew-mark .link{margin-left:4px}
+/* a crew's turn in the thread: the crew's, not the person's */
+.msg.crewturn{display:flex;flex-direction:column;gap:3px}
+.msg.crewturn .bubble{background:color-mix(in srgb,var(--ok) 6%,var(--panel));border:1px solid color-mix(in srgb,var(--ok) 30%,var(--line));border-radius:12px;padding:10px 14px}
+.msg.crewturn .bubble .body{margin:0}
+.msg.crewturn .bubble .body.clamped{max-height:18em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent)}
+.msg.crewturn .bubble .more{display:block;margin-top:4px;font-size:12px;color:var(--accent)}
+.msg.crewturn .who{font-size:11.5px}
+/* the plan in the dock's decision */
+.decision:has(.crew-dplan){max-height:max(280px,55vh)}
+.decision > .crew-dplan{flex:0 100 auto;min-height:72px;overflow-y:auto;overscroll-behavior:contain;padding:0 14px 6px;font-size:12.5px}
+.crew-dhead{color:var(--fg3);margin-bottom:4px}
+.crew-dsub{margin:0 0 4px;color:var(--fg3)}
+.crew-ptab{width:100%;border-collapse:collapse}
+.crew-ptab td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:top}
+.crew-ptab .crew-wv{color:var(--fg4);white-space:nowrap;font-size:11.5px}
+.crew-ptab .crew-own{white-space:pre;color:var(--fg2);font-size:11.5px}
+.crew-ptab .crew-env{text-align:right;white-space:nowrap}
+.crew-ticks{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:11.5px}
+.crew-diff{margin-bottom:6px}
+.crew-why{margin:0 0 4px;padding-left:18px;color:var(--fg2)}
+.crew-chg{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;padding:4px 8px;border-radius:6px;margin-top:2px}
+.crew-chg.op-add{background:var(--add-bg);color:var(--add-fg)}
+.crew-chg.op-del{background:var(--del-bg);color:var(--del-fg)}
+.crew-chg.op-chg{background:var(--sunk)}
+.crew-role{display:inline-block;padding:0 7px;border-radius:999px;font-size:11px;font-weight:600;background:var(--sunk);color:var(--fg2)}
+.crew-role.r-scout{background:color-mix(in srgb,var(--r0) 14%,transparent);color:var(--r0)}
+.crew-role.r-contractor{background:color-mix(in srgb,var(--r2) 14%,transparent);color:var(--r2)}
+.crew-role.r-implementer{background:color-mix(in srgb,var(--s-impl) 16%,transparent);color:color-mix(in srgb,var(--s-impl) 80%,#000)}
+.crew-role.r-tester{background:color-mix(in srgb,var(--s-verify) 14%,transparent);color:var(--ok)}
+.crew-role.r-scribe{background:color-mix(in srgb,var(--r4) 14%,transparent);color:var(--r4)}
+.crew-role.r-review{background:color-mix(in srgb,var(--s-plan) 12%,transparent);color:var(--s-plan)}
+/* the Crew tab */
+.crew{display:flex;flex-direction:column;gap:10px;padding:10px 2px 24px;font-size:13px}
+.crew-top{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.crew-state{font-weight:600}
+.crew-state.cs-running,.crew-state.cs-reviewing{color:var(--q-run)} .crew-state.cs-finished,.crew-state.cs-landed{color:var(--ok)}
+.crew-state.cs-partial,.crew-state.cs-paused{color:var(--warn)} .crew-state.cs-declined{color:var(--fg3)}
+.crew-br{color:var(--fg2);font-size:11.5px;overflow-wrap:anywhere}
+.crew-dim{color:var(--fg3)}
+.crew-acts{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.crew > .crew-acts{margin-left:0}
+.crew-budget{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg3);font-size:12px}
+.crew-budget b{color:var(--fg)}
+.crew-bar{position:relative;flex:1 1 80px;min-width:60px;height:6px;border-radius:3px;background:var(--sunk);overflow:hidden}
+.crew-bar > i{position:absolute;left:0;top:0;bottom:0}
+.crew-bar > i.pl{width:var(--pl);background:color-mix(in srgb,var(--accent) 22%,transparent)}
+.crew-bar > i.sp{width:var(--sp);background:var(--accent)}
+.crew-asks{padding:8px 10px;border-radius:8px;border:1px solid color-mix(in srgb,var(--q-needs) 50%,var(--line));background:color-mix(in srgb,var(--q-needs) 8%,var(--panel))}
+.crew-canvas{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 8px}
+.crew-wave{flex:0 0 172px;display:flex;flex-direction:column;gap:8px}
+.crew-wh{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--fg4)}
+.crew-node{display:flex;flex-direction:column;gap:5px;text-align:left;padding:8px 10px;border-radius:9px;border:1px solid var(--line2);background:var(--panel);font-size:12px;--nc:var(--ct-wait)}
+.crew-node:hover{border-color:var(--fg4)}
+.crew-node.t-ok{--nc:var(--ct-ok);border-color:color-mix(in srgb,var(--ct-ok) 45%,var(--line))}
+.crew-node.t-run{--nc:var(--ct-run);border-color:color-mix(in srgb,var(--ct-run) 55%,var(--line))}
+.crew-node.t-bad{--nc:var(--ct-bad);border-color:color-mix(in srgb,var(--ct-bad) 50%,var(--line))}
+.crew-node.t-off{--nc:var(--ct-off);opacity:.6}
+.crew-node.t-you{--nc:var(--ct-you);border-color:var(--ct-you);box-shadow:0 0 0 2px color-mix(in srgb,var(--ct-you) 40%,transparent)}
+.crew-node.t-wait,.crew-node.gate{border-style:dashed;background:var(--sunk)}
+.crew-node.sel{outline:2px solid var(--accent);outline-offset:1px}
+.crew-nh{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.crew-id{color:var(--fg4);font-size:11px}
+.crew-nt{font-weight:600;color:var(--fg);overflow-wrap:anywhere}
+.crew-checks{display:flex;gap:3px}
+.crew-checks > i{width:12px;height:3px;border-radius:2px;background:var(--line2)}
+.crew-checks > i.ok{background:var(--ct-ok)}
+.crew-act{font-family:var(--mono);font-size:11px;color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crew-nf{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--fg3);font-size:11.5px}
+.crew-st{margin-left:auto;color:var(--nc);font-weight:600}
+.crew-st::before{content:"● ";font-size:9px}
+.crew-rw{padding:0 5px;border-radius:4px;background:color-mix(in srgb,var(--q-fail) 12%,transparent);color:var(--q-fail);font-size:10.5px}
+.crew-lane{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px}
+.crew-cm{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:999px;border:1px solid var(--line2);font-family:var(--mono);font-size:11px}
+.crew-cm > i{width:6px;height:6px;border-radius:50%;background:var(--ct-ok)}
+.crew-planner{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg2);font-size:12.5px}
+.crew-planner i{color:var(--fg2)}
+.crew-insp{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;background:var(--panel);display:flex;flex-direction:column;gap:6px}
+.crew-ih{display:flex;align-items:center;gap:8px}
+.crew-ih h4{margin:0;font-size:14px}
+.crew-sec h5{margin:6px 0 4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--fg4)}
+.crew-sec p{margin:0}
+.crew-hand{margin:0;padding-left:18px}
+.crew-chk{font-size:12px;color:var(--fg3)}
+.crew-chk::before{content:"○ "}
+.crew-chk.ok{color:var(--ok)}
+.crew-chk.ok::before{content:"✓ "}
+.crew-item{display:grid;grid-template-columns:48px minmax(0,1fr);gap:2px 8px;padding:4px 0;border-top:1px solid var(--line)}
+.crew-item > :nth-child(3){grid-column:2;font-size:11.5px}
+.crew-log ol{margin:4px 0 0;padding-left:20px;font-size:11.5px;white-space:pre-wrap;color:var(--fg2)}
+.crew-log summary{cursor:pointer;font-size:12px;color:var(--fg3)}
+.crew-hist{font-size:12px}
+/* a session's spec: its bar, its editor and its revisions (spec.js) */
+.spec-sbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 0 10px;font-size:12.5px;color:var(--fg3)}
+.spec-sbar .sp{flex:1 1 0}
+.spec-editing{display:flex;flex-direction:column;padding-top:8px}
+.spec-ta{width:100%;min-height:60vh;box-sizing:border-box;font:12.5px/1.55 var(--mono);padding:10px 12px;border:1px solid var(--line2);border-radius:8px;background:var(--sunk);color:var(--fg);resize:vertical}
+.spec-revs{margin-top:18px}
+.spec-revrow{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;color:var(--fg2)}
+.spec-frozen{color:var(--accent);font-size:11.5px}

@@ -4,9 +4,14 @@
 // (POST …/spec/notes), "Request changes" sending the open notes to their
 // writer (POST …/spec/changes), and the gummi-checks block drawn as a table with each
 // check's last outcome on this branch.
+//
+// A session's spec (DESIGN §24.2) is optional and lives with the workspace:
+// the tab offers to start one, edits it whole (PUT …/spec, each save a
+// numbered revision listed under it), and starts a crew from it.
 
 import { h, append, clock, plural, clear, cardName } from './dom.js?v=__ASSET_V__'
-import { get, post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
+import { get, post, put, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
+import { openCrewStart } from './crew.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { changesButton } from './actions.js?v=__ASSET_V__'
@@ -18,8 +23,9 @@ export const specTab = {
   key: 'g s',
   fetch: (id) => get(cardPath(id, 'spec')),
   empty: (s) => !s || s.none,
-  // a session has no spec and never will: its work is its diff
-  hidden: (c) => c?.stage === 'open' || c?.kind === 'freeform',
+  // an agent in a home of its own keeps memory, not a spec; a session may
+  // keep one (DESIGN §24.2)
+  hidden: (c) => !!c?.home,
   render
 }
 
@@ -37,6 +43,15 @@ const slug = (name, i) => `sec-${i}-` + String(name).toLowerCase().replace(/[^a-
 
 function render (pane, entry, ctx) {
   const s = entry.data
+  if (s?.session) {
+    const ed = editing.get(ctx.id)
+    if (s.none) {
+      pane.append(h('div', { class: 'empty', testid: 'spec-none' }, h('b', null, 'No spec'), s.why || '',
+        ctx.closed ? null : h('button', { class: 'btn pri', type: 'button', testid: 'spec-start-session', onclick: (e) => startSpec(e.currentTarget, ctx) }, 'Start a spec')))
+      return
+    }
+    if (ed && !ctx.closed) { pane.append(editor(s, ed, ctx)); return }
+  }
   if (!s || s.none) {
     pane.append(h('div', { class: 'empty', testid: 'spec-none' }, h('b', null, 'No spec'),
       s?.why || (ctx.card?.stage === 'open' ? 'A session carries no document. Its conversation is the context.' : 'The plan stage writes it onto the card’s branch.')))
@@ -112,7 +127,92 @@ function render (pane, entry, ctx) {
       })), { testid: 'spec-toc-menu' })
     }, 'Sections ', h('span', { 'aria-hidden': 'true' }, '▾')))
   }
+  if (s.session) {
+    doc.querySelector('.src').after(sessionBar(s, ctx))
+    doc.append(revisionsEl(s))
+  }
   pane.append(h('div', { class: 'spec', testid: 'spec' }, doc))
+}
+
+// ---- a session's spec ----
+
+// editing holds a session spec being edited, per card: the text and the
+// revision it was opened at. The panel redraws the tab on every change to
+// the card, and a half-made edit must come back from that as it was.
+const editing = new Map()
+
+// an open crew holds the session's one crew slot (DESIGN §24.3)
+const OPEN_CREW = new Set(['proposed', 'running', 'paused', 'reviewing'])
+
+function sessionBar (s, ctx) {
+  const items = s.doneWhen || []
+  const checked = items.filter(i => i.check || i.judge).length
+  const crew = ctx.card?.crew
+  const may = !ctx.closed && !(crew && OPEN_CREW.has(crew.state))
+  return h('div', { class: 'spec-sbar', testid: 'spec-session' },
+    h('span', { class: 'mono', testid: 'spec-rev' }, s.revisions?.length ? `revision ${s.revisions[0].rev}` : 'no revision yet'),
+    h('span', { class: items.length ? 'okc' : 'nonec', testid: 'spec-ready' }, items.length
+      ? `${plural(items.length, 'done-when item')}${checked < items.length ? `, ${items.length - checked} without a check` : ''}`
+      : 'no done-when item yet: a crew needs one'),
+    h('span', { class: 'sp' }),
+    ctx.closed ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-edit', onclick: () => { editing.set(ctx.id, { text: s.markdown || '', rev: s.rev }); ctx.rerender() } }, 'Edit'),
+    may ? h('button', { class: 'btn pri', type: 'button', testid: 'spec-crew', title: 'A planner plans this spec into nodes; you approve the plan first', onclick: () => openCrewStart(ctx.card || { id: ctx.id }, () => ctx.setTab('crew')) }, 'Start a crew…') : null)
+}
+
+function revisionsEl (s) {
+  const revs = s.revisions || []
+  if (!revs.length) return null
+  return h('section', { class: 'spec-revs', testid: 'spec-revisions' }, h('h2', { class: 'sec' }, 'Revisions'),
+    revs.map(r => h('div', { class: 'spec-revrow', testid: `spec-revision-${r.rev}` },
+      h('b', { class: 'mono' }, `rev ${r.rev}`),
+      h('span', null, r.by || 'you'),
+      h('span', { class: 'mono' }, r.at ? clock(r.at) : ''),
+      (r.crews || []).length ? h('span', { class: 'spec-frozen' }, `frozen for crew ${r.crews.join(', ')}`) : null)))
+}
+
+function editor (s, ed, ctx) {
+  const ta = h('textarea', { class: 'spec-ta', testid: 'spec-editor', 'aria-label': 'The spec, as markdown', spellcheck: 'true' })
+  ta.value = ed.text
+  ta.addEventListener('input', () => { ed.text = ta.value })
+  const stale = ed.rev !== s.rev
+  const save = async (btn) => {
+    btn.disabled = true
+    try {
+      const spec = await put(cardPath(ctx.id, 'spec'), { markdown: ta.value, rev: ed.rev })
+      editing.delete(ctx.id)
+      toast(`Saved as revision ${spec?.revisions?.[0]?.rev ?? ''}`.trim())
+      ctx.swap(spec && spec.markdown !== undefined ? spec : null)
+    } catch (err) {
+      btn.disabled = false
+      toast(err.status === 409 ? 'The spec changed since you opened it: cancel, and edit it as it stands now' : (err.data?.error || err.message), { err: true })
+    }
+  }
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(box.querySelector('[data-testid="spec-save"]')) }
+    if (e.key === 'Escape') { e.stopPropagation(); editing.delete(ctx.id); ctx.rerender() }
+  })
+  const box = h('div', { class: 'spec spec-editing', testid: 'spec', data: { draft: 'spec-edit' } },
+    h('div', { class: 'spec-sbar' },
+      h('b', null, 'Editing'),
+      h('span', { class: 'mono' }, `from revision ${s.revisions?.[0]?.rev ?? ''}`),
+      stale ? h('span', { class: 'badc', testid: 'spec-stale' }, 'the spec changed since you opened it') : null,
+      h('span', { class: 'sp' }),
+      h('button', { class: 'btn', type: 'button', testid: 'spec-cancel', onclick: () => { editing.delete(ctx.id); ctx.rerender() } }, 'Cancel'),
+      h('button', { class: 'btn pri', type: 'button', testid: 'spec-save', onclick: (e) => save(e.currentTarget) }, 'Save')),
+    ta)
+  return box
+}
+
+async function startSpec (btn, ctx) {
+  btn.disabled = true
+  try {
+    const spec = await post(cardPath(ctx.id, 'spec/start'), { title: ctx.card?.title || '' })
+    toast('Spec started from the template')
+    ctx.swap(spec && spec.markdown !== undefined ? spec : null)
+  } catch (err) {
+    btn.disabled = false
+    toast(err.data?.error || err.message, { err: true })
+  }
 }
 
 function notesIn (notes, from, to, ctx) {

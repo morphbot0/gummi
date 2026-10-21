@@ -9,6 +9,7 @@ import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
 import { draftHead, writeSpecButton, delegateButton, openDelegate } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
+import { crewMarkEl, landCrewButton, crewWord } from './crew.js?v=__ASSET_V__'
 
 let ctx = {}
 
@@ -70,6 +71,8 @@ function render () {
       h('div', { class: 'head-actions' },
         foldAt(1, commitButton(c, actions)),
         foldAt(2, publishButton(c, actions)),
+        // a crew waiting to land is the head's point: it folds last
+        foldAt(9, landCrewButton(state.card)),
         foldAt(3, landButton(c, actions)),
         foldAt(0, writeSpecButton(state.card)),
         foldAt(0, delegateButton(state.card)),
@@ -77,6 +80,8 @@ function render () {
         menuBtn)),
     h('div', { class: 'subline' },
       stages(c),
+      crewLink(c),
+      crewMarkEl(state.card),
       c.home ? h('span', { class: 'home', testid: 'card-home' }, h('i', { 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'mono' }, c.home)) : null,
       c.home ? h('span', null, 'no repository') : null,
       h('span', { class: 'sp' }),
@@ -90,6 +95,14 @@ function render () {
       ctxMeter(c.context, 'card-context')),
     state.cardErr && !state.card ? h('div', { class: 'subline badc', testid: 'card-error' }, state.cardErr.message) : null])
   fit()
+}
+
+// crewLink names a session's latest crew and opens its tab (DESIGN §24.9).
+function crewLink (c) {
+  // a landed crew is said by its verified mark beside this
+  if (!c.crew || (c.crew.state === 'landed' && state.card?.crewMark)) return null
+  return h('button', { class: 'link', type: 'button', testid: 'card-crew', title: 'Open the Crew tab', onclick: () => ctx.setTab('crew') },
+    `crew ${c.crew.seq} `, h('b', null, crewWord(c.crew.state)))
 }
 
 // foldAt ranks a head button for fit: the lower, the sooner it folds.
@@ -150,6 +163,9 @@ export function openActions (line = '') {
   if (delegateButton(state.card)) {
     items.push({ label: 'Delegate to cards…', testid: 'action-delegate', hint: 'Let this session create workflow cards under a budget', onClick: () => openDelegate(state.card) })
   }
+  // so is landing a crew that has ended (DESIGN §24.3)
+  const crewLand = landCrewButton(state.card)
+  if (crewLand) items.unshift({ label: 'Land crew', testid: 'action-crew-land', hint: crewLand.title, onClick: () => crewLand.click() })
   openMenu(btn, items, { testid: 'card-actions-menu' })
   return true
 }
