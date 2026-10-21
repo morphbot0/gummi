@@ -718,53 +718,6 @@ func (m *Manager) mergeInProgress(ctx context.Context, wt string) bool {
 	return err == nil
 }
 
-// RebaseOnto moves a card's own commits from the base it forked from
-// (oldBase) onto this manager's HEAD, then re-anchors its fork point
-// there. It is how a card changes branches: attaching an existing card to
-// a goal moves it from main onto the goal branch (called on the goal's
-// manager), and detaching one moves it back (called on the repository's
-// manager). `--onto` replays only the commits after oldBase, so a card
-// leaving a goal never carries other cards' landings with it. A card with
-// no worktree has no commits to move and only its fork point is cleared.
-func (m *Manager) RebaseOnto(ctx context.Context, f *domain.Feature, oldBase string) error {
-	p, _, err := m.featurePaths(f)
-	if err != nil {
-		return err
-	}
-	if _, statErr := os.Stat(p); statErr != nil {
-		return m.forkStore.ClearForkPoint(ctx, f.ID)
-	}
-	// The card's OWN base, not the checkout's HEAD. For a goal card the
-	// two are the same thing — its manager is rooted at the goal
-	// worktree, so that checkout's HEAD *is* the goal branch — which is
-	// why this read as MainHead for as long as goals were the only
-	// caller. A stacked card's base is the branch of the card below it,
-	// resolved in a manager rooted at the ordinary repository, so
-	// targeting the checkout's HEAD would replay it onto main and
-	// quietly flatten the chain.
-	head, err := m.BaseHead(ctx, f)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(oldBase) == "" {
-		oldBase, err = runGit(ctx, p, "merge-base", head, "HEAD")
-		if err != nil {
-			return fmt.Errorf("finding where %s forked: %w", f.ID, err)
-		}
-	}
-	if _, err := runGit(ctx, p, "rebase", "--onto", head, oldBase); err != nil {
-		if !m.rebaseInProgress(ctx, p) {
-			return fmt.Errorf("moving %s onto its new base did not start: %w", f.ID, err)
-		}
-		conflicts := m.conflictedFiles(ctx, p)
-		if _, abortErr := runGit(ctx, p, "rebase", "--abort"); abortErr != nil {
-			return fmt.Errorf("move failed AND abort failed, worktree %s needs manual attention: %w (abort: %v)", p, err, abortErr)
-		}
-		return &RebaseConflictError{Files: conflicts}
-	}
-	return m.forkStore.ReanchorForkPoint(ctx, f.ID, head)
-}
-
 // CommitStat is `git show --stat` for one commit, without the message
 // body: the per-card section header of a goal's diff by card.
 func (m *Manager) CommitStat(ctx context.Context, sha string) (string, error) {
