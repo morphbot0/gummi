@@ -1115,6 +1115,7 @@ func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
 		return m.freeformAbsentLines(s, r, w)
 	}
 	lines := transcriptLines(s, snap, w, m.threadOutputs)
+	lines = append(lines, crewLines(s, r, w)...)
 	if snap.Err != nil {
 		for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {
 			lines = append(lines, "  "+s.Error.Render(l))

@@ -6,6 +6,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -169,5 +170,26 @@ func TestTranscriptShowsRunningWatches(t *testing.T) {
 	got := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
 	if !strings.Contains(got, "watching") || !strings.Contains(got, "w1 · tail -f build.log | grep FAIL") {
 		t.Errorf("watches:\n%s", got)
+	}
+}
+
+// TestTranscriptLabelsACrewReportAsTheCrews: a crew's report reaches its
+// session as a user turn sent by the crew (state.ActorCrew). It is not the
+// person's words, so it must not read "you".
+func TestTranscriptLabelsACrewReportAsTheCrews(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	snap := engine.Snapshot{
+		Role: agent.RoleImplementer,
+		Transcript: []engine.Message{
+			{Author: engine.AuthorUser, Content: "make the column"},
+			{Author: engine.AuthorUser, Content: "The crew has reported.", By: state.ActorCrew},
+		},
+	}
+	lines := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
+	if !labelPrecedes(lines, "you", "make the column") {
+		t.Errorf("the person's turn is not labelled you:\n%s", lines)
+	}
+	if !labelPrecedes(lines, "crew · report", "The crew has reported.") {
+		t.Errorf("the crew's report is not labelled as the crew's:\n%s", lines)
 	}
 }

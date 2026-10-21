@@ -8,12 +8,15 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 const crewPollInterval = 10 * time.Second
@@ -122,4 +125,55 @@ func (m *Shell) answerCrew(r featureRow, d *threadDecision, answer string) tea.C
 			m.loadRows,
 		}
 	}
+}
+
+// crewLines is the strip an open crew draws under its session's thread:
+// where the crew stands, what it has spent, and one line per node of its
+// plan. The web page's Crew tab is the full face; this is what a terminal
+// sees between the plan's approval and the report, which would otherwise
+// be nothing at all. A crew that ended says so in its report instead.
+func crewLines(s *theme.Styles, r featureRow, w int) []string {
+	c := r.Crew
+	if c == nil || !c.State.Open() {
+		return nil
+	}
+	runs := map[string]domain.CrewNodeRun{}
+	spent := c.OwnSpent
+	for _, n := range r.CrewNodes {
+		runs[n.Node] = n
+		spent += n.Spent
+	}
+	head := fmt.Sprintf("crew %d · %s · %.0f of %d credits", c.Seq, c.State, spent, c.Budget)
+	if len(c.Plan.Nodes) == 0 {
+		head += " · the planner is writing the plan"
+	}
+	lines := []string{s.Faint.Render(ansi.Truncate(head, max(w, 8), "…"))}
+	roleW := 0
+	for _, n := range c.Plan.Nodes {
+		roleW = max(roleW, len(n.ID)+1+len(n.Role))
+	}
+	for _, n := range c.Plan.Nodes {
+		st := domain.NodeWaiting
+		run, ok := runs[n.ID]
+		if ok {
+			st = run.State
+		}
+		mark, style := "·", s.Subtle
+		switch {
+		case st == domain.NodeLanded:
+			mark, style = "✓", s.Success
+		case st == domain.NodeDropped || st == domain.NodeStuck || st == domain.NodeExhausted:
+			mark, style = "✗", s.Warning
+		case st.Live():
+			mark, style = "▸", s.Info
+		}
+		state := string(st)
+		if ok && run.Reworks > 0 {
+			state += fmt.Sprintf(" · rework %d", run.Reworks)
+		}
+		who := fmt.Sprintf("%-*s", roleW, n.ID+" "+string(n.Role))
+		line := fmt.Sprintf("%s %s  %-20s %s", mark, who, state, sanitize(n.Title))
+		lines = append(lines, "  "+style.Render(ansi.Truncate(line, max(w-2, 8), "…")))
+	}
+	return append(lines, "")
 }

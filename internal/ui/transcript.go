@@ -80,9 +80,13 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		switch msg.Author {
 		case engine.AuthorUser:
 			label = s.KeyHint.Render("you")
-			if threadfold.TurnBy(msg.By) == "gummi" {
+			switch threadfold.TurnBy(msg.By) {
+			case "gummi":
 				// a turn gummi sent for the session's objective, never the person's
 				label = s.Faint.Render("gummi · objective")
+			case "crew":
+				// the session's crew reporting back, never the person's
+				label = s.Faint.Render("crew · report")
 			}
 			// EVERY answer to an ask carries its outcome, not just the
 			// happy one. The suffix used to appear only for a clean
