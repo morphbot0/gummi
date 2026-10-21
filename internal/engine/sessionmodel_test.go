@@ -19,25 +19,25 @@ import (
 )
 
 // sessionModelEngine is a board whose profiles only ever name backend
-// "claude", plus a StartAgent that can start "codex" on demand — the shape
-// that makes "a session may pick any installed agent" observable: codex is
+// "claude", plus a StartAgent that can start "opencode" on demand — the shape
+// that makes "a session may pick any installed agent" observable: opencode is
 // reachable only through the start, never through the profiles.
 func sessionModelEngine(t *testing.T) (*Engine, *recorder, *recorder, *atomic.Int32) {
 	t.Helper()
 	ws, store, wt := newRepo(t)
 	claude := recordingAgent()
 	claude.name = "claude"
-	codex := recordingAgent()
-	codex.name = "codex"
+	opencode := recordingAgent()
+	opencode.name = "opencode"
 	var starts atomic.Int32
 	e := New(Config{
 		Agents: map[string]agent.Agent{"": claude, "claude": claude},
 		StartAgent: func(name string) (agent.Agent, error) {
-			if name != "codex" {
+			if name != "opencode" {
 				return nil, errors.New("not installed")
 			}
 			starts.Add(1)
-			return codex, nil
+			return opencode, nil
 		},
 		Store: store, Worktrees: wt, Workspace: ws, Model: "fallback",
 		Profiles: config.Profiles{Default: "alpha", Profiles: map[string]config.Profile{
@@ -45,41 +45,41 @@ func sessionModelEngine(t *testing.T) (*Engine, *recorder, *recorder, *atomic.In
 		}},
 	})
 	t.Cleanup(func() { e.Close() })
-	return e, claude, codex, &starts
+	return e, claude, opencode, &starts
 }
 
 // TestASessionRunsOnTheModelItNamed: a freeform card that names its own
 // agent and model runs on them, not on its profile's implementer — and an
 // agent the board did not start is started for it, once.
 func TestASessionRunsOnTheModelItNamed(t *testing.T) {
-	e, claude, codex, starts := sessionModelEngine(t)
+	e, claude, opencode, starts := sessionModelEngine(t)
 	ctx := context.Background()
 
 	f := freeformCard(1, "tidy the help text")
 	f.Profile = "alpha"
-	f.SessionBackend, f.SessionModel = "codex", "gpt-5"
+	f.SessionBackend, f.SessionModel = "opencode", "openai/gpt-5"
 	createFeature(t, e.cfg.Store, f)
 	if _, err := e.OpenFreeform(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if got := codex.opts().Model; got != "gpt-5" {
-		t.Errorf("the session ran on model %q, want the gpt-5 it named", got)
+	if got := opencode.opts().Model; got != "openai/gpt-5" {
+		t.Errorf("the session ran on model %q, want the openai/gpt-5 it named", got)
 	}
 	if claude.count() != 0 {
 		t.Error("the profile's implementer was started for a session that named its own agent")
 	}
 
-	g := freeformCard(2, "a second codex session")
-	g.SessionBackend, g.SessionModel = "codex", "gpt-5"
+	g := freeformCard(2, "a second opencode session")
+	g.SessionBackend, g.SessionModel = "opencode", "openai/gpt-5"
 	createFeature(t, e.cfg.Store, g)
 	if _, err := e.OpenFreeform(ctx, g); err != nil {
 		t.Fatal(err)
 	}
 	if n := starts.Load(); n != 1 {
-		t.Errorf("codex was started %d times for two sessions, want once", n)
+		t.Errorf("opencode was started %d times for two sessions, want once", n)
 	}
-	if backend, model := e.SessionModel(g); backend != "codex" || model != "gpt-5" {
-		t.Errorf("SessionModel = %s/%s, want codex/gpt-5", backend, model)
+	if backend, model := e.SessionModel(g); backend != "opencode" || model != "openai/gpt-5" {
+		t.Errorf("SessionModel = %s/%s, want opencode/openai/gpt-5", backend, model)
 	}
 
 	// A card that names nothing still runs on its profile's implementer.
@@ -95,7 +95,7 @@ func TestASessionRunsOnTheModelItNamed(t *testing.T) {
 // conversation so far replayed rather than resumed, since the old
 // backend's conversation id is not the new one's.
 func TestSwitchingASessionsModelCarriesTheConversation(t *testing.T) {
-	e, _, codex, _ := sessionModelEngine(t)
+	e, _, opencode, _ := sessionModelEngine(t)
 	ctx := context.Background()
 
 	f := freeformCard(4, "fix the flaky retry")
@@ -110,17 +110,17 @@ func TestSwitchingASessionsModelCarriesTheConversation(t *testing.T) {
 	}
 	waitFreeformIdle(t, ff)
 
-	if err := e.SwitchSessionModel(ctx, f.ID, "codex", "gpt-5"); err != nil {
+	if err := e.SwitchSessionModel(ctx, f.ID, "opencode", "openai/gpt-5"); err != nil {
 		t.Fatal(err)
 	}
 	row, err := e.cfg.Store.GetFeature(ctx, f.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.SessionBackend != "codex" || row.SessionModel != "gpt-5" {
-		t.Errorf("the card holds %q/%q after the switch, want codex/gpt-5", row.SessionBackend, row.SessionModel)
+	if row.SessionBackend != "opencode" || row.SessionModel != "openai/gpt-5" {
+		t.Errorf("the card holds %q/%q after the switch, want opencode/openai/gpt-5", row.SessionBackend, row.SessionModel)
 	}
-	if !strings.Contains(transcriptText(ff.Snapshot()), "Switched to gpt-5 on codex") {
+	if !strings.Contains(transcriptText(ff.Snapshot()), "Switched to openai/gpt-5 on opencode") {
 		t.Errorf("the thread does not say the model changed:\n%s", transcriptText(ff.Snapshot()))
 	}
 
@@ -128,9 +128,9 @@ func TestSwitchingASessionsModelCarriesTheConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFreeformIdle(t, ff)
-	opts := codex.opts()
-	if opts.Model != "gpt-5" {
-		t.Errorf("the turn after the switch ran on %q, want gpt-5", opts.Model)
+	opts := opencode.opts()
+	if opts.Model != "openai/gpt-5" {
+		t.Errorf("the turn after the switch ran on %q, want openai/gpt-5", opts.Model)
 	}
 	if opts.ResumeID != "" {
 		t.Errorf("the new backend was asked to resume %q, a conversation that belongs to the old one", opts.ResumeID)
@@ -157,7 +157,7 @@ func TestASessionSwitchIsRefusedWhereItCannotApply(t *testing.T) {
 
 	stage := feature(5, "a stage card", domain.StageImplement)
 	createFeature(t, store, stage)
-	if err := e.SwitchSessionModel(ctx, stage.ID, "codex", "gpt-5"); err == nil {
+	if err := e.SwitchSessionModel(ctx, stage.ID, "opencode", "openai/gpt-5"); err == nil {
 		t.Error("a card in the workflow was given a session model")
 	}
 
@@ -175,7 +175,7 @@ func TestASessionSwitchIsRefusedWhereItCannotApply(t *testing.T) {
 	if err := ff.Send(ctx, "go slowly"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.SwitchSessionModel(ctx, f.ID, "codex", "gpt-5"); !errors.Is(err, ErrSessionBusy) {
+	if err := e.SwitchSessionModel(ctx, f.ID, "opencode", "openai/gpt-5"); !errors.Is(err, ErrSessionBusy) {
 		t.Errorf("a switch mid-turn = %v, want ErrSessionBusy", err)
 	}
 	row, err := store.GetFeature(ctx, f.ID)
@@ -315,7 +315,7 @@ func TestSessionModelChoicesMergesTheCatalogWithTheProfiles(t *testing.T) {
 	e, claude, _, _ := sessionModelEngine(t)
 	claude.Models = []string{"claude-opus-5-5", "claude-sonnet-5-5"}
 	e.cfg.Profiles.Profiles["beta"] = config.Profile{
-		"reviewer": {Backend: "codex", Model: "gpt-5"},
+		"reviewer": {Backend: "headless", Model: "gpt-5"},
 	}
 	ctx := context.Background()
 
@@ -324,11 +324,11 @@ func TestSessionModelChoicesMergesTheCatalogWithTheProfiles(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("claude choices = %v, want %v (deduped, sorted)", got, want)
 	}
-	if got := e.SessionModelChoices(ctx, "codex"); !slices.Equal(got, []string{"gpt-5"}) {
-		t.Errorf("codex choices = %v, want the profile id only (it cannot enumerate)", got)
+	if got := e.SessionModelChoices(ctx, "headless"); !slices.Equal(got, []string{"gpt-5"}) {
+		t.Errorf("headless choices = %v, want the profile id only (it cannot enumerate)", got)
 	}
-	if got := e.SessionModelChoices(ctx, "pi"); got != nil {
-		t.Errorf("pi choices = %v, want none (no agent, no probe, no profile)", got)
+	if got := e.SessionModelChoices(ctx, "copilot"); got != nil {
+		t.Errorf("copilot choices = %v, want none (no agent, no probe, no profile)", got)
 	}
 }
 
@@ -561,47 +561,6 @@ func TestSessionModelCatalogAsksOpencodeWithoutStartingIt(t *testing.T) {
 	}
 	if starts.Load() != 0 {
 		t.Errorf("the probe started a backend to ask it")
-	}
-}
-
-// TestSessionModelCatalogAsksAntigravityWithoutStartingIt: antigravity's
-// `agy models` probe answers through the same no-adapter seam, and an
-// empty model id is a legal antigravity pair (agy's own default) — the
-// pair rules a session's picker must agree with.
-func TestSessionModelCatalogAsksAntigravityWithoutStartingIt(t *testing.T) {
-	e := New(Config{Agents: map[string]agent.Agent{}, Model: "fallback"})
-	t.Cleanup(func() { e.Close() })
-	old := agent.AntigravityModelCatalog
-	t.Cleanup(func() { agent.AntigravityModelCatalog = old })
-	agent.AntigravityModelCatalog = func(context.Context, string) ([]string, error) {
-		return []string{"gemini-3.1-pro-high", "gemini-3.1-pro-low"}, nil
-	}
-
-	ids, ok := e.SessionModelCatalog(context.Background(), "antigravity")
-	if !ok || !slices.Equal(ids, []string{"gemini-3.1-pro-high", "gemini-3.1-pro-low"}) {
-		t.Fatalf("antigravity catalog = %v (ok=%v), want the probe's own ids", ids, ok)
-	}
-	if err := CheckSessionModel("antigravity", ""); err != nil {
-		t.Errorf("empty model refused: %v", err)
-	}
-	// opencode's rule is enforced here, not only by the picker's pattern
-	for _, bad := range []string{"", "claude-sonnet-5", "opencode/"} {
-		if err := CheckSessionModel("opencode", bad); err == nil {
-			t.Errorf("opencode model %q accepted, want refused", bad)
-		}
-	}
-	if err := CheckSessionModel("opencode", "opencode/big-pickle"); err != nil {
-		t.Errorf("opencode/big-pickle refused: %v", err)
-	}
-	if err := CheckSessionModel("antigravity", "gemini-3.1-pro-high"); err != nil {
-		t.Errorf("an agy id refused: %v", err)
-	}
-	needsModel, hint, pattern := SessionModelRule("antigravity")
-	if needsModel {
-		t.Error("antigravity must not need a model")
-	}
-	if !strings.Contains(hint, "gemini-3.1-pro-high") || pattern != "" {
-		t.Errorf("rule = (%v, %q, %q), want the effort-in-id hint and no pattern", needsModel, hint, pattern)
 	}
 }
 

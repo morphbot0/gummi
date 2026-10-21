@@ -21,7 +21,7 @@ import (
 // agent.CapabilitiesFor's capsBase keys — internal/agent/capabilities.go)
 // and the binary Detect actually probes for it.
 type AgentCLI struct {
-	Name      string // "copilot", "claude", "codex", "opencode", "pi", "antigravity"
+	Name      string // "copilot", "claude", "opencode"
 	Bin       string // the binary name/path actually probed (honors *_BIN overrides)
 	Installed bool   // whether Bin resolved on PATH at detection time
 }
@@ -45,16 +45,13 @@ func Known() []AgentCLI {
 	return []AgentCLI{
 		{Name: "copilot", Bin: "copilot"},
 		{Name: "claude", Bin: envOr("GUMMI_CLAUDE_BIN", "claude")},
-		{Name: "codex", Bin: envOr("GUMMI_CODEX_BIN", "codex")},
 		{Name: "opencode", Bin: envOr("GUMMI_OPENCODE_BIN", "opencode")},
-		{Name: "pi", Bin: envOr("GUMMI_PI_BIN", "pi")},
-		{Name: "antigravity", Bin: envOr("GUMMI_ANTIGRAVITY_BIN", "agy")},
 	}
 }
 
 // Detect reports, for every known agent CLI, whether its binary
 // (respecting *_BIN overrides) resolves on PATH right now. It is a pure,
-// synchronous PATH probe — five exec.LookPath calls, no network, no
+// synchronous PATH probe — three exec.LookPath calls, no network, no
 // process spawned — so callers may call it inline; internal/ui's
 // agentpicker.go still wraps it in a tea.Cmd where it feeds the picker,
 // not because the probe itself is slow but to keep the "never mutate

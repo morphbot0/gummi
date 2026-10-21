@@ -17,7 +17,7 @@ func TestUnavailableTellsAnOutageFromASetupProblem(t *testing.T) {
 
 	for _, setup := range []error{
 		&RunFailure{Backend: "claude", Diagnostic: "Invalid API key · please run /login", FirstTurn: true},
-		&RunFailure{Backend: "codex", Diagnostic: "codex: command not found in $PATH"},
+		&RunFailure{Backend: "opencode", Diagnostic: "opencode: command not found in $PATH"},
 		&RunFailure{Backend: "claude", Diagnostic: "exit status 1"},
 		errors.New("something else entirely"),
 		nil,

@@ -289,22 +289,14 @@ func TestSkillInstallCheck(t *testing.T) {
 // and rejects an unknown --agent.
 func TestResolveTargets(t *testing.T) {
 	proj, err := resolveTargets("project", "", "/repo")
-	if err != nil || len(proj) != 2 {
+	if err != nil || len(proj) != 1 {
 		t.Fatalf("project targets = %+v, err=%v", proj, err)
 	}
 	if !strings.HasSuffix(proj[0].dir, filepath.Join(".claude", "skills", "gummi")) {
 		t.Errorf("project dir = %q", proj[0].dir)
 	}
-	if !strings.HasSuffix(proj[1].dir, filepath.Join(".agents", "skills", "gummi")) {
-		t.Errorf("codex project dir = %q", proj[1].dir)
-	}
-	codexProject, err := resolveTargets("project", "codex", "/repo")
-	if err != nil || len(codexProject) != 1 || codexProject[0].dir != codexProjectSkillDir("/repo") {
-		t.Fatalf("explicit codex project target = %+v, err=%v", codexProject, err)
-	}
-	codex, err := resolveTargets("user", "codex", "/repo")
-	if err != nil || len(codex) != 1 || !strings.Contains(codex[0].dir, filepath.Join(".agents", "skills", "gummi")) {
-		t.Fatalf("codex user target = %+v, err=%v", codex, err)
+	if _, err := resolveTargets("project", "codex", "/repo"); err == nil {
+		t.Error("resolveTargets accepted --agent codex, which gummi no longer supports")
 	}
 
 	cop, err := resolveTargets("user", "copilot", "/repo")
@@ -325,25 +317,12 @@ func TestUserSkillDirHonorsClaudeConfigDir(t *testing.T) {
 	}
 }
 
-func TestDetectAgentsIncludesCodex(t *testing.T) {
-	t.Setenv("CODEX_HOME", t.TempDir())
-	found := false
-	for _, a := range detectAgents() {
-		if a == agentCodex {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("Codex was not detected from CODEX_HOME")
-	}
-}
-
 func TestParseAgentRejectsBogus(t *testing.T) {
 	_, err := parseAgent("bogus")
 	if err == nil {
 		t.Fatal("bogus agent accepted")
 	}
-	for _, name := range []string{"claude", "codex", "opencode", "copilot", "pi"} {
+	for _, name := range []string{"claude", "opencode", "copilot"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("unknown-agent error should mention %q, got: %v", name, err)
 		}

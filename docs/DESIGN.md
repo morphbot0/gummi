@@ -402,7 +402,9 @@ headless adapter** (spawn `<cmd> -p "<prompt>"`, capture output) as the
 lowest common denominator for one-shot autonomous stages with any CLI agent.
 
 Shipped alongside the above: **claude** (Claude Code CLI, streaming
-stream-json) and **codex** (Codex CLI, `codex exec --json`).
+stream-json) and **opencode**. These three are the supported agents
+(decision 27); headless stays only as the line protocol gummi's own demo
+and browser tests drive.
 
 ### 4.1a What a session discovers: skills, plugins, extensions
 
@@ -412,12 +414,10 @@ plugins, extensions, user config — and a card's session runs with all of
 it, at user scope and at repo scope, exactly as the operator's own run of
 that CLI would. A card on claude meets the repository's `.claude/skills`
 and the operator's `~/.claude` skills and plugins; a card on opencode
-its own and `~/.config/opencode`'s; a card on codex its `config.toml`; a
-card on pi its extensions. A skill a CLI does not discover is a skill
+its own and `~/.config/opencode`'s. A skill a CLI does not discover is a skill
 that CLI does not have — gummi does not paper over the difference with a
 convention of its own. This is what other multi-agent harnesses do
-(paseo runs claude with every setting source and codex with the real
-`CODEX_HOME`; openchamber mirrors opencode's discovery rather than
+(paseo runs claude with every setting source; openchamber mirrors opencode's discovery rather than
 narrowing it), and it is the only posture under which "the same agent the
 operator already tuned" is true.
 
@@ -453,13 +453,6 @@ refused, because the pack is not user-configured forwarding.
   it does not fail the session. Only a read-only research session takes
   `--strict-mcp-config`, because its roster is its cage and an
   operator's server is a tool the roster does not name.
-- antigravity runs under a redirected `HOME`, because agy has no
-  config-dir flag and gummi must not write into the operator's
-  `~/.gemini`. That is isolation of writes, not of skills: the card home's
-  `.gemini/config/skills` is reconciled on every session start to link
-  exactly the operator's own `~/.gemini/config/skills` entries, so a card
-  on agy loads what agy run by hand would. Every symlink there is gummi's;
-  a real entry is agy's and is never touched.
 - `gummi`'s own skill is not filtered. A user-scope `gummi skill install`
   is discovered by the CLIs that read that scope; the stage hints, not
   discovery, are what tell a card never to start a second gummi (§16).
@@ -558,7 +551,7 @@ than they keep and an operator routing a role deserves the real shape:
 - **File-tool confinement is the backend's**, and it comes in two tiers.
   claude and opencode pin their file-writing tools to the session's
   working directory, so a write naming somewhere else is refused by the
-  backend. copilot, codex and headless are merely *started* there — their
+  backend. copilot and headless are merely *started* there — their
   tools may name any path, and nothing notices. `gummi doctor`
   reports the tier per role per profile as `write-cage:<profile>`, so the
   choice is visible before a role is routed rather than after a run goes
@@ -1993,6 +1986,12 @@ Decided in the design interview (2026-07-03):
       gets the pack: a skill can make a pass worse, never remove it.
     This amends §4.1a, §16, §19.3c, §19.7, §19.9 and decision 17 in
     place.
+27. **gummi supports three agents: copilot, claude and opencode**,
+    decided 2026-10-21. codex, pi and antigravity are gone, adapters and
+    all, so every feature is built and tested against the agents people
+    run rather than spread thin across six. headless stays as the line
+    protocol the demo and the browser tests drive; it is not offered as
+    an agent to run cards on.
 
 Still open:
 
@@ -2642,14 +2641,13 @@ only at `done` or an escalation.
 
 `gummi skill install` generates a `SKILL.md` (YAML frontmatter + markdown body)
 and writes it where each supported agent reads it: Claude, Copilot, and
-opencode share one convention; Codex needs its own. **Content converges on
+opencode share one convention. **Content converges on
 one primitive** — there is no per-agent instruction format, only where it
 lands differs: a **project-scope** install writes `.claude/skills/gummi/` for
 Claude, Copilot, and opencode (Copilot and opencode both read the Claude-style
-skill layout), plus `.agents/skills/gummi/` for Codex — two files, not four.
+skill layout) — one file, not three.
 `--scope user` diverges per agent (Claude + opencode share
-`$CLAUDE_CONFIG_DIR`/`~/.claude`; Copilot uses `~/.copilot`; Codex uses
-`~/.agents`); `--agent` overrides detection; scope is detect-and-ask with
+`$CLAUDE_CONFIG_DIR`/`~/.claude`; Copilot uses `~/.copilot`); `--agent` overrides detection; scope is detect-and-ask with
 project recommended.
 
 Two properties keep the doc honest:
@@ -4030,7 +4028,7 @@ the workflow. "Stages take their agents from the profile" is therefore a
 fact the data enforces, not a convention every reader has to remember.
 
 **Any installed agent, not only the ones the profiles name.** A board
-starts the backends its profiles route to (§5), so a person picking codex
+starts the backends its profiles route to (§5), so a person picking opencode
 on a claude-only workspace would otherwise get the default agent. That
 would be a model nobody chose. `engine.Config.StartAgent` starts a backend
 the first time a session asks for it, and the engine closes the ones it
@@ -4135,7 +4133,7 @@ stale). A session continued as a spec says so as its last line.
 
 **The picker hides what an agent would refuse.** Each agent in the
 catalog carries a pattern for typed ids: claude refuses the foreign
-prefixes and dotted versions, and opencode and pi need `provider/model`.
+prefixes and dotted versions, and opencode needs `provider/model`.
 The page offers a typed id only on agents it fits. The pattern is a
 courtesy; `CheckSessionModel` is still the check.
 
@@ -4733,8 +4731,8 @@ than one stretched to cover both.
 A **thread turn**'s images are this turn's alone — a steer, a consult
 question, a freeform turn — so they ride with it, natively, exactly once:
 `agent.Turn` carries them alongside the text, `agent.Capabilities.Images`
-says which backends can take them at all (claude, copilot, codex,
-opencode, pi; never the line-protocol headless backend), and a turn that
+says which backends can take them at all (claude, copilot and
+opencode; never the line-protocol headless backend), and a turn that
 carries images to a session that cannot is refused with
 `agent.ErrImagesUnsupported` before anything is sent or recorded —
 refusal, not drop, the same rule the rest of this section already lives
@@ -5453,9 +5451,9 @@ names, `gummi-skills:<name>` and `gummi-<name>`; a bare name is an
 operator's or a repository's skill and is not counted.
 
 The pack reaches these three backends and no others, decided
-2026-10-16. antigravity, codex, pi and the headless adapter still run
-cards, without the pack: agy's card home links the operator's own skills
-only, and `doctor` says once, not each turn, that a routed backend runs
+2026-10-16 — and since decision 27 they are the only agents gummi
+runs. The headless adapter runs cards without the pack, and `doctor`
+says once, not each turn, that a routed backend runs
 without the pack. That narrowing is why the old `skills.forward` was
 dropped (§4.1a); it is accepted here because the pack is gummi's own
 learning, not a convenience over the operator's discovery.

@@ -127,7 +127,7 @@ gummi deps rm <dependent> <depends-on>
 gummi deps list <id>
 
 gummi skill show|install|list
-    --agent string  target a specific agent: claude|codex|opencode|copilot|pi (default: detect)
+    --agent string  target a specific agent: claude|opencode|copilot (default: detect)
     --check         verify every target is up to date; write nothing, fail if any is absent/foreign/drifted
     --dry-run       print what would be written, change nothing
     --force         overwrite an existing skill bundle (default: refuse and warn on drift)

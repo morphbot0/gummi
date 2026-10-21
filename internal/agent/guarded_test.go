@@ -10,8 +10,6 @@ func TestGuardedSupportMatrix(t *testing.T) {
 		{"claude", false},
 		{"copilot", true},
 		{"opencode", true},
-		{"pi", true},
-		{"codex", true},
 	}
 	for _, c := range cases {
 		support, known := GuardedSupport(c.name)

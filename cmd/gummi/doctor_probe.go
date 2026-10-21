@@ -32,7 +32,7 @@ const (
 //
 //   - headless has no model to reach (the role routes through the env
 //     command), so it is always ok.
-//   - opencode/codex: EventIdle → ok, EventError → fail, a construction
+//   - opencode: EventIdle → ok, EventError → fail, a construction
 //     error (missing binary, closed adapter), a session that cannot start,
 //     a Send failure, a timeout, or a closed event stream → unknown. A
 //     missing binary is unknown here — the backend:<name> check already

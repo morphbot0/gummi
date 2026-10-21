@@ -185,7 +185,7 @@ func TestArtifactFileRefusesACardWithNoArtifact(t *testing.T) {
 // its stages take theirs from its profile and nothing else.
 func TestOnlyASessionNamesItsOwnModel(t *testing.T) {
 	f := freeformCard(t)
-	f.SessionBackend, f.SessionModel = "codex", "gpt-5"
+	f.SessionBackend, f.SessionModel = "opencode", "openai/gpt-5"
 	if err := f.Validate(); err != nil {
 		t.Fatalf("a freeform card naming its session model was refused: %v", err)
 	}

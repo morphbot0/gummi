@@ -118,7 +118,7 @@ func TestConsultToolScopedToBoundCard(t *testing.T) {
 	}
 }
 
-// TestConsultMCPToolsWiring: an MCPTools backend (claude/codex/opencode
+// TestConsultMCPToolsWiring: an MCPTools backend (claude/opencode
 // shape — MCPTools true, ClientTools false) gets a card-scoped inbound MCP
 // endpoint (MCPSockPath set, dialing --feature <id> mode) and no
 // opts.Tools — the consult session's own capability branch.

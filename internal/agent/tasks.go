@@ -21,9 +21,8 @@ type Task struct {
 
 // TaskList reads a backend's own task-tool call as the checklist it
 // sets: Claude Code's TodoWrite and opencode's todowrite ({todos:
-// [{content, status, activeForm}]}), Codex's update_plan ({plan: [{step,
-// status}]}) and Copilot's update_todo, whose todos is a markdown
-// checklist. ok is false for any other tool, or one whose arguments hold
+// [{content, status, activeForm}]}) and Copilot's update_todo, whose
+// todos is a markdown checklist. ok is false for any other tool, or one whose arguments hold
 // no list at all — an empty list that parsed is a real "cleared".
 func TaskList(tool string, args map[string]any) ([]Task, bool) {
 	switch strings.ToLower(tool) {
@@ -31,9 +30,7 @@ func TaskList(tool string, args map[string]any) ([]Task, bool) {
 		if md, ok := args["todos"].(string); ok {
 			return markdownTasks(md), true
 		}
-		return taskItems(args["todos"], "content", "activeForm")
-	case "update_plan":
-		return taskItems(args["plan"], "step", "")
+		return taskItems(args["todos"])
 	}
 	return nil, false
 }
@@ -41,7 +38,7 @@ func TaskList(tool string, args map[string]any) ([]Task, bool) {
 // taskItems maps a JSON array of task objects. While an item is in
 // progress Claude Code also carries its present-tense form (activeForm,
 // "Running the tests"), which reads better as the line that is moving.
-func taskItems(v any, textKey, activeKey string) ([]Task, bool) {
+func taskItems(v any) ([]Task, bool) {
 	items, ok := v.([]any)
 	if !ok {
 		return nil, false
@@ -53,8 +50,8 @@ func taskItems(v any, textKey, activeKey string) ([]Task, bool) {
 			continue
 		}
 		t := Task{Status: taskStatus(m["status"])}
-		t.Text, _ = m[textKey].(string)
-		if a, _ := m[activeKey].(string); a != "" && t.Status == TaskInProgress {
+		t.Text, _ = m["content"].(string)
+		if a, _ := m["activeForm"].(string); a != "" && t.Status == TaskInProgress {
 			t.Text = a
 		}
 		if t.Text = strings.TrimSpace(t.Text); t.Text != "" {

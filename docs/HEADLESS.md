@@ -536,10 +536,10 @@ depends on another.
 ## The calling-agent skill
 
 gummi generates its own skill documenting this loop, and installs it where
-Claude Code, GitHub Copilot CLI, Codex and opencode read it:
+Claude Code, GitHub Copilot CLI and opencode read it:
 
 ```sh
-gummi skill install          # project scope: .claude/skills + .agents/skills
+gummi skill install          # project scope: .claude/skills
 gummi doctor                 # then check backend, auth and envelope are ready
 ```
 
@@ -553,7 +553,7 @@ an agent shipping one card reads SKILL.md and nothing else.
 reference.
 
 A project-scope install writes `.claude/skills/gummi/` for Claude, Copilot
-and opencode, plus `.agents/skills/gummi/` for Codex. `--scope user` writes
+and opencode. `--scope user` writes
 to each detected agent's home instead, `--agent` targets one, `--dry-run`
 prints what would be written, and `--check` fails if any target is absent or
 drifted. The command grammar and exit table are generated from the same

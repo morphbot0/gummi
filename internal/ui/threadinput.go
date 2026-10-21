@@ -157,7 +157,7 @@ const threadInputMaxHeight = 5
 // threadInputCharLimit is the most characters the composer takes in one
 // message. It is a sanity bound on a pasted document, not a context-window
 // budget: the agent backends take the prompt on stdin (stream-json for
-// Claude Code, stdin for Codex), so argv's per-argument size limit does not
+// Claude Code), so argv's per-argument size limit does not
 // apply, and the model's own context window is the real ceiling.
 const threadInputCharLimit = 64000
 

@@ -27,7 +27,7 @@ import (
 // the adapters startAdapter in cmd/gummi knows how to build; whether one is
 // installed on this host is a separate question (agentcli.Detect) that the
 // board asks when it offers the list.
-var SessionBackends = []string{"claude", "codex", "copilot", "opencode", "pi", "antigravity", "headless"}
+var SessionBackends = []string{"claude", "copilot", "opencode", "headless"}
 
 // ErrSessionBusy refuses a model switch while the session is mid-turn:
 // the turn in flight belongs to the model that started it, and stopping
@@ -61,10 +61,10 @@ func (e *Engine) SessionModel(f domain.Feature) (backend, model string) {
 
 // sessionAgent returns the agent a session runs on, starting it when the
 // board did not. The profiles decide which backends a board starts, and a
-// session that asks for one no profile names (a person picking codex on a
-// board whose profiles only use claude) is what StartAgent exists for.
+// session that asks for one no profile names (a person picking opencode
+// on a board whose profiles only use claude) is what StartAgent exists for.
 // Unlike agentFor it never falls back to the default for a name it does
-// not know: a session that asked for codex and silently got claude would
+// not know: a session that asked for opencode and silently got claude would
 // be running on a model nobody chose.
 func (e *Engine) sessionAgent(backend string) (agent.Agent, error) {
 	if backend == "" {
@@ -147,14 +147,6 @@ func CheckSessionModel(backend, model string) error {
 		}
 		if _, _, err := agent.SplitOpencodeModel(model); err != nil {
 			return fmt.Errorf("opencode needs a model spelled provider/model, not %q", model)
-		}
-	case "pi":
-		if model == "" {
-			return fmt.Errorf("%s needs a model spelled provider/model", backend)
-		}
-	case "codex":
-		if model == "" {
-			return errors.New("codex needs a model")
 		}
 	case "claude":
 		if foreign, provider := agent.ForeignModel(model); foreign {
@@ -310,20 +302,12 @@ func SessionModelRule(backend string) (needsModel bool, hint, pattern string) {
 	switch backend {
 	case "opencode":
 		return true, "provider/model, e.g. anthropic/claude-sonnet-5-5", `^[^/\s]+/\S+$`
-	case "pi":
-		return true, "provider/id", `^[^/\s]+/\S+$`
-	case "codex":
-		return true, "", ""
 	case "claude":
 		var alts []string
 		for _, p := range agent.ForeignModelPrefixes() {
 			alts = append(alts, regexp.QuoteMeta(p))
 		}
 		return false, "versions with dashes, e.g. claude-haiku-4-5; empty is the CLI's default", `^(?!(` + strings.Join(alts, "|") + `))(?!\S*\d\.\d)`
-	case "antigravity":
-		// agy's ids carry the effort dial (gemini-3.1-pro-high) and pass
-		// through verbatim to --model; empty runs the CLI's own default.
-		return false, "ids like gemini-3.1-pro-high; empty is agy's default", ""
 	}
 	return false, "", ""
 }
@@ -467,9 +451,8 @@ func (e *Engine) WarmModelCatalogs(backends ...string) {
 
 // probeModelCatalog asks backend itself, un-cached: the adapter it holds
 // when the adapter can enumerate, else the probes that need no adapter
-// (opencode's, claude's and antigravity's CLIs answer without a started
-// backend — no session involved, just their own catalog; antigravity's
-// `agy models` runs under its own seeded temp home).
+// (opencode's and claude's CLIs answer without a started backend — no
+// session involved, just their own catalog).
 func (e *Engine) probeModelCatalog(ctx context.Context, backend string) ([]string, bool) {
 	if a := e.knownAgent(backend); a != nil {
 		cl, ok := a.(agent.ModelCataloger)
@@ -488,8 +471,6 @@ func (e *Engine) probeModelCatalog(ctx context.Context, backend string) ([]strin
 		probe = agent.OpencodeModelCatalog
 	case "claude":
 		probe = agent.ClaudeModelCatalog
-	case "antigravity":
-		probe = agent.AntigravityModelCatalog
 	default:
 		return nil, false
 	}

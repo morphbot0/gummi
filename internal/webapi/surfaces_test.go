@@ -164,13 +164,13 @@ func TestSessionModelsShape(t *testing.T) {
 				{Name: "claude", Installed: true, Models: []string{"claude-opus-5-5", "claude-sonnet-5-5"}, Hint: "versions with dashes", Images: true},
 				{Name: "opencode", Installed: false, Models: []string{}, NeedsModel: true, Hint: "provider/model"},
 			},
-			Recent: []SessionModel{{Backend: "codex", Model: "gpt-5"}},
+			Recent: []SessionModel{{Backend: "opencode", Model: "openai/gpt-5"}},
 		},
 		Card: Card{
 			Row:     Row{ID: "FF-003", Kind: "freeform", Type: "Session", Title: "Tidy the help text", Stage: "open", Status: StatusRunning, Spend: 12, Envelope: 150},
 			Branch:  "ff/003-tidy-the-help-text",
-			Actions: []Action{{ID: "model", Label: "model", Needs: ActionNeedsModel, Default: "codex gpt-5"}},
-			Session: &SessionModel{Backend: "codex", Model: "gpt-5"},
+			Actions: []Action{{ID: "model", Label: "model", Needs: ActionNeedsModel, Default: "opencode openai/gpt-5"}},
+			Session: &SessionModel{Backend: "opencode", Model: "openai/gpt-5"},
 		},
 		Switch: ActionRequest{Backend: "claude", Model: "claude-sonnet-5-5"},
 	}))

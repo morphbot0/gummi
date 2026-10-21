@@ -37,7 +37,7 @@ func repoRoot(t *testing.T) string {
 // docs/CONFIGURATION.md "Environment variables" table. The README carries
 // only the handful a first user meets and points here for the rest, so this
 // table is the one that must stay complete. A cell may name several
-// variables (`GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, …); each backticked
+// variables (`GUMMI_CLAUDE_BIN`, `GUMMI_OPENCODE_BIN`, …); each backticked
 // span counts on its own.
 func envTableVars(t *testing.T) map[string]bool {
 	t.Helper()

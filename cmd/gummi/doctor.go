@@ -243,14 +243,6 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		}
 	}
 
-	// pricing — a backend that reports tokens and never money is priced
-	// by an operator rate, and without one its spend is a guess.
-	for _, name := range ordered {
-		if c, ok := pricingCheck(name); ok {
-			checks = append(checks, c)
-		}
-	}
-
 	// consult — whether a card's consult runs read-only on the backend
 	// that answers it, or can write to the checkout.
 	checks = append(checks, consultChecks(def, profiles)...)
@@ -563,38 +555,6 @@ func profilesLiveCheck(st engine.ProfilesState) doctorCheck {
 	return doctorCheck{Name: "profiles:live", Status: statusOK, Detail: detail}
 }
 
-// envelopeCheck validates GUMMI_ENVELOPE. It never fails readiness: a run
-// can still take --envelope N, and the run itself enforces the requirement.
-//
-// pricingCheck reports how a required backend's spend is priced, for the
-// backend that needs an operator rate to price it at all: agy reports
-// token counts only, so with no GUMMI_ANTIGRAVITY_CREDITS_PER_1K its
-// tokens fall back to gummi's generic BYOK rate, which can be far from
-// what a Gemini model costs, and every budget on those cards trips early
-// or late by the same factor. ok is false for a backend this does not
-// apply to.
-func pricingCheck(backend string) (doctorCheck, bool) {
-	if backend != "antigravity" {
-		return doctorCheck{}, false
-	}
-	if r := agent.AntigravityCreditRate(); r > 0 {
-		return doctorCheck{
-			Name: "pricing:antigravity", Status: statusOK,
-			Detail: fmt.Sprintf("antigravity tokens priced at %g cents per 1k (%s)", r, agent.AntigravityRateEnv),
-		}, true
-	}
-	detail := agent.AntigravityRateEnv + " is unset"
-	if v := strings.TrimSpace(os.Getenv(agent.AntigravityRateEnv)); v != "" {
-		detail = agent.AntigravityRateEnv + "=" + v + " is not a positive number"
-	}
-	return doctorCheck{
-		Name: "pricing:antigravity", Status: statusWarn,
-		Detail: fmt.Sprintf("%s — agy reports token counts only, so its spend is priced at gummi's default %g cents per 1k tokens, which may be far from the model's real price",
-			detail, domain.ByokCreditsPer1KTokens),
-		Remediation: "export " + agent.AntigravityRateEnv + "=<cents per 1k tokens> for the models your profiles run, so budgets measure real spend",
-	}, true
-}
-
 // consultChecks emits one consult:<backend> check per backend that answers
 // a card's consult in some profile, resolved the way the engine resolves
 // it (the consult role, else the architect, else the default backend). A
@@ -642,7 +602,7 @@ func consultChecks(def string, profiles config.Profiles) []doctorCheck {
 		}
 		checks = append(checks, doctorCheck{
 			Name: "consult:" + name, Status: statusWarn, Detail: detail,
-			Remediation: "route the consult role to claude, opencode or pi in profiles.yaml to confine it, or treat a consult there as able to write",
+			Remediation: "route the consult role to claude or opencode in profiles.yaml to confine it, or treat a consult there as able to write",
 		})
 	}
 	return checks
@@ -737,7 +697,7 @@ func curatorCheck(c *config.Curator) doctorCheck {
 	case !known:
 		chk.Status = statusWarn
 		chk.Detail += " — gummi does not know backend " + c.Backend
-		chk.Remediation = "set curator.backend in .gummi/config.yaml to claude, copilot, codex, opencode, pi, antigravity or headless"
+		chk.Remediation = "set curator.backend in .gummi/config.yaml to claude, copilot, opencode or headless"
 	case !caps.ClientTools && !caps.MCPTools:
 		chk.Status = statusWarn
 		chk.Detail += " — " + c.Backend + " cannot reach gummi's tools, so it cannot curate"
@@ -899,12 +859,6 @@ func backendInfoFor(name string) backendInfo {
 		return backendInfo{name: "claude", bin: cmp.Or(os.Getenv("GUMMI_CLAUDE_BIN"), "claude"), login: "authenticate the Claude Code CLI (`claude`)"}
 	case "opencode":
 		return backendInfo{name: "opencode", bin: cmp.Or(os.Getenv("GUMMI_OPENCODE_BIN"), "opencode"), login: "opencode auth login"}
-	case "codex":
-		return backendInfo{name: "codex", bin: cmp.Or(os.Getenv("GUMMI_CODEX_BIN"), "codex"), login: "codex login"}
-	case "pi":
-		return backendInfo{name: "pi", bin: cmp.Or(os.Getenv("GUMMI_PI_BIN"), "pi"), login: "run `pi` and /login, or set the provider's API key (e.g. OPENROUTER_API_KEY)"}
-	case "antigravity":
-		return backendInfo{name: "antigravity", bin: cmp.Or(os.Getenv("GUMMI_ANTIGRAVITY_BIN"), "agy"), login: "run `agy` in your real home to (re)authenticate — each card's redirected home is seeded with that token"}
 	case "headless":
 		return backendInfo{name: "headless", bin: firstField(os.Getenv("GUMMI_AGENT_CMD")), headless: true}
 	case "copilot":
@@ -1303,7 +1257,7 @@ func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 // nothing. What actually keeps a role's writes in its worktree is the
 // backend's own file-tool policy,
 // and that varies: claude and opencode pin their file tools to the
-// session's working directory, while copilot, codex and headless are
+// session's working directory, while copilot and headless are
 // merely started there. A weaker model routed at the second tier is held
 // by the prompt alone — which is how a reviewer once wrote a feature's
 // files into the operator's main checkout.
