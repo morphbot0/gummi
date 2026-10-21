@@ -114,6 +114,12 @@ func (m *Shell) answerCrew(r featureRow, d *threadDecision, answer string) tea.C
 		if err := eng.CrewAnswer(context.Background(), r.F.ID, id, answer, actor); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{clearInbox: r.F.ID, reseedInbox: true}
+		// the row carries the crew's decision: it is read again before the
+		// answer is done, so whoever gave it (a web answer waits on this)
+		// never sees the decision it just answered still standing
+		return tea.BatchMsg{
+			func() tea.Msg { return noticeMsg{clearInbox: r.F.ID, reseedInbox: true} },
+			m.loadRows,
+		}
 	}
 }

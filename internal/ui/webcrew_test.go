@@ -192,8 +192,12 @@ func TestACrewRunsFromTheWebFace(t *testing.T) {
 	if dec.Options[0].Label != engine.CrewRunPlan {
 		t.Fatalf("the first answer is %q", dec.Options[0].Label)
 	}
-	if _, err := b.Answer(ctx, string(id), webapi.AnswerRequest{Ref: dec.Ref, Option: "0", Against: dec.Against.Token}, "Simon"); err != nil {
+	ans, err := b.Answer(ctx, string(id), webapi.AnswerRequest{Ref: dec.Ref, Option: "0", Against: dec.Against.Token}, "Simon")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if ans.Decision != nil && ans.Decision.Ref == dec.Ref {
+		t.Fatalf("the answer came back with the decision it answered still pinned: %+v", ans.Decision)
 	}
 
 	// the board ticks the crew to its end
