@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morphis/gummi/internal/driver"
+	"github.com/morphis/gummi/internal/cardops"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -31,25 +31,25 @@ func runSquash(fl cliFlags, args []string) error {
 		return err
 	}
 	message = strings.TrimRight(message, "\n")
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *cardops.Ops, store *state.Store, ws state.Workspace, pool *worktree.Pool) (cardops.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		defer release()
 
 		if !f.PullRequest.Empty() {
 			count, prURL, err := d.OpenReviewThreads(ctx, f.ID)
 			if err != nil {
-				return driver.Outcome{}, err
+				return cardops.Outcome{}, err
 			}
 			if count > 0 {
 				if !fl.Bool("force") {
-					return driver.Outcome{}, fmt.Errorf("refusing to collapse: %d open review threads on %s; re-run with --force to proceed", count, prURL)
+					return cardops.Outcome{}, fmt.Errorf("refusing to collapse: %d open review threads on %s; re-run with --force to proceed", count, prURL)
 				}
 				fmt.Fprintf(os.Stderr, "warning: force-push will outdate %d open review threads on %s\n", count, prURL)
 			}
@@ -57,7 +57,7 @@ func runSquash(fl cliFlags, args []string) error {
 
 		beforeSHA, err := pool.Head(ctx, &f)
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		out, err := d.Squash(ctx, f.ID, message)
 		if err != nil {
