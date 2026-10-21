@@ -61,6 +61,9 @@ spend. This is the single most important design decision for the cost goal:
 
 ## 3. The workflow
 
+*Retired by decision 27 once §24 has shipped; until then this is the
+workflow every card in it walks.*
+
 There is exactly one workflow, compiled into gummi — never configurable,
 and now literally one: the three graphs this document originally
 described (feature, bug, research) were the same four ideas wearing three
@@ -1552,6 +1555,10 @@ Decided in the design interview (2026-07-03):
    this decision still forbids absolutely: a card in the workflow
    reaching `done` without its critique and its verify, and any
    configuration that would let one.
+
+   *To be reversed by decision 27 (§24)* once workflow cards are
+   retired: the floor moves into the crew, and whether to call one is
+   the session's choice.
 4. **Critique before every gate**: each stage ends with a fresh-context
    pass that tries to refute what it produced, and a *changes* verdict
    re-runs that stage in place — capped (default 2–3 rounds, and bounded
@@ -1561,6 +1568,9 @@ Decided in the design interview (2026-07-03):
    **plan critique**: critique→replan, capped at 2 rounds, then the human
    gate — catching design-level security/correctness flaws before
    implementation tokens are spent.
+
+   *To be reversed by decision 27 (§24)*: a crew reviews every node it
+   writes, and a session's spec critique is offered, never required.
 5. **The design stage is gummi-native chat** over SDK sessions; raw
    copilot attach is an escape hatch only. **The surface is the card
    thread** (§6): opening a card at its design stage *is* opening the
@@ -1836,6 +1846,9 @@ Decided in the design interview (2026-07-03):
     the combined branch), the budget is a ceiling no agent raises, and a
     sandbox refusal is a refusal — the lead plans around it, never widens
     a card's reach.
+
+    *To be replaced by decision 27 (§24)*: a goal becomes a long-lived
+    session whose crews may have sessions as nodes.
 21. **A plan's promises are part of the quality floor**, decided after
     the lxd drives (2026-09-15). Until then the floor asked whether the
     stages *ran* — a plan exists, a critique read the diff, the checks
@@ -1992,6 +2005,35 @@ Decided in the design interview (2026-07-03):
     run rather than spread thin across six. headless stays as the line
     protocol the demo and the browser tests drive; it is not offered as
     an agent to run cards on.
+
+27. **Work starts as a session, and a crew is the session's to call**,
+    decided 2026-10-21 (§24). Every card becomes a session; a session may
+    grow a spec and call on a crew: a planner whose plan of nodes a
+    person approves, and specialist agents that carry it out, each
+    checked and reviewed, onto a branch of the crew's own. gummi offers
+    the process and no longer enforces it: the session agent calls a
+    crew like a tool, or a person asks for one. Workflow cards are
+    retired, with no crew template that reproduces them, in the order
+    §24.12 sets: nothing is deleted before its replacement has run real
+    work. Once that is done, this decision **reverses decision 3** (the
+    graph and its floor), **reverses decision 4** (critique before every
+    gate becomes review after every crew node, and `spec_critique` on
+    offer), **replaces decision 20** (a goal becomes a long-lived session
+    whose crews may have sessions as nodes) and ends the verified-branch
+    floor in `Feature.MayLand` (`MayLandAt`), leaving the one §19.1 named
+    beside it: a person's read of the diff.
+
+    What does not bend, inside a crew: the plan passes
+    `crewplan.Problems` before a person sees it; every writing node is
+    checked and reviewed; two nodes never write the same path at once,
+    and what a node owns is enforced when it lands; the person approves
+    the plan, or has pre-authorised crews up to an amount, and every
+    widening always (decision 17's "may redo, may never widen"); no agent
+    approves its own crew; a node's question
+    reaches the person whenever the frozen spec does not answer it; and
+    the budget is a ceiling no agent raises. After a crew there is no
+    automatic review: the card says how many commits it is past its last
+    verification, and a person decides.
 
 Still open:
 
@@ -4013,6 +4055,9 @@ card's fourth cycle most of the diff against base is already read.
 
 ### 19.8 Sessions: the model is the session's own
 
+*Under §24 a session keeps its spec rather than handing itself off into a
+feature card; "write a spec" becomes `spec_start` (§24.2).*
+
 The web face calls a freeform card a **session**, and treats it as the
 default kind of work rather than the last row of the new-card form: one
 agent, running as itself, in its own worktree, reached from any browser.
@@ -4236,6 +4281,8 @@ launchd — there is no headless freeform driver for it to run yet
 Per-fire history beyond the row's one last outcome is a later need.
 
 ### 19.10 Delegation: a session that creates workflow cards
+
+*Replaced by crews (§24) once they ship.*
 
 A person may let a session hand pieces of its work to workflow cards
 (`domain.Delegation`, `engine/delegate.go`). The cards are a goal's cards
@@ -5740,3 +5787,455 @@ not a spec's reviewer threads.
 - **Importing existing skills.** Skills an operator's own tools wrote
   into `~/.claude/skills` are the operator's discovery (§4.1a), not the
   pack. Bringing them in is a person's commit.
+
+## 24. Sessions and crews — work without a workflow
+
+*Decided 2026-10-21 (decision 27); not yet built.* This section describes
+where gummi goes, and it supersedes the workflow (§3), the kinds' stage
+contracts (§12, §13), goals as a separate engine (§17) and delegation
+(§19.10) **once it has shipped and run real work** (§24.12). Until then
+those sections describe the code as it is.
+
+Every unit of work starts as a **session** (§19.8). A session may grow a
+**spec**, and it may call on a **crew**: a planner that turns the spec
+into a plan of nodes, and specialist agents that carry them out, each
+checked and reviewed, landing on a branch of the crew's own. The session
+agent calls a crew like a tool, or a person asks for one. gummi offers
+the process; it no longer enforces it.
+
+```
+session ──talk──▶ spec (optional) ──crew_start──▶ plan ──you approve──▶ run ──▶ report
+   ▲                                                                              │
+   └──────────── the session carries on from the report, and may start another ───┘
+   lands on a person's read of its diff, as a session always has (§19.1)
+```
+
+### 24.1 Why
+
+The graph made every change pay for a design, a critique, an
+implementation, a second critique and a verify, whether the change needed
+them or not. Freeform cards (§19) were the admission that most work does
+not, and once sessions became the default (§19.8) the graph was the less
+common path with most of the code. The design survives in it because
+its ideas are right: a spec as the context carrier, a fresh-context
+reviewer, machine-checked "done", budgets a person sets.
+
+The market (surveyed 2026-10) lands in the same place. The products that
+work with coding agents at scale have a planner write a spec or task
+graph and check each step with an independent verifier (Augment Intent,
+Factory Missions, Cognition's managed Devins, Kiro's spec tasks). The
+two widely read arguments, Anthropic's for multi-agent systems and
+Cognition's against them, now agree on the same rules:
+- one writer per area;
+- a clean-context reviewer;
+- artifacts between agents, not transcripts;
+- parallel work only where the work divides.
+
+None of them shows the fleet as a tree with cost and attention on it,
+makes each planned step a gate with checks of its own, or catches
+conflicting decisions between siblings before they merge. A crew does
+all three.
+
+So the floor moves from the card to the crew. A crew always plans,
+checks, reviews and verifies, and a person approves its plan and every
+widening of it. Whether to use a crew is the session's choice and the
+person's, not gummi's.
+
+### 24.2 The session's spec
+
+A session has at most one spec, and most never have one. A session about
+to call a crew needs one, because a crew is judged against its done-when
+items.
+
+| tool | does | origin |
+|---|---|---|
+| `spec_start(title)` | creates the spec from the template | new; replaces §19.8's "write a spec" hand-off |
+| `spec_view(section?)` | reads it | the stage tool, offered to sessions |
+| `spec_replace_section(section, body)` | writes one section | the stage tool, offered to sessions |
+| `spec_annotate(anchor, note)` | anchors a `%%` question to the line a snippet names | the stage tool, offered to sessions |
+| `spec_critique()` | a fresh-context reviewer tries to refute the spec; findings land as anchored threads | the plan critique (decision 4), **offered, never required** |
+
+Today these tools are stage-only (`engine.stageTools`); a session reaches
+a spec only by handing itself off into a new feature card. Under §24
+the spec stays on the session.
+
+**The template** merges what the three kinds' contracts asked for:
+Problem, Approach, **Done when** (the `gummi-done-when` block,
+`domain.DoneWhen` and `spec.ParseDoneWhen` unchanged), Limits (what is
+deliberately not done) and Notes, which carry the `%%` checklist. A bug
+is offered a Reproduction section and research a Question in place of
+Approach. They are prompts, not sections a gate demands: no gate reads
+a session's spec.
+
+**It lives with the workspace** (`Feature.SpecPath`,
+`.gummi/specs/<ID>-<slug>.md`), not on the branch, so it is never in the
+card's diff and never lands in the repository. Each write through the
+spec tools or the Spec tab is a numbered **revision**, snapshotted in the
+state store, which nothing keeps today. The person reads, edits and
+annotates it on the card's Spec tab, the way a diff is annotated (§6.1).
+`resolve_annotation`, today a diff comment's only, is extended to the
+spec's comments so the agent can close them.
+
+### 24.3 A crew, from the session's side
+
+| tool | does | returns |
+|---|---|---|
+| `crew_start(brief, budget)` | asks for a crew; the planner wakes and writes the plan | at once: the crew is proposed |
+| `crew_status()` | nodes, states, spend, open questions | text |
+| `crew_steer(note)` | a note to the planner, which wakes it | ack |
+| `crew_stop(reason)` | winds the crew down; what has landed stays | ack |
+| `crew_land()` | lands a finished crew's branch on the session's | the merge, or why not |
+
+The rules for using them:
+
+- **Always offered.** A crew is an ordinary option, so there is no
+  opt-in like delegation's. What holds the cost is the approval, the
+  budget, and the planner's own answer that a change is too small to
+  split.
+- **A spec first.** `crew_start` refuses a session whose spec has no
+  done-when item, and says so. The session agent writes the spec with
+  the person; it holds the context, so the planner does not write it.
+- **Asynchronous.** `crew_start` returns at once. A crew runs for tens
+  of minutes, and a tool call held open that long fights every
+  backend's idea of a turn and locks the person out of the session. The
+  report comes back as a turn gummi sends under an actor of its own
+  (`WithActor`), the way an objective's next turn does (§19.11). The
+  thread draws it as the crew's.
+- **No `crew_approve`.** The plan goes to the person as a decision, the
+  way every checkpoint does (decision 18). A person may pre-authorise
+  a session's crews up to an amount each, in the manner of
+  delegation's "this one and all that follow": a plan under it runs
+  without asking, and the session's own budget still caps how many.
+  Pre-authorisation covers the first plan only; a widening always goes
+  to the person. The agent never approves its own crew.
+- **Starting a crew freezes the spec.** The crew is judged against
+  that revision. An edit to the spec during a run is a steer to the
+  planner.
+- **One crew at a time per session**, so one branch has one writer.
+- **The session waits for its crew.** A session may not land while a
+  crew is open, as §19.10's parent waits for its cards. Closing a
+  session with a crew running asks the person first, then stops the
+  crew (`crew_stop`) and keeps what landed on the crew branch.
+- **Nothing resumes itself.** A quit parks a running crew: its nodes'
+  backends stop, and its pending planner wakes are kept in the store.
+  After a restart the crew shows as paused, and runs again only when a
+  person resumes it (decision 17).
+
+**Where the crew works.** A crew has a branch of its own, forked from the
+session's tip when the crew starts: `crew/<slug>/<n>`, and its nodes'
+`crew/<slug>/<n>.<node>`, where a node id is always `t<k>`. They are
+not nested under the session's `ff/…` ref, because git cannot hold both
+a ref and a directory of that name; and the slash after the slug keeps
+session `foo`'s crew 1 apart from session `foo-1`'s. `Feature.BranchName`
+stays the one constructor (crews and nodes are card rows, §24.6), and
+`Store.BranchTaken` and cleanup cover `crew/` refs. Nodes fork from the
+crew branch and land back on it, routed on the parent the way goal
+cards are (`Pool.ManagerFor`). The session keeps its own checkout and
+may keep working while the crew runs.
+
+**Landing a crew.** A finished or partial crew lands on the session's
+branch the way `DelegateLand` lands a delegated card: as one squash
+commit, refused while the session's tree holds uncommitted work, with a
+conflict going back to the session agent. A partial crew lands what it
+landed, and says so. After the squash gummi runs the done-when checks
+on the session's new tip, and that commit is what the verified mark
+(§24.8) is pinned to. Commits the session made during the run sit
+under it: the checks saw them, the crew's reviewers did not, and the
+report says so. Node branches go when their node lands; the crew branch
+goes when the crew lands, or with the session.
+
+**Budget.** A crew's budget is its own ceiling. Where the session has
+an envelope, the crew's budget is held against it from the start, so a
+session cannot spend what its crew was promised. A session without an
+envelope (`Budget.Envelope` 0, no cap) still gives its crew one. Inside
+the crew the goal ledger's rule holds (`goalpolicy.Card.Held`,
+`domain.DelegateHeld`): an unfinished node holds the larger of its
+envelope and its spend, and a landed or dropped one only its spend. The
+planner and the final review are the crew's own spend (`Ledger.Own`).
+The session's own turns during a run are the session's, not the crew's.
+
+### 24.4 The crew document
+
+`.gummi/crews/<ID>-<slug>/<n>.md`, a folder beside `.gummi/goals/`. Its sections:
+
+- **Brief**: what the session asked for, and the spec revision frozen
+  for the crew.
+- **Done when**: copied from the spec when the crew starts.
+- **Plan**: a `gummi-crew` block.
+- **Limits**.
+- **Run log**: gummi appends each node's handoff.
+- **Report**: written when the crew ends.
+
+```yaml
+# gummi-crew
+lanes: 3
+budget: 1500            # credits, out of the session's envelope
+nodes:
+  - id: t2
+    role: contractor    # scout | contractor | implementer | tester | scribe
+    title: TurnLog type and store interface
+    brief: |
+      Define TurnLog and the store interface, with stubs.
+      Do not wire the engine.
+    needs: [t1]
+    owns: [internal/domain/turn.go, internal/state/turns.go]
+    serves: [DW-1]
+    checks: [go build ./..., go vet ./internal/state/]
+    tier: standard      # cheap | standard | strong — a profile slot
+    envelope: 220
+```
+
+A node row is `domain.GoalCardRow` (title, serves, `depends_on` as
+`needs`, envelope) plus `role`, `brief`, `owns`, `checks` and `tier`.
+
+**The roles are a fixed catalogue.** The planner sharpens a role with a
+brief and with skills from the pack (§23); it does not invent one. An
+invented role has no profile slot and no record to price it by.
+
+| role | does |
+|---|---|
+| scout | reads, reproduces and maps; writes nothing but its handoff |
+| contractor | writes, first and alone, the interfaces and stubs that parallel nodes build against |
+| implementer | builds inside what it owns |
+| tester | writes and extends tests |
+| scribe | writes docs and the try-it guide |
+
+**Two roles are gummi's, never the planner's to place.** The **reviewer**
+runs after every writing node. The **integrator** resolves landing
+conflicts. A plan cannot leave them out because a plan cannot name them.
+
+**Profiles map `planner` and the tiers to models.** `planner` falls
+back to the architect, as `lead` does.
+
+### 24.5 The plan checks
+
+A pure `crewplan.Problems(plan, items, budget) []string`, in the manner
+of `goalPlanProblems`. A plan that fails is sent back to the planner
+before any person sees it.
+
+1. Node ids are unique, every `needs` names a node, and there is no
+   cycle.
+2. Every done-when item is served by at least one node.
+3. Every writing node (contractor, implementer, tester, scribe) owns at
+   least one path. It also has at least one check, or serves an item
+   that has one. A scout owns nothing.
+4. **Two nodes whose `owns` overlap are ordered:** one must reach the
+   other through `needs`. This is the one-writer rule. Overlap is a
+   conservative test on path prefixes, so a false positive costs only a
+   serialised pair.
+5. The nodes' envelopes and the planner's reserve fit the budget, and
+   no envelope is below what a node can finish in.
+6. Every role is in the catalogue, and every tier is in the profile.
+
+A plan of one implementer node is valid, and the planner is told to
+choose it whenever the work does not divide.
+
+### 24.6 A node
+
+```
+waiting ─▶ running ─▶ checking ─▶ reviewing ─▶ landed
+              ▲           │            │
+              └── rework ─┴────────────┘     (capped at 2, then stuck)
+           also: stuck · exhausted · dropped
+```
+
+- **A node is a short session that no person works.** It is stored as a
+  card row of its own kind, child of the crew and hidden from the board,
+  because everything it reuses takes a card: `Pool.ManagerFor`,
+  `SquashMerge`, `DelegateHeld`, `cardrun` and `BranchTaken`. It runs in
+  its own tree on its own branch, with its role's prompt, its brief, the
+  frozen spec and the handoffs of the nodes it needs. It never sees
+  another agent's transcript.
+- **Its sandbox is the session's.** A scout runs read-only wherever the
+  backend enforces it (`Capabilities().ReadOnlyEnforce`, as research
+  does), and the owns check at landing (below) holds for every node. A
+  tool call asking to act outside the sandbox parks for the person, as
+  under decision 17. Neither the planner nor a node can answer it.
+- **The handoff** ends every node in a fixed grammar, parsed the way
+  `FINDING:` lines are:
+  - `DONE:` what it did;
+  - `DECISION:` a choice it made that the brief did not make for it;
+  - `OPEN:` what it left.
+  `DECISION:` lines are how conflicting choices between siblings
+  surface before they merge.
+- **Checking** runs the node's `checks` in its tree.
+- **Reviewing** is a fresh-context reviewer, ideally of another model,
+  using the verdict grammar the critiques use (`internal/verdict`).
+  Findings rework the node in place.
+- **What it owns is enforced when it lands.** A diff that touches a path
+  outside `owns` is sent back as a finding. The one-writer rule is
+  something gummi checks, not something it asks for.
+- **Landing** squashes the node onto the crew branch in plan order
+  (`SquashMerge`). A conflict gets an integrator turn in the crew tree,
+  the way a goal resolves a catch-up conflict (`GoalTree.CatchUp`).
+- **Questions** (`ask_user`) go to the planner first, routed the way a
+  goal's lead takes its cards' questions (`GoalAnswer`). It answers what
+  the frozen spec settles. What the spec does not settle goes to the
+  person on the Crew tab. This differs from `GoalAnswer`, which falls
+  back to the recommended option: a crew never answers for the person.
+  The planner's answers are drawn in the node's thread as its own.
+
+### 24.7 The conductor and the planner
+
+`crewpolicy.Decide(Input) []Action` is pure. It is the subset of
+`goalpolicy.Decide` a crew needs, and it reuses that package's `Ledger`.
+`Engine.CrewTick` builds the snapshot and executes the actions. Each
+tick, in this order:
+
+1. Wind down when the budget is past its reserve.
+2. Land one node that has passed its checks and review.
+3. Send an exhausted node to the planner once, to raise or drop it.
+4. Send a stuck node to the planner up to twice, then drop it.
+5. Wake the planner on a pending reason: the start, a steer, a handoff
+   with `DECISION:` or `OPEN:` lines, a question it must answer, or the
+   person's answer to a widening.
+6. Start ready nodes up to the lanes.
+7. When nothing is left, run the **final review** and write the report.
+   The final review is the done-when checks on the crew's tip, plus one
+   reviewer over the whole crew diff against the frozen spec.
+
+Tranches, substrates, experiments and programmes stay goal machinery
+until goals move onto crews (§24.12).
+
+**The planner** is a short turn on `planner`, in the crew tree, waking
+only on those events and acting only through its own tools:
+- `plan_write` (the first plan, or a revision),
+- `node_rework(id, note)`,
+- `node_drop(id, why)`,
+- `node_raise(id, to)`,
+- `answer(node, text)`.
+Each turn is booked to the session.
+
+**Widening is mechanical.** gummi compares every revision with the
+approved plan. The revision is a decision for the person if it:
+- adds, removes or rewords a done-when item, or changes its check;
+- raises the crew's budget;
+- gives a node a path outside the union of the paths the person
+  approved.
+
+Everything else is applied and written to the run log: new nodes inside
+the approved paths and budget, splits, reorders, reworks and drops.
+This is decision 17's "may redo, may never widen", stated for crews. A
+person who answers "keep the scope" writes the gap into the crew's
+Limits instead.
+
+### 24.8 The report, and after it
+
+A crew ends **finished** when the final review passes, and **partial**
+when it is stopped, stuck past the planner, or out of budget. Either way
+the report reaches the session as one turn, and the same text goes into
+the crew document. It holds:
+- each done-when item, met or not, with its check's result;
+- the nodes' `DECISION:` lines, gathered;
+- what is left open;
+- the cost against the plan, and how much of it was rework.
+
+The spec's Notes take the decisions and the open items, so the next crew
+starts from the spec rather than the transcript.
+
+The session agent carries on from the report, the diff since the crew
+started and the spec. It answers questions, makes small fixes, lands the
+crew (`crew_land`) or starts another crew. A follow-up planner reads the
+previous crew's run log.
+
+**There is no automatic review after a crew.** The session may change
+its branch after a crew has verified it. The card's head says so:
+**"crew verified at `<sha>` · N commits since"**, where the sha is the
+landing commit whose checks passed (§24.3). A partial crew's mark says
+partial. One action re-runs the done-when checks on the tip and moves
+the mark there. Landing is still the person's
+read of the diff (§19.1). The crew's review and checks are evidence for
+that read, never a gate on it.
+
+### 24.9 The faces
+
+**The Crew tab.** It sits beside Thread, Spec and Diff on a session's
+page. It holds:
+- a budget strip: spent, then planned, then the session's envelope,
+  with the lanes, rework and the time elapsed;
+- the plan drawn as waves of nodes: role, title, check bars, spend,
+  time and state, with a rework badge, and an amber ring on the node
+  that waits on the person;
+- the crew branch with what has landed on it;
+- a strip saying when the planner last woke and why.
+
+Selecting a node opens its page beside the canvas: its question
+(recommended answer first), its brief, what it owns, its checks, its
+`DECISION:` lines, and tabs for its thread, its diff and its handoff.
+
+**In the thread.** The plan is a decision. It shows the nodes in waves
+with their owns and costs, the plan checks as ticks, the models each
+role gets, and three answers: run the crew, talk it over, keep it a
+session. A widening is a decision too, drawn as a diff of the plan. The
+run itself folds to one line per event.
+
+**On the board.** A session with a crew shows one square per node in its
+state's colour, and its attention lane counts the crew's open questions.
+
+**Read models.** A pure `crewrun` fold reads the crew record into what
+both faces draw. It reuses `cardrun` per node, so no surface disagrees
+about what a crew cost. Its JSON shape is set in `webapi` first.
+
+The TUI shows the same fold as a list grouped by wave, and a phone does
+the same. The canvas is the web face's own.
+
+### 24.10 What a person gives up
+
+- **The guarantee.** Today a card in the workflow cannot land unverified,
+  and `MayLand` enforces it. Under §24 a branch is as verified as the
+  crews that ran on it, and the verified mark says how current that is.
+- **A fixed contract for outside drivers.** `gummi run`/`resume`, their
+  NDJSON and the `gummi skill` bundle describe stages. They change shape
+  (§24.12) and are deprecated, not broken.
+- **The adopted-branch floor.** An adopted card had to walk the whole
+  graph (D22). An adopted branch becomes an ordinary session on a branch
+  gummi did not cut. Custody is unchanged: gummi never deletes,
+  rebases or force-pushes one. Only the graph walk goes.
+
+### 24.11 What becomes of what is there
+
+| now | under §24 |
+|---|---|
+| the graph and its rerun edges (§3, `internal/workflow`) | retired; a node's rework and the planner's revisions replace the reruns |
+| plan stage: explore, converge, plan | the session's conversation and its spec |
+| plan critique | `spec_critique`, offered; the planner's plan is checked by `crewplan.Problems` |
+| implement and its critique | a crew's nodes, each reviewed |
+| verify | each node's checks and the crew's final review |
+| feature, bug and research kinds | spec template prompts and planner guidance; research is a crew of scouts and a scribe that may run in a scratch tree |
+| research's decompose gate | the planner proposes new sessions in a report |
+| goals (§17) | a long-lived session whose crews may have sessions as nodes; `goalpolicy` and the goal tree become crew machinery |
+| delegation (§19.10) | replaced by crews |
+| objectives (§19.11), schedules and heartbeats (§19.9) | unchanged: they are already a session's |
+| stacks (§18) | unchanged |
+| `gatepolicy` | answers the two decisions left, a plan and a widening |
+| `MayLand`'s two floors | the verified-branch floor goes; a person's read of the diff (§19.1) stays |
+| `run` / `resume` | start a session from a prompt that may call crews within its envelope and exits with a report; the stage-shaped NDJSON and exit statuses are deprecated |
+
+### 24.12 The order of retirement
+
+Each step ships on its own and leaves gummi working:
+
+1. **Crews in sessions.** Session specs, the crew tools, the document
+   and its checks, nodes, the conductor, the report, and a Crew tab
+   that is a list. Workflow cards are untouched.
+2. **The Crew tab's canvas.**
+3. **Goals and the headless driver move onto crews.** The separate goal
+   engine is removed. `run`/`resume` take their new shape, with the old
+   output kept for a deprecation period.
+4. **Evidence.** `cardrun` compares crews with workflow cards on cost and
+   rework, over real work.
+5. **Workflow cards stop being minted.** Those in flight finish on the
+   old engine. Then `internal/workflow`, the stage contracts, delegation
+   and the verified-branch floor are deleted, and §3, §12, §13, §17 and §19.10
+   are rewritten as history.
+
+### 24.13 Deferred
+
+- **A node that is a whole session**, with its own spec, escalated when
+  the planner judges a piece too large for one node. Goals need it in
+  step 3.
+- **A crew across repositories.** Goal trees already do this, and a crew
+  inherits it with goals.
+- **Two crews at once on one session**, which would need two integration
+  branches and a merge between them.
+- **Planner-invented roles.**
