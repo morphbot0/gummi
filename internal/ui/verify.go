@@ -15,7 +15,6 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verify"
-	"github.com/morphis/gummi/internal/verifydoc"
 )
 
 // verifyResultMsg carries the outcome of a verify run.
@@ -54,9 +53,6 @@ func (m *Shell) checksFor(f domain.Feature) []verify.Result {
 // step is the safety for artifact-carried commands (DESIGN §4.4 threat
 // list) — the dialog shows exactly what will execute.
 func (m *Shell) runChecks(f domain.Feature) tea.Cmd {
-	if f.Kind == domain.KindResearch {
-		return m.runDocVerify(f)
-	}
 	workDir := filepath.Join(m.wt.Root(), f.WorktreePath())
 	path := m.artifactFile(&f)
 	if path == "" {
@@ -258,153 +254,6 @@ func (d *verifyDialog) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString("\n" + s.KeyHint.Render("enter") + s.KeyLabel.Render(" run") +
 		s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" cancel"))
-	return s.DialogFrame.Render(b.String())
-}
-
-// runDocVerify runs the deterministic verifydoc floor against a research
-// card's artifact — zero-token and pure, so it re-runs on every press with
-// no memoization; a stale report would mislead. Dispatches a report dialog
-// on any failure, or a notice on a clean pass or a doc/repo that isn't
-// there yet to check.
-func (m *Shell) runDocVerify(f domain.Feature) tea.Cmd {
-	path := m.artifactFile(&f)
-	if path == "" {
-		m.notice = noticeMsg{text: f.Name() + ": no doc yet — verifydoc runs on the artifact"}
-		return nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
-		return nil
-	}
-	mgr, err := m.wt.ManagerFor(context.Background(), &f)
-	if err != nil {
-		m.notice = noticeMsg{text: f.Name() + ": repo unresolved — " + err.Error(), isErr: true}
-		return nil
-	}
-	artifact := string(raw)
-	layout := spec.LayoutOf(&f)
-	files := readCitedFiles(mgr.RepoRoot(), verifydoc.CitedPaths(artifact, layout))
-	report := verifydoc.Check(artifact, files, layout)
-	if report.Pass() {
-		m.notice = noticeMsg{text: f.Name() + ": document verify — clean"}
-		return nil
-	}
-	m.Overlay.Push(newDocVerifyDialog(f, report))
-	return nil
-}
-
-// docFloorRefusal is what a person is told when a research card's
-// verify→done crossing is refused by the document floor (verifydoc).
-//
-// It used to be the three counts alone — "5 unmapped question(s)" — which
-// named a rule without stating it, so a card whose verify had passed was
-// refused with nothing on any screen saying what "unmapped" meant or how
-// to fix it. This names the first few items and the rule, and says what
-// to do: the document is fixed by the stage that writes it, or by hand.
-func docFloorRefusal(f domain.Feature, rep verifydoc.Report) string {
-	layout := spec.LayoutOf(&f)
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s: not done yet — the research document fails its floor (%s)", f.ID, rep.Summary(layout))
-	if n := len(rep.Coverage); n > 0 {
-		const show = 3
-		quoted := make([]string, 0, show)
-		for i, c := range rep.Coverage {
-			if i == show {
-				break
-			}
-			quoted = append(quoted, "“"+sanitize(c.Item)+"”")
-		}
-		fmt.Fprintf(&b, ". Unmapped: %s", strings.Join(quoted, ", "))
-		if n > show {
-			fmt.Fprintf(&b, " (+%d more)", n-show)
-		}
-		fmt.Fprintf(&b, ". Each ## %s bullet must be quoted in a ## Slices row's requirements, or given an ## Out of scope line `- <its text>: <why not>`", layout.Coverage)
-	}
-	if n := len(rep.Citations); n > 0 {
-		fmt.Fprintf(&b, ". Broken citation: %s — %s", sanitize(rep.Citations[0].Citation), sanitize(rep.Citations[0].Reason))
-		if n > 1 {
-			fmt.Fprintf(&b, " (+%d more)", n-1)
-		}
-	}
-	if rep.OpenThreads > 0 {
-		b.WriteString(". Open comments need resolving first")
-	}
-	b.WriteString(" — send it back to have the document fixed, or edit it yourself")
-	return b.String()
-}
-
-// readCitedFiles reads each cited path's lines from root, keyed by the
-// path as cited. A path that would resolve outside root is skipped and
-// never read; an unreadable file is silently dropped — verifydoc reports
-// the missing citation itself. Mirrors engine.fileMap, the same
-// containment contract the engine's own document-verify gate uses.
-func readCitedFiles(root string, paths []string) map[string][]string {
-	out := make(map[string][]string, len(paths))
-	for _, p := range paths {
-		full := filepath.Join(root, p)
-		rel, err := filepath.Rel(root, full)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			continue
-		}
-		data, err := os.ReadFile(full) //nolint:gosec // rel is checked above to stay under root
-		if err != nil {
-			continue
-		}
-		out[p] = strings.Split(string(data), "\n")
-	}
-	return out
-}
-
-// docVerifyDialog presents a research document's verifydoc report: every
-// broken citation and unmapped brief question, plus the open-thread count
-// when nonzero. Pushed only on a failing report — a clean one goes to a
-// notice instead.
-type docVerifyDialog struct {
-	feature domain.FeatureID
-	report  verifydoc.Report
-	layout  spec.Layout
-}
-
-func newDocVerifyDialog(f domain.Feature, report verifydoc.Report) *docVerifyDialog {
-	return &docVerifyDialog{feature: f.ID, report: report, layout: spec.LayoutOf(&f)}
-}
-
-func (d *docVerifyDialog) ID() string { return "doc-verify" }
-
-func (d *docVerifyDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
-	switch key.String() {
-	case "esc", "enter", "q":
-		return true, nil
-	}
-	return false, nil
-}
-
-func (d *docVerifyDialog) View(s *theme.Styles, w, h int) string {
-	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("verify "+d.feature.Ref()) + "\n\n")
-	if len(d.report.Citations) > 0 {
-		b.WriteString(s.Warning.Render("broken citations") + "\n")
-		for _, c := range d.report.Citations {
-			b.WriteString("  " + s.Error.Render(sanitize(c.Citation)) + s.Faint.Render(" — "+sanitize(c.Reason)) + "\n")
-		}
-		b.WriteString("\n")
-	}
-	if len(d.report.Coverage) > 0 {
-		b.WriteString(s.Warning.Render("unmapped "+strings.ToLower(d.layout.Coverage)) + "\n")
-		for _, c := range d.report.Coverage {
-			b.WriteString("  " + s.Error.Render(sanitize(c.Item)) + s.Faint.Render(" — "+sanitize(c.Reason)) + "\n")
-		}
-		// The rule, where the refusal is: a floor nobody can see the
-		// shape of is one a document fails twice before anyone learns it.
-		b.WriteString(s.Faint.Render("  map one by quoting it in a `## Slices` row's requirements,") + "\n")
-		b.WriteString(s.Faint.Render("  or as `- <its text>: <why not>` under `## Out of scope`") + "\n")
-		b.WriteString("\n")
-	}
-	if d.report.OpenThreads > 0 {
-		b.WriteString(s.Warning.Render(fmt.Sprintf("open threads: %d", d.report.OpenThreads)) + "\n\n")
-	}
-	b.WriteString(s.Faint.Render("enter/esc close"))
 	return s.DialogFrame.Render(b.String())
 }
 

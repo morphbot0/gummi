@@ -446,7 +446,6 @@ func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
 // Start opens the autopilot dialog on it.
 type formResult struct {
 	Kind        domain.Kind         // "" reads as feature
-	Mode        domain.ResearchMode // research only: "" is the survey, "diagnosis" the other contract
 	Desc        string
 	Profile     string
 	Envelope    *int // nil = the shell's default envelope
@@ -465,9 +464,9 @@ type formResult struct {
 	// StackOnto names a card to stack this one on top of, creating the
 	// stack if that card is not in one yet. StackInto joins an existing
 	// stack at the top. Both empty is a standalone card.
-	StackOnto  domain.FeatureID
-	StackInto  domain.StackID
-	Start      bool
+	StackOnto domain.FeatureID
+	StackInto domain.StackID
+	Start     bool
 	// SessionBackend and SessionModel are the agent and model a freeform
 	// card's session runs on when the person picked them (DESIGN §19.8);
 	// both empty is the profile's implementer. Only the web face's session
@@ -488,8 +487,8 @@ type formResult struct {
 // the repo as the next dialog's preselect, and does what the result
 // asked for next (the autopilot dialog).
 type cardCreatedMsg struct {
-	f          domain.Feature
-	start      bool
+	f     domain.Feature
+	start bool
 	// stack is the stack the new card joined, empty when standalone. The
 	// shell ticks it so the card's branch is cut on the right base.
 	stack domain.StackID
@@ -534,7 +533,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			repo = ""
 		}
 		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
-			Kind: kind, Mode: res.Mode, Description: res.Desc, Profile: res.Profile, Envelope: env,
+			Kind: kind, Description: res.Desc, Profile: res.Profile, Envelope: env,
 			Repo: repo, RequireRepo: m.requireRepo, Base: res.Base,
 			Adopt: res.Adopt, InspectAdopted: m.adoptInspector(ctx, repo, res.Base),
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
@@ -868,11 +867,6 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 		}
 		text := fmt.Sprintf("%s: %s %s — land it before this card can start coding", m.cardName(id), unmetDependencyClause, strings.Join(names, ", "))
 		return blockedMsg(actor, id, text)
-	case engine.StatusBlockedDocument:
-		// the deterministic citation/coverage floor (internal/verifydoc)
-		// failed — the document stays at verify rather than reaching done
-		// on a broken citation or an unmapped brief question.
-		return blockedMsg(actor, id, docFloorRefusal(res.Feature, res.DocumentReport))
 	case engine.StatusNeedsMerge:
 		// verify→done is the user's "this feature is done" decision: the
 		// merge flow (user-written message → squash merge) finishes the
@@ -1238,12 +1232,6 @@ func (m *Shell) tidy(ctx context.Context, f domain.Feature) noticeMsg {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 	}
-	// A research card runs in a scratch tree rather than a branch
-	// worktree. Disposable by construction, and absent is success, so
-	// this runs unconditionally for every kind.
-	if err := m.wt.RemoveScratch(ctx, &f); err != nil {
-		return noticeMsg{text: sanitize(err.Error()), isErr: true}
-	}
 	// An adopted branch was never gummi's to delete, and a branch that
 	// is the only copy of its work is the one thing here that could be
 	// lost: both stay, and the notice says which.
@@ -1540,11 +1528,6 @@ func (m *Shell) deleteCardTrees(ctx context.Context, f *domain.Feature) error {
 		if err := m.wt.Remove(ctx, f, true); err != nil {
 			return err
 		}
-	}
-	// ...and the scratch tree, which is the only tree a research card
-	// ever has.
-	if err := m.wt.RemoveScratch(ctx, f); err != nil && !errors.Is(err, worktree.ErrRepoNotConfigured) {
-		return err
 	}
 	// a feature that never left Spec has no branch — only delete
 	// one that exists. An adopted card's branch is skipped outright: the

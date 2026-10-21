@@ -282,14 +282,9 @@ func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, 
 func cardPlaceholderFor(c domain.CardType) string {
 	head := "Describe it. The first line is the title.\n\n" +
 		"  #123 or an issue link on the first line: alt+g imports it\n"
-	if c.Mode == domain.ModeDiagnosis {
-		return head + "  the rest becomes the symptom — what you saw, where, how often"
-	}
 	switch c.Kind {
 	case domain.KindBug:
 		return head + "  headings: Steps to reproduce · Expected · Actual · Environment"
-	case domain.KindResearch:
-		return head + "  the rest becomes the research brief"
 	case domain.KindGoal:
 		return "Describe the outcome you want. The first line is the title.\n\n" +
 			"  next, the architect agrees with you what done means and which\n" +
@@ -822,14 +817,6 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		d.errText = "budget required — a goal's budget is the ceiling for everything it runs"
 		return false, nil
 	}
-	if trimmed == "" && d.ct.Kind == domain.KindResearch {
-		// "budget", like the row label and the collapsed "runs as"
-		// readout above it. A refusal is the one string in this dialog a
-		// reader is guaranteed to stop and read, so it is the last place
-		// that should still be calling a spend cap an envelope.
-		d.errText = "budget required — a research card carries no default"
-		return false, nil
-	}
 	if trimmed != "" {
 		n, err := domain.ParseDollars(trimmed)
 		if err != nil {
@@ -848,7 +835,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		return false, nil
 	}
 	res := formResult{
-		Kind: d.ct.Kind, Mode: d.ct.Mode, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
+		Kind: d.ct.Kind, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
 		Base: d.base, Adopt: d.adopt, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		Start:          start,
@@ -1227,7 +1214,7 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 func (d *cardForm) runsLine(s *theme.Styles) string {
 	env := strings.TrimSpace(d.env.Value())
 	switch {
-	case env == "" && (d.ct.Kind == domain.KindResearch || d.ct.Kind == domain.KindGoal):
+	case env == "" && d.ct.Kind == domain.KindGoal:
 		env = s.Error.Render("budget required")
 	case env == "":
 		env = "default budget"
@@ -1262,7 +1249,7 @@ func joinIDs(ids []domain.FeatureID) string {
 // runs after — and the after list while that row has focus.
 func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 	hint := envelopeHintCapped
-	if d.ct.Kind == domain.KindResearch || d.ct.Kind == domain.KindGoal {
+	if d.ct.Kind == domain.KindGoal {
 		hint = envelopeHintRequired
 	}
 	rows := []string{

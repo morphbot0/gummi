@@ -15,8 +15,7 @@ import (
 // which renders only while the field is empty — and the field is
 // prefilled every time the dialog opens. The door reads the value back
 // with its unit on the collapsed "runs as" line, and labels the input
-// when the options are expanded; research, which refuses 0, says
-// "required" there instead.
+// when the options are expanded.
 func TestCreationFormsLabelTheEnvelopeField(t *testing.T) {
 	s := m0Styles()
 	profiles := []string{"thrifty"}
@@ -26,7 +25,6 @@ func TestCreationFormsLabelTheEnvelopeField(t *testing.T) {
 	}{
 		{domain.KindFeature, envelopeHintCapped},
 		{domain.KindBug, envelopeHintCapped},
-		{domain.KindResearch, envelopeHintRequired},
 	} {
 		t.Run(string(c.kind), func(t *testing.T) {
 			form := newCardForm(domain.CardType{Kind: c.kind}, profiles, nil, true, "", nil, 2400, nil)

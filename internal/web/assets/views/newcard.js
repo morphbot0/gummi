@@ -17,20 +17,16 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.platform || '')
 const ABOUT = {
   feature: 'A change: planned, implemented and verified on its own branch.',
   bug: 'A defect: the fix is planned, implemented and verified like a feature.',
-  research: 'A question to investigate. It ends in findings, not a branch to land.',
-  'research:diagnosis': 'Research that pins down why something fails.',
   freeform: 'No stages and no gates: an agent works on a branch while you talk to it. It opens at once.'
 }
 const BRIEF = {
   feature: ['What and why', 'What should change, and why it matters'],
   bug: ['What happens', 'What goes wrong, and where'],
-  research: ['The question', 'What do you want to know?'],
-  'research:diagnosis': ['The symptom', 'What fails, and when'],
   freeform: ['What to do', 'Say what you want done']
 }
 const ADOPTS = new Set(['feature', 'bug'])
 const STACKS = new Set(['feature', 'bug'])
-const WAITS = new Set(['feature', 'bug', 'research', 'research:diagnosis'])
+const WAITS = new Set(['feature', 'bug'])
 
 // Which field a refusal is about, read from the sentence the form wrote.
 // Adopting goes before the base: its refusals talk about branches too
@@ -292,8 +288,7 @@ registerView('newcard', {
       const env = el.envelope.value.trim() === '' ? null : parseDollars(el.envelope.value)
       if (env?.err) { showErr(env.err); return }
       const req = {
-        kind: st.kind.startsWith('research') ? 'research' : st.kind,
-        diagnosis: st.kind === 'research:diagnosis' || undefined,
+        kind: st.kind,
         title: el.title.value.trim(),
         description: el.desc.value.trim() || undefined,
         profile: el.profile.value || undefined,

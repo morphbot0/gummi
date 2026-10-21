@@ -22,8 +22,8 @@ func (e *Engine) SetRepo(ctx context.Context, id domain.FeatureID, repo string) 
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	if f.Kind == domain.KindGoal {
-		return domain.Feature{}, fmt.Errorf("%s is a goal, and goals no longer run", id)
+	if f.Kind == domain.KindGoal || f.Kind == domain.KindResearch {
+		return domain.Feature{}, fmt.Errorf("%s is a retired %s card, and it no longer runs", id, f.Kind)
 	}
 	if f.Home {
 		return domain.Feature{}, fmt.Errorf("%s is an agent: it runs in its home, in no repository", id)

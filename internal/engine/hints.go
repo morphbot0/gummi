@@ -6,8 +6,6 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/spec"
-	"github.com/morphis/gummi/internal/verifydoc"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -119,21 +117,6 @@ gummi raises the stage's gate itself, with the same question, in the
 place the user is already looking. Asking first does not bring the gate
 any closer — it just spends a round trip to arrive at it.`
 
-// researchWorkingDirGuard tells a research stage what its working
-// directory is. Every other kind now runs in the card's own branch
-// worktree for its whole life, so there is nothing to warn them about —
-// what they write is kept, on the branch that will carry it. A research
-// card is the exception: its branch never receives a commit (DESIGN
-// decision 5), so it runs in a detached scratch tree instead, and the
-// part a filesystem cage cannot say is that the tree is disposable and
-// the durable surface is the document.
-const researchWorkingDirGuard = `Your working directory is a scratch checkout of main: a throwaway, not
-this item's branch and not the main checkout. Nothing you write to disk
-here is kept — so do not start implementing, and do not run git commit.
-The research document is the one durable surface, and gummi's spec tools
-are how you reach it. If a decision needs a change to the repo, record
-it in the document and let an implementation card make it.`
-
 // worktreeBoundaryHint says where a session's work happens and where its
 // throwaway work goes. Both halves came from watching real sessions: a
 // plan session that built a small Go module in /tmp — go.mod, main.go, a
@@ -213,32 +196,12 @@ func roleForStage(f domain.Feature) (agent.Role, bool) {
 	case domain.StagePlan:
 		return agent.RoleArchitect, true
 	case domain.StageImplement:
-		// A research card's build stage gathers evidence and writes it
-		// up: architect work, read-only, no code. One graph does not mean
-		// one contract — the kind still decides what the stage IS.
-		if f.Kind == domain.KindResearch {
-			return agent.RoleArchitect, true
-		}
 		return agent.RoleImplementer, true
 	case domain.StageVerify:
 		return agent.RoleReviewer, true
 	default:
 		return "", false
 	}
-}
-
-// researchReadOnly reports whether a research feature's stage is an
-// autonomous pass that must never mutate the main checkout (it runs in
-// the repo root with no worktree).
-//
-// It governs the REPOSITORY, and only that: the backend's own file and
-// shell tools, which Engine.run refuses to start such a session without
-// being able to strip (Capabilities().ReadOnlyEnforce). It once also
-// stripped gummi's mediated document tools, which left the survey stage
-// unable to write the one artifact it exists to produce; those are served
-// on every stage now (asktool.go).
-func researchReadOnly(f domain.Feature) bool {
-	return f.Kind == domain.KindResearch && f.Stage != domain.StagePlan
 }
 
 // stageHints builds the system instructions for a feature's stage: the
@@ -253,12 +216,7 @@ func researchReadOnly(f domain.Feature) bool {
 func stageHints(f domain.Feature, specPath, scratch string, flavor runFlavor) []string {
 	switch flavor {
 	case flavorCritique:
-		h := []string{contractHint(f, specPath, agent.RoleReviewer, flavorCritique), critiqueHint(f)}
-		if f.Kind != domain.KindResearch {
-			h = append(h, worktreeBoundaryHint(scratch))
-		} else {
-			h = append(h, researchFloorHint(f))
-		}
+		h := []string{contractHint(f, specPath, agent.RoleReviewer, flavorCritique), critiqueHint(f), worktreeBoundaryHint(scratch)}
 		if gate := gateAskHint(f); gate != "" {
 			h = append(h, gate)
 		}
@@ -267,12 +225,7 @@ func stageHints(f domain.Feature, specPath, scratch string, flavor runFlavor) []
 		return []string{contractHint(f, specPath, agent.RoleImplementer, flavorRebase), rebaseHint(), worktreeBoundaryHint(scratch)}
 	}
 	role, _ := roleForStage(f)
-	hints := []string{contractHint(f, specPath, role, flavor)}
-	if f.Kind == domain.KindResearch {
-		hints = append(hints, researchWorkingDirGuard)
-	} else {
-		hints = append(hints, worktreeBoundaryHint(scratch))
-	}
+	hints := []string{contractHint(f, specPath, role, flavor), worktreeBoundaryHint(scratch)}
 
 	switch f.Stage {
 	case domain.StagePlan:
@@ -280,17 +233,7 @@ func stageHints(f domain.Feature, specPath, scratch string, flavor runFlavor) []
 	case domain.StageImplement:
 		hints = append(hints, buildHints(f)...)
 	case domain.StageVerify:
-		switch f.Kind {
-		case domain.KindResearch:
-			hints = append(hints, researchVerifyHint())
-		default:
-			hints = append(hints, verifyHint(f.Kind))
-		}
-	}
-	// Every research stage writes toward one deterministic floor, and a
-	// rule a stage is never told is one it meets only as a refusal.
-	if f.Kind == domain.KindResearch {
-		hints = append(hints, researchFloorHint(f))
+		hints = append(hints, verifyHint(f.Kind))
 	}
 	// An adopted card's every stage opens onto work it did not write, and
 	// the contract above was written for a branch that started empty. This
@@ -450,14 +393,6 @@ If your verdict is changes, do not ask — the loop is not finished.`)
 // RunCritique refuses any stage CritiqueRoundKind does not know, so this
 // never has to invent a contract for one.
 func critiqueHint(f domain.Feature) string {
-	if f.Kind == domain.KindResearch {
-		// a research critique judges a document at either stage, and is
-		// read-only at both
-		if f.IsDiagnosis() {
-			return diagnosisCritiqueHint()
-		}
-		return researchCritiqueHint()
-	}
 	if f.Stage == domain.StageImplement {
 		return reviewHint(f.Kind)
 	}
@@ -611,203 +546,6 @@ fix fallout your resolution caused. Skip if the repo has no such
 command; this is fallout detection, not full CI, so stop after.
 If a conflict cannot be reconciled, run ` + "`git rebase --abort`" + ` and end
 your final message explaining which conflict and why.`)
-}
-
-// investigateHint is the research build pass contract: an autonomous,
-// read-only survey that grounds every finding in path:line citations so
-// later stages can navigate to them. Research stages run in the card's
-// disposable scratch tree, and the session carries
-// researchWorkingDirGuard alongside this contract; the cwd sentence
-// here states the same facts so the contract never contradicts its
-// wiring.
-func investigateHint() string {
-	return strings.TrimSpace(`
-Stage: Implement — investigate (autonomous). Survey the research
-question against this repo. You run in the card's scratch checkout of
-main — a throwaway, with no worktree — and the repository is read-only to
-you: no tool of yours can edit or commit a file in it, so do not expect to
-modify the code, add instrumentation or run an experiment that changes it.
-The research document is the exception and the point: it is written
-through gummi's own document tools (spec_view, spec_replace_section,
-spec_annotate), which reach the document at its workspace home and nothing
-else.
-Ground every finding with a path:line citation so later stages can
-navigate to it. Write your findings into the document as you go — the
-Findings section is this stage's deliverable, and a survey that ends with
-it empty has produced nothing — and stop when the survey answers the
-research question or names what blocks it.`)
-}
-
-// shapeHint is the research design pass contract: an interactive session
-// that shapes the brief into the research question and the direction the
-// build stage's survey will take. It runs before anything has been
-// surveyed, so there are no options to converge and no evidence to
-// judge — its raw material is the brief and its open questions. Research
-// stages run in the card's disposable scratch tree, and the session
-// carries researchWorkingDirGuard alongside this contract; the cwd
-// sentence here states the same facts so the contract never contradicts
-// its wiring again.
-func shapeHint() string {
-	return strings.TrimSpace(`
-Stage: Plan (interactive; the user is in gummi's chat pane). Shape the
-research question with the user. No survey has run yet — gathering
-evidence is the build stage's job — so your raw material is the brief
-and its open questions, not findings. Scope the question, fix the
-constraints and success criteria it must meet, and pick the direction
-the survey will take, writing each decision into the research document
-as it settles. You run in the card's scratch checkout, a throwaway:
-nothing you write to disk there is kept, and the research document is
-the one durable surface, reached through gummi's spec tools rather than
-the filesystem. Ask one decision at a time with a recommended answer
-attached, and stop when the question, its constraints, and the
-direction are set.`)
-}
-
-// diagnoseShapeHint is the diagnosis design pass contract — the survey's
-// shapeHint transposed onto a symptom. The two stages differ in what
-// their raw material is: a survey starts from a question somebody asked,
-// a diagnosis starts from behaviour somebody saw, and the first thing
-// worth settling is how the investigation will recognise that behaviour
-// when it meets it. Like every research stage it runs in the card's
-// scratch checkout and writes only through gummi's document tools.
-func diagnoseShapeHint() string {
-	return strings.TrimSpace(`
-Stage: Plan (interactive; the user is in gummi's chat pane). Scope the
-investigation with the user. Nothing has been investigated yet —
-gathering evidence is the build stage's job — so your raw material is
-the reported symptom, not findings. Settle three things and write each
-into the diagnosis document as it settles: how the fault is recognised
-(Reproduction — exact steps when it reproduces on demand; when it does
-not, say so and name the evidence that stands in for a repro, such as a
-log, a trace or a failing CI run), what the investigation is bound by
-(Constraints — time, scope, what must not be touched), and anything the
-investigation deliberately will not explain (Out of scope).
-Do not diagnose here and do not propose a fix: a cause named before any
-evidence is gathered is a guess the build stage will then try to
-confirm rather than test.
-The investigation that follows is READ-ONLY by construction — it runs
-with every writing tool stripped — so it cannot add instrumentation,
-run an experiment that edits code, or try a fix. Do not offer any of
-those as an option: scope the investigation to what reading the repo,
-its history and its existing tests can establish, and if the fault
-genuinely cannot be explained without new instrumentation, record that
-under Constraints as the limit it is. You run in the card's scratch checkout, a
-throwaway: nothing you write to disk there is kept, and the diagnosis
-document is the one durable surface, reached through gummi's spec tools
-rather than the filesystem. Ask one decision at a time with a
-recommended answer attached, and stop when the reproduction and the
-constraints are set.`)
-}
-
-// diagnoseInvestigateHint is the diagnosis build pass contract. It is
-// investigateHint's read-only, cited survey pointed at a fault instead of
-// a question, and it carries the two instructions that are the whole
-// reason this mode exists: record what you eliminated, and do not
-// converge on one cause because one is the usual number.
-func diagnoseInvestigateHint() string {
-	return strings.TrimSpace(`
-Stage: Implement — investigate (autonomous). Find out WHY the
-reported symptom happens. You run in the card's scratch checkout of
-main — a throwaway, with no worktree — and the repository is read-only to
-you: no tool of yours can edit or commit a file in it, so you cannot add
-instrumentation, run an experiment that edits code, or test a fix. Work
-from reading, from the reproduction the design stage recorded, and from
-whatever the repo's own history and tests already tell you. The diagnosis
-document is the exception: it is written through gummi's own document
-tools, which reach it at its workspace home and nothing else.
-Write into the diagnosis document as you go:
-- Evidence — what you observed, every claim carrying a path:line
-  citation so the fix cards can navigate straight to it.
-- Ruled out — each candidate cause you eliminated and what eliminated
-  it. A dead end you do not record is one the fix cards pay to walk
-  again.
-- Causes — one bullet per cause, each saying why it produces the
-  symptom. Do not assume there is exactly one: a symptom with two
-  independent causes is common and is the case a bug card cannot
-  express. Equally, do not pad the list — a candidate you cannot tie to
-  the symptom belongs in Ruled out or Open risks, not here.
-- Slices — one row per cause, the fix it needs, with that cause's
-  bullet text in the row's requirements so the coverage check can
-  reconcile them. A cause you are deliberately not fixing goes under
-  Out of scope instead, with the reason.
-Propose the fixes; do not write them. Stop when every cause you can
-establish is recorded with its evidence, or when you can name precisely
-what blocks establishing the rest.`)
-}
-
-// researchCritiqueHint is the research critique pass contract, served
-// to both stages: an adversarial critique of the research document as
-// the stage that just ran left it. It is autonomous and read-only —
-// findings are recorded via submit_verdict, never by editing the
-// artifact. One text serves both stages, so it names what each stage
-// produces instead of claiming where convergence sits in the order.
-func researchCritiqueHint() string {
-	return strings.TrimSpace(`
-Research critique (autonomous, fresh context, read-only).
-Adversarially critique the research document as the stage that just ran
-left it — the shaped question and direction after the design pass, the
-gathered evidence and its grounding in cited sources after the build
-pass — for soundness and completeness, including whether the brief's
-questions are actually answered. Judge the document the stage produced,
-not the one a later stage will write. A "changes" verdict sends the
-stage back for another round rather than blocking a finished document.
-You run with no worktree and cannot modify the artifact: record your
-findings in your final message and submit a verdict via the
-submit_verdict tool (pass or changes), exactly once, instead of writing
-to the document.`)
-}
-
-// researchFloorHint states the research document's deterministic floor
-// (internal/verifydoc) to every stage that writes toward it.
-//
-// The floor decides whether a research card may be marked done, and it
-// used to be stated nowhere a stage could read: a real drive's verify
-// passed, "mark done" was refused for five unmapped questions, and two
-// re-runs "mapped" them with notes citing Findings — an answer in
-// substance that the floor, by design, does not read. The rule is the
-// same sentence the refusal and the report print (verifydoc.CoverageRule),
-// so the stage and the person are told one rule.
-func researchFloorHint(f domain.Feature) string {
-	l := spec.LayoutOf(&f)
-	return strings.TrimSpace(fmt.Sprintf(`
-The research document is held to a deterministic floor before it can
-be marked done, checked by gummi, not by a reviewer's judgement:
-  - no open `+"`%%%% @user`"+` thread;
-  - every `+"`path:line`"+` / `+"`path:start-end`"+` citation under
-    `+"`## %s`"+` resolves against the repository (and a fenced snippet
-    right after one still matches the file);
-  - coverage: %s.
-Whichever stage finishes the document, leave it meeting all three.`, l.Evidence, verifydoc.CoverageRule(l)))
-}
-
-// researchVerifyHint is the research verify contract. A research card's
-// verify used to be served the FEATURE verify hint — gummi-checks, a
-// branch, INV- lines, "ready to land on main" — for a document with none
-// of those, and nothing in it about the one floor its verify is actually
-// held to.
-func researchVerifyHint() string {
-	return strings.TrimSpace(`
-Stage: Verify (autonomous) — the research document. There is no
-branch and nothing to build or run: what you verify is the document.
-Judge whether it answers its brief — every finding grounded in a
-citation that says what the finding claims, every question answered,
-and the direction following from the evidence rather than asserted.
-gummi runs the document's deterministic floor itself (stated below)
-and puts its report as it stands in your kickoff; when this stage
-ends it runs the floor again, and a document that fails it fails
-verify whatever your verdict says. If the report lists unmapped
-questions or broken citations, fix the document with
-spec_replace_section — quote each question in a slice's requirements
-or give it an Out of scope line, correct each citation — and record
-what you changed in the Review section.
-You are autonomous: no one can answer questions, so never end with
-one. End your final message with a verdict on its own line, exactly
-one of:
-  VERDICT: pass       — the document answers its brief and meets the floor
-  VERDICT: fail       — it does not; name what is missing
-  VERDICT: blocked    — the repository cannot be read well enough to judge
-gummi parses this exact line; without it the stage escalates to the
-human as unclear.`)
 }
 
 // reviewHint is the Review stage contract. Review is shared by both
@@ -1139,17 +877,6 @@ attached — and resolve each thread as they decide.
 Alongside the shape of the fix, add ` + fileManifestRubric + `
 The user approves the diagnosis to advance — do not start fixing.`),
 		}
-	case domain.KindResearch:
-		// The design stage shapes the question and the direction; the
-		// evidence is gathered at implement, which is read-only for a
-		// research card (researchReadOnly) exactly as investigate was.
-		// A diagnosis shapes a reproduction instead of a question.
-		if f.IsDiagnosis() {
-			return []string{diagnoseShapeHint()}
-		}
-		return []string{
-			shapeHint(),
-		}
 	default:
 		return []string{
 			planPhasePreamble,
@@ -1236,12 +963,6 @@ Stop when the plan is written; the user approves it.`),
 // were one slot spelled two ways; the difference was never the stage, it
 // was whether the card is a feature or a bug.
 func buildHints(f domain.Feature) []string {
-	if f.Kind == domain.KindResearch {
-		if f.IsDiagnosis() {
-			return []string{diagnoseInvestigateHint()}
-		}
-		return []string{investigateHint()}
-	}
 	if f.Kind == domain.KindBug {
 		return []string{
 			strings.TrimSpace(`
@@ -1302,37 +1023,6 @@ stage runs exactly those commands. If you are addressing review findings, resolv
 the Review section with how you fixed it. If you need a decision or
 hit a blocker, stop and say so clearly rather than guessing.`),
 	}
-}
-
-// diagnosisCritiqueHint is the diagnosis critique pass contract. A
-// diagnosis fails in ways a survey does not — a cause asserted from a
-// plausible reading rather than evidence, a second cause missed because
-// the first one explained enough of the symptom to stop looking, a dead
-// end explored and then not written down — so the critique names those
-// rather than inheriting the survey's "is the question answered".
-func diagnosisCritiqueHint() string {
-	return strings.TrimSpace(`
-Diagnosis critique (autonomous, fresh context, read-only).
-Adversarially critique the diagnosis document as the stage that just ran
-left it — the reproduction and the bounds after the design pass, the
-evidence and the causes after the build pass. Judge the document the
-stage produced, not the one a later stage will write.
-After the build pass, press on four things in particular:
-- Is each cause actually supported by the cited evidence, or is it a
-  plausible reading of the code that nothing observed confirms? A cause
-  that would survive being wrong is not established.
-- Would each cause, on its own, produce the reported symptom? If it
-  explains only part of it, say which part is unaccounted for.
-- Is there a second cause? Check whether the evidence is fully explained
-  by the causes listed, and say so if the document stopped at the first
-  one that fit.
-- Does Ruled out record what was eliminated and why, or does the
-  document only show the path that worked?
-A "changes" verdict sends the stage back for another round rather than
-blocking a finished document. You run with no worktree and cannot modify
-the artifact: record your findings in your final message and submit a
-verdict via the submit_verdict tool (pass or changes), exactly once,
-instead of writing to the document.`)
 }
 
 // freeformContractHint is what a freeform card's session is told about

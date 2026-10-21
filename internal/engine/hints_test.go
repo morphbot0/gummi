@@ -130,9 +130,6 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		{domain.StageImplement, domain.KindBug, []string{
 			"smallest change that resolves the bug", "bounce back to fix",
 		}},
-		{domain.StagePlan, domain.KindResearch, []string{
-			"critique the research document", "submit_verdict",
-		}},
 	} {
 		f := feature(1, "Dark mode", tc.stage)
 		f.Kind = tc.kind
@@ -174,9 +171,6 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}},
 		{domain.StageImplement, domain.KindBug, []string{
 			"smallest change that resolves the bug", "bounce back to fix",
-		}},
-		{domain.StagePlan, domain.KindResearch, []string{
-			"critique the research document", "submit_verdict",
 		}},
 	} {
 		f := feature(1, "Dark mode", tc.stage)
@@ -295,64 +289,6 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	}
 }
 
-// Research stages carry their own stage contracts: the design stage is
-// an interactive shaping session (scope the question, fix the
-// constraints and success criteria, pick the survey's direction), the
-// build stage is an autonomous read-only survey that grounds findings
-// with path:line citations, and review-of-a-document is an autonomous
-// read-only critique that records findings via submit_verdict instead
-// of editing the artifact.
-func TestResearchStageHints(t *testing.T) {
-	cases := []struct {
-		stage domain.Stage
-		want  []string
-	}{
-		{domain.StageImplement, []string{
-			"read-only", "path:line citation", "no worktree",
-		}},
-		{domain.StagePlan, []string{
-			"Shape the research question", "direction the survey will take",
-			"spec tools", "scratch checkout of main",
-		}},
-	}
-	for _, tc := range cases {
-		f := feature(1, "RS topic", tc.stage)
-		f.Kind = domain.KindResearch
-		h := unwrap(strings.Join(stageHints(f, "research.md", "", flavorStage), "\n"))
-		for _, want := range tc.want {
-			if !strings.Contains(h, unwrap(want)) {
-				t.Errorf("%s hint missing %q", tc.stage, want)
-			}
-		}
-	}
-
-	// research's critique judges a document, so it must not carry the
-	// worktree-diff contract: it is read-only and has no
-	// spec_replace_section to record findings with.
-	rf := feature(1, "RS topic", domain.StagePlan)
-	rf.Kind = domain.KindResearch
-	critique := unwrap(strings.Join(stageHints(rf, "research.md", "", flavorCritique), "\n"))
-	for _, want := range []string{"read-only", "submit_verdict", "critique"} {
-		if !strings.Contains(critique, unwrap(want)) {
-			t.Errorf("research critique hint missing %q", want)
-		}
-	}
-	for _, absent := range []string{"spec_replace_section", "Review the worktree diff"} {
-		if strings.Contains(critique, absent) {
-			t.Errorf("research critique hint contains %q; it must be absent", absent)
-		}
-	}
-
-	// a feature's critique is unchanged: it still reviews the diff and
-	// records findings by editing the artifact.
-	nf := feature(1, "Dark mode", domain.StageImplement)
-	nf.Kind = domain.KindFeature
-	ncrit := unwrap(strings.Join(stageHints(nf, "spec.md", "", flavorCritique), "\n"))
-	if !strings.Contains(ncrit, "Review the worktree diff") {
-		t.Error("feature critique hint lost the worktree-diff contract")
-	}
-}
-
 // TestRebaseHintCarriesBuildCheck: F15 concretized the rebase's
 // post-conflict check — name the discoverable build commands rather
 // than "if the repo has one".
@@ -440,64 +376,6 @@ func TestInteractiveKickoffQuickSpec(t *testing.T) {
 	}
 }
 
-// Research design and build are architect work (shaping a research
-// topic, then surveying it), and the design stage is a gated interactive
-// chat that must have its own opener — a missing case panics in
-// interactiveKickoff.
-func TestResearchRolesAndKickoff(t *testing.T) {
-	// a research card is architect work at BOTH agent stages: its design
-	// stage shapes the question, and its build stage gathers evidence and
-	// writes it up — there is no code either side of the gate.
-	for _, st := range []domain.Stage{domain.StagePlan, domain.StageImplement} {
-		f := feature(1, "RS", st)
-		f.Kind = domain.KindResearch
-		if role, ok := roleForStage(f); !ok || role != agent.RoleArchitect {
-			t.Errorf("roleForStage(research, %s) = %s/%v, want architect", st, role, ok)
-		}
-	}
-	// and a feature's build stage is still implementer work
-	if role, _ := roleForStage(feature(1, "FD", domain.StageImplement)); role != agent.RoleImplementer {
-		t.Errorf("roleForStage(feature, implement) = %s, want implementer", role)
-	}
-	f := feature(1, "RS", domain.StagePlan)
-	f.Kind = domain.KindResearch
-	if got := designKickoff(f); !strings.Contains(got, "research") {
-		t.Errorf("research kickoff = %q, want the research opener", got)
-	}
-}
-
-// TestResearchContractsMatchMergedOrder pins the research contracts to the
-// merged graph's order: the design stage shapes the question and the
-// direction before anything has been surveyed, and the survey runs at
-// build. The design contract must therefore not ask the agent to converge
-// surveyed options (nothing has been surveyed when it runs), and the
-// research critique — which serves both stages, always downstream of the
-// design pass — must not claim convergence is still ahead of it. Both
-// stage contracts must also match their wiring on the working directory:
-// every research stage runs in the card's scratch tree, never the main
-// checkout.
-func TestResearchContractsMatchMergedOrder(t *testing.T) {
-	f := feature(1, "RS", domain.StagePlan)
-	f.Kind = domain.KindResearch
-	if design := unwrap(designHints(f)[0]); strings.Contains(design, "surveyed") {
-		t.Errorf("research design contract asks to converge surveyed options before any survey runs: %q", design)
-	}
-	if crit := unwrap(critiqueHint(f)); strings.Contains(crit, "has not converged") {
-		t.Errorf("research critique claims convergence is still ahead, but the design pass already ran: %q", crit)
-	}
-	// the design contract must not contradict its wiring on the working
-	// directory: every research stage runs in the card's scratch tree,
-	// never the main checkout.
-	if design := unwrap(designHints(f)[0]); strings.Contains(design, "main checkout") {
-		t.Errorf("research design contract contradicts its scratch-tree wiring (mentions the main checkout): %q", design)
-	}
-	build := f
-	build.Stage = domain.StageImplement
-	if survey := unwrap(buildHints(build)[0]); strings.Contains(survey, "main checkout") {
-		t.Errorf("research build contract contradicts its scratch-tree wiring (mentions the main checkout): %q", survey)
-	}
-}
-
 // TestSpecHintTeachesBaselineOptOut: baseline: false is a domain.Check
 // field the rubric is the only place an agent could learn about. Without
 // the rule, a check aimed at a file the feature has yet to create fails
@@ -523,17 +401,6 @@ func TestWorktreeBoundaryReachesEveryWorktreeStage(t *testing.T) {
 	crit := strings.Join(stageHints(feature(1, "boundary", domain.StagePlan), "/w/spec.md", "", flavorCritique), "\n")
 	if !strings.Contains(crit, "Never cd into the repository's main checkout") {
 		t.Error("the critique pass is not told where its boundary is")
-	}
-	// a research card has its own working-directory guard and must not be
-	// handed a second, contradictory one
-	r := feature(2, "research", domain.StagePlan)
-	r.Kind = domain.KindResearch
-	rh := strings.Join(stageHints(r, "/w/doc.md", "", flavorStage), "\n")
-	if strings.Contains(rh, "Never cd into the repository's main checkout") {
-		t.Error("a research card got the worktree boundary hint; it has no worktree")
-	}
-	if !strings.Contains(rh, "scratch checkout of main") {
-		t.Error("a research card lost its own working-directory guard")
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -181,66 +180,6 @@ func firstWorkStageRound(h *harness) int {
 		}
 	}
 	return -1
-}
-
-// TestRSReviewLegLanding proves the research review-loop routing this
-// feature adds: a research card that was bounced review→investigate (one
-// review round already burned) parks/resumes at Investigate with the
-// review counter seeded from the store — round 1, not a fresh grant — and
-// the driver steps a research card's work stage forward to verify like
-// any other card's, rather than hitting an "unexpected autonomous stage"
-// default. One graph means research has no special leg to land on.
-func TestRSReviewLegLanding(t *testing.T) {
-	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Investigated further.")
-		},
-
-		// the work stage ends with a critique now; a drive that is not
-		// about the critique still needs it to pass.
-		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-	})
-	// research stages run read-only in the main checkout; only a backend
-	// that can structurally enforce that is allowed to drive them.
-	h.fake.Caps.ReadOnlyEnforce = true
-	id, err := domain.NewID(domain.KindResearch, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slug, _ := domain.Slugify("research card")
-	now := time.Now()
-	f := domain.Feature{
-		ID: id, Num: 1, Kind: domain.KindResearch, Title: "research card", Slug: slug,
-		Stage: domain.StageImplement, CreatedAt: now, UpdatedAt: now,
-	}
-	putDraft(t, h, &f, "# RS-001: research card\n\n## Findings\n\nNothing yet.\n")
-	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
-		t.Fatal(err)
-	}
-	// simulate the prior review→investigate bounce: one round already burned.
-	if err := h.store.SetReviewRounds(context.Background(), f.ID, 1); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = h.driver(Options{}).drive(context.Background(), f.ID)
-	if err != nil {
-		t.Fatalf("drive: %v", err)
-	}
-	// The card walks its work leg forward and lands on research's own
-	// decompose gate, which this fixture has no proposals for — that gate
-	// is decompose's business, tested there. What matters here is that the
-	// leg moved at all and carried its burned round with it.
-	if got := h.stageOf(f.ID); got == domain.StageImplement {
-		t.Fatalf("feature stuck at %s; the work leg never stepped forward", got)
-	}
-	if r := investigateStageRound(h); r != 1 {
-		t.Fatalf("work-stage event round = %d, want 1 (the burned round, not a fresh grant)", r)
-	}
 }
 
 // investigateStageRound returns the round of the investigate stage event

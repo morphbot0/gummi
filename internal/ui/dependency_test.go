@@ -2,8 +2,6 @@ package ui
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +10,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/livelog"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -106,46 +103,6 @@ func TestAdvanceBlockedByDependency(t *testing.T) {
 	}
 	if !strings.Contains(m.notice.text, "FD-002@implement") {
 		t.Errorf("notice = %q, want it to name the unmet dependency", m.notice.text)
-	}
-}
-
-// A research card at verify whose document fails the deterministic
-// citation floor (internal/verifydoc) blocks on 'g': the notice names the
-// failing checks — not a "→ done" transition notice — and the card stays
-// at verify. advanceStage calls engine.Advance directly, with no agent
-// session involved, so a transient engine (no configured agent) suffices.
-func TestAdvanceBlockedByDocument(t *testing.T) {
-	m, _ := newWorkspace(t)
-	m.now = func() time.Time { return fixedTime }
-	ctx := context.Background()
-	f := &domain.Feature{
-		ID: "RS-001", Num: 1, Kind: domain.KindResearch, Title: "research card", Slug: "research-card",
-		Stage: domain.StageVerify, CreatedAt: fixedTime, UpdatedAt: fixedTime,
-	}
-	if err := m.store.CreateFeature(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	draft := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f))
-	body := "# RS-001: research card\n\n## Findings\n\n" +
-		"Broken cite `internal/missing.go:1` here.\n"
-	if err := os.WriteFile(draft, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	m = pump(t, m, m.Init()) // load rows
-	m = pressAdvance(t, m)
-	got, _ := m.store.GetFeature(ctx, f.ID)
-	if got.Stage != domain.StageVerify {
-		t.Fatalf("failing document did not block the gate (stage=%s)", got.Stage)
-	}
-	if !strings.Contains(m.notice.text, "1 broken citation") {
-		t.Errorf("notice = %q, want it to name the failing citation check", m.notice.text)
-	}
-	if !m.notice.isErr {
-		t.Error("blocked notice should be styled as an error")
 	}
 }
 

@@ -133,10 +133,6 @@ func TestSectionOwner(t *testing.T) {
 		{domain.CardType{Kind: domain.KindFeature}, "Review", "", false},
 		{domain.CardType{Kind: domain.KindBug}, "Root cause", domain.StagePlan, true},
 		{domain.CardType{Kind: domain.KindBug}, "Fix", domain.StageImplement, true},
-		{domain.CardType{Kind: domain.KindResearch}, "Direction", domain.StagePlan, true},
-		{domain.CardType{Kind: domain.KindResearch}, "Findings", domain.StageImplement, true},
-		{domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}, spec.DiagSectionRepro, domain.StagePlan, true},
-		{domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}, spec.DiagSectionEvidence, domain.StageImplement, true},
 		{domain.CardType{Kind: domain.KindGoal}, "Objective", "", false},
 		{domain.CardType{Kind: domain.KindFeature}, "", "", false},
 	}

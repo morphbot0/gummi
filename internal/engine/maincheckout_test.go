@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // gitOut runs git in the main checkout, failing the test on error and
@@ -66,36 +65,5 @@ func TestMainCheckoutWriteDoesNotEndTheRun(t *testing.T) {
 	waitFor(t, e, EventIdle)
 	if out := gitOut(t, root, "status", "--porcelain", "--untracked-files=all"); !strings.Contains(out, "cmd/gummi/main.go") {
 		t.Fatalf("the write should be left exactly as the agent made it; status:\n%s", out)
-	}
-}
-
-// TestResearchPreExistingDirtStartsAnyway: an autonomous research pass
-// used to refuse to start over an operator's uncommitted work, because it
-// ran in that checkout; it runs in the card's scratch tree now, so the
-// dirt is out of its reach and refusing would park a card over a state it
-// cannot touch. The dirt must still be there afterwards, untouched.
-func TestResearchPreExistingDirtStartsAnyway(t *testing.T) {
-	rec := &recorder{Fake: agent.NewFake("ack")}
-	rec.Caps.ReadOnlyEnforce = true
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "rs investigate", domain.StageImplement)
-	f.ID = domain.FeatureID("RS-001")
-	f.Kind = domain.KindResearch
-	if err := store.CreateFeature(context.Background(), &f); err != nil {
-		t.Fatal(err)
-	}
-	writeAt(t, wt.Root(), "README.md", "operator dirty\n")
-	if err := e.Run(f); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	waitFor(t, e, EventIdle)
-	if rec.count() != 1 {
-		t.Fatalf("session count = %d, want 1 (the operator's dirt must not block the run)", rec.count())
-	}
-	if out := gitOut(t, wt.Root(), "status", "--porcelain"); !strings.Contains(out, "README.md") {
-		t.Fatal("operator's README.md dirt vanished")
 	}
 }

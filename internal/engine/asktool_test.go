@@ -971,36 +971,6 @@ func researchReadonlySession(t *testing.T) (*Engine, *Session) {
 	return e, s
 }
 
-// TestReadOnlyResearchWritesItsDocument is the regression for the worst
-// finding of the lxd autopilot drive: a research card's survey stage was
-// served no tool that could write the document it exists to produce.
-//
-// spec_replace_section used to be refused outright on any read-only
-// research session, "so the MCP bridge cannot rewrite the main checkout".
-// It cannot: the tool is gummi-mediated and writes the card's artifact at
-// its workspace home. What guards the checkout is the adapter's own
-// read-only mode, which Engine.run refuses to start such a session
-// without (Capabilities().ReadOnlyEnforce, covered by
-// TestResearchReadOnlyRefusedOnNonEnforcingBackend).
-func TestReadOnlyResearchWritesItsDocument(t *testing.T) {
-	e, s := researchReadonlySession(t)
-	result, err := e.DispatchClientTool(context.Background(), s, "spec_replace_section",
-		json.RawMessage(`{"section":"Problem","body":"the survey found this"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(result, "not available") {
-		t.Fatalf("a research survey is still refused its own document tool: %q", result)
-	}
-	after, err := os.ReadFile(s.SpecPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(after), "the survey found this") {
-		t.Errorf("the survey's write never reached the document:\n%s", after)
-	}
-}
-
 func TestArchitectToolHintMentionsSpecTools(t *testing.T) {
 	hint := toolHint(domain.StagePlan, flavorStage)
 	for _, want := range []string{"spec_view", "spec_replace_section"} {

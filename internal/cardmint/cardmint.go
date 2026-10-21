@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/atomicfile"
@@ -57,11 +56,6 @@ type Input struct {
 	// draft-seeded shape, and KindResearch mints an RS card and seeds its
 	// `## Brief` directly (research has no draft step).
 	Kind domain.Kind
-	// Mode refines KindResearch into the survey (empty) or the diagnosis
-	// contract, choosing which document template seeds the card. Ignored
-	// for every other kind, and refused by Feature.Validate if it reaches
-	// one.
-	Mode domain.ResearchMode
 	// Description is the free-form input text: its first line is the
 	// title (domain.SplitFreeform). For KindResearch the whole text is the
 	// Brief; for everything else the overflow past the first line seeds
@@ -291,21 +285,14 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	// A research card's names already say research — its id is RS-,
-	// its document lives under research/ — and people title one
-	// "Research: …", which made every name it carries say it twice
-	// (research/research-compare-…). The title keeps the word; the slug
-	// drops it.
-	if in.Kind == domain.KindResearch {
-		if rest, ok := strings.CutPrefix(slug, "research-"); ok && rest != "" {
-			slug = rest
-		}
-	}
 	// Sessions are the card a person makes now; the workflow kinds are
 	// minted only by the callers that still drive them (Input.Workflow),
 	// and a goal by none.
 	if in.Kind == domain.KindGoal {
 		return domain.Feature{}, fmt.Errorf("goals are retired: start a session and let its crew do the work")
+	}
+	if in.Kind == domain.KindResearch {
+		return domain.Feature{}, fmt.Errorf("research cards are retired: start a session and ask it")
 	}
 	if in.Kind != domain.KindFreeform && !in.Workflow {
 		return domain.Feature{}, fmt.Errorf("a %s card is no longer made here: start a session instead", in.Kind)
@@ -402,17 +389,9 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if gate == "" {
 		gate = domain.GateAttended
 	}
-	// Only a research card carries a mode; dropping it here rather than
-	// refusing keeps a caller that presets the dialog's type row (where
-	// diagnosis sits beside research) from failing when the person then
-	// moves the row to bug.
-	mode := in.Mode
-	if in.Kind != domain.KindResearch {
-		mode = domain.ModeSurvey
-	}
 	now := time.Now()
 	f := domain.Feature{
-		ID: id, Num: num, Kind: in.Kind, Mode: mode, Title: title, OneLiner: oneLiner,
+		ID: id, Num: num, Kind: in.Kind, Title: title, OneLiner: oneLiner,
 		// InitialFor, not Initial: a freeform card starts outside the
 		// graph, at domain.StageOpen, and never enters it.
 		Slug: slug, Stage: workflow.InitialFor(in.Kind),
@@ -438,21 +417,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	}
 	f.ParentID = in.Parent
 	f.FoundBy = in.FoundBy
-	if in.Kind == domain.KindResearch {
-		artifact := filepath.Join(ws.Root, f.ArtifactPath())
-		seed := domain.ResearchSeed{Brief: in.Description}
-		prov := domain.DraftProvenance{Source: in.Source}
-		content := spec.SeededResearchTemplate(&f, seed, prov)
-		if mode == domain.ModeDiagnosis {
-			content = spec.SeededDiagnosisTemplate(&f, seed, prov)
-		}
-		if err := os.MkdirAll(filepath.Dir(artifact), 0o750); err != nil {
-			return domain.Feature{}, err
-		}
-		if err := atomicfile.Write(artifact, []byte(content), 0o600); err != nil {
-			return domain.Feature{}, err
-		}
-	} else if in.Kind != domain.KindFreeform &&
+	if in.Kind != domain.KindFreeform &&
 		(seed != "" || in.Acceptance != "" || in.Adopt != "" || (in.Kind == domain.KindBug && in.Discussion != "")) {
 		// seed the draft before persisting: the description's overflow fills
 		// the Problem section (a title-sized description seeds nothing

@@ -157,62 +157,6 @@ func TestMintAcceptanceAloneSeedsDraft(t *testing.T) {
 	}
 }
 
-// TestMintResearch: research uses SplitDescription (no seed/draft), always
-// takes the full route regardless of Full, and renders straight to the RS
-// artifact path instead of a draft.
-func TestMintResearch(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Workflow: true,
-		Kind:     domain.KindResearch, Description: "grounded look at auth", Envelope: 2400,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Kind != domain.KindResearch {
-		t.Errorf("kind = %q", f.Kind)
-	}
-	artifact := filepath.Join(ws.Root, f.ArtifactPath())
-	raw, err := os.ReadFile(artifact)
-	if err != nil {
-		t.Fatalf("expected a research artifact: %v", err)
-	}
-	if !strings.Contains(string(raw), "grounded look at auth") {
-		t.Errorf("artifact missing brief text:\n%s", raw)
-	}
-	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-	if _, err := os.Stat(draft); !os.IsNotExist(err) {
-		t.Errorf("research should not seed a draft, stat err = %v", err)
-	}
-}
-
-// A research card titled "Research: …" does not say research twice in
-// every name it carries (research/research-compare-…); the title keeps
-// the word. A title that is only the word keeps it as its slug.
-func TestMintResearchDoesNotDoubleTheWord(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Workflow: true,
-		Kind:     domain.KindResearch, Description: "Research: compare greeting libraries", Envelope: 2400,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Slug != "compare-greeting-libraries" || f.Title != "Research: compare greeting libraries" {
-		t.Errorf("slug = %q, title = %q", f.Slug, f.Title)
-	}
-	if b := f.BranchName(); strings.Contains(b, "research-research") || strings.Contains(b, "research/research") {
-		t.Errorf("branch name doubles the word: %s", b)
-	}
-	g, err := Mint(context.Background(), store, ws, Input{Workflow: true, Kind: domain.KindResearch, Description: "Research", Envelope: 2400})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if g.Slug != "research" {
-		t.Errorf("a title that is only the word slugs to %q", g.Slug)
-	}
-}
-
 // TestMintRejectsUnknownRepoBeforeMinting: an unconfigured repo fails, and
 // fails before a sequence number is consumed — matching both prior
 // duplicates' behavior (createFeature, Materialize's requireRepo).
@@ -442,55 +386,6 @@ func TestMintFeatureAcceptanceHeading(t *testing.T) {
 	}
 }
 
-func TestMintDiagnosisSeedsTheDiagnosisDocument(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	ctx := context.Background()
-	f, err := Mint(ctx, store, ws, Input{
-		Workflow: true,
-		Kind:     domain.KindResearch, Mode: domain.ModeDiagnosis,
-		Description: "The picker drops answers\n\nSeen twice today, both on a tall window.",
-		Envelope:    300,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Mode != domain.ModeDiagnosis || !f.IsDiagnosis() {
-		t.Fatalf("minted card mode = %q", f.Mode)
-	}
-	got, err := store.GetFeature(ctx, f.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Mode != domain.ModeDiagnosis {
-		t.Errorf("the mode did not survive the store: %q", got.Mode)
-	}
-	raw, err := os.ReadFile(filepath.Join(ws.Root, f.ArtifactPath()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(raw)
-	if _, ok := spec.ViewSection(body, "Symptom"); !ok {
-		t.Errorf("the diagnosis card got the survey template:\n%s", body)
-	}
-	sym, _ := spec.ViewSection(body, "Symptom")
-	if !strings.Contains(sym, "Seen twice today") {
-		t.Errorf("the description did not seed the symptom: %q", sym)
-	}
-}
-
-// TestMintDropsAModeOnANonResearchKind: a surface that presets the type
-// row and then moves it must not mint a bug carrying a research mode.
-func TestMintDropsAModeOnANonResearchKind(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{Workflow: true, Kind: domain.KindBug, Mode: domain.ModeDiagnosis, Description: "Login loops", Envelope: 300})
-	if err != nil {
-		t.Fatalf("the mint should drop the mode, not fail: %v", err)
-	}
-	if f.Mode != domain.ModeSurvey {
-		t.Errorf("a bug card kept mode %q", f.Mode)
-	}
-}
-
 // A newly minted card gets the per-kind branch spelling — the kind of
 // work and the label, no card id.
 func TestMintUsesTheKindBranchScheme(t *testing.T) {
@@ -565,10 +460,13 @@ func TestMintAllowsSameLabelAcrossKinds(t *testing.T) {
 	if got := f.BranchName(); got != "feat/rate-limits" {
 		t.Errorf("BranchName() = %q, want feat/rate-limits", got)
 	}
-	if _, rerr := Mint(ctx, store, ws, Input{
-		Workflow: true,
-		Kind:     domain.KindResearch, Description: "rate limits", Envelope: 100,
-	}); rerr != nil {
-		t.Errorf("a research card has no branch and must never collide: %v", rerr)
+}
+
+// TestMintRefusesResearch: research cards are retired; nothing mints one,
+// not even a caller that still drives the workflow.
+func TestMintRefusesResearch(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	if _, err := Mint(context.Background(), store, ws, Input{Workflow: true, Kind: domain.KindResearch, Description: "Why is it slow", Envelope: 300}); err == nil {
+		t.Fatal("a research card was minted")
 	}
 }

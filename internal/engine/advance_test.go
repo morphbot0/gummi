@@ -858,128 +858,9 @@ func TestAdvanceDependencyGateNotCoding(t *testing.T) {
 	}
 }
 
-// --- research workflow (worktree-less routing) ---
-
-// A research card walks its whole graph without ever materializing a
-// worktree: research routes investigate/shape/review/verify/done all
-// to the main checkout, so Advance never reports EnteredWorktree and no
-// worktree exists.
-func TestAdvanceResearchNoWorktree(t *testing.T) {
-	e, ws, store, wt := advanceEngine(t)
-	ctx := context.Background()
-	f := feature(1, "rs topic", domain.StageTodo)
-	f.ID = domain.FeatureID("RS-001")
-	f.Kind = domain.KindResearch
-	putFeature(t, store, f)
-	draftDesign(t, ws, f)
-
-	for _, want := range []domain.Stage{
-		domain.StagePlan, domain.StageImplement, domain.StageVerify, domain.StageDone,
-	} {
-		res := mustAdvance(t, e, f.ID)
-		if res.Status != StatusAdvanced || res.To != want {
-			t.Fatalf("advance to %s: status=%d to=%s", want, res.Status, res.To)
-		}
-		if res.EnteredWorktree {
-			t.Fatalf("research card created a worktree at %s", want)
-		}
-	}
-	if ok, _ := wt.Exists(ctx, &f); ok {
-		t.Fatal("research card materialized a worktree")
-	}
-}
-
-// Verify→done for a research card never reports NeedsMerge: there is no
-// branch to land, so the merge gate falls through straight to the
-// transition, and the squash-merge/commit-message scribe path (only ever
-// reached from StatusNeedsMerge) is never entered.
-func TestAdvanceResearchVerifyDoneNoMerge(t *testing.T) {
-	e, ws, store, _ := advanceEngine(t)
-	f := feature(1, "research no land", domain.StagePlan)
-	f.ID = domain.FeatureID("RS-001")
-	f.Kind = domain.KindResearch
-	putFeature(t, store, f)
-	draftDesign(t, ws, f)
-
-	for stage := domain.StagePlan; stage != domain.StageVerify; {
-		res := mustAdvance(t, e, f.ID)
-		stage = res.To
-	}
-	res := mustAdvance(t, e, f.ID)
-	if res.Status != StatusAdvanced || res.To != domain.StageDone {
-		t.Fatalf("research verify→done: status=%d to=%s, want advanced/done", res.Status, res.To)
-	}
-	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageDone {
-		t.Fatalf("research card did not reach done: %s", got.Stage)
-	}
-}
-
-// TestAdvanceVerifyDocument mirrors verifychecks_test.go's shape for the
-// new deterministic document gate: a research card at verify whose
-// artifact fails the citation floor (no open user threads, so the new
-// verifydoc gate is exercised rather than StatusBlockedQuestions) stays at
-// verify with the broken citation named in the report; fixing the
-// citation advances it straight to done.
-func TestAdvanceVerifyDocument(t *testing.T) {
-	e, ws, store, wt := advanceEngine(t)
-	f := feature(1, "rs verify", domain.StageVerify)
-	f.ID = domain.FeatureID("RS-001")
-	f.Kind = domain.KindResearch
-	putFeature(t, store, f)
-
-	if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-	// Both documents draft `## Findings`: the done edge's undrafted gate
-	// runs ahead of the document floor, so a document still holding that
-	// section's template prompt would be held there and never reach the
-	// citation check this test is about.
-	failing := "# RS-001: rs verify\n\n## Findings\n\n" +
-		"Broken cite `internal/missing.go:1` here.\n"
-	if err := os.WriteFile(draft, []byte(failing), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	res := mustAdvance(t, e, f.ID)
-	if res.Status != StatusBlockedDocument {
-		t.Fatalf("status=%d, want StatusBlockedDocument", res.Status)
-	}
-	if len(res.DocumentReport.Citations) != 1 {
-		t.Fatalf("DocumentReport.Citations = %+v, want exactly 1 issue", res.DocumentReport.Citations)
-	}
-	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageVerify {
-		t.Fatalf("blocked document gate still transitioned to %s", got.Stage)
-	}
-
-	// fix the citation: an existing, in-range file under the repo root
-	if err := os.MkdirAll(filepath.Join(wt.RepoRoot(), "internal"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	cited := filepath.Join(wt.RepoRoot(), "internal", "foo.go")
-	if err := os.WriteFile(cited, []byte("package foo\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	passing := "# RS-001: rs verify\n\n## Findings\n\n" +
-		"Cite `internal/foo.go:1` here.\n"
-	if err := os.WriteFile(draft, []byte(passing), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	res = mustAdvance(t, e, f.ID)
-	if res.Status != StatusAdvanced || res.To != domain.StageDone {
-		t.Fatalf("passing document: status=%d to=%s, want advanced/done", res.Status, res.To)
-	}
-	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageDone {
-		t.Fatalf("research card did not reach done: %s", got.Stage)
-	}
-}
-
 // TestRequiredSections is a table test over the free function's whole
 // contract: what each gate owes, and nothing for every edge that owes
-// nothing. Research is in the table now — its edges used to return nil on
-// the theory that verifydoc covered the done edge, which it only does for
-// a document that has citations to break in the first place.
+// nothing.
 func TestRequiredSections(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1007,34 +888,12 @@ func TestRequiredSections(t *testing.T) {
 			[]string{"Verification"},
 		},
 		{
-			// what the shape contract's own stop condition names
-			"research's design gate owes question, constraints, direction", domain.KindResearch,
-			domain.StagePlan, domain.StageImplement,
-			[]string{"Questions", "Constraints", "Direction"},
-		},
-		{
-			"research's build gate owes the survey", domain.KindResearch,
-			domain.StageImplement, domain.StageVerify,
-			[]string{"Findings"},
-		},
-		{
-			// Findings only: Slices is deliberately not owed, because a
-			// zero-slice RS is a legitimate terminal (see requiredSections)
-			"research to done owes findings", domain.KindResearch, domain.StageVerify,
-			domain.StageDone,
-			[]string{"Findings"},
-		},
-		{
 			"the todo kickoff owes nothing", domain.KindFeature, domain.StageTodo,
 			domain.StagePlan, nil,
 		},
 		{
 			"implement to verify owes nothing", domain.KindFeature,
 			domain.StageImplement, domain.StageVerify, nil,
-		},
-		{
-			"research's todo kickoff owes nothing either", domain.KindResearch,
-			domain.StageTodo, domain.StagePlan, nil,
 		},
 	}
 	for _, c := range cases {
@@ -1170,116 +1029,6 @@ func TestAdvanceUndraftedGateFallsThroughOnMissingArtifact(t *testing.T) {
 	}
 }
 
-// TestResearchGatesOweSectionsOnEveryEdge walks the blank research
-// template past all three research edges. It is the regression for a
-// research card that went todo→done in four keypresses, spending nothing,
-// with all nine sections still holding their `%% @gummi:` prompts:
-// requiredSections had no research row at all, so every research gate
-// returned nil and the verifydoc floor on the done edge passed vacuously
-// (no citations to break, no questions to leave unanswered).
-//
-// The done edge owes Findings alone — see requiredSections for why Slices
-// is deliberately not required, and TestResearchDoneGateAllowsAZeroSliceCard
-// for the case that would break if it were.
-func TestResearchGatesOweSectionsOnEveryEdge(t *testing.T) {
-	f := researchFeature(domain.StagePlan)
-	blank := spec.ResearchTemplate(&f)
-
-	for _, tc := range []struct {
-		name     string
-		from, to domain.Stage
-		want     []string
-	}{
-		{"design", domain.StagePlan, domain.StageImplement, []string{"Questions", "Constraints", "Direction"}},
-		{"build", domain.StageImplement, domain.StageVerify, []string{"Findings"}},
-		{"done", domain.StageVerify, domain.StageDone, []string{"Findings"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := UndraftedGateSections(domain.CardType{Kind: domain.KindResearch}, tc.from, tc.to, blank)
-			if len(got) != len(tc.want) {
-				t.Fatalf("undrafted = %v, want %v", got, tc.want)
-			}
-			for i, want := range tc.want {
-				if got[i] != want {
-					t.Fatalf("undrafted = %v, want %v", got, tc.want)
-				}
-			}
-		})
-	}
-}
-
-// A research document whose sections were actually written crosses every
-// one of those edges: the gate must not be a standing "no" for research
-// the way returning nil made it a standing "yes".
-func TestResearchGatesPassOnADraftedDocument(t *testing.T) {
-	doc := "# RS-003: quota accounting\n\n" +
-		"## Questions\n\nDoes the meter double-count a retried call?\n\n" +
-		"## Constraints\n\nRead-only; one week.\n\n" +
-		"## Findings\n\nThe retry path re-enters the meter at `internal/meter.go:42`.\n\n" +
-		"## Direction\n\nMeter at the transport seam, not the call site.\n\n" +
-		"## Slices\n\n```yaml\n- title: move the meter\n  one-liner: meter at the transport seam\n" +
-		"  depends-on: []\n  requirements: []\n  id: \"\"\n```\n"
-
-	for _, edge := range [][2]domain.Stage{
-		{domain.StagePlan, domain.StageImplement},
-		{domain.StageImplement, domain.StageVerify},
-		{domain.StageVerify, domain.StageDone},
-	} {
-		if got := UndraftedGateSections(domain.CardType{Kind: domain.KindResearch}, edge[0], edge[1], doc); got != nil {
-			t.Errorf("%s→%s: undrafted = %v, want none", edge[0], edge[1], got)
-		}
-	}
-}
-
-// TestResearchDoneGateAllowsAZeroSliceCard pins the one thing the done
-// edge must NOT do. `## Slices` is the decomposition's input, so requiring
-// it here looks obviously right and is wrong: "this needs no follow-on
-// work" is a conclusion research is allowed to reach, and the rest of the
-// system already treats it as terminal rather than broken —
-// DecomposeForCard no-ops on a doc with no unsettled rows, and
-// TestZeroSliceRSExitsDoneCleanly drives such a card to done without ever
-// spawning an architect. An earlier pass at this gate did demand Slices
-// and broke all four of those paths at once.
-func TestResearchDoneGateAllowsAZeroSliceCard(t *testing.T) {
-	doc := "# RS-003: quota accounting\n\n" +
-		"## Findings\n\nThe retry path re-enters the meter at `internal/meter.go:42`.\n\n" +
-		"## Slices\n\n%% @gummi: the proposed follow-on work, one row per slice\n"
-
-	if got := UndraftedGateSections(domain.CardType{Kind: domain.KindResearch}, domain.StageVerify, domain.StageDone, doc); len(got) != 0 {
-		t.Fatalf("undrafted = %v, want none: a surveyed card with nothing to mint still reaches done", got)
-	}
-	// The evidence is still owed, so the gate has not simply been switched off.
-	empty := "# RS-003: quota accounting\n\n## Findings\n\n%% @gummi: what the investigation learned\n"
-	if got := UndraftedGateSections(domain.CardType{Kind: domain.KindResearch}, domain.StageVerify, domain.StageDone, empty); len(got) != 1 || got[0] != "Findings" {
-		t.Fatalf("undrafted = %v, want [Findings]", got)
-	}
-}
-
-// TestAdvanceBlockedByUndraftedResearchDocument drives the blank template
-// through the real e.Advance blocker chain, under GateAutopilot — the way
-// the four-keypress walk happened. The `%% @gummi:` prompts are gummi's
-// own markers, so the open-questions blocker never sees them: the
-// undrafted gate is the only thing standing between a template and a
-// finished research card.
-func TestAdvanceBlockedByUndraftedResearchDocument(t *testing.T) {
-	e, ws, store, _ := advanceEngine(t)
-	f := researchFeature(domain.StagePlan)
-	f.GateApproval = domain.GateAutopilot
-	putFeature(t, store, f)
-	writeDraftBody(t, ws, f, spec.ResearchTemplate(&f))
-
-	res := mustAdvance(t, e, f.ID)
-	if res.Status != StatusBlockedUndrafted {
-		t.Fatalf("status=%d, want StatusBlockedUndrafted", res.Status)
-	}
-	if len(res.Undrafted) != 3 || res.Undrafted[0] != "Questions" {
-		t.Fatalf("Undrafted = %v, want [Questions Constraints Direction]", res.Undrafted)
-	}
-	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StagePlan {
-		t.Fatalf("blocked undrafted gate still transitioned to %s", got.Stage)
-	}
-}
-
 // A comment written at todo — the natural way to hand the agent context
 // before starting it — must not block the card from starting. Leaving
 // todo is not a review gate: nothing has been produced to object to, and
@@ -1320,59 +1069,5 @@ func TestAdvanceFromTodoIgnoresComments(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "also cover the rm command?") {
 		t.Fatalf("the user's comment did not survive the crossing:\n%s", raw)
-	}
-}
-
-// TestDiagnosisGateSections: the diagnosis edges owe their own sections,
-// and the survey's rows are untouched — the two are selected by the mode,
-// not by the kind they share.
-func TestDiagnosisGateSections(t *testing.T) {
-	diag := domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}
-	survey := domain.CardType{Kind: domain.KindResearch}
-	for _, tc := range []struct {
-		name     string
-		ct       domain.CardType
-		from, to domain.Stage
-		want     []string
-	}{
-		{"diagnosis design", diag, domain.StagePlan, domain.StageImplement, []string{"Reproduction", "Constraints"}},
-		{"diagnosis build", diag, domain.StageImplement, domain.StageVerify, []string{"Evidence"}},
-		{"diagnosis done", diag, domain.StageVerify, domain.StageDone, []string{"Evidence"}},
-		{"diagnosis kickoff owes nothing", diag, domain.StageTodo, domain.StagePlan, nil},
-		{"survey design is unchanged", survey, domain.StagePlan, domain.StageImplement, []string{"Questions", "Constraints", "Direction"}},
-		{"survey done is unchanged", survey, domain.StageVerify, domain.StageDone, []string{"Findings"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := requiredSections(tc.ct, tc.from, tc.to)
-			if len(got) != len(tc.want) {
-				t.Fatalf("requiredSections = %v, want %v", got, tc.want)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Fatalf("requiredSections = %v, want %v", got, tc.want)
-				}
-			}
-		})
-	}
-}
-
-// TestBlankDiagnosisIsUndraftedAtEveryGate: the reason the rows above
-// exist. A diagnosis document nobody wrote in must not walk todo→done on
-// four keypresses any more than a blank research one may.
-func TestBlankDiagnosisIsUndraftedAtEveryGate(t *testing.T) {
-	card := domain.Feature{
-		ID: "RS-009", Num: 9, Kind: domain.KindResearch, Mode: domain.ModeDiagnosis,
-		Title: "why", Slug: "why", Stage: domain.StagePlan,
-	}
-	blank := spec.DiagnosisTemplate(&card)
-	ct := domain.CardTypeOf(&card)
-	for _, tc := range []struct{ from, to domain.Stage }{
-		{domain.StagePlan, domain.StageImplement},
-		{domain.StageImplement, domain.StageVerify},
-		{domain.StageVerify, domain.StageDone},
-	} {
-		if got := UndraftedGateSections(ct, tc.from, tc.to, blank); len(got) == 0 {
-			t.Errorf("%s→%s: a blank diagnosis should be refused, got nothing undrafted", tc.from, tc.to)
-		}
 	}
 }

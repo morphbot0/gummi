@@ -62,14 +62,6 @@ func TestPlanStageStillNamesItsOwnGate(t *testing.T) {
 	}
 }
 
-// A research plan is a single phase, so the preamble would be describing
-// phases it does not have.
-func TestResearchPlanCarriesNoPhasePreamble(t *testing.T) {
-	if strings.Contains(planText(t, domain.KindResearch), "ONE session's order of work") {
-		t.Error("the single-phase research plan carries the multi-phase preamble")
-	}
-}
-
 // TestPlanAsksOnlyDecidingQuestions: each question in the headless loop
 // costs a process exit, a new session and a fresh read of the repository,
 // so a confirmation — "is this list complete?", "may I proceed?" — is

@@ -34,8 +34,6 @@ type CreateCardRequest struct {
 	Env      string `json:"env,omitempty"`
 	// Issue is a GitHub issue number to seed a bug from.
 	Issue int `json:"issue,omitempty"`
-	// Diagnosis makes a research card a diagnosis rather than a survey.
-	Diagnosis bool `json:"diagnosis,omitempty"`
 	// Start runs the card's first stage once it is created.
 	Start bool `json:"start,omitempty"`
 	// Backend and Model are the agent and model a session (a freeform

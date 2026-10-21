@@ -28,7 +28,6 @@ func TestBG096CreatedEventDescribesTheKindItCreated(t *testing.T) {
 	}{
 		{domain.KindFeature, "full"},
 		{domain.KindBug, "full"},
-		{domain.KindResearch, "full"},
 	}
 	for _, c := range cases {
 		h := newHarness(t, false, nil)

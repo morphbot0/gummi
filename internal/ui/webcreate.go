@@ -22,26 +22,15 @@ import (
 // cardCreated: dependencies, stack placement, freeform starting at once,
 // "create & autopilot") are the ones the terminal runs, not a second copy.
 
-// webKindValue is a card type as the form's kind choice names it:
-// research's diagnosis mode is its own entry, as it is on the kind row.
-func webKindValue(ct domain.CardType) string {
-	if ct.Kind == domain.KindResearch && ct.Mode == domain.ModeDiagnosis {
-		return string(domain.KindResearch) + ":" + string(domain.ModeDiagnosis)
-	}
-	return string(ct.Kind)
-}
+// webKindValue is a card type as the form's kind choice names it.
+func webKindValue(ct domain.CardType) string { return string(ct.Kind) }
 
-// webCardType reads the request's kind back into a card type: a kind
-// value WebForm offered, or "research" with the diagnosis flag.
-func webCardType(kind string, diagnosis bool) (domain.CardType, bool) {
+// webCardType reads the request's kind back into a card type.
+func webCardType(kind string) (domain.CardType, bool) {
 	if kind == "" {
 		kind = string(domain.KindFreeform)
 	}
 	ct := domain.CardType{Kind: domain.Kind(kind)}
-	if kind == webKindValue(domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}) ||
-		(ct.Kind == domain.KindResearch && diagnosis) {
-		ct = domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}
-	}
 	return ct, ct.Valid()
 }
 
@@ -356,7 +345,7 @@ func (b *Bridge) RefreshRepos(ctx context.Context) {
 // submitted as its Create (or, with Autopilot, its "Create & autopilot")
 // button submits it. It answers the new card.
 func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, person string) (webapi.Card, error) {
-	ct, ok := webCardType(req.Kind, req.Diagnosis)
+	ct, ok := webCardType(req.Kind)
 	if !ok {
 		return webapi.Card{}, refuse(WebBadRequest, "no card kind "+strconv.Quote(req.Kind))
 	}

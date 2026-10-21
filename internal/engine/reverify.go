@@ -167,7 +167,7 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 	res.Advance = adv
 	res.Feature = adv.Feature
 	switch adv.Status {
-	case StatusBlockedQuestions, StatusBlockedDiff, StatusBlockedDocument, StatusBlockedOmission, StatusBlockedUndrafted:
+	case StatusBlockedQuestions, StatusBlockedDiff, StatusBlockedOmission, StatusBlockedUndrafted:
 		res.Status = ReverifyBlocked
 	default:
 		res.Status = ReverifyFinalized

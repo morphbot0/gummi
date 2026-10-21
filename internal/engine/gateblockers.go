@@ -8,7 +8,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
-	"github.com/morphis/gummi/internal/verifydoc"
 )
 
 // AdvanceStatus classifies what Advance did (or why it could not move the
@@ -31,11 +30,6 @@ const (
 	// one of its direct dependencies is still short of Done — its work is
 	// not yet available to build on.
 	StatusBlockedDependency
-	// StatusBlockedDocument: a research card's Verify→done gate, where the
-	// document fails the deterministic citation/coverage floor
-	// (internal/verifydoc). The feature stays at verify; DocumentReport
-	// carries the broken citations and unmapped questions.
-	StatusBlockedDocument
 	// StatusNeedsMerge: the verify→done gate, where the branch is ahead of
 	// main and awaits a squash-merge decision. Advance never merges — the
 	// caller lands the branch (the TUI collects a commit message; the
@@ -82,9 +76,6 @@ type AdvanceResult struct {
 	// Status is StatusBlockedDependency — its ID and the stage it is
 	// stuck at.
 	BlockingDeps []BlockingDep
-	// DocumentReport carries the broken citations and unmapped coverage
-	// items when Status is StatusBlockedDocument.
-	DocumentReport verifydoc.Report
 	// Reason is populated only for StatusBlockedOmission; it mirrors the
 	// human-facing reason produced by the shared omission-gate predicate.
 	Reason string
@@ -180,8 +171,6 @@ func describeAdvance(adv AdvanceResult) string {
 		return "undrafted " + strings.Join(adv.Undrafted, ", ")
 	case StatusBlockedOmission:
 		return adv.Reason
-	case StatusBlockedDocument:
-		return "the document floor failed"
 	}
 	return "status " + fmt.Sprint(adv.Status)
 }

@@ -309,12 +309,6 @@ func (o *Ops) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 			return o.fail(ctx, string(id), err)
 		}
 	}
-	// A research card runs in a scratch tree rather than a branch worktree
-	// (a research branch never receives a commit); absent is success, so
-	// this runs unconditionally for every kind.
-	if err := wt.RemoveScratch(ctx, &f); err != nil {
-		return o.fail(ctx, string(id), err)
-	}
 	// An adopted branch is left standing (DESIGN §10 D22): the worktree
 	// above was gummi's to remove, the ref underneath it never was. The
 	// clean still succeeds — the card is cleaned, and the branch surviving

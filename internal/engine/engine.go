@@ -841,9 +841,10 @@ func (e *Engine) RunRebaseStopped(ctx context.Context, f domain.Feature, files [
 // run is the shared autonomous-run path behind RunWith, RunCritique,
 // and RunRebase.
 func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
-	// Goals are retired: a legacy goal card is read, never run.
-	if f.Kind == domain.KindGoal {
-		return fmt.Errorf("%s is a goal, and goals no longer run", f.ID)
+	// Goals and research are retired: a legacy card of either is read,
+	// never run.
+	if f.Kind == domain.KindGoal || f.Kind == domain.KindResearch {
+		return fmt.Errorf("%s is a retired %s card, and it no longer runs", f.ID, f.Kind)
 	}
 	role, ok := roleForStage(f)
 	if !ok {
@@ -902,7 +903,7 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReplacedRunning: replacedRunning, ReadOnly: researchReadOnly(f), state: StateRunning, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReplacedRunning: replacedRunning, state: StateRunning, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
@@ -1040,11 +1041,6 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 			if pre := e.runSpecChecks(s); pre != "" {
 				msg = pre + "\n\n" + msg
 			}
-		}
-		// a research card's verify is held to its document floor; the
-		// report opens the kickoff so the verifier can repair it
-		if pre := e.documentFloorPreamble(s); pre != "" {
-			msg = pre + "\n\n" + msg
 		}
 	}
 	// Implement gets the plan's file manifest. Measured: gummi's
@@ -1564,30 +1560,12 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		}
 		return nil, "", nil, fmt.Errorf("no agent registered for backend %q (feature %s role %s)", backend, f.ID, role)
 	}
-	// An autonomous research session runs in the main checkout with the
-	// artifact at its workspace home — no worktree, so a read-write agent
-	// could mutate the operator's repo. Fail closed: a backend that cannot
-	// structurally strip its write tools (copilot, headless) is
-	// refused here, before any session, so "documented no-op" can never
-	// silently downgrade the read-only guarantee to nothing at all.
-	readOnly := researchReadOnly(f)
-	if readOnly && !ag.Capabilities().ReadOnlyEnforce {
-		// ag.Name(), not the resolved backend name: an empty name is
-		// resolveRole's documented fallback to the engine's default
-		// backend — the normal path on a workspace with no profiles.yaml,
-		// not an edge — and `backend ""` names nothing the reader could
-		// go and change. The nil-agent guard above makes the same
-		// distinction for the same reason.
-		return nil, "", nil, fmt.Errorf("backend %q cannot enforce a read-only research session "+
-			"(feature %s stage %s); point this role at `claude` or `opencode`, or accept that "+
-			"autonomous research cannot run on that backend", ag.Name(), f.ID, f.Stage)
-	}
 	// A real, per-card place for throwaway files, named in the boundary
 	// hint. Best-effort: a directory that cannot be created leaves the
 	// hint saying `mktemp -d`, as it always did.
 	scratch := e.scratchFilesDirFor(f.ID)
 	hints := stageHints(f, specPath, scratch, flavor)
-	if h := coAuthorHint(); h != "" && !readOnly {
+	if h := coAuthorHint(); h != "" {
 		hints = append(hints, h)
 	}
 	// The repository orientation card sits directly under the operator's
@@ -1673,7 +1651,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// A card left to run alone answers its own questions, so the agent is
 	// told that before it asks one — whichever of the two routes above it
 	// would have used.
-	if f.GateApproval == domain.GateAutopilot && !readOnly {
+	if f.GateApproval == domain.GateAutopilot {
 		hints = append(hints, unattendedAskHint)
 	}
 	// Every stage session gets its own inbound MCP endpoint, so a backend
@@ -1699,7 +1677,6 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		OutputTokenMax: rc.OutputTokenMax,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(f.ID),
-		ReadOnly:       readOnly,
 		ResumePath:     resumeSessionPath(e.cfg.Workspace, f.ID, role, flavor),
 		ResumeID:       resumeID,
 		// The scratch directory the boundary hint names: a caged backend
@@ -1759,28 +1736,10 @@ func (e *Engine) locateFor(ctx context.Context, f domain.Feature, allowDrift boo
 	}
 	root := e.pool.Root()
 	draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
-	// Every research stage — interactive (shape) or autonomous (investigate/
-	// review/verify) — is branch-worktree-less and reads the artifact at its
-	// workspace home. Research has no draft-then-promote step (Create seeds
-	// the artifact directly, never a draft), and never enters a worktree —
-	// the only path that promotes a draft into its artifact — so routing
-	// shape through a draft the way brainstorm/spec do would orphan its
-	// edits: nothing ever merges them back. Promote here is a no-op cleanup
-	// once the artifact exists (the common case); it only materializes a
-	// fresh one for a crash-recovery or legacy edge case. The scratch tree
-	// is the cwd for the same reason it is everywhere else — the ReadOnly
-	// tool-stripping stays the research guarantee, and the tree is what
-	// makes it structural rather than a promise about tool coverage.
+	// A legacy research card has no worktree and never runs (Engine.run
+	// refuses it), so there is nothing to locate.
 	if f.Kind == domain.KindResearch {
-		artifact := filepath.Join(root, f.ArtifactPath())
-		if err := spec.Promote(artifact, draft, "", &f); err != nil {
-			return "", "", err
-		}
-		scratch, serr := wt.EnsureScratch(ctx, &f)
-		if serr != nil {
-			return "", "", serr
-		}
-		return scratch, artifact, nil
+		return "", "", fmt.Errorf("%s is a retired research card, and it no longer runs", f.ID)
 	}
 	// A freeform card minted into the main checkout has no worktree to
 	// ensure and no branch to cut: its working directory is the managed
@@ -2697,9 +2656,6 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			// it pinned is on the branch nowhere, is a pass about the
 			// process rather than about the work.
 			e.gatePromiseVerdict(s)
-			// and a research document's floor, which decides whether
-			// the card may be marked done at all
-			e.gateDocumentVerdict(s)
 		}
 	case agent.EventError:
 		// a terminal error ends the turn with no trailing idle (the

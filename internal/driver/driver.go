@@ -375,8 +375,6 @@ func (d *Driver) Verify(ctx context.Context, id domain.FeatureID) (Outcome, erro
 			d.out.Emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), OpenDiff: res.Advance.Blockers, Resume: string(id)})
 		case engine.StatusBlockedDependency:
 			d.out.Emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), BlockingDeps: res.Advance.BlockingDeps, Resume: string(id)})
-		case engine.StatusBlockedDocument:
-			d.out.Emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), Document: newDocumentSummary(res.Advance.DocumentReport), Resume: string(id)})
 		case engine.StatusBlockedOmission:
 			d.out.Emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), Reason: res.Advance.Reason, Resume: string(id)})
 		case engine.StatusBlockedUndrafted:
@@ -780,13 +778,6 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 	case domain.StageVerify:
 		v := verdict.SessionVerdict(snap)
 		d.emitResult(f, v)
-		// A research verify the document floor failed is answered by the
-		// floor's own gate, which blocks with the report (citations,
-		// unmapped questions) a caller can act on — the same outcome the
-		// done edge gave before the floor also ran inside verify.
-		if engine.DocumentFloorFailed(snap) {
-			return d.crossGate(ctx, f)
-		}
 		out := gatepolicy.Decide(gatepolicy.Input{
 			Stage:       domain.StageVerify,
 			Kind:        f.Kind,
@@ -1130,10 +1121,6 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 	case engine.StatusBlockedDependency:
 		d.recordBlocked(f, dependencyBlockedQuestion(res.BlockingDeps))
 		d.out.Emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), BlockingDeps: res.BlockingDeps, Resume: string(f.ID)})
-		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
-	case engine.StatusBlockedDocument:
-		d.recordBlocked(f, "the citation/coverage floor blocks the decompose gate.")
-		d.out.Emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Document: newDocumentSummary(res.DocumentReport), Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusBlockedOmission:
 		d.recordBlocked(f, res.Reason)
@@ -1659,15 +1646,13 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 // from the description (mirrors ui/msgs.go:createFeature). For
 // KindFeature/KindBug the quick route is default (--full keeps
 // brainstorm+plan) and the overflow seeds a draft under ws.DraftsDir().
-// KindResearch has no brainstorm/plan and no draft step: the brief is
-// rendered straight to the RS artifact path via SeededResearchTemplate.
 // The actual recipe lives in internal/cardmint, shared with every minting
 // caller — this is now just the translation from a Driver's own Options
 // to a cardmint.Input.
 func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc string) (domain.Feature, error) {
 	repo := d.opts.Repo
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
-		Kind: ct.Kind, Mode: ct.Mode, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
+		Kind: ct.Kind, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
 		Repo: repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
 		Adopt: d.opts.Adopt, InspectAdopted: d.eng.AdoptInspector(ctx, repo, d.opts.Base),
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,

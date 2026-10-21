@@ -241,8 +241,6 @@ const (
 	// FloorPromise: a promise the plan made — an invariant verify never
 	// answered, or a golden pinned by nothing on the branch — is unmet.
 	FloorPromise = "promise"
-	// FloorDocument: the research document floor failed.
-	FloorDocument = "document"
 )
 
 // Snapshot is an immutable view of a session's state, safe to render.
@@ -324,12 +322,6 @@ type Session struct {
 	// re-run the stage the interrupt stopped — a rebase dispatched on a
 	// parked card leaves nothing to re-run.
 	ReplacedRunning bool
-	// ReadOnly marks an autonomous research pass (investigate,
-	// review-of-research) that must never mutate the main checkout. Set at
-	// construction from researchReadOnly, immutable. The engine uses it to
-	// refuse mutating client tools (spec_replace_section, spec_annotate)
-	// even when a hand-crafted MCP call names them.
-	ReadOnly bool
 
 	// kickoffNote is extra content appended to an autonomous run's stage
 	// kickoff — the user's review comments delivered via RunWith. Set at
@@ -453,8 +445,7 @@ type Session struct {
 	// verify idle: a live check failure (FloorChecks), a shipped build
 	// artifact (FloorHygiene), a bug whose Verify finish omitted every
 	// [env:] live check while a prerequisite probed present
-	// (FloorOmission), an unmet plan promise (FloorPromise), and a
-	// research document failing its floor (FloorDocument). They only ever
+	// (FloorOmission), and an unmet plan promise (FloorPromise). They only ever
 	// downgrade — Pass -> Blocked, or either -> Fail — and the downgrade
 	// itself happens in verdict.SessionVerdict from the stamped floor.
 	verdictFloor       string

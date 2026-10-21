@@ -70,25 +70,6 @@ var sectionOwners = map[domain.CardType]map[string]domain.Stage{
 		"root cause":         domain.StagePlan,
 		"fix":                domain.StageImplement,
 	},
-	// the survey: shapeHint settles the question, its constraints and the
-	// direction; investigateHint writes the Findings
-	{Kind: domain.KindResearch}: {
-		"brief":       domain.StagePlan,
-		"questions":   domain.StagePlan,
-		"constraints": domain.StagePlan,
-		"direction":   domain.StagePlan,
-		"findings":    domain.StageImplement,
-	},
-	// the diagnosis: the design pass sets the reproduction and the bounds,
-	// diagnoseInvestigateHint writes the rest
-	{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}: {
-		strings.ToLower(spec.DiagSectionSymptom):  domain.StagePlan,
-		strings.ToLower(spec.DiagSectionRepro):    domain.StagePlan,
-		strings.ToLower(spec.DiagSectionCons):     domain.StagePlan,
-		strings.ToLower(spec.DiagSectionEvidence): domain.StageImplement,
-		strings.ToLower(spec.DiagSectionRuledOut): domain.StageImplement,
-		strings.ToLower(spec.DiagSectionCauses):   domain.StageImplement,
-	},
 }
 
 // SectionOwner names the stage whose writer writes section on a card of

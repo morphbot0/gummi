@@ -10,7 +10,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
-	"github.com/morphis/gummi/internal/verifydoc"
 	"github.com/morphis/gummi/internal/workflow"
 )
 
@@ -32,9 +31,10 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		return AdvanceResult{}, err
 	}
 	res := AdvanceResult{Feature: f, From: f.Stage}
-	// Goals are retired: a legacy goal card is read, never advanced.
-	if f.Kind == domain.KindGoal {
-		return res, fmt.Errorf("%s is a goal, and goals no longer run", id)
+	// Goals and research are retired: a legacy card of either is read,
+	// never advanced.
+	if f.Kind == domain.KindGoal || f.Kind == domain.KindResearch {
+		return res, fmt.Errorf("%s is a retired %s card, and it no longer runs", id, f.Kind)
 	}
 
 	next := e.nextStage(f)
@@ -75,22 +75,6 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		// so do unresolved diff annotations, the gate's other backend.
 		if n := e.openDiffCommentsBlockingGate(ctx, f); n > 0 {
 			res.Status, res.Blockers = StatusBlockedDiff, n
-			return res, nil
-		}
-	}
-
-	// A research card's Verify→done gate additionally runs the
-	// deterministic citation/coverage floor (internal/verifydoc): a broken
-	// citation or an unmapped brief question bounces the card back to
-	// investigate the same way an open thread does, before any worktree or
-	// merge bookkeeping runs.
-	if next == domain.StageDone && f.Kind == domain.KindResearch {
-		report, err := e.documentReport(ctx, &f)
-		if err != nil {
-			return res, err
-		}
-		if !report.Pass() {
-			res.Status, res.DocumentReport = StatusBlockedDocument, report
 			return res, nil
 		}
 	}
@@ -392,52 +376,6 @@ func (e *Engine) artifactFile(f *domain.Feature) string {
 	)
 }
 
-// documentReport runs the deterministic verifydoc floor against a research
-// card's artifact: the file map covers only the paths its evidence
-// section's citations name, read from the card's managed repo checkout, so
-// the report never leaks existence or line counts of any other file. The
-// card's mode picks which headings those are (spec.LayoutOf).
-func (e *Engine) documentReport(ctx context.Context, f *domain.Feature) (verifydoc.Report, error) {
-	path := e.artifactFile(f)
-	if path == "" {
-		return verifydoc.Report{}, nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return verifydoc.Report{}, nil
-	}
-	artifact := string(raw)
-	wt, err := e.mgr(ctx, f)
-	if err != nil {
-		return verifydoc.Report{}, err
-	}
-	layout := spec.LayoutOf(f)
-	files := fileMap(wt.RepoRoot(), verifydoc.CitedPaths(artifact, layout))
-	return verifydoc.Check(artifact, files, layout), nil
-}
-
-// fileMap reads each cited path's lines from root, keyed by the path as
-// cited. A path that would resolve outside root is skipped and never
-// read — containment is enforced once at citation-parse time too
-// (verifydoc.Check), but fileMap asserts it independently so the file set
-// handed to the report can never extend past the checkout.
-func fileMap(root string, paths []string) map[string][]string {
-	out := make(map[string][]string, len(paths))
-	for _, p := range paths {
-		full := filepath.Join(root, p)
-		rel, err := filepath.Rel(root, full)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			continue
-		}
-		data, err := os.ReadFile(full) //nolint:gosec // rel is checked above to stay under root
-		if err != nil {
-			continue // missing file: verifydoc.Check reports it as a citation issue
-		}
-		out[p] = strings.Split(string(data), "\n")
-	}
-	return out
-}
-
 // requiredSections names the section(s) a gate expects the departing
 // stage to have actually written, keyed on the edge Advance is crossing.
 // Deliberately narrow — a stage's own output, not a completeness
@@ -473,74 +411,6 @@ func requiredSections(ct domain.CardType, from, to domain.Stage) []string {
 		return []string{"Verification plan"}
 	case kind == domain.KindBug && to == domain.StageDone:
 		return []string{"Verification"}
-
-	// The research design gate. The row is the shape contract's own stop
-	// condition, quoted from shapeHint (hints.go): "stop when the
-	// question, its constraints, and the direction are set". Three
-	// sections rather than one because that stage settles three separate
-	// decisions the survey then runs on — not a completeness sweep of the
-	// ten-section template: Brief is the requester's own words, and the
-	// remaining six are later stages' work.
-	case ct == (domain.CardType{Kind: domain.KindResearch}) && from == domain.StagePlan && to == domain.StageImplement:
-		return []string{"Questions", "Constraints", "Direction"}
-
-	// The research build gate. investigateHint sends the build stage to
-	// survey the question read-only and "record your findings … in the
-	// research document as you go": Findings is that survey, and it is the
-	// section every later check reads — verifydoc resolves its citations,
-	// and with nothing in it there is nothing to resolve.
-	case ct == (domain.CardType{Kind: domain.KindResearch}) && from == domain.StageImplement && to == domain.StageVerify:
-		return []string{"Findings"}
-
-	// The research done gate — the edge that decomposes the document into
-	// feature cards. This one is keyed on what crossing CONSUMES rather
-	// than on what the departing stage wrote, because for research the
-	// departing stage wrote nothing: verify is a read-only critique whose
-	// verdict lives in the session, not in the document. Findings is what
-	// the evidence was supposed to be, so a document reaching done without
-	// it has nothing to have proved anything with — the same shape as a
-	// feature owing its Verification plan here.
-	//
-	// `## Slices` is deliberately NOT required, even though it is the
-	// decomposition's input. A research card that concludes no follow-on
-	// work is needed is a legitimate terminal, not a stalled one:
-	// DecomposeForCard treats a doc with no unsettled rows as a cheap
-	// no-op rather than an error, and TestZeroSliceRSExitsDoneCleanly
-	// pins that a zero-slice RS reaches done without ever spawning an
-	// architect. Demanding Slices here would forbid the honest answer
-	// "nothing to build", which is exactly the judgement this stage is
-	// allowed to reach.
-	case ct == (domain.CardType{Kind: domain.KindResearch}) && to == domain.StageDone:
-		return []string{"Findings"}
-
-	// The diagnosis gates are the survey's three edges with the diagnosis
-	// document's sections in them — same reasoning, different headings,
-	// which is what makes the mode a layout rather than a second kind.
-	//
-	// The design gate owes Reproduction and Constraints: what the
-	// investigation will recognise the fault by, and the bounds it works
-	// in. Reproduction is demanded even for a fault that will not
-	// reproduce on demand — the gate checks that the stage SAID how the
-	// symptom is recognised, and "seen twice in CI, never locally, here
-	// is the log" is a perfectly good answer to that. What it forbids is
-	// starting the investigation without one.
-	case ct.Mode == domain.ModeDiagnosis && from == domain.StagePlan && to == domain.StageImplement:
-		return []string{spec.DiagSectionRepro, spec.DiagSectionCons}
-
-	// The build gate owes Evidence, exactly as the survey's owes Findings:
-	// it is the section every later check reads, and with nothing in it
-	// the citation check passes vacuously.
-	case ct.Mode == domain.ModeDiagnosis && from == domain.StageImplement && to == domain.StageVerify:
-		return []string{spec.DiagSectionEvidence}
-
-	// The done gate owes Evidence and nothing else. Causes is deliberately
-	// NOT required, for the same reason Slices is not required of a
-	// survey: "I could not find the cause, and here is what I ruled out"
-	// is an honest terminal for an investigation, and a gate that forbade
-	// it would be a gate that rewards inventing a cause. The evidence is
-	// what a diagnosis must have either way.
-	case ct.Mode == domain.ModeDiagnosis && to == domain.StageDone:
-		return []string{spec.DiagSectionEvidence}
 
 	default:
 		return nil

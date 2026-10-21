@@ -10,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -360,47 +358,4 @@ func mcpE2EReadonlySetup(t *testing.T) (*Engine, string, *Session) {
 	socket := mcpSockPath(e.cfg.Workspace, f.ID)
 	t.Cleanup(func() { s.stop() })
 	return e, socket, s
-}
-
-// TestMCPEndToEndReadonlySurface: a read-only research session reaches its
-// document over MCP. The surface used to be stripped of
-// spec_replace_section and spec_annotate, and a call naming one was
-// refused, "so the MCP shim cannot rewrite the main checkout" — which it
-// never could: the tool writes the artifact at its workspace home, through
-// the engine. The strip is what left a research survey unable to write its
-// Findings at all (see TestReadOnlyResearchWritesItsDocument).
-func TestMCPEndToEndReadonlySurface(t *testing.T) {
-	_, socket, s := mcpE2EReadonlySetup(t)
-	child := startChildFor(t, socket, "RS-001")
-
-	id := child.nextID()
-	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
-	child.receive(id)
-
-	id = child.nextID()
-	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"tools/list"}`)
-	resp := child.receive(id)
-	tools := resp["result"].(map[string]any)["tools"].([]any)
-	names := make([]string, 0, len(tools))
-	for _, tl := range tools {
-		names = append(names, tl.(map[string]any)["name"].(string))
-	}
-	for _, want := range []string{"spec_view", "spec_replace_section"} {
-		if !slices.Contains(names, want) {
-			t.Fatalf("read-only tools/list lost %s: %v — a research survey cannot "+
-				"write the document it exists to produce", want, names)
-		}
-	}
-
-	text, _ := child.call("spec_replace_section", `{"section":"Problem","body":"the survey found this"}`)
-	if strings.Contains(text, "not available") {
-		t.Fatalf("spec_replace_section over MCP was refused on a research session: %q", text)
-	}
-	after, err := os.ReadFile(s.SpecPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(after), "the survey found this") {
-		t.Fatalf("the survey's write never reached the document:\n%s", after)
-	}
 }
