@@ -178,9 +178,6 @@ func TestDuplicateCarriesIdentity(t *testing.T) {
 	if dup.Base != src.Base {
 		t.Errorf("copy base = %q, want the source's %q", dup.Base, src.Base)
 	}
-	if dup.Severity != src.Severity {
-		t.Errorf("copy severity = %q, want the source's %q", dup.Severity, src.Severity)
-	}
 	if dup.BranchScheme != domain.DefaultBranchScheme {
 		t.Errorf("copy branch scheme = %q, want the current default %q, never the source's spelling", dup.BranchScheme, domain.DefaultBranchScheme)
 	}

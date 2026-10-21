@@ -336,18 +336,6 @@ func TestStackOrdersLandingOnly(t *testing.T) {
 	if _, blocked := f.eng.StackLandBlocker(ctx, &a); blocked {
 		t.Error("the bottom card must never be blocked from landing")
 	}
-
-	// And the ordering is ONLY about landing: both cards are at implement
-	// and neither is held out of its stage by the other. Advance's
-	// dependency gate is the thing that blocks work, and a stack writes
-	// no dependency edges — assert that directly.
-	deps, err := f.store.ListDependencies(ctx, b.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(deps) != 0 {
-		t.Errorf("stacking wrote %d dependency edge(s); a stack is topology, not scheduling", len(deps))
-	}
 }
 
 // A conflict stops the walk where it happened: the conflicted card's

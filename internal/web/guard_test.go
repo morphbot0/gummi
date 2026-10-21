@@ -28,7 +28,7 @@ func TestOnlyTheServersOwnNamesAreAnswered(t *testing.T) {
 		{http.MethodGet, "/api/board", ""},
 		{http.MethodGet, "/api/events", ""},
 		{http.MethodPost, "/api/pair/request", "{}"},
-		{http.MethodPost, "/api/cards", `{"kind":"feature","title":"pwned"}`},
+		{http.MethodPost, "/api/cards", `{"kind":"freeform","title":"pwned"}`},
 	} {
 		res, _ := h.do(c, tc.method, tc.path, tc.body,
 			"Host", "attacker.example:"+port, "Origin", "http://attacker.example:"+port)

@@ -85,17 +85,7 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid var(
 .app:focus{outline:none}
 
 /* ---------- shell ---------- */
-.app{height:var(--app-h,100%);transform:translateY(var(--app-top,0px));display:grid;grid-template-rows:44px auto minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
-/* the quit-resume question, above the board while it is open */
-.resume-banner{border-bottom:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--panel));padding:8px 16px;display:flex;flex-direction:column;gap:8px}
-.rb-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.rb-dot{width:8px;height:8px;border-radius:50%;background:var(--warn);flex-shrink:0}
-.rb-text{flex:1;min-width:220px;font-size:13px;color:var(--fg2)}
-.rb-text .link{font-size:12.5px}
-.rb-actions{display:flex;gap:6px;flex-wrap:wrap}
-.rb-pick{display:flex;flex-direction:column;gap:6px;max-width:560px}
-.rb-pick .cpick{background:var(--panel);border:1px solid var(--line)}
-.rb-pick-go{display:flex;justify-content:flex-end}
+.app{height:var(--app-h,100%);transform:translateY(var(--app-top,0px));display:grid;grid-template-rows:44px minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
 /* notifications on this device */
 .push-box{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 .push-state{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--fg3)}
@@ -374,9 +364,6 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .receipt .when{margin-left:auto;font-family:var(--mono);font-size:11px;white-space:nowrap}
 .note-ev{font-size:12.5px;color:var(--fg3);font-style:italic;display:flex;gap:10px}
 .note-ev .when{margin-left:auto;font-family:var(--mono);font-size:11px;font-style:normal;white-space:nowrap}
-.stretch{display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--accent)}
-.stretch::before,.stretch::after{content:"";flex:1;height:0;border-top:1px dashed color-mix(in srgb,var(--accent) 40%,var(--line))}
-.stretch b{font-weight:600}
 .ev-dec{border:1px solid color-mix(in srgb,var(--dc,var(--accent)) 35%,var(--line));border-radius:10px;padding:8px 12px;font-size:13px;display:flex;flex-direction:column;gap:2px}
 .ev-dec .k{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:color-mix(in srgb,var(--dc,var(--accent)) var(--t-keep),#000)}
 .ev-dec .a{color:var(--fg3);font-size:12.5px}
@@ -929,14 +916,6 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .aq{margin:0;color:var(--fg);font-size:14px;overflow-wrap:anywhere;white-space:pre-line}
 .aq .sub{display:block;margin-top:4px;color:var(--fg3);font-size:12.5px}
 .aform textarea{font-family:var(--mono);font-size:13px;line-height:1.5}
-.cpicks{display:flex;flex-direction:column;max-height:220px;overflow:auto;border:1px solid var(--line2);border-radius:8px;background:var(--bg);padding:4px}
-.cpick{display:grid;grid-template-columns:auto 64px minmax(0,1fr) auto;gap:8px;align-items:center;padding:5px 8px;border-radius:6px;font-size:13px;color:var(--fg);cursor:pointer}
-.cpick:hover{background:var(--sunk)}
-.cpick .id{font-family:var(--mono);font-size:12px;color:var(--fg3)}
-.cpick .t{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.cpick .s{font-size:11.5px;color:var(--fg3)}
-.cpick input{accent-color:var(--accent);margin:0}
-.cfilter{border:1px solid var(--line2);border-radius:8px;padding:6px 10px;background:var(--bg);outline:0;font-size:13px;color:var(--fg)}
 .menu{position:fixed;z-index:55;min-width:220px;max-width:calc(100vw - 16px);overflow-y:auto;overscroll-behavior:contain;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--shadow);padding:4px;display:flex;flex-direction:column}
 .menu button{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;font-size:13px;text-align:left;color:var(--fg2);white-space:nowrap}
 .menu button:hover,.menu button:focus-visible{background:var(--sunk);color:var(--fg)}
@@ -1005,10 +984,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   #p-conn .ct{display:none}
 }
 @media (max-width:760px){
-  .app{grid-template-rows:44px auto auto minmax(0,1fr) auto;padding-bottom:env(safe-area-inset-bottom,0px)}
-  .resume-banner{padding:8px 12px}
-  .rb-actions{width:100%}
-  .rb-actions .btn{flex:1;justify-content:center}
+  .app{grid-template-rows:44px auto minmax(0,1fr) auto;padding-bottom:env(safe-area-inset-bottom,0px)}
   .app,.app.rail-compact{--rail-w:100%}
   .main{grid-template-columns:minmax(0,1fr)}
   .rail,.center,.right,.resizer{display:none}
@@ -1116,9 +1092,9 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
    the conversation and the line being written steps aside or shrinks */
 @media (max-width:760px){
   /* each piece keeps its own row, so one stepping aside moves nothing else */
-  .app > .top{grid-row:1} .app > .resume{grid-row:2}
-  .app > .mcard{grid-row:3} .app > .main{grid-row:4} .app > .mdec{grid-row:5}
-  html.kb .app{grid-template-rows:0 auto auto minmax(0,1fr) 0;padding-bottom:0}
+  .app > .top{grid-row:1}
+  .app > .mcard{grid-row:2} .app > .main{grid-row:3} .app > .mdec{grid-row:4}
+  html.kb .app{grid-template-rows:0 auto minmax(0,1fr) 0;padding-bottom:0}
   html.kb .top,html.kb .mdec,html.kb .mcard .tabs{display:none}
   /* a phone has no room beside its thread: a notice stands just above
      what is docked at the bottom (toast.js sets --toast-bottom) */
@@ -1163,7 +1139,6 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .msg.gummi .body.prompt > summary::-webkit-details-marker{display:none}
 .msg.gummi .body.prompt[open] > summary{display:none}
 .tools pre.tool-out{margin:4px 0 2px;padding:6px 8px;background:var(--sunk);border-radius:6px;color:var(--err);white-space:pre-wrap;font-size:11.5px}
-.stretch.close{color:var(--fg3)}
 .note.prompt{border-left-color:var(--line2);background:var(--sunk);color:var(--fg3)}
 .note.prompt b{color:var(--fg3)}
 .ln.since .m{box-shadow:inset 2px 0 0 var(--accent)}

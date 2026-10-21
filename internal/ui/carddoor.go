@@ -16,10 +16,10 @@ import (
 // happens once a card exists.
 
 // openCardForm builds the door for a card type with everything the board knows:
-// profiles, repositories, the repo chosen last time, the cards the after
-// row may name, and the seams for GitHub. It does not push it.
-func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
-	d := newCardForm(ct, m.profileNames, m.repoNames, m.repoHasDefault(), m.lastRepo, m.afterCands(), m.envelopePrefill(), m.createCard)
+// profiles, repositories, the repo chosen last time, and the seams for
+// GitHub. It does not push it.
+func (m *Shell) openCardForm() *cardForm {
+	d := newCardForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.lastRepo, m.envelopePrefill(), m.createCard)
 	// Offer the branches the chosen repo actually has, with the one it
 	// currently has out marked as the default.
 	d.setRepoData(m.baseBranches, m.repoBranches)
@@ -34,12 +34,9 @@ func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
 // stackCands is every card the stack row may fork from; setStackCands
 // puts them in the order the row offers them.
 //
-// It is built apart from afterCands, and deliberately: the two rows
-// answer different questions (DESIGN §18.1 — topology, not scheduling),
-// and what is legal to wait on is not what is legal to fork from. The
-// refusals here are openStackForm's, as rows that never enter the cycle
-// rather than notices after the fact: a research card has no branch, and
-// a goal's cards share the goal's branch instead of stacking.
+// The refusals here are openStackForm's, as rows that never enter the
+// cycle rather than notices after the fact: a legacy research card has
+// no branch, and a legacy goal's cards share the goal's branch.
 //
 // A done card stays on offer. Done means the card reached a verified
 // branch, not that the branch landed (§7), so stacking the next slice on
@@ -67,19 +64,6 @@ func (m *Shell) stackCands() []stackCand {
 		}
 		out = append(out, stackCand{ID: f.ID, Title: f.Title, Repo: f.Repo, Touched: f.UpdatedAt})
 	}
-	return out
-}
-
-// afterCands is every card not yet done, as the after row offers them.
-func (m *Shell) afterCands() []afterCand {
-	var out []afterCand
-	for _, r := range m.rows {
-		if r.F.Stage == domain.StageDone {
-			continue
-		}
-		out = append(out, afterCand{ID: r.F.ID, Title: r.F.Title, Repo: r.F.Repo, Stage: r.F.Stage})
-	}
-	sortAfterCands(out)
 	return out
 }
 

@@ -81,7 +81,7 @@ func (d *Driver) Create(ctx context.Context, prompt string) (domain.Feature, err
 		return domain.Feature{}, errors.New("run needs a prompt")
 	}
 	f, err := cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
-		Kind: domain.KindFreeform, Description: prompt, Profile: d.opts.Profile,
+		Description: prompt, Profile: d.opts.Profile,
 		Envelope: d.opts.Envelope, Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo,
 		Base: d.opts.Base, ExternalRef: d.opts.Ref,
 	})

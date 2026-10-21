@@ -16,7 +16,6 @@ import (
 	"github.com/morphis/gummi/internal/attachment"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 	"github.com/morphis/gummi/internal/worktree"
@@ -213,41 +212,6 @@ func TestComposerImagesFollowsBackend(t *testing.T) {
 	}
 	if comp2.Images {
 		t.Errorf("composer.Images = true on a backend without the capability")
-	}
-}
-
-// TestCreateCardAttachmentsLinkInSpec asserts that a description
-// attachment lands as a spec-anchored link in the card's seeded draft.
-func TestCreateCardAttachmentsLinkInSpec(t *testing.T) {
-	b, _, _, _, _ := sessionBoard(t, agent.NewFake("ack"))
-	ctx := context.Background()
-	var ws state.Workspace
-	var store *state.Store
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { ws, store = m.ws, m.store; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	ref, err := b.PutAttachment(bytes.NewReader(testPNG), "shot.png")
-	if err != nil {
-		t.Fatal(err)
-	}
-	desc := "Screenshot of the broken layout.\n\nSee the attached image."
-	c, err := b.CreateCard(ctx, webapi.CreateCardRequest{
-		Kind: "feature", Title: "Fix the broken layout", Description: desc, Attachments: []string{ref.ID},
-	}, "Simon")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := store.GetFeature(ctx, domain.FeatureID(c.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)))
-	if err != nil {
-		t.Fatalf("seeded draft missing: %v", err)
-	}
-	link := attachment.Link(attachment.Ref{ID: ref.ID, Name: "shot.png", MediaType: ref.MediaType})
-	if !strings.Contains(string(raw), link) {
-		t.Errorf("draft missing the attachment link %q:\n%s", link, raw)
 	}
 }
 

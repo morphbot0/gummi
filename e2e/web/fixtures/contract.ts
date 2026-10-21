@@ -44,7 +44,6 @@ export function thread() {
       { key: 's2', seq: 20, t: 'stage', time: at(20), stage: 'implement', role: 'implementer', model: 'e2e-implementer', verdict: 'done', credits: 3.1 },
       { key: 'y1', seq: 21, t: 'you', time: at(22), stage: 'implement', by: 'Tester', via: 'steered', text: 'Keep the adopted branch alive in `clean`.' },
       { key: 'm2', seq: 22, t: 'message', time: at(30), stage: 'implement', role: 'implementer', model: 'e2e-implementer', text: 'Added `ErrNoDocument` and a regression test.' },
-      { key: 'x1', seq: 23, t: 'stretch', time: at(31), label: 'autopilot', tally: '1 gate crossed' },
       { key: 's3', seq: 30, t: 'stage', time: at(40), stage: 'verify', role: 'verify' },
       { key: 'v1', seq: 31, t: 'verify', time: at(41), stage: 'verify', checks: [
         { name: 'build', cmd: 'go build ./...', ok: true, ms: 4100 },

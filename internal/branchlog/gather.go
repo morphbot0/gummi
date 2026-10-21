@@ -101,7 +101,7 @@ func (e Env) resolve(ctx context.Context, f domain.Feature) (*worktree.Manager, 
 	} else if !ok {
 		return nil, "", worktree.ErrNoWorktree
 	}
-	base, err := worktree.ResolveCollapseBase(ctx, e.Store, mgr, &f)
+	base, err := worktree.ResolveCollapseBase(ctx, mgr, &f)
 	if err != nil {
 		return nil, "", err
 	}

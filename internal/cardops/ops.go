@@ -368,7 +368,7 @@ func (o *Ops) Squash(ctx context.Context, id domain.FeatureID, message string) (
 		return o.fail(ctx, string(id), fmt.Errorf("invalid commit message: %w", err))
 	}
 
-	base, err := worktree.ResolveCollapseBase(ctx, o.Store, wt, &f)
+	base, err := worktree.ResolveCollapseBase(ctx, wt, &f)
 	if err != nil {
 		return o.fail(ctx, string(id), err)
 	}

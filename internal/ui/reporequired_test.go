@@ -1,14 +1,12 @@
 package ui
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -94,7 +92,7 @@ func TestRepoPickerSingleRepoNeedsNoChoice(t *testing.T) {
 func TestCardFormRefusesUnchosenRepo(t *testing.T) {
 	var got formResult
 	var created bool
-	f := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"a", "b"}, false, "", nil, 0, func(res formResult) tea.Cmd {
+	f := newCardForm(nil, []string{"a", "b"}, false, "", 0, func(res formResult) tea.Cmd {
 		got, created = res, true
 		return nil
 	})
@@ -129,7 +127,7 @@ func TestCardFormRefusesUnchosenRepo(t *testing.T) {
 // who starts describing the card never cycles anything by accident. The
 // last repo chosen this session is the preselect.
 func TestCardFormRepoRowNeverEatsTyping(t *testing.T) {
-	f := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"a", "b", "c"}, false, "", nil, 0, nil)
+	f := newCardForm(nil, []string{"a", "b", "c"}, false, "", 0, nil)
 	f.HandleKey(tea.KeyPressMsg{Code: '3', Text: "3"})
 	if f.repo.name() != "c" {
 		t.Errorf("digit 3 chose %q, want c", f.repo.name())
@@ -141,11 +139,11 @@ func TestCardFormRepoRowNeverEatsTyping(t *testing.T) {
 	if f.repo.name() != "c" {
 		t.Errorf("typing changed the repo to %q", f.repo.name())
 	}
-	sticky := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"a", "b", "c"}, false, "b", nil, 0, nil)
+	sticky := newCardForm(nil, []string{"a", "b", "c"}, false, "b", 0, nil)
 	if sticky.repo.name() != "b" || sticky.focus != cardStopText {
 		t.Errorf("last repo preselect: repo=%q focus=%d", sticky.repo.name(), sticky.focus)
 	}
-	if bogus := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"a", "b"}, false, "zzz", nil, 0, nil); bogus.repo.chosen() {
+	if bogus := newCardForm(nil, []string{"a", "b"}, false, "zzz", 0, nil); bogus.repo.chosen() {
 		t.Error("an unconfigured last repo should not preselect")
 	}
 }
@@ -155,7 +153,7 @@ func TestCardFormRepoRowNeverEatsTyping(t *testing.T) {
 // enter still creates a card on the first press.
 func TestSingleRepoFormsSubmitUnprompted(t *testing.T) {
 	var created bool
-	f := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, nil, true, "", nil, 0, func(formResult) tea.Cmd {
+	f := newCardForm(nil, nil, true, "", 0, func(formResult) tea.Cmd {
 		created = true
 		return nil
 	})
@@ -173,7 +171,7 @@ func TestSingleRepoFormsSubmitUnprompted(t *testing.T) {
 func TestSingleNamedRepoStillRenders(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	views := map[string]string{
-		"card": ansi.Strip(newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"lxd"}, false, "", nil, 0, nil).View(s, 80, 24)),
+		"card": ansi.Strip(newCardForm(nil, []string{"lxd"}, false, "", 0, nil).View(s, 80, 24)),
 	}
 	for name, view := range views {
 		if !strings.Contains(view, "repo") || !strings.Contains(view, "lxd") {
@@ -188,7 +186,7 @@ func TestSingleNamedRepoStillRenders(t *testing.T) {
 func TestLoneWorkspaceDefaultRendersNoRepoRow(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	views := map[string]string{
-		"card": ansi.Strip(newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, nil, true, "", nil, 0, nil).View(s, 80, 24)),
+		"card": ansi.Strip(newCardForm(nil, nil, true, "", 0, nil).View(s, 80, 24)),
 	}
 	for name, view := range views {
 		if strings.Contains(view, "repo ") || strings.Contains(view, "repo:") {
@@ -201,7 +199,7 @@ func TestLoneWorkspaceDefaultRendersNoRepoRow(t *testing.T) {
 // is read-only. Tabbing through the dialog must never land on it, because
 // ←/→ there would do nothing.
 func TestSingleNamedRepoIsNotATabStop(t *testing.T) {
-	f := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"lxd"}, false, "", nil, 0, nil)
+	f := newCardForm(nil, []string{"lxd"}, false, "", 0, nil)
 	for _, s := range f.stops() {
 		if s == cardStopRepo {
 			t.Error("the read-only repo row is a tab stop")
@@ -214,35 +212,5 @@ func TestSingleNamedRepoIsNotATabStop(t *testing.T) {
 	}
 	if seen[cardStopRepo] {
 		t.Error("focus landed on the read-only repo row")
-	}
-}
-
-// TestCardFormNeverAsksAGoalForARepo: a goal is not in a repository —
-// the cards its plan agrees name their own, and the goal's own home is
-// settled from them at its plan gate. So the dialog does not open on the
-// repo row, does not offer it, and does not refuse to create without one.
-func TestCardFormNeverAsksAGoalForARepo(t *testing.T) {
-	var got formResult
-	var created bool
-	f := newCardForm(domain.CardType{Kind: domain.KindGoal}, nil, []string{"a", "b"}, false, "", nil, 0, func(res formResult) tea.Cmd {
-		got, created = res, true
-		return nil
-	})
-	if f.focus != cardStopText {
-		t.Fatalf("focus = %d, want the text box", f.focus)
-	}
-	if slices.Contains(f.stops(), cardStopRepo) {
-		t.Fatal("the repo row is not in a goal's focus ring")
-	}
-	f.SetText("export works offline")
-	f.env.SetValue("4000")
-	if view := f.View(theme.New(theme.GummiDark()), 80, 24); strings.Contains(view, "repo") {
-		t.Errorf("a goal's dialog shows no repo row:\n%s", view)
-	}
-	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done || !created {
-		t.Fatalf("form did not submit: done=%v created=%v err=%q", done, created, f.errText)
-	}
-	if got.Repo != "" {
-		t.Errorf("created repo = %q, want none — the plan gate settles it", got.Repo)
 	}
 }

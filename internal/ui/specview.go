@@ -635,7 +635,6 @@ func (sv *specView) needsAttentionCount() int {
 func (sv *specView) renderStatus(m *Shell, w int) string {
 	s := m.styles
 	var b strings.Builder
-	b.WriteString(sv.renderDependencyStatus(m, w))
 
 	var blocking, reviewed, agentNotes []spec.Thread
 	for _, t := range sv.doc.OpenQuestions() {
@@ -694,49 +693,6 @@ func (sv *specView) renderStatus(m *Shell, w int) string {
 	// gate's vocabulary; what the reader needs to know is that nothing is
 	// waiting on them.
 	renderThreadGroup("prompts the stages will answer — nothing waiting on you", agentNotes, nil)
-	return b.String()
-}
-
-// renderDependencyStatus renders each direct dependency of the spec's
-// feature with its live status — ID, current stage, and whether it is done
-// or still pending — resolved from the dependency store at render, plus an
-// all-done line when every dependency is Done. Returns empty when there is
-// no store or no dependencies, so it composes cleanly onto the read view.
-func (sv *specView) renderDependencyStatus(m *Shell, w int) string {
-	if m.store == nil {
-		return ""
-	}
-	ctx := context.Background()
-	ids, err := m.store.ListDependencies(ctx, sv.f.ID)
-	if err != nil || len(ids) == 0 {
-		return ""
-	}
-	s := m.styles
-	var b strings.Builder
-	b.WriteString(s.Subtitle.Render("Dependencies") + "\n")
-	allDone := true
-	for _, id := range ids {
-		dep, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return ""
-		}
-		done := dep.Stage == domain.StageDone
-		if !done {
-			allDone = false
-		}
-		mark := s.Warning.Render("◌")
-		status := s.Warning.Render("pending")
-		if done {
-			mark = s.Success.Render("✔")
-			status = s.Success.Render("done")
-		}
-		line := fmt.Sprintf("  %s %s @ %s · %s",
-			mark, s.Base.Render(string(id)), s.Base.Render(string(dep.Stage)), status)
-		b.WriteString(ansi.Truncate(line, w, "…") + "\n")
-	}
-	if allDone {
-		b.WriteString(s.Success.Render("  all dependencies done") + "\n")
-	}
 	return b.String()
 }
 

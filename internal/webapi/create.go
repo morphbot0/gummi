@@ -1,13 +1,12 @@
 package webapi
 
-// CreateCardRequest is POST /api/cards: the new-card form, every kind.
-// Fields that do not apply to Kind are ignored. Answers Card.
+// CreateCardRequest is POST /api/cards: the new-card form. It makes a
+// session. Answers Card.
 type CreateCardRequest struct {
-	// Kind is "feature", "bug", "research", "goal" or "freeform".
+	// Kind is "freeform" or empty; the workflow kinds are refused.
 	Kind  string `json:"kind"`
 	Title string `json:"title"`
-	// Description is the card's brief: a feature's what-and-why, a
-	// research card's question, a goal's done-when.
+	// Description is the session's opening turn.
 	Description string `json:"description,omitempty"`
 	OneLiner    string `json:"oneLiner,omitempty"`
 	Profile     string `json:"profile,omitempty"`
@@ -16,57 +15,38 @@ type CreateCardRequest struct {
 	Base string `json:"base,omitempty"`
 	// Envelope is the credit budget; nil takes the board's default.
 	Envelope *int `json:"envelope,omitempty"`
-	// Autopilot starts the card with its gates crossing unattended.
-	Autopilot bool `json:"autopilot,omitempty"`
-	// DependsOn lists the cards this one waits for.
-	DependsOn []string `json:"dependsOn,omitempty"`
 	// StackOn places the card on top of another card's stack.
 	StackOn string `json:"stackOn,omitempty"`
-	// Bug fields.
-	Severity string `json:"severity,omitempty"`
-	Repro    string `json:"repro,omitempty"`
-	Expected string `json:"expected,omitempty"`
-	Actual   string `json:"actual,omitempty"`
-	Env      string `json:"env,omitempty"`
-	// Issue is a GitHub issue number to seed a bug from.
-	Issue int `json:"issue,omitempty"`
-	// Start runs the card's first stage once it is created.
-	Start bool `json:"start,omitempty"`
 	// Backend and Model are the agent and model a session (a freeform
 	// card) runs on, picked in its draft's composer (DESIGN §19.8). Both
-	// empty runs it on its profile's implementer. Refused on every other
-	// kind: a stage takes its agent from the card's profile.
+	// empty runs it on its profile's implementer.
 	Backend string `json:"backend,omitempty"`
 	Model   string `json:"model,omitempty"`
 	// MainCheckout is a freeform kind's "runs in" choice: a session that
 	// works in the repository's main checkout instead of a worktree of
 	// its own (DESIGN §19) — no branch cut, no worktree created. Refused
-	// on every other kind, and with Base or StackOn set: a main-checkout
-	// session has no branch to fork from or stack onto.
+	// with Base or StackOn set: a main-checkout session has no branch to
+	// fork from or stack onto.
 	MainCheckout bool `json:"mainCheckout,omitempty"`
 	// Home is the third "runs in" choice: an agent, a session that works
 	// in a home of its own and in no repository (DESIGN §19.3d). Refused
-	// on every other kind, and with Repo, Base or StackOn set.
+	// with Repo, Base or StackOn set.
 	Home bool `json:"home,omitempty"`
 	// Attachments are the ids of images (already uploaded via POST
-	// /api/attachments) to link into the card's seeded description —
-	// stored by reference, so every later stage that reads the spec sees
-	// them too.
+	// /api/attachments) to link into the session's opening turn, stored
+	// by reference.
 	Attachments []string `json:"attachments,omitempty"`
 }
 
 // Form is GET /api/form: the choices the new-card form offers.
 type Form struct {
-	Kinds      []Choice `json:"kinds"`
-	Profiles   []string `json:"profiles"`
-	Repos      []string `json:"repos"`
-	Severities []string `json:"severities"`
+	Kinds    []Choice `json:"kinds"`
+	Profiles []string `json:"profiles"`
+	Repos    []string `json:"repos"`
 	// Branches lists the chosen repo's branches (?repo=), for Base.
 	Branches []string `json:"branches,omitempty"`
-	// Stackable are the cards a new card can be stacked on; Dependable the
-	// cards it can depend on.
-	Stackable  []CardRef `json:"stackable"`
-	Dependable []CardRef `json:"dependable"`
+	// Stackable are the cards a new card can be stacked on.
+	Stackable []CardRef `json:"stackable"`
 	// Envelope is the board's default envelope.
 	Envelope int `json:"envelope"`
 	// Sessions is what a session's model picker offers.

@@ -2,10 +2,7 @@ package cardmint
 
 import (
 	"context"
-	"strings"
 	"testing"
-
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // TestMintAMainCheckoutCard: the freeform kind's opt-out of the worktree.
@@ -15,7 +12,6 @@ func TestMintAMainCheckoutCard(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
 	f, err := Mint(ctx, store, ws, Input{
-		Kind:         domain.KindFreeform,
 		Description:  "Poke at the pty leak\n\nThe copilot adapter keeps one per idle timeout.",
 		MainCheckout: true,
 		Envelope:     400,
@@ -36,7 +32,6 @@ func TestMintAMainCheckoutCard(t *testing.T) {
 	// The same title mints again without a slug refusal: no branch, no
 	// ref to collide on.
 	again, err := Mint(ctx, store, ws, Input{
-		Kind:         domain.KindFreeform,
 		Description:  "Poke at the pty leak",
 		MainCheckout: true,
 	})
@@ -48,28 +43,5 @@ func TestMintAMainCheckoutCard(t *testing.T) {
 	}
 	if !again.MainCheckout {
 		t.Error("the second mint was not marked")
-	}
-}
-
-// TestMainCheckoutIsRefusedOnEveryOtherKind: a feature or a bug exists to
-// end as a branch, so the opt-out is refused at the mint — before a
-// sequence number is spent.
-func TestMainCheckoutIsRefusedOnEveryOtherKind(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	seqBefore := readSeq(t, ws.SeqFile())
-	_, err := Mint(context.Background(), store, ws, Input{
-		Workflow:     true,
-		Kind:         domain.KindFeature,
-		Description:  "a feature with nowhere to work",
-		MainCheckout: true,
-	})
-	if err == nil {
-		t.Fatal("a feature was minted into the main checkout")
-	}
-	if !strings.Contains(err.Error(), "freeform") {
-		t.Errorf("the refusal does not say who may have it: %v", err)
-	}
-	if after := readSeq(t, ws.SeqFile()); after != seqBefore {
-		t.Errorf("the refused mint spent a sequence number (%q → %q)", seqBefore, after)
 	}
 }

@@ -289,8 +289,6 @@ export function itemEl (it, live = false) {
     case 'verify': return verify(it)
     case 'decision': return decision(it)
     case 'note': return h('div', { class: 'note-ev' }, h('span', null, it.text), h('span', { class: 'when' }, clock(it.time)))
-    case 'stretch': return h('div', { class: ['stretch', it.edge], testid: 'stretch', title: it.reason || null },
-      h('b', null, it.label || 'autopilot'), [it.tally, it.how].filter(Boolean).join(' · ') || null)
     default: return h('div', { class: 'note-ev' }, it.text || it.t)
   }
 }

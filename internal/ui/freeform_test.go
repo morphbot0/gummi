@@ -196,7 +196,7 @@ func TestCreatingAFreeformCardMintsItOutsideTheGraph(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -231,7 +231,7 @@ func TestLandingAFreeformCardFromTheBoard(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -342,12 +342,8 @@ func TestTheFreeformCommandIsInTheVocabulary(t *testing.T) {
 	if cmd := m.runCommand(found.id); cmd != nil {
 		t.Error("opening the creation dialog should need no command")
 	}
-	d, ok := m.Overlay.Top().(*cardForm)
-	if !ok {
+	if _, ok := m.Overlay.Top().(*cardForm); !ok {
 		t.Fatalf("the freeform command did not open the creation dialog")
-	}
-	if d.Kind() != domain.KindFreeform {
-		t.Errorf("the dialog opened preset to %q, want freeform", d.Kind())
 	}
 }
 
@@ -404,13 +400,8 @@ func TestWhileAFreeformTurnRunsTheAnswerIsToStopIt(t *testing.T) {
 	if !offered["pause"] {
 		t.Error("the inventory offers no way to stop a turn in flight")
 	}
-	if offered["deps"] {
-		t.Error("the dependency picker is what p would open mid-turn")
-	}
 
-	// Between turns it is the review loop again: nothing to stop, and no
-	// dependency picker either — a session has no stages for a
-	// dependency to hold back.
+	// Between turns it is the review loop again: nothing to stop.
 	idle := busy
 	idle.freeformBusy = false
 	offered = map[string]bool{}
@@ -419,9 +410,6 @@ func TestWhileAFreeformTurnRunsTheAnswerIsToStopIt(t *testing.T) {
 	}
 	if offered["pause"] {
 		t.Error("between turns there is no turn to stop")
-	}
-	if offered["deps"] {
-		t.Error("a session offers a dependency picker, but nothing holds a session back")
 	}
 }
 
@@ -435,7 +423,7 @@ func TestDeletingAFreeformCardLeavesTheWorkspaceStanding(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 

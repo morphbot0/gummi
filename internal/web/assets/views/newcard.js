@@ -1,31 +1,19 @@
 // views/newcard.js — the new-card form: a session (the board's one
 // kind; an agent is a session's "where"), with the choices GET /api/form
 // offers — profiles, the default budget,
-// repositories and their branches, the cards a new one can stack on or
-// wait for. Submitting is POST /api/cards, which fills in and submits the
+// repositories and their branches, the cards a new one can stack on.
+// Submitting is POST /api/cards, which fills in and submits the
 // TUI's own card form: its validation is the one that runs, and its
 // refusal comes back as a sentence, shown beside the field it is about.
-// "Create & autopilot" is that form's second button.
 
-import { h, clear, dollarsInput, parseDollars, ref, cardName } from '../dom.js?v=__ASSET_V__'
+import { h, clear, dollarsInput, parseDollars, cardName } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { hush } from '../toast.js?v=__ASSET_V__'
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || '')
 
-// What each kind is for, under the kind picker.
-const ABOUT = {
-  feature: 'A change: planned, implemented and verified on its own branch.',
-  bug: 'A defect: the fix is planned, implemented and verified like a feature.',
-  freeform: 'No stages and no gates: an agent works on a branch while you talk to it. It opens at once.'
-}
-const BRIEF = {
-  feature: ['What and why', 'What should change, and why it matters'],
-  bug: ['What happens', 'What goes wrong, and where'],
-  freeform: ['What to do', 'Say what you want done']
-}
-const STACKS = new Set(['feature', 'bug'])
-const WAITS = new Set(['feature', 'bug'])
+// What a session is, under the form's head.
+const ABOUT = 'No stages and no gates: an agent works on a branch while you talk to it. It opens at once.'
 
 // Which field a refusal is about, read from the sentence the form wrote.
 const FIELD_OF = [
@@ -33,10 +21,8 @@ const FIELD_OF = [
   [/description/i, 'desc'],
   [/budget|envelope|credits/i, 'envelope'],
   [/profile/i, 'profile'],
-  [/severity/i, 'severity'],
   [/repositor/i, 'repo'],
   [/stack/i, 'stack'],
-  [/waited on|depend/i, 'after'],
   [/branch/i, 'base']
 ]
 
@@ -82,17 +68,8 @@ registerView('newcard', {
     const draw = () => {
       const f = st.form
       clear(body)
-      if (!f.kinds.some(k => k.value === st.kind)) st.kind = f.kinds[0]?.value || 'freeform'
-      // one kind is no choice: the picker shows only while there are two
-      const kinds = f.kinds.length < 2 ? null : h('div', { class: 'nc-kinds', role: 'radiogroup', 'aria-label': 'Kind', testid: 'newcard-kinds' },
-        f.kinds.map(k => h('button', {
-          type: 'button', role: 'radio', class: ['nc-kind', k.value === st.kind && 'on'],
-          'aria-checked': String(k.value === st.kind), testid: `newcard-kind-${k.value.replace(':', '-')}`,
-          onclick: () => { keep(); st.kind = k.value; draw() }
-        }, k.label)))
-      const [briefLabel, briefPh] = BRIEF[st.kind] || BRIEF.freeform
       el.title = h('input', { testid: 'newcard-title', placeholder: 'A short title', autocomplete: 'off', value: st.title ?? seedTitle ?? '' })
-      el.desc = h('textarea', { testid: 'newcard-desc', placeholder: briefPh, rows: 5, value: st.desc ?? seedRest.join('\n').trim() })
+      el.desc = h('textarea', { testid: 'newcard-desc', placeholder: 'Say what you want done', rows: 5, value: st.desc ?? seedRest.join('\n').trim() })
       const chips = h('div', { class: 'chips', testid: 'newcard-chips', hidden: st.attachments.length === 0 })
       const renderChips = () => {
         clear(chips)
@@ -125,20 +102,11 @@ registerView('newcard', {
       })
       const attach = h('button', { class: 'attach', type: 'button', testid: 'newcard-attach', title: 'Attach an image', onclick: () => file.click() }, '📎')
       const main = [
-        h('div', { class: 'nc-kindrow' }, kinds, h('p', { class: 'nc-about', testid: 'newcard-about' }, ABOUT[st.kind] || '')),
+        h('div', { class: 'nc-kindrow' }, h('p', { class: 'nc-about', testid: 'newcard-about' }, ABOUT)),
         field('title', 'Title', el.title),
-        field('desc', briefLabel, el.desc),
+        field('desc', 'What to do', el.desc),
         h('div', { class: 'nc-attach' }, attach, file, chips)
       ]
-      if (st.kind === 'bug') {
-        el.severity = h('select', { testid: 'newcard-severity' }, f.severities.map(s => h('option', { value: s, selected: s === (st.severity || 'medium') }, s)))
-        el.repro = h('textarea', { testid: 'newcard-repro', rows: 2, placeholder: 'Steps to reproduce', value: st.repro || '' })
-        el.expected = h('input', { testid: 'newcard-expected', placeholder: 'What should happen', value: st.expected || '' })
-        el.actual = h('input', { testid: 'newcard-actual', placeholder: 'What happens instead', value: st.actual || '' })
-        main.push(h('div', { class: 'nc-row' }, field('severity', 'Severity', el.severity)),
-          field('repro', 'Steps to reproduce', el.repro),
-          h('div', { class: 'nc-row two' }, field('expected', 'Expected', el.expected), field('actual', 'Actual', el.actual)))
-      }
 
       const side = []
       el.profile = h('select', { testid: 'newcard-profile' }, f.profiles.map(p => h('option', { value: p, selected: p === (st.profile || f.profiles[0]) }, p)))
@@ -154,7 +122,7 @@ registerView('newcard', {
       el.base = h('select', { testid: 'newcard-base' }, h('option', { value: '' }, 'the default branch'), branches.map(b => h('option', { value: b, selected: b === st.base }, b)))
       const baseHint = h('span', { class: 'fh', testid: 'newcard-base-hint' })
       side.push(h('label', { class: 'field', data: { f: 'base' } }, h('span', { class: 'fl' }, 'Base branch'), el.base, baseHint, errEl('base')))
-      if (STACKS.has(st.kind) && f.stackable?.length) {
+      if (f.stackable?.length) {
         el.stack = h('select', { testid: 'newcard-stack' }, h('option', { value: '' }, 'no stack'), f.stackable.map(c => h('option', { value: c.id, selected: c.id === st.stack }, `${c.title}`)))
         side.push(field('stack', 'Stack onto', el.stack, 'Fork from that card’s branch. It never waits for it.'))
       }
@@ -170,26 +138,15 @@ registerView('newcard', {
       }
       el.stack?.addEventListener('change', syncBase)
       syncBase()
-      if (WAITS.has(st.kind) && f.dependable?.length) {
-        const picked = new Set(st.after || [])
-        el.after = f.dependable.map(c => ({ c, cb: h('input', { type: 'checkbox', value: c.id, checked: picked.has(c.id), testid: `newcard-after-${c.id}` }) }))
-        side.push(h('div', { class: 'field', data: { f: 'after' } }, h('span', { class: 'fl' }, 'Waits for'),
-          h('div', { class: 'cpicks', role: 'group', 'aria-label': 'Waits for', testid: 'newcard-after' },
-            el.after.map(({ c, cb }) => h('label', { class: 'cpick' }, cb, h('span', { class: 'id' }, ref(c.id)), h('span', { class: 't' }, c.title), h('span', { class: 's' }, c.stage)))),
-          h('span', { class: 'fh' }, 'It is planned at once; its design is approved only once each ticked card is done.'), errEl('after')))
-      } else {
-        el.after = null
-      }
 
       const err = h('p', { class: 'aerr', testid: 'newcard-error', role: 'alert', hidden: true })
       errs._ = err
-      const create = h('button', { class: 'btn pri', type: 'submit', testid: 'newcard-create' }, st.kind === 'freeform' ? 'Create and open' : 'Create')
-      const auto = st.kind === 'freeform' ? null : h('button', { class: 'btn', type: 'button', testid: 'newcard-autopilot', title: 'Create it and let autopilot cross its gates', onclick: () => submit(true) }, 'Create & autopilot')
-      const form = h('form', { class: 'nc', testid: 'newcard-form', novalidate: true, onsubmit: (e) => { e.preventDefault(); submit(false) } },
+      const create = h('button', { class: 'btn pri', type: 'submit', testid: 'newcard-create' }, 'Create and open')
+      const form = h('form', { class: 'nc', testid: 'newcard-form', novalidate: true, onsubmit: (e) => { e.preventDefault(); submit() } },
         h('div', { class: 'nc-grid' }, h('div', { class: 'nc-main' }, main), h('div', { class: 'nc-side' }, side)),
         h('div', { class: 'nc-foot' }, err, h('span', { class: 'nc-keys' }, h('kbd', null, MAC ? '⌘' : 'Ctrl'), h('kbd', null, 'enter'), ' creates'),
-          h('button', { class: 'btn', type: 'button', testid: 'newcard-cancel', onclick: () => ctx.close() }, 'Cancel'), auto, create))
-      form.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(false) } })
+          h('button', { class: 'btn', type: 'button', testid: 'newcard-cancel', onclick: () => ctx.close() }, 'Cancel'), create))
+      form.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() } })
       // a refusal is about what was sent: editing the field clears it
       const clearField = (e) => {
         const f = e.target.closest?.('.field')
@@ -201,13 +158,12 @@ registerView('newcard', {
       form.addEventListener('input', clearField)
       form.addEventListener('change', clearField)
       el.create = create
-      el.auto = auto
       body.append(form)
       el.title.focus()
     }
 
-    // keep holds what was typed across a redraw (a kind or repository
-    // change redraws the form).
+    // keep holds what was typed across a redraw (a repository change
+    // redraws the form).
     const keep = () => {
       if (!el.title) return
       st.title = el.title.value
@@ -216,11 +172,6 @@ registerView('newcard', {
       st.envelope = el.envelope?.value
       st.base = el.base?.disabled ? st.base : el.base?.value
       st.stack = el.stack?.value
-      st.severity = el.severity?.value
-      st.repro = el.repro?.value
-      st.expected = el.expected?.value
-      st.actual = el.actual?.value
-      st.after = el.after ? el.after.filter(x => x.cb.checked).map(x => x.c.id) : st.after
     }
 
     const showErr = (msg) => {
@@ -246,7 +197,7 @@ registerView('newcard', {
       return msg[0].toUpperCase() + msg.slice(1)
     }
 
-    const submit = async (autopilot) => {
+    const submit = async () => {
       if (st.busy) return
       if (st.attachments.some((a) => a.pending)) { showErr('still uploading an image — wait a moment and try again'); return }
       if (st.attachments.some((a) => a.error)) { showErr('remove the failed attachment before creating'); return }
@@ -263,36 +214,22 @@ registerView('newcard', {
         repo: st.repo || undefined,
         base: (!el.base.disabled && el.base.value) || undefined,
         stackOn: el.stack?.value || undefined,
-        dependsOn: el.after ? el.after.filter(x => x.cb.checked).map(x => x.c.id) : undefined,
-        autopilot: autopilot || undefined,
         attachments: st.attachments.length ? st.attachments.map((a) => a.id) : undefined
-      }
-      if (st.kind === 'bug') {
-        Object.assign(req, {
-          severity: el.severity.value,
-          repro: el.repro.value.trim() || undefined,
-          expected: el.expected.value.trim() || undefined,
-          actual: el.actual.value.trim() || undefined
-        })
       }
       showErr('')
       st.busy = true
       el.create.disabled = true
-      if (el.auto) el.auto.disabled = true
       try {
         const card = await ctx.api.post('/api/cards', req)
         ctx.close()
-        ctx.toast(`Created ${cardName(card.id)}${autopilot ? ' on autopilot' : ''}`)
+        ctx.toast(`Created ${cardName(card.id)}`)
         await ctx.refreshBoard?.()
         ctx.select(card.id)
       } catch (err) {
         showErr(err.data?.text || err.message)
       } finally {
         st.busy = false
-        if (el.create.isConnected) {
-          el.create.disabled = false
-          if (el.auto) el.auto.disabled = false
-        }
+        if (el.create.isConnected) el.create.disabled = false
       }
     }
 

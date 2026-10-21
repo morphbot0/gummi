@@ -330,7 +330,7 @@ func (m *Shell) openStackForm() tea.Cmd {
 			return noticeMsg{text: f.Name() + " is a goal — its own cards already share one branch", isErr: true}
 		}
 	}
-	form := m.openCardForm(domain.CardType{Kind: domain.KindFreeform})
+	form := m.openCardForm()
 	form.stackOn(f.ID, f.Title, "")
 	// The new card must live in the same repository as the card it forks
 	// from, so the repo row is settled rather than asked.

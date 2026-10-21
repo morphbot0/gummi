@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -17,7 +16,7 @@ func agentShell(t *testing.T) *Shell {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.now = func() time.Time { return fixedTime }
 	m.Attach(store, wt, ws)
-	if msg := m.createCard(formResult{Kind: domain.KindFreeform, Desc: "Watch the nightly CI", MainCheckout: true, Home: true})(); msg != nil {
+	if msg := m.createCard(formResult{Desc: "Watch the nightly CI", MainCheckout: true, Home: true})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}

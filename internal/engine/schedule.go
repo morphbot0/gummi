@@ -251,7 +251,6 @@ func (e *Engine) fireMint(ctx context.Context, s domain.Schedule) domain.Schedul
 		// the outcome's empty Orphan clears the pointer.
 	}
 	f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
-		Kind:           domain.KindFreeform,
 		Description:    s.Prompt,
 		Envelope:       s.Envelope,
 		SessionBackend: s.Backend,

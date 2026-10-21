@@ -46,7 +46,7 @@ test('a change elsewhere on the board leaves the open card’s thread and panel 
   expect(present).toEqual([true, true, true]);
 
   // another card is made: the board moves, the open card does not
-  const other = await api('POST', '/api/cards', { kind: 'feature', title: 'Somewhere else' });
+  const other = await api('POST', '/api/cards', { kind: 'freeform', title: 'Somewhere else' });
   await expect(page.locator(`[data-id="${other.json.id}"]`).first()).toBeVisible({ timeout: 15_000 });
   expect(await kept()).toEqual([true, true, true]);
 });

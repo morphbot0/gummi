@@ -32,7 +32,6 @@ import { h } from './dom.js?v=__ASSET_V__'
 import {
   initSelection, loadBoard, select, refresh, refreshAll, loadLive, nextNeeding, nextRunning, step
 } from './selection.js?v=__ASSET_V__'
-import { initResume } from './resume.js?v=__ASSET_V__'
 import { registerWorker, openPush } from './push.js?v=__ASSET_V__'
 import './views/index.js?v=__ASSET_V__'
 
@@ -142,7 +141,6 @@ async function startBoard () {
   initPanel(ctx)
   initMobile()
   initSelection()
-  initResume({ loadBoard, select: ctx.select })
   initApprovals()
   registerWorker()
   initKeys({

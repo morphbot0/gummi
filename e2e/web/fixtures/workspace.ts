@@ -275,16 +275,6 @@ export class Workspace {
   }
 
   /**
-   * Feature cards in the backlog (stage todo), for the specs about what
-   * only a workflow card has (its dependencies, its autopilot). Nothing
-   * mints a workflow card any more but the web API's explicit kind, so
-   * these go through a board of their own (viaBoard) too.
-   */
-  async seedTodo(titles: string[]): Promise<string[]> {
-    return this.viaBoard(titles.map((title) => ({ kind: 'feature', title })));
-  }
-
-  /**
    * Make cards through `POST /api/cards`, as the new-card form does, on a
    * board started for it on a free port with no pairing; wait for every
    * card's opening turn (a session's) to settle; stop the board again.

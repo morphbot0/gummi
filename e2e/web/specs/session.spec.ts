@@ -109,10 +109,8 @@ test('a session switches its model mid-conversation, and a stage card has no pic
   await input.press('Enter');
   await expect(page.getByTestId('thread')).toContainText('Done: noted it in NOTES.md.', { timeout: 30_000 });
 
-  const feature = String((await api('POST', '/api/cards', { kind: 'feature', title: 'Configurable retries' })).json?.id);
-  await page.goto(`${server.url}/#${feature}`);
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', feature);
-  await expect(page.getByTestId('model-picker-btn')).toHaveCount(0);
+  // the workflow kinds are retired: the API makes sessions only
+  expect((await api('POST', '/api/cards', { kind: 'feature', title: 'Configurable retries' })).status).toBe(400);
 });
 
 // The session's Stats tab answers what a session has: its spend against

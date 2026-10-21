@@ -2437,7 +2437,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			m.syncActionFocus()
 		}
 	case "n":
-		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+		m.Overlay.Push(m.openCardForm())
 	case "T":
 		// Stack a new card on TOP of the selected one. This is the whole
 		// of setting a stack up: the stack is created by the act of

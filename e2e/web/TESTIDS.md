@@ -59,13 +59,6 @@ request once).
 | `rail-group-agents` | the agents' own group, above the status groups |
 | `rail-more-menu`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
-## Resume offer
-
-`resume-slot` (always present), `resume-banner` (the quit-resume question),
-`resume-text`, `resume-ago` (how long ago the quit was, kept current),
-`resume-all`, `resume-choose`, `resume-card-<ID>` (a checkbox once
-choosing), `resume-picked`, `resume-none` ("Not now").
-
 ## Notifications
 
 `push-dialog`, `push-body`, `push-state` (`data-state` = `on` | `off` |
@@ -86,8 +79,7 @@ yes is sent bare first and never pre-confirmed, and its yes is the token the
 question came with), `action-input` (the field its `needs` asks for,
 prefilled with its default), `action-hint` (under a landing's or a squash's
 message: where it came from and what it becomes, or — with a spinner, the box read-only and
-`action-confirm` saying "Drafting…" — that gummi is drafting it), `action-card-<ID>` (a card in the dependency
-picker), `action-cards-filter`, `action-error` (the board's refusal, in the
+`action-confirm` saying "Drafting…" — that gummi is drafting it), `action-error` (the board's refusal, in the
 dialog), `action-confirm`, `action-cancel`, `land-method` (the landing method select
 above a landing's message, in the menu's dialog and in the verify answer's
 landing dialog, where a card may keep its commits; its options are `squash`
@@ -106,7 +98,7 @@ branch would be removed).
 | `thread-items` | the polite live region holding items |
 | `stage-group-<stage>` | a stage segment (`<details>`; `open` when unfolded; the current one has class `cur`) |
 | `thread-item` | an item without a more specific id; `data-key`, `data-type` on every item |
-| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `activity` (a run of tool calls, open while it is being added to and folded after; `activity-last` the step its folded line ends on), `stretch`, `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
+| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `activity` (a run of tool calls, open while it is being added to and folded after; `activity-last` the step its folded line ends on), `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
 | `verify-no-checks` | a verify item's head when gummi had no gummi-checks to run (never "all passed") |
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
@@ -337,14 +329,10 @@ Fleet stats (`fleet`): `fleet`, `fleet-window` (the window switch),
 on you; `.gate`; `.land`), `fleet-lane-curator` (the skill curator's
 lane, above the cards'; `.blk.cur` a run), `fleet-curator-spent`,
 `fleet-tip`, `fleet-empty`, `fleet-error`.
-New card (`view-newcard`): `newcard-loading`, `newcard-form`, `newcard-kinds`,
-`newcard-kind-<value>` (`feature`, `bug`, `research`, `research-diagnosis`,
-`goal`, `freeform`), `newcard-about`, `newcard-title`, `newcard-desc`,
-`newcard-severity`, `newcard-repro`, `newcard-expected`, `newcard-actual`,
+New card (`view-newcard`): `newcard-loading`, `newcard-form`,
+`newcard-about`, `newcard-title`, `newcard-desc`,
 `newcard-profile`, `newcard-envelope`, `newcard-repo`, `newcard-base`
-(`newcard-base-hint` under it),
-`newcard-stack`, `newcard-after`, `newcard-after-<ID>`,
+(`newcard-base-hint` under it), `newcard-stack`,
 `newcard-error` (a refusal no field owns), `newcard-error-<field>` (beside
-its field: `title`, `desc`, `envelope`, `profile`, `severity`, `repo`,
-`base`, `stack`, `after`), `newcard-create`, `newcard-autopilot`,
-`newcard-cancel`.
+its field: `title`, `desc`, `envelope`, `profile`, `repo`,
+`base`, `stack`), `newcard-create`, `newcard-cancel`.

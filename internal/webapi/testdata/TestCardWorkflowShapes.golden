@@ -66,11 +66,6 @@
               "label": "api"
             }
           ]
-        },
-        {
-          "id": "gate",
-          "label": "hand to autopilot",
-          "default": "autopilot"
         }
       ],
       "composer": {
@@ -83,7 +78,6 @@
     "number": 750,
     "confirm": "c1a2b3c4d5e6f7a8b9c0d1e2 c9f8e7d6c5b4a3f2e1d0c9b8",
     "repo": "api",
-    "mode": "attended",
     "against": "verify:FD-012:verify#1a2b3c4d@9f8e7d6"
   },
   "refusals": [
@@ -120,18 +114,9 @@
     }
   ],
   "create": {
-    "kind": "research:diagnosis",
+    "kind": "freeform",
     "title": "Slow board",
-    "autopilot": true,
-    "dependsOn": [
-      "FD-001"
-    ],
     "stackOn": "FD-002"
-  },
-  "resume": {
-    "cards": [
-      "FD-004"
-    ]
   },
   "board": {
     "repo": "gummi",
@@ -167,16 +152,6 @@
           "FD-012"
         ]
       }
-    ],
-    "resume": {
-      "cards": [
-        {
-          "id": "FD-004",
-          "title": "Export",
-          "stage": "implement"
-        }
-      ],
-      "since": "2h ago"
-    }
+    ]
   }
 }

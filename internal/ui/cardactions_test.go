@@ -439,9 +439,6 @@ func TestCardActionsForSessionState(t *testing.T) {
 			if a.id == "pause" {
 				gotPause = true
 			}
-			if a.id == "deps" {
-				t.Errorf("busy=%v: a session offers a dependency picker", busy)
-			}
 		}
 		if gotPause != busy {
 			t.Errorf("busy=%v: pause present = %v", busy, gotPause)

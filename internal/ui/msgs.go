@@ -325,20 +325,14 @@ func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
 }
 
 // formResult is what the new-card dialog hands the shell: everything a
-// mint needs, for any kind. The description's first line is the card's
-// title; the lines past it seed the artifact (cardmint decides how, per
-// kind). After names dependency edges written once the card exists.
+// mint needs. The description's first line is the card's title, and the
+// whole of it is the session's opening turn.
 type formResult struct {
-	Kind        domain.Kind // "" reads as feature
 	Desc        string
 	Profile     string
 	Envelope    *int // nil = the shell's default envelope
 	Repo        string
-	Severity    domain.Severity
-	ExternalRef string
-	Source      string // "manual", "github"
-	Discussion  string // an imported issue's comments
-	After       []domain.FeatureID
+	ExternalRef string // an imported issue
 	// Base is the branch the card forks from, "" for the checkout's HEAD.
 	Base string
 	// StackOnto names a card to stack this one on top of, creating the
@@ -354,8 +348,7 @@ type formResult struct {
 	SessionModel   string
 	// MainCheckout is the freeform kind's "runs in" choice: a session that
 	// works in the repository's main checkout instead of a worktree of its
-	// own — no branch cut, no worktree created (DESIGN §19). Refused at
-	// the mint on every other kind.
+	// own — no branch cut, no worktree created (DESIGN §19).
 	MainCheckout bool
 	// Home is the third "runs in" choice: an agent, working in a home of
 	// its own and in no repository (domain.Feature.Home).
@@ -369,7 +362,7 @@ type cardCreatedMsg struct {
 	// stack is the stack the new card joined, empty when standalone. The
 	// shell ticks it so the card's branch is cut on the right base.
 	stack domain.StackID
-	warn  string // a dependency edge that could not be written
+	warn  string // a stack placement that could not be made
 	// opening is the text a freeform card was created with, verbatim: its
 	// session's first turn (FreeformSession.KickoffWith), which the card
 	// itself only keeps as a line-sized title and one-liner.
@@ -384,18 +377,11 @@ type cardCreatedMsg struct {
 	open bool
 }
 
-// createCard mints a card of any kind through cardmint.Mint — the same
-// recipe `gummi run`, `bugs new` and the workspace MCP endpoint use — and
-// then records its dependency edges. The old feature/bug/research
-// create paths were three hand-rolled copies of that recipe; this is the
-// one TUI caller now.
+// createCard mints a session through cardmint.Mint — the same recipe
+// `gummi run` uses — and then places it in its stack.
 func (m *Shell) createCard(res formResult) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		kind := res.Kind
-		if !kind.Valid() {
-			kind = domain.KindFreeform
-		}
 		env := m.envelope
 		if res.Envelope != nil {
 			env = *res.Envelope
@@ -406,25 +392,16 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			repo = ""
 		}
 		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
-			Kind: kind, Description: res.Desc, Profile: res.Profile, Envelope: env,
+			Description: res.Desc, Profile: res.Profile, Envelope: env,
 			Repo: repo, RequireRepo: m.requireRepo, Base: res.Base,
-			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
-			Discussion:     res.Discussion,
+			ExternalRef:    res.ExternalRef,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
 			MainCheckout: res.MainCheckout, Home: res.Home,
-			// The form offers no kind: a workflow kind reaches it only as a
-			// preset, from the bug import or the web API's explicit kind.
-			Workflow: kind != domain.KindFreeform,
 		})
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		var warn []string
-		for _, dep := range res.After {
-			if err := m.store.AddDependency(ctx, f.ID, dep); err != nil {
-				warn = append(warn, sanitize(err.Error()))
-			}
-		}
 		// Stacking happens after the mint, and a failure to stack is a
 		// warning rather than a rollback: the card is real, described and
 		// numbered, and throwing it away because a chain could not be
@@ -442,9 +419,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			f:     f,
 			stack: stacked, warn: strings.Join(warn, "; "),
 		}
-		if f.IsFreeform() {
-			created.opening = res.Desc
-		}
+		created.opening = res.Desc
 		return created
 	}
 }
@@ -508,7 +483,7 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 			ID: newID, Num: num, Kind: src.Kind, Title: src.Title, OneLiner: src.OneLiner,
 			Slug: src.Slug, Stage: domain.StageOpen,
 			Profile: src.Profile, Budget: domain.Budget{Envelope: src.Budget.Envelope},
-			Repo: src.Repo, Base: src.Base, Severity: src.Severity,
+			Repo: src.Repo, Base: src.Base,
 			// an agent's copy is an agent, in a fresh home of its own
 			MainCheckout: src.Home, Home: src.Home,
 			BranchScheme: domain.DefaultBranchScheme,

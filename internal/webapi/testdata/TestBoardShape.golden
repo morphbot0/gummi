@@ -48,12 +48,10 @@
       "stage": "implement",
       "status": "running",
       "running": {
-        "verb": "editing board.go",
-        "autopilot": true
+        "verb": "editing board.go"
       },
       "spend": 3,
       "envelope": 500,
-      "autopilot": true,
       "severity": "high",
       "waits": [
         "FD-010"
@@ -83,16 +81,5 @@
       "home": ".gummi/homes/FF-020"
     }
   ],
-  "resume": {
-    "cards": [
-      {
-        "id": "FD-012",
-        "title": "Dark mode",
-        "stage": "plan"
-      }
-    ],
-    "since": "3m ago",
-    "at": "2026-09-27T09:12:00Z"
-  },
   "eventId": "1760000000000042"
 }

@@ -40,7 +40,7 @@ export function same (a, b) {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
-const HEAD_FIELDS = ['stage', 'status', 'envelope', 'autopilot', 'landed', 'profile', 'repo', 'elsewhere']
+const HEAD_FIELDS = ['stage', 'status', 'envelope', 'landed', 'profile', 'repo', 'elsewhere']
 
 function rowMoved (r, c) {
   return HEAD_FIELDS.some(k => (r[k] ?? null) !== (c[k] ?? null)) ||

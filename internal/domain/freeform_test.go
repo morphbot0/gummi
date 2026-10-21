@@ -44,11 +44,6 @@ func TestAFreeformCardIsOffTheGraph(t *testing.T) {
 	if got := StageOpen.SuperState(); got != SuperInProgress {
 		t.Errorf("StageOpen.SuperState() = %q, want %q", got, SuperInProgress)
 	}
-	// Dependencies are settled from the moment it is minted: there is no
-	// design stage in which taking one on could still change the work.
-	if !AtOrPastCoding(StageOpen) {
-		t.Error("a freeform card is not at-or-past coding; it is coding from its first turn")
-	}
 }
 
 // TestAFreeformCardLandsWithoutVerifying: a session lands on a person's

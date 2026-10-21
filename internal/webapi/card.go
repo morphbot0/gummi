@@ -159,7 +159,6 @@ const (
 	ActionNeedsMessage ActionNeeds = "message"
 	ActionNeedsNumber  ActionNeeds = "number"
 	ActionNeedsProfile ActionNeeds = "profile"
-	ActionNeedsCards   ActionNeeds = "cards"
 	// ActionNeedsConfirm: the action asks a yes before it acts. The page
 	// collects nothing first: it sends the action bare, shows the question
 	// the "confirm" question answers with, and sends its token back
@@ -167,8 +166,6 @@ const (
 	ActionNeedsConfirm ActionNeeds = "confirm"
 	// ActionNeedsRepo: the repository picker (ActionRequest.Repo).
 	ActionNeedsRepo ActionNeeds = "repo"
-	// ActionNeedsMode: the autopilot switch's mode (ActionRequest.Mode).
-	ActionNeedsMode ActionNeeds = "mode"
 	// ActionNeedsText: one line of text (ActionRequest.Message), such as a
 	// pull request's URL or number; empty is an answer too when Detail
 	// says so.
@@ -226,11 +223,6 @@ const (
 	// its answers right now ("/rebase" at a gate). The TUI opens its menu
 	// filtered by the word; the page opens the card's actions.
 	RouteMenu Route = "menu"
-	// RouteRead: a line typed at a stop that no answer takes words for. It
-	// is sent as a line, and the board reads it to place it (a routed
-	// re-entry, or a message) exactly as the TUI's enter does — it is never
-	// the highlighted answer.
-	RouteRead Route = "read"
 )
 
 // Composer is the card's composer state, and the answer to POST
@@ -241,12 +233,6 @@ type Composer struct {
 	// will do ("steers the implementer mid-turn").
 	Says  string `json:"says"`
 	Route Route  `json:"route"`
-	// Read marks an answer line the board reads before it goes anywhere:
-	// words typed at a stop are placed first, and the reading is put to
-	// the person as a question of its own, so enter does not yet give the
-	// answer they go with. Says says so; the page shows it in place of the
-	// answer's own label.
-	Read bool `json:"read,omitempty"`
 	// Images is whether the card's current agent (its backend and,
 	// where knowable, its model) can take images with a turn. The page
 	// offers the composer's attach control only when this is true.
@@ -398,18 +384,14 @@ type ActionRequest struct {
 	Method string `json:"method,omitempty"`
 	// KeepBranch asks that an action which closes the card (a landing, a
 	// hand-off) leave its worktree and branch standing (AnswerRequest.KeepBranch).
-	KeepBranch bool     `json:"keepBranch,omitempty"`
-	Number     *int     `json:"number,omitempty"`
-	Profile    string   `json:"profile,omitempty"`
-	Cards      []string `json:"cards,omitempty"`
+	KeepBranch bool   `json:"keepBranch,omitempty"`
+	Number     *int   `json:"number,omitempty"`
+	Profile    string `json:"profile,omitempty"`
 	// Confirm is the token(s) of the confirmation(s) the server asked on an
 	// earlier try ("confirm" question) and the person said yes to (AnswerRequest.Confirm).
 	Confirm string `json:"confirm,omitempty"`
 	// Repo is the repository picker's answer.
 	Repo string `json:"repo,omitempty"`
-	// Mode is the autopilot switch's answer: "autopilot" or "attended".
-	// Empty takes the one the card's menu entry names.
-	Mode string `json:"mode,omitempty"`
 	// Backend and Model are the model switch's answer: the agent and model
 	// a session runs on from its next turn.
 	Backend string `json:"backend,omitempty"`
@@ -423,18 +405,17 @@ type ActionRequest struct {
 
 // DecisionIndependentActions are the card actions that neither answer nor
 // move past a pinned decision, so they run without an Against: the menu
-// entries that change what the card waits for, what it may spend, which
+// entries that change what the card may spend, which
 // profile or repository it runs under and which pull request it is linked
 // to (and, for a session, which model it runs on and committing its
 // worktree), and the ones that copy
 // or remove it (each of those asks its own
 // question first). Every other action — a crossing, a landing, a
-// send-back, a run, a pause, a rebase, a hand-off, the autopilot switch —
-// and every composer line (SendRequest) sent while a decision is pinned
+// send-back, a run, a pause, a rebase, a hand-off — and every composer line (SendRequest) sent while a decision is pinned
 // must carry the token the page showed, and is refused with 409 "moved"
 // without one. An action that is also one of the pinned decision's
 // options is never independent.
 var DecisionIndependentActions = []string{
-	"deps", "profile", "envelope", "repo", "prlink", "prunlink", "prpull",
+	"profile", "envelope", "repo", "prlink", "prunlink", "prpull",
 	"duplicate", "delete", "clean", "model", "commit",
 }

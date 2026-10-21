@@ -114,12 +114,12 @@ func TestASessionStartsOnTheModelItsDraftPicked(t *testing.T) {
 }
 
 // What a session may not be started on is refused before anything is
-// minted: a model on a card in the workflow, a pair no agent could run,
+// minted: a retired workflow kind, a pair no agent could run,
 // and an agent this host does not have.
 func TestASessionDraftRefusesWhatCannotRun(t *testing.T) {
 	h := newCardBoard(t, namedFake{Fake: agent.NewFake("ok"), name: "opencode"})
 	for _, req := range []webapi.CreateCardRequest{
-		{Kind: "feature", Title: "Configurable retries", Backend: "opencode", Model: "openai/gpt-5"},
+		{Kind: "feature", Title: "Configurable retries"},
 		{Kind: "freeform", Description: "anything", Backend: "claude", Model: "gpt-5"},
 		{Kind: "freeform", Description: "anything", Backend: "opencode"},
 		{Kind: "freeform", Description: "anything", Model: "gpt-5"},
@@ -172,14 +172,6 @@ func TestASessionSwitchesItsModelFromItsMenu(t *testing.T) {
 	}
 	if row.SessionModel != "openai/gpt-5-mini" {
 		t.Errorf("the card holds model %q after the switch", row.SessionModel)
-	}
-
-	f := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Configurable retries"})
-	if slices.ContainsFunc(h.card(f.ID).Actions, func(a webapi.Action) bool { return a.ID == "model" }) {
-		t.Error("a card in the workflow is offered a model switch; its stages take their models from its profile")
-	}
-	if h.card(f.ID).Session != nil {
-		t.Error("a card in the workflow reports a session model")
 	}
 }
 

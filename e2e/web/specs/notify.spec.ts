@@ -155,7 +155,7 @@ test('a push becomes a notification that links to its card', async ({ server }) 
 });
 
 test('tapping a notification focuses the board and opens the card', async ({ pairedPage: page, server, api }, info) => {
-  const id = (await api('POST', '/api/cards', { kind: 'feature', title: 'Add a wink helper' })).json.id;
+  const id = (await api('POST', '/api/cards', { kind: 'freeform', title: 'Add a wink helper' })).json.id;
   // the worker's half: focus the board's window and tell it where to go,
   // or open one when there is none
   const tap = { notification: { data: { url: `/#${id}` }, close: () => {} } };

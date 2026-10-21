@@ -1,42 +1,27 @@
-// Package cardmint owns the one recipe for minting a new card (feature,
-// bug, or research item) from a free-form description: split the
-// description, slugify the title, validate the target repo, mint the
-// next sequence number, build the domain.Feature, and seed whatever draft
-// artifact its kind wants before persisting it.
+// Package cardmint owns the one recipe for minting a new card — a
+// session, or an agent (a session in a home of its own) — from a
+// free-form description: split the description, slugify the title,
+// validate the target repo, mint the next sequence number, build the
+// domain.Feature and persist it.
 //
-// That recipe used to live twice — once as (*driver.Driver).createFeature
-// for headless `gummi run`/`bugs new`, and a second time, differently
-// shaped, inside Engine.Materialize's bulk-ingest path. This package
-// exists so any third caller can mint a single card without adding a
-// fourth copy or reaching across a package boundary that would cycle:
-// internal/driver already imports internal/engine (Driver embeds
-// *engine.Engine), so internal/engine cannot import internal/driver to
-// reuse createFeature, and neither can import the other's package for
-// this. cardmint sits below both — it imports only internal/domain,
-// internal/state, internal/spec, and internal/workflow, none of which
-// import driver or engine — so both driver and engine import cardmint
-// instead of each other.
+// Every caller mints through it: the board's form and the web face's
+// POST /api/cards, a follow-up filed from a finished card, a schedule's
+// fire, and headless `gummi run`. cardmint knows nothing about any of
+// them; it takes an Input describing exactly the decisions a mint needs
+// and a RequireRepo callback, because "can this card have this
+// repository" is answered by whoever owns the repository pool.
 //
-// cardmint knows nothing about either caller. It does not know what a
-// Driver's Options or an Engine's tool arguments look like; it takes an
-// Input describing exactly the decisions a mint needs (kind, description,
-// profile, envelope, repo, external ref, route, gate approval) and a
-// RequireRepo callback, because "can this card have this repository" is
-// answered differently by each caller (a driver asks its *engine.Engine;
-// the workspace endpoint asks its own *Engine directly) and cardmint has
-// no engine of its own to ask.
+// The workflow kinds (feature, bug, research, goal) are no longer
+// minted: a row of one in an old database is read, never made.
 package cardmint
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -50,15 +35,9 @@ import (
 // reference to an *engine.Engine or a *driver.Driver; wiring those in
 // would immediately create the import cycle this package exists to avoid.
 type Input struct {
-	// Kind selects the card's artifact home and its stages' contracts —
-	// not a route, since there is one graph: KindFeature/KindBug share the
-	// draft-seeded shape, and KindResearch mints an RS card and seeds its
-	// `## Brief` directly (research has no draft step).
-	Kind domain.Kind
 	// Description is the free-form input text: its first line is the
-	// title (domain.SplitFreeform). For KindResearch the whole text is the
-	// Brief; for everything else the overflow past the first line seeds
-	// the draft (the Problem section, or a bug report's sections).
+	// title (domain.SplitFreeform), and the whole of it is the session's
+	// opening turn, which the caller sends.
 	Description string
 	// Profile is the model-role profile the card runs under (empty means
 	// the workspace default).
@@ -67,15 +46,12 @@ type Input struct {
 	Envelope int
 	// SessionBackend and SessionModel are the agent and model a freeform
 	// card's session runs on (DESIGN §19.8); both empty is the profile's
-	// implementer. Any other kind naming one is refused by
-	// domain.Feature.Validate, since a stage takes its agent from the
-	// profile.
+	// implementer.
 	SessionBackend string
 	SessionModel   string
 	// MainCheckout mints a freeform card whose session runs in the
 	// repository's main checkout instead of a worktree of its own
-	// (DESIGN §19): no branch is cut, no worktree is created. Refused on
-	// every other kind. False is every card minted before it existed.
+	// (DESIGN §19): no branch is cut, no worktree is created.
 	MainCheckout bool
 	// Home mints an agent: a freeform card that runs in a home of its
 	// own, in no repository (domain.Feature.Home). It implies
@@ -111,36 +87,6 @@ type Input struct {
 	// issue reference), persisted as Feature.ExternalRef and echoed by
 	// callers that track it.
 	ExternalRef string
-	// Acceptance is optional acceptance-criteria text seeded into the
-	// draft's Verification plan section alongside the description's
-	// overflow. Ignored for KindResearch.
-	Acceptance string
-	// Severity is a bug's impact, persisted on the card and seeded into
-	// its report header. Ignored for every other kind.
-	Severity domain.Severity
-	// Source names where the description came from ("manual", "github"),
-	// rendered into the artifact's provenance header beside ExternalRef.
-	// Empty renders no provenance.
-	Source string
-	// Discussion is an imported issue's comment thread, seeded into a bug
-	// report's Discussion section. It is the one part of an import that is
-	// not in the description text a person can edit, so it rides beside
-	// it. Ignored for every other kind.
-	Discussion string
-	// GateApproval selects who crosses this card's gates on an unattended
-	// resume: domain.GateAutopilot (crosses them all) or
-	// domain.GateAttended (checkpoints each one for a human). Empty reads
-	// as domain.GateAttended — the stricter of the two — matching
-	// domain.(*Feature).GateMode, which is how every reader resolves the
-	// stored field. Mint writes the resolved value rather than the empty
-	// string so nothing downstream has to resolve it again.
-	GateApproval string
-	// Workflow lets a caller that still runs cards through the stage graph
-	// mint a workflow kind (feature, bug, research): the headless driver's
-	// `gummi run` and the web API's explicit kind. Without it only a
-	// freeform card — a session, or an agent — is minted; every person-
-	// facing creation surface leaves it unset.
-	Workflow bool
 	// Unattended marks a mint with nobody present to retitle a colliding
 	// card — a schedule firing on a cadence mints the same description
 	// every fire, and the collision surfaces at the fire, after the
@@ -154,17 +100,6 @@ type Input struct {
 	FoundBy domain.FeatureID
 }
 
-// Mint validates in, mints the next sequence number, builds the
-// domain.Feature, seeds its draft or research artifact where the kind and
-// input call for one, and persists it. It does not drive the card —
-// callers that want it running still own that decision, the same way
-// (*driver.Driver).Create does today.
-//
-// Order matters and is deliberate: the repo check runs before
-// MintFeatureNum so a bad --repo never burns a sequence number, matching
-// both callers' pre-existing behavior (createFeature's own comment, and
-// Engine.Materialize's requireRepo pre-flight).
-
 // freeSlug returns a slug whose branch nobody holds.
 //
 // Telling a person to retitle a card is the right answer when a person is
@@ -174,7 +109,7 @@ type Input struct {
 // variant and says nothing; a person's card still gets told.
 func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (string, error) {
 	branchFor := func(s string) string {
-		f := domain.Feature{Kind: in.Kind, Slug: s, BranchScheme: domain.DefaultBranchScheme}
+		f := domain.Feature{Kind: domain.KindFreeform, Slug: s, BranchScheme: domain.DefaultBranchScheme}
 		return f.BranchName()
 	}
 	owner, taken, err := store.BranchTaken(ctx, in.Repo, branchFor(slug), "")
@@ -202,27 +137,17 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 	return "", fmt.Errorf("%s is taken, and so is every variant of it up to 50", branchFor(slug))
 }
 
+// Mint validates in, mints the next sequence number, builds the
+// domain.Feature and persists it. It does not start the card's session:
+// callers that want it running own that decision.
+//
+// Order matters and is deliberate: the repo check runs before
+// MintFeatureNum so a bad --repo never burns a sequence number.
 func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input) (domain.Feature, error) {
-	// the first line is the title for every kind — a multi-line research
-	// brief names itself on its first line exactly as a feature does; the
-	// full brief goes into the artifact below. Research just keeps no
-	// separate seed: the whole description is the Brief.
-	title, oneLiner, seed := domain.SplitFreeform(in.Description)
+	title, oneLiner, _ := domain.SplitFreeform(in.Description)
 	slug, err := domain.Slugify(title)
 	if err != nil {
 		return domain.Feature{}, err
-	}
-	// Sessions are the card a person makes now; the workflow kinds are
-	// minted only by the callers that still drive them (Input.Workflow),
-	// and a goal by none.
-	if in.Kind == domain.KindGoal {
-		return domain.Feature{}, fmt.Errorf("goals are retired: start a session and let its crew do the work")
-	}
-	if in.Kind == domain.KindResearch {
-		return domain.Feature{}, fmt.Errorf("research cards are retired: start a session and ask it")
-	}
-	if in.Kind != domain.KindFreeform && !in.Workflow {
-		return domain.Feature{}, fmt.Errorf("a %s card is no longer made here: start a session instead", in.Kind)
 	}
 	// an agent names no repository, so there is none to require of it
 	if !in.Home {
@@ -234,8 +159,6 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	// branch in one, is a mint that lost track of what it was making.
 	if in.Home {
 		switch {
-		case in.Kind != domain.KindFreeform:
-			return domain.Feature{}, fmt.Errorf("a home of its own is an agent's: a %s runs in its own branch worktree", in.Kind)
 		case in.Repo != "":
 			return domain.Feature{}, fmt.Errorf("an agent is in no repository, but names %q", in.Repo)
 		case in.Base != "":
@@ -243,22 +166,13 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		}
 		in.MainCheckout = true
 	}
-	// MainCheckout is the freeform kind's own opt-out, and nothing else
-	// has a use for it: every other kind exists to end as a branch.
-	if in.MainCheckout && in.Kind != domain.KindFreeform {
-		return domain.Feature{}, fmt.Errorf("main_checkout is a freeform card's: a %s runs in its own branch worktree", in.Kind)
-	}
 	// The branch name a card gets no longer carries its id, so two cards
 	// whose titles slugify the same would want the same ref. Refuse here,
 	// before a sequence number is spent and before a card exists that
 	// could never cut its branch — and say what to do about it, since the
-	// fix is a word in the title and nothing else.
-	//
-	// A main-checkout freeform card cuts no branch, so no slug can collide
-	// on one.
-	switch {
-	case in.MainCheckout:
-	case in.Kind != domain.KindResearch:
+	// fix is a word in the title and nothing else. A main-checkout card
+	// cuts no branch, so no slug can collide on one.
+	if !in.MainCheckout {
 		free, terr := freeSlug(ctx, store, in, slug)
 		if terr != nil {
 			return domain.Feature{}, terr
@@ -269,7 +183,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	id, err := domain.NewID(in.Kind, num)
+	id, err := domain.NewID(domain.KindFreeform, num)
 	if err != nil {
 		return domain.Feature{}, err
 	}
@@ -281,75 +195,23 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 			return domain.Feature{}, fmt.Errorf("%s: an earlier agent's home still stands at %s — move it away, or try again for the next number", id, ws.HomeDir(id))
 		}
 	}
-	gate := in.GateApproval
-	if gate == "" {
-		gate = domain.GateAttended
-	}
 	now := time.Now()
 	f := domain.Feature{
-		ID: id, Num: num, Kind: in.Kind, Title: title, OneLiner: oneLiner,
-		Slug: slug, Stage: initialStage(in.Kind),
+		ID: id, Num: num, Kind: domain.KindFreeform, Title: title, OneLiner: oneLiner,
+		Slug: slug, Stage: domain.StageOpen,
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		SessionBackend: in.SessionBackend, SessionModel: in.SessionModel,
 		MainCheckout: in.MainCheckout, Home: in.Home,
-		GateApproval: gate,
-		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
-		Base: in.Base,
+		ExternalRef: in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
+		Base: in.Base, FoundBy: in.FoundBy,
 		// Every newly minted card gets the current branch-name scheme.
 		// Stored rather than read from the default at render time, so a
 		// later change to the default never renames this card's branch —
 		// which by then exists in checkouts this process cannot see.
 		BranchScheme: domain.DefaultBranchScheme,
 	}
-	if in.Kind == domain.KindBug {
-		f.Severity = in.Severity
-	}
-	f.FoundBy = in.FoundBy
-	if in.Kind != domain.KindFreeform &&
-		(seed != "" || in.Acceptance != "" || (in.Kind == domain.KindBug && in.Discussion != "")) {
-		// seed the draft before persisting: the description's overflow fills
-		// the Problem section (a title-sized description seeds nothing
-		// there), and Acceptance fills the Verification plan (D10). Either
-		// input alone is enough to warrant a draft; both are just a pre-fill
-		// the spec agent still owns and approves.
-		//
-		// KindBug gets the bug report shape instead, and the overflow goes
-		// through domain.ParseBugBody: the same headings the GitHub import
-		// recognises in an issue body (Steps to reproduce, Expected,
-		// Actual, Environment) route typed text into the report's sections,
-		// and everything else lands in Summary. Acceptance has no
-		// destination for a bug (SeededBugTemplate never pre-seeds Root
-		// cause/Fix/Verification) and is silently unused here, matching
-		// that template's existing contract.
-		//
-		// A feature keeps its overflow verbatim in Problem, with exactly one
-		// heading recognised: an `## Acceptance` section is cut out and
-		// seeds the Verification plan, the same place the --acceptance flag
-		// writes. An explicit Acceptance wins over one found in the text.
-		draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-		var content string
-		if in.Kind == domain.KindBug {
-			report := domain.ParseBugBody(seed)
-			report.Discussion = in.Discussion
-			content = spec.SeededBugTemplate(&f, report, domain.BugProvenance{Source: in.Source, ExternalRef: in.ExternalRef}, in.Severity)
-		} else {
-			problem, acceptance := domain.SplitAcceptance(seed)
-			if in.Acceptance != "" {
-				acceptance = in.Acceptance
-			}
-			content = spec.SeededTemplate(&f, domain.DraftSeed{Problem: problem, Acceptance: acceptance}, domain.DraftProvenance{Source: in.Source})
-		}
-		if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
-			return domain.Feature{}, err
-		}
-		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
-			return domain.Feature{}, err
-		}
-	}
-	// A freeform card falls out of every branch above with no artifact at
-	// all, which is the point: its description is the opening turn of its
-	// session and its thread is the record (Kind.ArtifactNoun returns ""
-	// for it). Nothing to seed, nothing to promote, nothing to gate.
+	// A session has no artifact to seed: its description is the opening
+	// turn of its session and its thread is the record.
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		return domain.Feature{}, err
 	}
@@ -368,13 +230,4 @@ func requireRepo(check func(string) error, repo string) error {
 		return fmt.Errorf("repository %q cannot be validated: no repository checker was wired", repo)
 	}
 	return nil
-}
-
-// initialStage is where a minted card starts: a session at
-// domain.StageOpen, where it stays; a legacy workflow card at todo.
-func initialStage(k domain.Kind) domain.Stage {
-	if k == domain.KindFreeform {
-		return domain.StageOpen
-	}
-	return domain.StageTodo
 }

@@ -1,7 +1,5 @@
 package webapi
 
-import "time"
-
 // Board is GET /api/board: the rail of cards and the header above it.
 type Board struct {
 	// Repo names the workspace; Head is the default repository's checked-
@@ -20,32 +18,10 @@ type Board struct {
 	// Rows is every card, in the TUI board's order. The page groups them
 	// by Status; it does not reorder within a group.
 	Rows []Row `json:"rows"`
-	// Resume is the question the TUI asks when it starts on cards its last
-	// quit stopped: pick them back up, or not now. Nil when there is
-	// nothing to offer. Answer it with POST /api/board/resume.
-	Resume *ResumeOffer `json:"resume,omitempty"`
 	// EventID is the event stream's last id as this read began: a page
 	// opens GET /api/events?since=<it> and is told only what changed after
 	// the read, rather than refetching everything it just read.
 	EventID string `json:"eventId,omitempty"`
-}
-
-// ResumeOffer is the quit-resume question: the cards the last quit
-// stopped, and when. Since is how long before this board started that
-// was ("2h ago"), measured once; At is the moment itself, for a page that
-// says how long ago it is now and keeps saying it.
-type ResumeOffer struct {
-	Cards []CardRef `json:"cards"`
-	Since string    `json:"since"`
-	At    time.Time `json:"at,omitzero"`
-}
-
-// ResumeRequest is POST /api/board/resume. Cards names the offered cards
-// to pick back up (all of them is the TUI's "Resume all"); None declines
-// the offer ("Not now"), which leaves every card parked where it stopped.
-type ResumeRequest struct {
-	Cards []string `json:"cards,omitempty"`
-	None  bool     `json:"none,omitempty"`
 }
 
 // Today is the header's spend line.
@@ -110,8 +86,6 @@ type Row struct {
 	// workspace root (DESIGN §19.3d). Such a card is in no repository,
 	// so its empty Repo does not mean the default.
 	Home string `json:"home,omitempty"`
-	// Autopilot marks a card whose gates cross unattended.
-	Autopilot bool `json:"autopilot,omitempty"`
 	// Elsewhere marks a card another gummi process is driving: this board
 	// may watch it and not steer it.
 	Elsewhere bool `json:"elsewhere,omitempty"`
@@ -162,8 +136,6 @@ type RowRunning struct {
 	// Verb is what the agent is doing, in the TUI's words ("planning",
 	// "running checks").
 	Verb string `json:"verb"`
-	// Autopilot marks a stretch autopilot is driving.
-	Autopilot bool `json:"autopilot,omitempty"`
 	// Pausing marks a pause asked for and not yet taken.
 	Pausing bool `json:"pausing,omitempty"`
 }

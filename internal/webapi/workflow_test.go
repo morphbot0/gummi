@@ -40,7 +40,6 @@ func TestCardWorkflowShapes(t *testing.T) {
 		Refusals  []Error           `json:"refusals"`
 		Questions []Error           `json:"questions"`
 		Create    CreateCardRequest `json:"create"`
-		Resume    ResumeRequest     `json:"resume"`
 		Board     Board             `json:"board"`
 	}{
 		Answer: AnswerRequest{Ref: "gate:FD-012:plan", Option: "advance", Against: "gate:FD-012:plan#0de111d3@3f2a1bc", Confirm: "c1a2b3c4d5e6f7a8b9c0d1e2"},
@@ -57,20 +56,18 @@ func TestCardWorkflowShapes(t *testing.T) {
 			Actions: []Action{
 				{ID: "profile", Label: "profile", Needs: ActionNeedsProfile, Default: "thrifty", Choices: []Choice{{Value: "premium", Label: "premium", Detail: "copilot · gpt-5"}}},
 				{ID: "repo", Label: "repository", Key: "o", Needs: ActionNeedsRepo, Choices: []Choice{{Value: "api", Label: "api"}}},
-				{ID: "gate", Label: "hand to autopilot", Default: "autopilot"},
 			},
 			Composer: Composer{Says: "“rebase” is in the card's menu, not one of the answers above", Route: RouteMenu},
 		}},
-		Action:    ActionRequest{Number: &n, Repo: "api", Mode: "attended", Confirm: "c1a2b3c4d5e6f7a8b9c0d1e2 c9f8e7d6c5b4a3f2e1d0c9b8", Against: "verify:FD-012:verify#1a2b3c4d@9f8e7d6"},
+		Action:    ActionRequest{Number: &n, Repo: "api", Confirm: "c1a2b3c4d5e6f7a8b9c0d1e2 c9f8e7d6c5b4a3f2e1d0c9b8", Against: "verify:FD-012:verify#1a2b3c4d@9f8e7d6"},
 		Refusals:  refusals,
 		Questions: questions,
-		Create:    CreateCardRequest{Kind: "research:diagnosis", Title: "Slow board", DependsOn: []string{"FD-001"}, StackOn: "FD-002", Autopilot: true},
-		Resume:    ResumeRequest{Cards: []string{"FD-004"}},
+		Create:    CreateCardRequest{Kind: "freeform", Title: "Slow board", StackOn: "FD-002"},
 		Board: Board{Repo: "gummi", Today: Today{Spent: 41.5}, Viewers: []Viewer{}, Rows: []Row{
 			{
 				ID: "FD-013", Kind: "feature", Type: "Feature", Title: "Row cache", Stage: "plan", Status: StatusRunning,
 				Running: &RowRunning{Verb: "planning", Pausing: true}, Stack: &RowStack{ID: "ST-1", Name: "rows", Pos: 1, Of: 2}, Waits: []string{"FD-012"},
 			},
-		}, Resume: &ResumeOffer{Cards: []CardRef{{ID: "FD-004", Title: "Export", Stage: "implement"}}, Since: "2h ago"}},
+		}},
 	}))
 }

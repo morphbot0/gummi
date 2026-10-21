@@ -335,7 +335,7 @@ func TestCardLineNarrowWidthGolden(t *testing.T) {
 
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
-	form := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, nil, false, "", nil, 2400, func(formResult) tea.Cmd { return nil })
+	form := newCardForm(nil, nil, false, "", 2400, func(formResult) tea.Cmd { return nil })
 	form.SetText("dark mode toggle")
 	form.text.Blur()
 	m.Overlay.Push(form)

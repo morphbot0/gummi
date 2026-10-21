@@ -435,14 +435,9 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	}
 	in := webInput{
 		actor: state.PersonActor(person), message: req.Message, number: req.Number,
-		profile: req.Profile, repo: req.Repo, mode: req.Mode, confirm: req.Confirm,
+		profile: req.Profile, repo: req.Repo, confirm: req.Confirm,
 		land:   action == "merge" || action == "squash",
 		method: method, keepBranch: req.KeepBranch,
-	}
-	switch req.Mode {
-	case "", domain.GateAutopilot, domain.GateAttended:
-	default:
-		return nil, refuse(WebBadRequest, "mode is autopilot or attended, not "+strconv.Quote(req.Mode))
 	}
 	if action == "repo" {
 		// the repository the action offers may be a clone made since launch

@@ -114,7 +114,6 @@ func (m *Shell) mintBugFromCard(parent domain.Feature, line string, landed bool)
 	m.saveThreadDraft(parent.ID)
 	return func() tea.Msg {
 		f, err := cardmint.Mint(context.Background(), m.store, m.ws, cardmint.Input{
-			Kind:        domain.KindFreeform,
 			Description: desc,
 			Profile:     parent.Profile,
 			Envelope:    env,

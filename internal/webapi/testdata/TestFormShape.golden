@@ -1,17 +1,14 @@
 {
   "kinds": [
     {
-      "value": "feature",
-      "label": "Feature"
+      "value": "freeform",
+      "label": "Session"
     }
   ],
   "profiles": [
     "balanced"
   ],
   "repos": [],
-  "severities": [
-    "high"
-  ],
   "branches": [
     "main",
     "feat/dark",
@@ -19,7 +16,6 @@
     "stale"
   ],
   "stackable": [],
-  "dependable": [],
   "envelope": 2000,
   "sessions": {
     "default": {

@@ -359,8 +359,7 @@ const webLandingEmpty = " — leave the message empty and gummi drafts one for y
 
 // webActionDefaults fills the inputs whose suggested value is a read of
 // the store or the repository, which the loop must not make: the landing
-// message the merge dialog would open on, and the dependencies the
-// dependency picker would open with ticked. Off the loop.
+// message the merge dialog would open on. Off the loop.
 func (m *Shell) webActionDefaults(ctx context.Context, f domain.Feature, acts []webapi.Action) {
 	for i := range acts {
 		a := &acts[i]
@@ -371,19 +370,6 @@ func (m *Shell) webActionDefaults(ctx context.Context, f domain.Feature, acts []
 				a.Default = msg
 				a.Detail = strings.TrimSuffix(a.Detail, webLandingEmpty)
 			}
-		case "deps":
-			if m.store == nil {
-				continue
-			}
-			deps, err := m.store.ListDependencies(ctx, f.ID)
-			if err != nil {
-				continue
-			}
-			ids := make([]string, 0, len(deps))
-			for _, d := range deps {
-				ids = append(ids, string(d))
-			}
-			a.Default = strings.Join(ids, ",")
 		}
 	}
 }

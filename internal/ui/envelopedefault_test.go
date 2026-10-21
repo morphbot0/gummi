@@ -44,7 +44,7 @@ func TestCreationDialogsPrefillDefaultEnvelope(t *testing.T) {
 	want := domain.DollarsInput(DefaultEnvelopeCredits)
 	views := map[string]string{}
 	for _, ct := range domain.CardTypes {
-		views[ct.Name()] = newCardForm(ct, nil, nil, true, "", nil, DefaultEnvelopeCredits, nil).View(s, 80, 24)
+		views[ct.Name()] = newCardForm(nil, nil, true, "", DefaultEnvelopeCredits, nil).View(s, 80, 24)
 	}
 	for name, view := range views {
 		if !strings.Contains(view, want) {

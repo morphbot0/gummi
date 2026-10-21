@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/worktree"
@@ -127,7 +126,7 @@ func typeString(t *testing.T, m *Shell, str string) *Shell {
 func TestFormValidationBlocksEmptyTitle(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.Overlay.HasDialogs() {
 		t.Fatal("form closed despite empty title")

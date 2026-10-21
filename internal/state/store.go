@@ -18,11 +18,6 @@ import (
 // ErrNotFound is returned when a feature ID has no row.
 var ErrNotFound = errors.New("feature not found")
 
-// ErrDependedOn is returned by DeleteFeature when the card still has
-// dependents. The store pre-checks before deleting so the raw SQLite FK
-// constraint error never surfaces and no edge is silently dropped.
-var ErrDependedOn = errors.New("feature has dependents")
-
 // ErrForkPointStamped is returned by SetForkPoint when the feature row
 // already records a fork-point SHA. It is the "stamped once" refusal that
 // keeps Create and the lazy backfill from racing a stored SHA into being
@@ -330,11 +325,9 @@ CREATE TABLE IF NOT EXISTS check_baseline (
 	PRIMARY KEY (feature_id, name)
 );
 
--- One directed edge per dependency: feature_id depends on depends_on_id.
--- feature_id cascades on delete (a deleted card's outgoing edges go with
--- it); depends_on_id does not, so SQLite FK enforcement refuses deleting
--- a card others still depend on. The store pre-checks dependents before
--- delete (ErrDependedOn) so the raw constraint error never surfaces.
+-- One directed edge per dependency between two workflow cards, kept only
+-- so an old database opens: nothing writes an edge any more, and
+-- DeleteFeature drops a card's incoming edges before the card itself.
 CREATE TABLE IF NOT EXISTS feature_deps (
 	feature_id    TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
 	depends_on_id TEXT NOT NULL REFERENCES features(id),
@@ -1708,16 +1701,11 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	return nil
 }
 
-// DeleteFeature removes a feature and (via cascade) its history. A card
-// that others still depend on is refused: dependents are checked first so
-// the raw SQLite FK constraint never surfaces and no edge is dropped.
+// DeleteFeature removes a feature and (via cascade) its history. A legacy
+// dependency edge onto it, which no cascade covers, goes first.
 func (s *Store) DeleteFeature(ctx context.Context, id domain.FeatureID) error {
-	deps, err := s.ListDependents(ctx, id)
-	if err != nil {
-		return err
-	}
-	if len(deps) > 0 {
-		return fmt.Errorf("deleting %s: %w", id, ErrDependedOn)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM feature_deps WHERE depends_on_id=?`, string(id)); err != nil {
+		return fmt.Errorf("deleting %s: %w", id, err)
 	}
 	// A card leaves its stack the way `stack rm` takes it out — the gap
 	// closed, the cards above moved down — or the stack is left with a hole

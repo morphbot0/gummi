@@ -248,7 +248,7 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 	case "model":
 		return m.openCardModelPicker()
 	case "new-freeform":
-		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+		m.Overlay.Push(m.openCardForm())
 		return nil
 	}
 	return m.boardVerb(id)

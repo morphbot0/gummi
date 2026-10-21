@@ -41,9 +41,6 @@ const (
 	ItemDecision ItemType = "decision"
 	// ItemNote is gummi's own narration: a pause, a hand-off.
 	ItemNote ItemType = "note"
-	// ItemStretch marks where an autopilot stretch opened or closed, with
-	// its label and tally.
-	ItemStretch ItemType = "stretch"
 )
 
 // Item is one entry in a card's thread.
@@ -77,21 +74,11 @@ type Item struct {
 	// Exited, Verdict and Credits close a stage divider once its stage
 	// exited (a verify item carries Exited and Verdict too); Outcome is
 	// the divider's mark, "ok", "fail" or "" for neutral.
-	Exited  bool    `json:"exited,omitempty"`
-	Verdict string  `json:"verdict,omitempty"`
-	Credits float64 `json:"credits,omitempty"`
-	Outcome string  `json:"outcome,omitempty"`
-	// Label and Tally describe a stretch marker ("autopilot", "3 gates").
-	// Edge is "open" or "close"; a closing marker says How the stretch
-	// ended and the Reason its closing event gave. Mode is the autopilot
-	// mode the stretch ran in.
-	Label  string     `json:"label,omitempty"`
-	Tally  string     `json:"tally,omitempty"`
-	Edge   string     `json:"edge,omitempty"`
-	How    string     `json:"how,omitempty"`
-	Reason string     `json:"reason,omitempty"`
-	Mode   string     `json:"mode,omitempty"`
-	Tools  []ToolCall `json:"tools,omitempty"`
+	Exited  bool       `json:"exited,omitempty"`
+	Verdict string     `json:"verdict,omitempty"`
+	Credits float64    `json:"credits,omitempty"`
+	Outcome string     `json:"outcome,omitempty"`
+	Tools   []ToolCall `json:"tools,omitempty"`
 	// Items is an activity item's run, oldest first: tools items and
 	// thinking messages.
 	Items   []Item     `json:"items,omitempty"`

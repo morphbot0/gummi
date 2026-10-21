@@ -19,56 +19,36 @@ import (
 // (cardform.go): GET /api/form reads the choices off a form opened the
 // way `n` opens it, and POST /api/cards fills one in and submits it — so
 // the form's validation, its result and the shell's follow-up (createCard,
-// cardCreated: dependencies, stack placement, freeform starting at once,
-// "create & autopilot") are the ones the terminal runs, not a second copy.
+// cardCreated: stack placement, the session starting at once) are the
+// ones the terminal runs, not a second copy.
 
 // webKindValue is a card type as the form's kind choice names it.
 func webKindValue(ct domain.CardType) string { return string(ct.Kind) }
 
-// webCardType reads the request's kind back into a card type.
-func webCardType(kind string) (domain.CardType, bool) {
-	if kind == "" {
-		kind = string(domain.KindFreeform)
-	}
-	ct := domain.CardType{Kind: domain.Kind(kind)}
-	return ct, ct.Valid()
-}
-
 // WebForm is GET /api/form: the new-card form's choices, for repo (the
 // workspace default when empty).
 func (m *Shell) WebForm(repo string) (webapi.Form, error) {
-	d := m.openCardForm(domain.CardType{Kind: domain.KindFreeform})
+	d := m.openCardForm()
 	if problem := m.webFormRepo(d, repo); problem != "" {
 		return webapi.Form{}, refuse(WebBadRequest, problem)
 	}
 	f := webapi.Form{
-		Kinds:      make([]webapi.Choice, 0, 1),
-		Profiles:   append([]string{}, d.profiles...),
-		Repos:      []string{},
-		Severities: []string{},
-		Branches:   append([]string{}, d.baseCands...),
-		Stackable:  []webapi.CardRef{},
-		Dependable: []webapi.CardRef{},
-		Envelope:   m.envelopePrefill(),
-		Sessions:   m.webSessionModels(),
+		Kinds:     make([]webapi.Choice, 0, 1),
+		Profiles:  append([]string{}, d.profiles...),
+		Repos:     []string{},
+		Branches:  append([]string{}, d.baseCands...),
+		Stackable: []webapi.CardRef{},
+		Envelope:  m.envelopePrefill(),
+		Sessions:  m.webSessionModels(),
 	}
-	// The form makes a session; the workflow kinds are no longer offered
-	// (an API caller may still name one, Input.Workflow).
+	// The form makes a session, the one kind there is to make.
 	ct := domain.CardType{Kind: domain.KindFreeform}
-	f.Kinds = append(f.Kinds, webapi.Choice{Value: webKindValue(ct), Label: ct.Name(), Detail: firstLineOf(cardPlaceholderFor(ct))})
+	f.Kinds = append(f.Kinds, webapi.Choice{Value: webKindValue(ct), Label: ct.Name(), Detail: firstLineOf(cardPlaceholder)})
 	if d.repo.shown() {
 		f.Repos = append(f.Repos, d.repo.options()...)
 	}
-	for _, s := range bugSeverityChoices {
-		if s != "" {
-			f.Severities = append(f.Severities, string(s))
-		}
-	}
 	for _, c := range d.stackVisible() {
 		f.Stackable = append(f.Stackable, webapi.CardRef{ID: string(c.ID), Title: c.Title})
-	}
-	for _, c := range d.afterCands {
-		f.Dependable = append(f.Dependable, webapi.CardRef{ID: string(c.ID), Title: c.Title, Stage: string(c.Stage)})
 	}
 	return f, nil
 }
@@ -131,11 +111,6 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 		return problem
 	}
 	if req.Backend != "" || strings.TrimSpace(req.Model) != "" {
-		// only a session picks its own model: a stage takes its agent from
-		// the card's profile (DESIGN §19.8)
-		if d.ct.Kind != domain.KindFreeform {
-			return "only a session picks its own model — a " + d.ct.Name() + "'s stages take theirs from its profile"
-		}
 		if problem := m.checkSessionPick(req.Backend, req.Model); problem != "" {
 			return problem
 		}
@@ -144,8 +119,6 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	if req.Home {
 		// an agent: the third "runs in" answer, in no repository at all
 		switch {
-		case d.ct.Kind != domain.KindFreeform:
-			return "only a session can be an agent with a home of its own — a " + d.ct.Name() + " works in a branch worktree"
 		case req.Repo != "":
 			return "an agent is in no repository — drop repo"
 		case req.Base != "" || req.StackOn != "":
@@ -153,12 +126,7 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 		}
 		d.mainCheckout, d.home = true, true
 	} else if req.MainCheckout {
-		// the freeform kind's "runs in" choice, refused everywhere else
-		// for the same reason the model pick is: every other kind exists
-		// to end as a branch.
-		if d.ct.Kind != domain.KindFreeform {
-			return "only a session can run in the main checkout — a " + d.ct.Name() + " works in a branch worktree of its own"
-		}
+		// the session's "runs in" choice
 		if req.Base != "" {
 			return "a session in the main checkout forks from no branch — drop base"
 		}
@@ -171,17 +139,6 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	var body []string
 	if s := strings.TrimSpace(req.Description); s != "" {
 		body = append(body, s)
-	}
-	// a bug's report, under the headings the form's placeholder teaches
-	for _, sec := range [][2]string{
-		{"Steps to reproduce", req.Repro},
-		{"Expected", req.Expected},
-		{"Actual", req.Actual},
-		{"Environment", req.Env},
-	} {
-		if s := strings.TrimSpace(sec[1]); s != "" {
-			body = append(body, "## "+sec[0]+"\n\n"+s)
-		}
 	}
 	if len(req.Attachments) > 0 {
 		if m.engine == nil {
@@ -214,28 +171,6 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 			return "profile " + strconv.Quote(req.Profile) + " is not configured"
 		}
 		d.profile = i
-	}
-	if req.Severity != "" {
-		i := slices.Index(bugSeverityChoices, domain.Severity(req.Severity))
-		if i < 0 {
-			return "severity " + strconv.Quote(req.Severity) + " is not one of " + strings.Join(func() []string {
-				var out []string
-				for _, s := range bugSeverityChoices[1:] {
-					out = append(out, string(s))
-				}
-				return out
-			}(), ", ")
-		}
-		d.sev = i
-	}
-	for _, dep := range req.DependsOn {
-		id := domain.FeatureID(strings.TrimSpace(dep))
-		if !slices.ContainsFunc(d.afterCands, func(c afterCand) bool { return c.ID == id }) {
-			return m.cardName(id) + " cannot be waited on — it is done, or not on this board"
-		}
-		if !slices.Contains(d.after, id) {
-			d.after = append(d.after, id)
-		}
 	}
 	if req.Base != "" {
 		if !slices.Contains(d.baseCands, req.Base) {
@@ -274,22 +209,21 @@ func (b *Bridge) RefreshRepos(ctx context.Context) {
 // CreateCard is POST /api/cards: the new-card form, filled in and
 // submitted as its Create button submits it. It answers the new card.
 func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, person string) (webapi.Card, error) {
-	ct, ok := webCardType(req.Kind)
-	if !ok {
-		return webapi.Card{}, refuse(WebBadRequest, "no card kind "+strconv.Quote(req.Kind))
+	if req.Kind != "" && req.Kind != string(domain.KindFreeform) {
+		// the workflow kinds are retired: a session is the card there is
+		return webapi.Card{}, refuse(WebBadRequest, "no card kind "+strconv.Quote(req.Kind)+" — only sessions are made now")
 	}
 	// A session is started from its first message, the way a person
 	// starts a conversation, and takes its title from that message's first
 	// line (domain.SplitFreeform) — the draft has no title field to fill.
-	session := ct.Kind == domain.KindFreeform && strings.TrimSpace(req.Description) != ""
-	if strings.TrimSpace(req.Title) == "" && !session {
+	if strings.TrimSpace(req.Title) == "" && strings.TrimSpace(req.Description) == "" {
 		return webapi.Card{}, refuse(WebBadRequest, "a card needs a title")
 	}
 	// the name the request carries may be a clone made since launch
 	b.RefreshRepos(ctx)
 	in := webInput{actor: state.PersonActor(person)}
 	out, werr := b.intent(ctx, "", in, webWait, func(m *Shell, _ featureRow) (tea.Cmd, error) {
-		d := m.openCardForm(ct)
+		d := m.openCardForm()
 		if problem := m.webFill(d, req); problem != "" {
 			return nil, refuse(WebBadRequest, problem)
 		}

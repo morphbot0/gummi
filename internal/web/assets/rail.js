@@ -98,7 +98,7 @@ function quality (r) {
 // word is the row's status in words, the second line's lead.
 function word (r) {
   if (r.status === 'needs') return needsWord(r.needs, r.stage)
-  if (r.status === 'running') return r.running?.pausing ? 'pausing' : (r.running?.autopilot || r.autopilot) ? 'autopilot' : (r.running?.verb || 'working')
+  if (r.status === 'running') return r.running?.pausing ? 'pausing' : (r.running?.verb || 'working')
   if (r.status === 'watching') return 'watching'
   if (r.status === 'paused') return 'paused'
   const session = r.home ? 'agent' : (r.stage === 'open' || r.kind === 'freeform') && 'session'

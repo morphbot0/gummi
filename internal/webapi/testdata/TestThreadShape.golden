@@ -59,14 +59,6 @@
       }
     },
     {
-      "key": "stretch-8",
-      "seq": 8,
-      "t": "stretch",
-      "time": "2026-09-27T09:12:00Z",
-      "label": "autopilot",
-      "tally": "2 gates crossed"
-    },
-    {
       "key": "verify-9",
       "seq": 9,
       "t": "verify",

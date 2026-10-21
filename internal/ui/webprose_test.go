@@ -54,9 +54,6 @@ func TestProseGoingWithAStopsAnswerIsNotRead(t *testing.T) {
 				return
 			}
 			c := m.webComposer(r, "please also handle the empty state")
-			if c.Read {
-				t.Errorf("%s (%s): route %s says=%q is marked read; nothing reads a line now", r.F.ID, od.api.Kind, c.Route, c.Says)
-			}
 			if c.Route == webapi.RouteAnswer && od.api.Kind != webapi.DecisionAsk {
 				seen++
 			}

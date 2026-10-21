@@ -62,9 +62,6 @@ type webInput struct {
 	number  *int
 	profile string
 	repo    string
-	// mode is the autopilot dialog's answer; empty takes the one the
-	// dialog confirms.
-	mode string
 	// method is the landing method the request names; empty is squash.
 	method domain.LandMethod
 	// keepBranch: the request asks that the closing it makes leave the
