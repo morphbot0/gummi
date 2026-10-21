@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end integration check: drives the real TUI in a tmux PTY
-# against a scripted demo repo, and asserts card create, spec draft and delete
-# on disk (no agent runs). Exits non-zero on any failed assertion.
+# against a scripted demo repo, and asserts a session's create, its
+# worktree and its delete on disk. The session's agent is the scripted
+# fake the web suite uses, never a real backend. Exits non-zero on any
+# failed assertion.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,36 +25,38 @@ fail() { echo "e2e FAIL: $*" >&2; exit 1; }
 k() { tmux -L "$sock" send-keys "$@"; sleep 0.3; }
 pane() { tmux -L "$sock" capture-pane -p; }
 
-# wait (bounded) until the pane shows a marker string
+# wait (bounded) until the pane shows a marker string; on a miss, print
+# what the pane shows instead
 await() {
     for _ in $(seq 1 50); do
         pane | grep -q "$1" && return 0
         sleep 0.2
     done
+    pane >&2
     fail "timed out waiting for: $1"
 }
 
-tmux -L "$sock" new-session -d -x 120 -y 34 "cd '$dir' && '$bin'"
+tmux -L "$sock" new-session -d -x 120 -y 34 \
+    "cd '$dir' && GUMMI_AGENT=headless GUMMI_AGENT_CMD='$root/scripts/web-e2e-agent.py' '$bin'"
 await "no cards yet"
 
-# create a feature through the real form
-k n; k 'Demo feature'; k Enter
-await "“Demo feature” created"
+# create a session through the real form
+k n; k 'Demo session'; k Enter
+await "“Demo session” created"
 [ -f "$dir/.gummi/state/gummi.db" ] || fail "state db missing"
 
-# the card's design draft lives in the workspace, not on a branch, and the
-# spec surface shows it
-draft="$dir/.gummi/state/drafts/FD-001-demo-feature.md"
-k s; await "FD-001 · spec"
-[ -f "$draft" ] || fail "draft missing"
-k Escape; await "Demo feature"
-git -C "$dir" worktree list | grep -q "FD-001" && fail "worktree created before any stage ran"
+# a session works in a worktree of its own from the moment it exists
+tree="$dir/.gummi/worktrees/FF-001"
+for _ in $(seq 1 50); do [ -d "$tree" ] && break; sleep 0.2; done
+[ -d "$tree" ] || fail "the session's worktree was not created"
 
-# delete: confirm dialog -> record and draft gone
-k D; await "delete “Demo feature”"
+# delete from the board (creating opened the session's thread): confirm
+# dialog -> record and worktree gone
+k Escape
+k D; await "delete “Demo session”"
 k y
 await "no cards yet"
-[ ! -f "$draft" ] || fail "draft survived delete"
+[ ! -d "$tree" ] || fail "worktree survived delete"
 
 k q
 echo "e2e PASS"
