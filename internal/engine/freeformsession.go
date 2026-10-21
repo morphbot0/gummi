@@ -353,10 +353,8 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	var mcpPath string
 	var mcpTeardown func()
 	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
-		tools = stageTools(domain.StageOpen, flavorStage, nil)
-		if h := toolHint(domain.StageOpen, flavorStage); h != "" {
-			hints = append(hints, h)
-		}
+		tools = freeformTools()
+		hints = append(hints, freeformToolHint)
 		// gummi's own watch, for a backend with no Monitor of its own
 		var extra []agent.ToolDef
 		if !caps.NativeWatch {

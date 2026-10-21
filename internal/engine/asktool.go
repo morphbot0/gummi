@@ -201,20 +201,22 @@ func stageTools(stage domain.Stage, flavor runFlavor, deciding []string) []agent
 	case domain.StageImplement:
 		return []agent.ToolDef{resolveAnnotationTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageOpen:
-		// A freeform card (DESIGN §19): ask_user and resolve_annotation. It
-		// gets resolve_annotation because the reader's diff comments are
-		// exactly how work is steered on such a card, and the count has to
-		// burn down as they are addressed. It gets ask_user (the no-
-		// artifact form, below) because a freeform card is otherwise an
-		// ordinary coding-agent session, and an ordinary coding-agent
-		// session that needs a decision asks for one instead of guessing —
-		// the person being in the thread already is not a reason to take
-		// its one way of stopping and waiting away. It gets no spec tools:
-		// it has no artifact to read or write.
-		return []agent.ToolDef{askUserToolFreeform(), resolveAnnotationTool()}
+		return freeformTools()
 	default:
 		return nil
 	}
+}
+
+// freeformTools is the gummi tool surface of a session (a freeform card,
+// DESIGN §19): ask_user and resolve_annotation. It gets resolve_annotation
+// because the reader's diff comments are exactly how work is steered on
+// such a card, and the count has to burn down as they are addressed. It
+// gets ask_user (the no-artifact form, below) because a session that
+// needs a decision asks for one instead of guessing — the person being
+// in the thread already is not a reason to take its one way of stopping
+// and waiting away.
+func freeformTools() []agent.ToolDef {
+	return []agent.ToolDef{askUserToolFreeform(), resolveAnnotationTool()}
 }
 
 // A read-only research session used to be served a STRIPPED gummi surface:
@@ -590,7 +592,14 @@ call the submit_verdict tool exactly once at the end (verdict "pass",
 "fail", or "blocked") instead of writing a VERDICT: line — gummi gates
 on it.`
 	case domain.StageOpen:
-		return `You have two gummi tools. ask_user: put a decision to the user as a
+		return freeformToolHint
+	default:
+		return ""
+	}
+}
+
+// freeformToolHint tells a session which gummi tools it has (freeformTools).
+const freeformToolHint = `You have two gummi tools. ask_user: put a decision to the user as a
 few options and get their choice back — prefer it over asking in prose
 (faster for the user, cheaper); lead with your recommended option, marked
 as such in its label; ask one question at a time (parallel ask_user calls
@@ -598,10 +607,6 @@ are bounced). This card has no gate and no artifact, so leave gate and
 changes_section unset. resolve_annotation: mark a diff review comment
 addressed — call it once per comment, right after you make the edit it
 asks for.`
-	default:
-		return ""
-	}
-}
 
 // askConventionHint is the fallback for backends without client tools:
 // the agent emits a fenced block gummi parses into the same picker.
