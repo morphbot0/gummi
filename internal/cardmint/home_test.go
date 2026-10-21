@@ -54,7 +54,6 @@ func TestAnAgentNamesNoRepositoryOrBranch(t *testing.T) {
 		"kind":  {Input{Workflow: true, Kind: domain.KindFeature, Description: "x", Home: true}, "is an agent's"},
 		"repo":  {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Repo: "api"}, "in no repository"},
 		"base":  {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Base: "release"}, "forks from no branch"},
-		"adopt": {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Adopt: "topic"}, "adopt"},
 	} {
 		_, err := Mint(ctx, store, ws, c.in)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

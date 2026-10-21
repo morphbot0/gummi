@@ -71,15 +71,6 @@ type cardForm struct {
 	// (setRepoData), kept so a repo picked by hand offers its own branches.
 	checkedOut map[string]string
 	branchesOf map[string][]string
-	// adopt is an existing branch to mint this card ONTO rather than
-	// cutting one for it (DESIGN §10 D22). Empty — the default, and what
-	// every card does — means gummi cuts the branch.
-	//
-	// It shares baseCands: the branches on offer to adopt are the same
-	// branches on offer to fork from, because they are simply the
-	// repository's branches. What differs is what the card then does with
-	// the one it is given, which the row's own label says.
-	adopt string
 	// stackOnto names the card this one is being stacked on top of, and
 	// stackCands the cards the row can name. stackInto names an existing
 	// stack to join instead. All empty is a standalone card.
@@ -210,7 +201,6 @@ const (
 	cardStopAfter
 	cardStopWhere
 	cardStopBase
-	cardStopAdopt
 	cardStopStack
 	cardStopButtons
 )
@@ -354,9 +344,6 @@ func (d *cardForm) stops() []int {
 		}
 		if len(d.baseCands) > 1 && !d.mainCheckout {
 			s = append(s, cardStopBase)
-		}
-		if d.asksAdopt() {
-			s = append(s, cardStopAdopt)
 		}
 		if d.asksStack() {
 			s = append(s, cardStopStack)
@@ -580,12 +567,6 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case cardStopBase:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.cycleBase(delta)
-		} else if k == "enter" {
-			return d.submit(false)
-		}
-	case cardStopAdopt:
-		if delta, ok := selectCycleDelta(k); ok {
-			d.cycleAdopt(delta)
 		} else if k == "enter" {
 			return d.submit(false)
 		}
@@ -837,7 +818,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	res := formResult{
 		Kind: d.ct.Kind, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
-		Base: d.base, Adopt: d.adopt, StackOnto: d.stackOnto, StackInto: d.stackInto,
+		Base: d.base, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		Start:          start,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
 		MainCheckout: d.mainCheckout, Home: d.home,
@@ -1310,11 +1291,6 @@ func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 			choiceCells(s, d.focus == cardStopBase, d.baseChoices(), d.baseIdx(), "", false),
 			d.baseIdx(), width, maxLines)...)
 	}
-	if d.asksAdopt() {
-		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopAdopt, "works on"), optionLabelW,
-			choiceCells(s, d.focus == cardStopAdopt, d.adoptChoices(), d.adoptIdx(), "", false),
-			d.adoptIdx(), width, maxLines)...)
-	}
 	if d.asksStack() {
 		label := optionLabel(s, d.focus == cardStopStack, "stack")
 		if d.stackInto != "" {
@@ -1515,8 +1491,6 @@ func (d *cardForm) hint() string {
 		return "←/→ choose where the session works · alt+o collapse · tab next · esc cancel"
 	case cardStopBase:
 		return "←/→ choose the branch it forks from · alt+o collapse · tab next · esc cancel"
-	case cardStopAdopt:
-		return "←/→ work on an existing branch instead of cutting one · alt+o collapse · tab next · esc cancel"
 	case cardStopStack:
 		// The cells are bare ids, so the title of the chosen card is
 		// named here rather than on the row: the hint line is the one
@@ -1579,17 +1553,6 @@ func (d *cardForm) stackOn(onto domain.FeatureID, label string, into domain.Stac
 func (d *cardForm) setStackCands(c []stackCand) {
 	sortStackCands(c)
 	d.stackCands = c
-}
-
-// asksAdopt reports whether the "works on" row is offered. Adopting needs
-// a branch to adopt, and two kinds have no business with one: a research
-// card has no branch of its own to put one on, and a freeform card is
-// refused outright at the mint (cardmint.Mint) — an adopted card walks the
-// whole workflow (DESIGN §10 D22) and a freeform card walks none of it, so
-// offering the row here would be offering a refusal.
-func (d *cardForm) asksAdopt() bool {
-	return len(d.baseCands) > 0 &&
-		d.ct.Kind != domain.KindResearch && d.ct.Kind != domain.KindFreeform
 }
 
 // asksStack is whether the stack row is worth a tab stop: a research
@@ -1739,42 +1702,6 @@ func (d *cardForm) baseIdx() int {
 		}
 	}
 	return 0
-}
-
-// adoptChoices is the adopt row's cells: cutting a fresh branch, which is
-// the default and reads first, then every branch that could be adopted
-// instead.
-func (d *cardForm) adoptChoices() []string {
-	out := make([]string, 0, len(d.baseCands)+1)
-	out = append(out, "a new branch")
-	return append(out, d.baseCands...)
-}
-
-// adoptIdx is the selected cell of adoptChoices.
-func (d *cardForm) adoptIdx() int {
-	if d.adopt == "" {
-		return 0
-	}
-	for i, b := range d.baseCands {
-		if b == d.adopt {
-			return i + 1
-		}
-	}
-	return 0
-}
-
-// cycleAdopt moves the adopt row by dir over adoptChoices.
-func (d *cardForm) cycleAdopt(dir int) {
-	choices := d.adoptChoices()
-	i := (d.adoptIdx() + dir) % len(choices)
-	if i < 0 {
-		i += len(choices)
-	}
-	if i == 0 {
-		d.adopt = ""
-		return
-	}
-	d.adopt = choices[i]
 }
 
 // whereChoices is the "runs in" row's cells: the card's own worktree,

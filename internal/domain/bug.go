@@ -60,13 +60,9 @@ type BugReport struct {
 type BugProvenance struct {
 	Source      string // "github", "manual", …
 	ExternalRef string // e.g. https://github.com/o/r/issues/42
-	// Adopted is the work this bug card was minted on top of — a branch
-	// somebody already started on the fix. Nil for every other bug.
-	Adopted *AdoptedWork
 }
 
-// Empty reports whether there is no provenance to render. Adopted is not
-// part of it, for the reason DraftProvenance.Empty gives.
+// Empty reports whether there is no provenance to render.
 func (p BugProvenance) Empty() bool { return p.Source == "" && p.ExternalRef == "" }
 
 // BugProposal is one candidate bug a source emits — everything needed to

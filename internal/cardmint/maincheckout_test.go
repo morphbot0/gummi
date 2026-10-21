@@ -73,22 +73,3 @@ func TestMainCheckoutIsRefusedOnEveryOtherKind(t *testing.T) {
 		t.Errorf("the refused mint spent a sequence number (%q → %q)", seqBefore, after)
 	}
 }
-
-// TestAMainCheckoutCardCannotAdopt: it has no branch of its own, so there
-// is nothing for an adoption to hand it and nothing to leave behind.
-func TestAMainCheckoutCardCannotAdopt(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	_, err := Mint(context.Background(), store, ws, Input{
-		Kind:           domain.KindFreeform,
-		Description:    "finish their parser",
-		MainCheckout:   true,
-		Adopt:          "feat/their-parser",
-		InspectAdopted: inspector(theirWork(), nil),
-	})
-	if err == nil {
-		t.Fatal("a main-checkout card adopted a branch")
-	}
-	if !strings.Contains(err.Error(), "feat/their-parser") {
-		t.Errorf("the refusal does not name the branch: %v", err)
-	}
-}

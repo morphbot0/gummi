@@ -343,8 +343,8 @@ New card (`view-newcard`): `newcard-loading`, `newcard-form`, `newcard-kinds`,
 `newcard-severity`, `newcard-repro`, `newcard-expected`, `newcard-actual`,
 `newcard-profile`, `newcard-envelope`, `newcard-repo`, `newcard-base`
 (`newcard-base-hint` under it),
-`newcard-adopt`, `newcard-stack`, `newcard-after`, `newcard-after-<ID>`,
+`newcard-stack`, `newcard-after`, `newcard-after-<ID>`,
 `newcard-error` (a refusal no field owns), `newcard-error-<field>` (beside
 its field: `title`, `desc`, `envelope`, `profile`, `severity`, `repo`,
-`base`, `adopt`, `stack`, `after`), `newcard-create`, `newcard-autopilot`,
+`base`, `stack`, `after`), `newcard-create`, `newcard-autopilot`,
 `newcard-cancel`.

@@ -76,26 +76,3 @@ func TestValidateAdoptedCard(t *testing.T) {
 		t.Errorf("a derived card carrying a branch: err = %v, want a refusal", err)
 	}
 }
-
-func TestStalenessSaysWhatGummiWillNotDo(t *testing.T) {
-	for _, tc := range []struct {
-		behind int
-		want   string
-	}{
-		{0, "up to date with main"},
-		{1, "1 commit behind main — gummi will not rebase it for you"},
-		{40, "40 commits behind main — gummi will not rebase it for you"},
-	} {
-		w := &AdoptedWork{Branch: "feat/theirs", Base: "main", Behind: tc.behind}
-		if got := w.Staleness(); got != tc.want {
-			t.Errorf("behind %d: %q, want %q", tc.behind, got, tc.want)
-		}
-	}
-	var nilWork *AdoptedWork
-	if !nilWork.Empty() {
-		t.Error("a nil AdoptedWork is not Empty")
-	}
-	if got := (&AdoptedWork{Behind: 2}).Staleness(); !strings.Contains(got, "its base") {
-		t.Errorf("staleness with no base named = %q", got)
-	}
-}

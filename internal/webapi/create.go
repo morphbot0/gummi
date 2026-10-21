@@ -18,10 +18,6 @@ type CreateCardRequest struct {
 	Envelope *int `json:"envelope,omitempty"`
 	// Autopilot starts the card with its gates crossing unattended.
 	Autopilot bool `json:"autopilot,omitempty"`
-	// Adopt names an existing branch to put the card on (§10 D22); PR
-	// names a pull request whose head branch to adopt.
-	Adopt string `json:"adopt,omitempty"`
-	PR    string `json:"pr,omitempty"`
 	// DependsOn lists the cards this one waits for.
 	DependsOn []string `json:"dependsOn,omitempty"`
 	// StackOn places the card on top of another card's stack.
@@ -65,16 +61,8 @@ type Form struct {
 	Profiles   []string `json:"profiles"`
 	Repos      []string `json:"repos"`
 	Severities []string `json:"severities"`
-	// Branches lists the chosen repo's branches (?repo=), for Base and
-	// Adopt.
+	// Branches lists the chosen repo's branches (?repo=), for Base.
 	Branches []string `json:"branches,omitempty"`
-	// Adoptable says, for each of Branches in the same order, whether a
-	// new card may adopt it and, when it may not, why: another card holds
-	// it (a landed one too — one branch, one card), it is the branch the
-	// card would land on, or it carries no commits of its own past that
-	// branch. Measured against the repo's default base; a card given
-	// another base is checked again when it is created.
-	Adoptable []AdoptChoice `json:"adoptable,omitempty"`
 	// Stackable are the cards a new card can be stacked on; Dependable the
 	// cards it can depend on.
 	Stackable  []CardRef `json:"stackable"`
@@ -83,17 +71,6 @@ type Form struct {
 	Envelope int `json:"envelope"`
 	// Sessions is what a session's model picker offers.
 	Sessions SessionModels `json:"sessions"`
-}
-
-// AdoptChoice is one branch the new-card form's adopt list shows. Why is
-// empty when the branch may be adopted, and otherwise the reason it will
-// be refused, short enough to sit beside its name ("FD-001 has it").
-// Held names the card holding it, the one reason that does not depend
-// on which base the card is given.
-type AdoptChoice struct {
-	Branch string `json:"branch"`
-	Why    string `json:"why,omitempty"`
-	Held   string `json:"held,omitempty"`
 }
 
 // SessionModels is what a session's model picker offers (DESIGN §19.8).

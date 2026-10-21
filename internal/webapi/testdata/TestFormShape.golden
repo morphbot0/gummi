@@ -18,24 +18,6 @@
     "fd-001-wave",
     "stale"
   ],
-  "adoptable": [
-    {
-      "branch": "main",
-      "why": "the branch it lands on"
-    },
-    {
-      "branch": "feat/dark"
-    },
-    {
-      "branch": "fd-001-wave",
-      "why": "FD-001 has it",
-      "held": "FD-001"
-    },
-    {
-      "branch": "stale",
-      "why": "no commits past main"
-    }
-  ],
   "stackable": [],
   "dependable": [],
   "envelope": 2000,

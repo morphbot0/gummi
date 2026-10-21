@@ -76,14 +76,12 @@ type Input struct {
 	// MainCheckout mints a freeform card whose session runs in the
 	// repository's main checkout instead of a worktree of its own
 	// (DESIGN §19): no branch is cut, no worktree is created. Refused on
-	// every other kind, and incompatible with Adopt (an adopted card
-	// walks the whole workflow; a main-checkout card has no branch to
-	// walk any of it on). False is every card minted before it existed.
+	// every other kind. False is every card minted before it existed.
 	MainCheckout bool
 	// Home mints an agent: a freeform card that runs in a home of its
 	// own, in no repository (domain.Feature.Home). It implies
 	// MainCheckout — the home is the repository it runs in the checkout
-	// of — and refuses a repository, a base, a stack and an adoption.
+	// of — and refuses a repository, a base and a stack.
 	Home bool
 	// Repo is the managed repository the card belongs to: a configured
 	// `repos:` name, or "" for the workspace default.
@@ -110,25 +108,6 @@ type Input struct {
 	// stacked card above the bottom ignores it — its base is the branch
 	// of the card below it.
 	Base string
-	// Adopt is an existing branch to mint this card ONTO rather than
-	// cutting one for it (DESIGN §10 D22): the card's branch becomes this
-	// ref verbatim, and its first stage opens onto the work already there.
-	// Empty mints an ordinary card, which is nearly all of them.
-	Adopt string
-	// InspectAdopted answers, for Adopt, the two questions cardmint cannot:
-	// is that branch really there, and what is on it. It is a callback for
-	// the same reason RequireRepo is — cardmint imports no git and holds no
-	// worktree manager, and the caller that does is the one able to say.
-	//
-	// It returns the work the card is inheriting, which is seeded into the
-	// draft so the architect reads the branch before planning against it.
-	// An error refuses the mint, before a sequence number is spent: a card
-	// minted onto a branch that is not there could never cut one either.
-	//
-	// A nil callback with a non-empty Adopt fails closed, exactly as
-	// RequireRepo does, since minting onto an unverified ref is the bug the
-	// check exists to catch.
-	InspectAdopted func(branch string) (domain.AdoptedWork, error)
 	// ExternalRef is an optional external correlation id (e.g. a GitHub
 	// issue reference), persisted as Feature.ExternalRef and echoed by
 	// callers that track it.
@@ -225,52 +204,6 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 	return "", fmt.Errorf("%s is taken, and so is every variant of it up to 50", branchFor(slug))
 }
 
-// adoptedWork validates an adoption and returns what the card inherits.
-//
-// Two checks, and they are the inverse of the ones an ordinary mint runs.
-// freeSlug asks whether a derived branch name is free and refuses when it
-// is taken; adoption asks whether the named ref EXISTS (the caller's
-// business, via InspectAdopted) and whether any card already holds it
-// (gummi's business, via the same BranchTaken). Two cards on one branch
-// would be two cards committing over each other with no way to tell whose
-// work a diff belonged to — a worse failure than a naming collision,
-// since nothing about it looks wrong until the work is lost.
-func adoptedWork(ctx context.Context, store *state.Store, in Input) (domain.AdoptedWork, error) {
-	if err := domain.ValidateAdoptedBranch(in.Adopt); err != nil {
-		return domain.AdoptedWork{}, err
-	}
-	if in.Kind == domain.KindResearch {
-		return domain.AdoptedWork{}, fmt.Errorf("a research card runs in a scratch tree and has no branch, so it cannot adopt %s", in.Adopt)
-	}
-	if owner, taken, err := store.BranchTaken(ctx, in.Repo, in.Adopt, ""); err != nil {
-		return domain.AdoptedWork{}, err
-	} else if taken {
-		return domain.AdoptedWork{}, fmt.Errorf("%s already has %s — one branch, one card", owner, in.Adopt)
-	}
-	if in.InspectAdopted == nil {
-		return domain.AdoptedWork{}, fmt.Errorf("branch %q cannot be verified: no branch inspector was wired", in.Adopt)
-	}
-	w, err := in.InspectAdopted(in.Adopt)
-	if err != nil {
-		return domain.AdoptedWork{}, err
-	}
-	if w.Branch == "" {
-		w.Branch = in.Adopt
-	}
-	return w, nil
-}
-
-// adoptedFor is the inherited work as a template argument: a pointer for
-// an adopted card, nil for every other, so the draft renderers can keep
-// treating "no inherited work" as the absence of a value rather than as a
-// zero struct they must each know how to recognise.
-func adoptedFor(in Input, w domain.AdoptedWork) *domain.AdoptedWork {
-	if in.Adopt == "" {
-		return nil
-	}
-	return &w
-}
-
 func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input) (domain.Feature, error) {
 	// the first line is the title for every kind — a multi-line research
 	// brief names itself on its first line exactly as a feature does; the
@@ -299,20 +232,6 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 			return domain.Feature{}, err
 		}
 	}
-	// Two refusals a freeform card earns by being off the graph (DESIGN
-	// §19), both before a sequence number is spent.
-	//
-	// Adoption is the first, and it is a binding decision it would
-	// contradict: a card minted onto a branch gummi did not cut still
-	// walks the whole graph, "because the alternative is the first hole in
-	// the quality floor" (DESIGN §10 D22). A freeform card walks nothing,
-	// so adopting with one would be exactly that hole — take someone's
-	// branch, add to it, land it, with no stage having looked at any of it.
-	// A feature minted onto the branch is the way to rework it; a freeform
-	// card that turns out to be worth landing is promoted the same way.
-	if in.Kind == domain.KindFreeform && in.Adopt != "" {
-		return domain.Feature{}, fmt.Errorf("a freeform card cannot adopt %s: an adopted card walks the whole workflow (DESIGN §10 D22) and a freeform card has none — mint a feature onto that branch instead", in.Adopt)
-	}
 	// An agent is in no repository: everything that names one, or a
 	// branch in one, is a mint that lost track of what it was making.
 	if in.Home {
@@ -323,8 +242,6 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 			return domain.Feature{}, fmt.Errorf("an agent is in no repository, but names %q", in.Repo)
 		case in.Base != "":
 			return domain.Feature{}, fmt.Errorf("an agent forks from no branch, but names base %q", in.Base)
-		case in.Adopt != "":
-			return domain.Feature{}, fmt.Errorf("an agent cannot adopt %s: it holds no branch", in.Adopt)
 		}
 		in.MainCheckout = true
 	}
@@ -333,30 +250,15 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if in.MainCheckout && in.Kind != domain.KindFreeform {
 		return domain.Feature{}, fmt.Errorf("main_checkout is a freeform card's: a %s runs in its own branch worktree", in.Kind)
 	}
-	if in.MainCheckout && in.Adopt != "" {
-		return domain.Feature{}, fmt.Errorf("a card running in the main checkout cannot adopt %s: it has no branch of its own to leave behind", in.Adopt)
-	}
 	// The branch name a card gets no longer carries its id, so two cards
 	// whose titles slugify the same would want the same ref. Refuse here,
 	// before a sequence number is spent and before a card exists that
 	// could never cut its branch — and say what to do about it, since the
 	// fix is a word in the title and nothing else.
 	//
-	// Research cards are exempt: they never cut a branch. So are adopted
-	// cards, for the opposite reason — their branch name does not come
-	// from the slug at all, so two of them may slugify alike without ever
-	// wanting the same ref. What they need instead is the same uniqueness
-	// question asked about the ref itself, which adoptedWork does. A
-	// main-checkout freeform card cuts no branch either, so no slug can
-	// collide on one.
-	var inherited domain.AdoptedWork
+	// A main-checkout freeform card cuts no branch, so no slug can collide
+	// on one.
 	switch {
-	case in.Adopt != "":
-		w, aerr := adoptedWork(ctx, store, in)
-		if aerr != nil {
-			return domain.Feature{}, aerr
-		}
-		inherited = w
 	case in.MainCheckout:
 	case in.Kind != domain.KindResearch:
 		free, terr := freeSlug(ctx, store, in, slug)
@@ -403,17 +305,12 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		// which by then exists in checkouts this process cannot see.
 		BranchScheme: domain.DefaultBranchScheme,
 	}
-	if in.Adopt != "" {
-		// The adopted card is the one case where the branch is not derived
-		// at all: it has a name already, given by whoever cut it.
-		f.BranchScheme, f.Branch = domain.BranchSchemeAdopted, in.Adopt
-	}
 	if in.Kind == domain.KindBug {
 		f.Severity = in.Severity
 	}
 	f.FoundBy = in.FoundBy
 	if in.Kind != domain.KindFreeform &&
-		(seed != "" || in.Acceptance != "" || in.Adopt != "" || (in.Kind == domain.KindBug && in.Discussion != "")) {
+		(seed != "" || in.Acceptance != "" || (in.Kind == domain.KindBug && in.Discussion != "")) {
 		// seed the draft before persisting: the description's overflow fills
 		// the Problem section (a title-sized description seeds nothing
 		// there), and Acceptance fills the Verification plan (D10). Either
@@ -438,13 +335,13 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		if in.Kind == domain.KindBug {
 			report := domain.ParseBugBody(seed)
 			report.Discussion = in.Discussion
-			content = spec.SeededBugTemplate(&f, report, domain.BugProvenance{Source: in.Source, ExternalRef: in.ExternalRef, Adopted: adoptedFor(in, inherited)}, in.Severity)
+			content = spec.SeededBugTemplate(&f, report, domain.BugProvenance{Source: in.Source, ExternalRef: in.ExternalRef}, in.Severity)
 		} else {
 			problem, acceptance := domain.SplitAcceptance(seed)
 			if in.Acceptance != "" {
 				acceptance = in.Acceptance
 			}
-			content = spec.SeededTemplate(&f, domain.DraftSeed{Problem: problem, Acceptance: acceptance}, domain.DraftProvenance{Source: in.Source, Adopted: adoptedFor(in, inherited)})
+			content = spec.SeededTemplate(&f, domain.DraftSeed{Problem: problem, Acceptance: acceptance}, domain.DraftProvenance{Source: in.Source})
 		}
 		if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
 			return domain.Feature{}, err

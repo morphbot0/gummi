@@ -46,7 +46,6 @@ test('a session from the form, with its budget and profile', async ({ pairedPage
 test('a session opens at once', async ({ pairedPage: page }, info) => {
   await openForm(page);
   await expect(page.getByTestId('newcard-autopilot')).toHaveCount(0);
-  await expect(page.getByTestId('newcard-adopt')).toHaveCount(0);
   await page.getByTestId('newcard-title').fill('Tidy the readme');
   await page.getByTestId('newcard-create').click();
   await expect(page.getByTestId('card-title')).toHaveText('Tidy the readme');

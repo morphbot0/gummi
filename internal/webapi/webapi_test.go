@@ -217,8 +217,7 @@ func TestMemoryShape(t *testing.T) {
 	}))
 }
 
-// The new-card form's adopt list reads each branch's adoptability beside
-// the branch list itself.
+// TestFormShape: the new-card form's choices.
 func TestFormShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, Form{
 		Kinds:      []Choice{{Value: "feature", Label: "Feature"}},
@@ -226,12 +225,6 @@ func TestFormShape(t *testing.T) {
 		Repos:      []string{},
 		Severities: []string{"high"},
 		Branches:   []string{"main", "feat/dark", "fd-001-wave", "stale"},
-		Adoptable: []AdoptChoice{
-			{Branch: "main", Why: "the branch it lands on"},
-			{Branch: "feat/dark"},
-			{Branch: "fd-001-wave", Why: "FD-001 has it", Held: "FD-001"},
-			{Branch: "stale", Why: "no commits past main"},
-		},
 		Stackable:  []CardRef{},
 		Dependable: []CardRef{},
 		Envelope:   2000,

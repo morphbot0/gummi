@@ -51,33 +51,6 @@ func TestMintAFreeformCard(t *testing.T) {
 	}
 }
 
-// TestAFreeformCardCannotAdoptABranch guards a binding decision from the
-// obvious way around it: an adopted card walks the whole workflow, "because
-// the alternative is the first hole in the quality floor" (DESIGN §10 D22).
-// A freeform card walks nothing, so adopting with one would be that hole —
-// take someone's branch, add to it, land it, with no stage having looked.
-func TestAFreeformCardCannotAdoptABranch(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	seqBefore := readSeq(t, ws.SeqFile())
-	_, err := Mint(context.Background(), store, ws, Input{
-		Kind:           domain.KindFreeform,
-		Description:    "finish their parser",
-		Adopt:          "feat/their-parser",
-		InspectAdopted: inspector(theirWork(), nil),
-	})
-	if err == nil {
-		t.Fatal("a freeform card adopted a branch")
-	}
-	if !strings.Contains(err.Error(), "feat/their-parser") {
-		t.Errorf("the refusal does not name the branch: %v", err)
-	}
-	// Refused before a sequence number is spent, like every other mint-time
-	// refusal.
-	if after := readSeq(t, ws.SeqFile()); after != seqBefore {
-		t.Errorf("the refused mint spent a sequence number (%q → %q)", seqBefore, after)
-	}
-}
-
 // TestOnlyASessionIsMintedByDefault: a workflow kind is minted only by a
 // caller that still drives the stage graph and says so; a goal by none.
 func TestOnlyASessionIsMintedByDefault(t *testing.T) {

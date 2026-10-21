@@ -93,12 +93,9 @@ func (m *Manager) RebaseOnto(ctx context.Context, f *domain.Feature, oldBase str
 	return m.forkStore.ReanchorForkPoint(ctx, f.ID, head)
 }
 
-// Ahead counts the commits branch carries that base does not: what a card
-// adopting it would inherit, measured the way InspectBranch measures it
-// (from the two branches' fork point). InspectBranch refuses a branch
-// with none, and refuses one sharing no history with base, which is the
-// error here — so a form can say which branches are worth offering before
-// anyone picks one.
+// Ahead counts the commits branch carries that base does not, measured
+// from the two branches' fork point. Two refs sharing no history are the
+// error.
 func (m *Manager) Ahead(ctx context.Context, branch, base string) (int, error) {
 	forkPoint, err := runGit(ctx, m.repo, "merge-base", base, branch)
 	if err != nil {

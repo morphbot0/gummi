@@ -446,15 +446,6 @@ func (p *Pool) CreateFrom(ctx context.Context, f *domain.Feature, start string) 
 	return wt.CreateFrom(ctx, f, start)
 }
 
-// Attach is Create's counterpart for an adopted card (Manager.Attach).
-func (p *Pool) Attach(ctx context.Context, f *domain.Feature) (string, error) {
-	wt, err := p.ManagerFor(ctx, f)
-	if err != nil {
-		return "", err
-	}
-	return wt.Attach(ctx, f)
-}
-
 // BehindBase reports how far the card's branch trails its base, as
 // Manager.BehindBase does; 0 when the card's repo cannot be resolved,
 // since this is reporting, never a gate.

@@ -24,18 +24,13 @@ const BRIEF = {
   bug: ['What happens', 'What goes wrong, and where'],
   freeform: ['What to do', 'Say what you want done']
 }
-const ADOPTS = new Set(['feature', 'bug'])
 const STACKS = new Set(['feature', 'bug'])
 const WAITS = new Set(['feature', 'bug'])
 
 // Which field a refusal is about, read from the sentence the form wrote.
-// Adopting goes before the base: its refusals talk about branches too
-// ("main is the branch this card would land on; adopting it…", "FD-001
-// already has feat/x — one branch, one card").
 const FIELD_OF = [
   [/title|first line/i, 'title'],
   [/description/i, 'desc'],
-  [/adopt|one branch, one card/i, 'adopt'],
   [/budget|envelope|credits/i, 'envelope'],
   [/profile/i, 'profile'],
   [/severity/i, 'severity'],
@@ -159,10 +154,6 @@ registerView('newcard', {
       el.base = h('select', { testid: 'newcard-base' }, h('option', { value: '' }, 'the default branch'), branches.map(b => h('option', { value: b, selected: b === st.base }, b)))
       const baseHint = h('span', { class: 'fh', testid: 'newcard-base-hint' })
       side.push(h('label', { class: 'field', data: { f: 'base' } }, h('span', { class: 'fl' }, 'Base branch'), el.base, baseHint, errEl('base')))
-      if (ADOPTS.has(st.kind)) {
-        el.adopt = h('select', { testid: 'newcard-adopt' })
-        side.push(field('adopt', 'Adopt a branch', el.adopt, 'Work on a branch gummi did not cut. It is added to, never rebased or deleted.'))
-      }
       if (STACKS.has(st.kind) && f.stackable?.length) {
         el.stack = h('select', { testid: 'newcard-stack' }, h('option', { value: '' }, 'no stack'), f.stackable.map(c => h('option', { value: c.id, selected: c.id === st.stack }, `${c.title}`)))
         side.push(field('stack', 'Stack onto', el.stack, 'Fork from that card’s branch. It never waits for it.'))
@@ -176,30 +167,7 @@ registerView('newcard', {
         baseHint.textContent = stacked
           ? `Set by the stack: it forks from ${el.stack.value}’s branch and lands with it.`
           : 'What the branch forks from and lands on.'
-        syncAdopt()
       }
-      // the adopt list: every branch, but one that would be refused is
-      // there only to say why it can't be picked — the server's word for
-      // each (another card holds it, nothing of its own to adopt), and
-      // the branch the card would land on, which follows the base picked
-      const why = new Map((f.adoptable || []).map(a => [a.branch, a]))
-      const syncAdopt = () => {
-        if (!el.adopt) return
-        const picked = el.adopt.value || st.adopt || ''
-        const lands = el.base.disabled ? '' : (el.base.value || (!st.repo ? ctx.state?.board?.head || '' : ''))
-        clear(el.adopt).append(h('option', { value: '' }, 'no — cut a new branch'),
-          ...branches.map(b => {
-            // the server measured against the default base: under another
-            // base only a card holding the branch still settles it, and the
-            // create says the rest
-            const a = why.get(b) || {}
-            const no = b === lands ? 'the branch it lands on' : (!el.base.value || a.held ? a.why || '' : '')
-            return no
-              ? h('option', { value: b, disabled: true }, `${b} — ${no}`)
-              : h('option', { value: b, selected: b === picked }, b)
-          }))
-      }
-      el.base.addEventListener('change', syncAdopt)
       el.stack?.addEventListener('change', syncBase)
       syncBase()
       if (WAITS.has(st.kind) && f.dependable?.length) {
@@ -247,7 +215,6 @@ registerView('newcard', {
       st.profile = el.profile?.value
       st.envelope = el.envelope?.value
       st.base = el.base?.disabled ? st.base : el.base?.value
-      st.adopt = el.adopt?.value
       st.stack = el.stack?.value
       st.severity = el.severity?.value
       st.repro = el.repro?.value
@@ -295,7 +262,6 @@ registerView('newcard', {
         envelope: env ? env.credits : undefined,
         repo: st.repo || undefined,
         base: (!el.base.disabled && el.base.value) || undefined,
-        adopt: el.adopt?.value || undefined,
         stackOn: el.stack?.value || undefined,
         dependsOn: el.after ? el.after.filter(x => x.cb.checked).map(x => x.c.id) : undefined,
         autopilot: autopilot || undefined,

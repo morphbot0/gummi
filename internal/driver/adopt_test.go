@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -40,88 +39,31 @@ func (h *harness) somebodyElsesBranch(name string) {
 	h.git("checkout", "-q", "main")
 }
 
-// driveAdopted drives a card minted onto an existing branch all the way
-// to verified, and returns it.
-func driveAdopted(t *testing.T, branch string) (*harness, *Driver, domain.FeatureID) {
-	t.Helper()
-	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Read the inherited diff; rework planned.")
-		},
-		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			_ = os.WriteFile(filepath.Join(o.WorkDir, "ours.txt"), []byte("our rework\n"), 0o600)
-			return msgIdle(o.Model, "Reworked, on top of theirs.")
-		},
-		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-	})
-	h.somebodyElsesBranch(branch)
-	out, err := h.driver(Options{Adopt: branch}).Run(context.Background(), "finish what they started")
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if out.Status != StatusVerified {
-		t.Fatalf("status = %q, want verified", out.Status)
-	}
-	return h, h.driver(Options{}), domain.FeatureID(out.ID)
-}
-
-// TestDriveAdoptedCardKeepsTheirWork is the end-to-end premise: a card
-// minted onto somebody else's branch runs the ordinary workflow in a
-// worktree that already holds their commits, and finishes with both their
-// work and its own on the branch.
-func TestDriveAdoptedCardKeepsTheirWork(t *testing.T) {
-	h, _, id := driveAdopted(t, "feat/theirs")
-	ctx := context.Background()
-
-	f, err := h.store.GetFeature(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !f.Adopted() {
-		t.Fatalf("card is not adopted: scheme = %q", f.BranchScheme)
-	}
-	if got := f.BranchName(); got != "feat/theirs" {
-		t.Errorf("branch = %s, want the adopted one (gummi cut nothing)", got)
-	}
-	// Their commit is still on the branch, and ours is on top of it.
-	log := h.git("log", "--oneline", "feat/theirs")
-	if !strings.Contains(log, "their unfinished work") {
-		t.Errorf("the inherited commit is gone from the branch:\n%s", log)
-	}
-	p, err := h.wt.Path(&f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"theirs.txt", "ours.txt"} {
-		if _, err := os.Stat(filepath.Join(p, name)); err != nil {
-			t.Errorf("%s missing from the finished worktree: %v", name, err)
-		}
-	}
-}
-
 // TestCleanKeepsAnAdoptedBranch is the custody guard at the driver's
 // surface (DESIGN §10 D22). Cleaning up is the one routine act that
 // destroys a branch, and an adopted branch is the part gummi never owned:
 // the worktree goes, the ref stays, and the clean still SUCCEEDS, because
 // a surviving branch is the intended outcome and not a partial failure.
 func TestCleanKeepsAnAdoptedBranch(t *testing.T) {
-	h, d, id := driveAdopted(t, "feat/theirs")
+	h := newHarness(t, true, nil)
 	ctx := context.Background()
-
-	if _, err := h.driver(Options{}).Merge(ctx, id, "feat(export): finish their work", domain.LandSquash); err != nil {
-		t.Fatalf("Merge: %v", err)
+	// A card minted onto somebody else's branch before adoption was
+	// retired: still a row, still holding the branch, already landed.
+	h.somebodyElsesBranch("feat/theirs")
+	f := domain.Feature{
+		ID: "FD-007", Num: 7, Kind: domain.KindFeature, Title: "Finish their work", Slug: "finish-their-work",
+		Stage: domain.StageDone, BranchScheme: domain.BranchSchemeAdopted, Branch: "feat/theirs",
 	}
-	f, err := h.store.GetFeature(ctx, id)
-	if err != nil {
+	if err := h.store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := h.wt.Ensure(ctx, &f); err != nil {
+		t.Fatalf("attaching the adopted branch: %v", err)
+	}
+	h.git("merge", "-q", "--no-ff", "-m", "land their work", "feat/theirs")
+	id := f.ID
 
-	out, err := d.Clean(ctx, id)
+	out, err := h.driver(Options{}).Clean(ctx, id)
 	if err != nil {
 		t.Fatalf("Clean refused an adopted card instead of keeping its branch: %v", err)
 	}

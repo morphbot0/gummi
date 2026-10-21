@@ -457,10 +457,6 @@ type formResult struct {
 	After       []domain.FeatureID
 	// Base is the branch the card forks from, "" for the checkout's HEAD.
 	Base string
-	// Adopt is an existing branch to mint the card onto rather than
-	// cutting one for it (DESIGN §10 D22); "" cuts one, as every card did
-	// before adoption existed.
-	Adopt string
 	// StackOnto names a card to stack this one on top of, creating the
 	// stack if that card is not in one yet. StackInto joins an existing
 	// stack at the top. Both empty is a standalone card.
@@ -535,7 +531,6 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
 			Kind: kind, Description: res.Desc, Profile: res.Profile, Envelope: env,
 			Repo: repo, RequireRepo: m.requireRepo, Base: res.Base,
-			Adopt: res.Adopt, InspectAdopted: m.adoptInspector(ctx, repo, res.Base),
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
 			Discussion:     res.Discussion,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
@@ -580,20 +575,6 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 // requireRepo is cardmint's repository check for this workspace: a name
 // the pool knows, or the default when the pool has one. A shell with no
 // pool (a scaffold) has one implicit repository and refuses nothing.
-// adoptInspector is the branch half of the mint's validation, wired the
-// same way requireRepo is: cardmint cannot ask git anything, and the
-// shell's worktree pool can. A board with no pool answers that nothing is
-// adoptable, which is the honest answer and refuses the mint rather than
-// letting a card be minted onto an unverified ref.
-func (m *Shell) adoptInspector(ctx context.Context, repo, base string) func(string) (domain.AdoptedWork, error) {
-	return func(branch string) (domain.AdoptedWork, error) {
-		if m.wt == nil {
-			return domain.AdoptedWork{}, errors.New("no repository is available to adopt a branch from")
-		}
-		return m.wt.InspectBranch(ctx, repo, branch, base)
-	}
-}
-
 func (m *Shell) requireRepo(name string) error {
 	if m.wt == nil || m.wt.Known(name) {
 		return nil

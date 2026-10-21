@@ -22,7 +22,6 @@ import (
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
-	"github.com/morphis/gummi/internal/worktree"
 )
 
 // GateApproval selects whether a gate stops for the caller. The quality
@@ -58,9 +57,6 @@ type Options struct {
 	// ("" for whatever the repository has checked out, which is what
 	// every card did before bases were selectable).
 	Base string
-	// Adopt is an existing branch to mint the card ONTO instead of cutting
-	// one for it (--adopt, DESIGN §10 D22). Empty creates an ordinary card.
-	Adopt string
 }
 
 // Driver runs one feature through the engine's gate floor headlessly. It
@@ -1654,20 +1650,10 @@ func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc str
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
 		Kind: ct.Kind, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
 		Repo: repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
-		Adopt: d.opts.Adopt, InspectAdopted: d.eng.AdoptInspector(ctx, repo, d.opts.Base),
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
 		// `gummi run` still drives a card through the stage graph
 		Workflow: true,
 	})
-}
-
-// Worktrees resolves the worktree manager for a card's own repository.
-// It is exposed for the adoption path in cmd/gummi, which has to attach a
-// freshly minted card's branch worktree before it can anchor a pull
-// request's review comments onto its diff — the one thing that has to
-// happen between a mint and the first stage run.
-func (d *Driver) Worktrees(ctx context.Context, f *domain.Feature) (*worktree.Manager, error) {
-	return d.eng.WorktreesFor(ctx, f)
 }
 
 // enterStage resets per-stage state. The activity cursor is reset here
