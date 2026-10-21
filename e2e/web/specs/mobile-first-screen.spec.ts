@@ -13,7 +13,7 @@ test.use({
   seed: {
     run: async (ws) => {
       ids = {
-        gate: await ws.seedDesignGate('Add a wave helper'),
+        gate: await ws.seedReady('Add a wave helper'),
         sessions: await ws.seedSessions(['Add a shrug helper', 'Add a nod helper']),
       };
     },

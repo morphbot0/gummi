@@ -107,20 +107,6 @@ test.describe('a backlog', () => {
     await shot(page, info, 'action-refused');
   });
 
-  test('handing a card to autopilot asks first, in the overlay\'s words', async ({ pairedPage: page, server, api }, info) => {
-    const id = ids[2];
-    await open(page, server, id, phone(info));
-    await menu(page, 'gate');
-    // it loosens control: sent bare, the server asks back what autopilot
-    // will do with this card, and nothing changes until that is a yes
-    await expect(page.getByTestId('action-question')).toContainText(/Hand “.+” to autopilot\?/);
-    await expect(page.getByTestId('action-question')).toContainText('never lands on');
-    expect(((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeFalsy();
-    await shot(page, info, 'action-autopilot');
-    await page.getByTestId('action-confirm').click();
-    await expect(page.getByTestId('action-dialog')).toHaveCount(0);
-    await expect.poll(async () => ((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeTruthy();
-  });
 });
 
 test.describe('a card in its design stage', () => {
@@ -152,26 +138,23 @@ test.describe('a card in its design stage', () => {
   });
 });
 
-test.describe('a verified card', () => {
+test.describe('a session ready to land', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a farewell helper'); } } });
+  test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a farewell helper'); } } });
 
-  test('lands with the message drafted when verify passed', async ({ pairedPage: page, server, workspace }, info) => {
+  test('lands with a message drafted for its branch', async ({ pairedPage: page, server, workspace }, info) => {
     await open(page, server, id, phone(info));
+    // nothing has drafted a message for this branch yet: the dialog says so
     await menu(page, 'merge');
-    const msg = page.getByTestId('action-input');
-    await expect(msg).toHaveValue(/^feat: land /);
-    await expect(page.getByTestId('action-dialog')).toContainText('Drafted when verify passed');
+    await expect(page.getByTestId('action-input')).toHaveValue('');
+    await expect(page.getByTestId('action-hint')).toContainText('Nothing was drafted yet');
     await shot(page, info, 'action-land');
     // a squash in place is not a landing, and its hint does not say so
     await page.getByTestId('action-cancel').click();
     await menu(page, 'squash');
-    await expect(page.getByTestId('action-input')).toHaveValue(/^feat: land /);
-    await expect(page.getByTestId('action-hint')).toContainText('the one commit the branch becomes');
-    await expect(page.getByTestId('action-hint')).not.toContainText(/lands|Nothing was drafted/);
+    await expect(page.getByTestId('action-hint')).not.toContainText(/lands/);
     // sent with no message, the squash waits on a drafting pass: the
     // dialog says it is drafting until the draft comes back into the box
-    await page.getByTestId('action-input').fill('');
     let release!: () => void;
     const held = new Promise<void>((r) => { release = r; });
     await page.route(`**/api/cards/${id}/actions/squash`, async (route) => { await held; await route.continue(); });
@@ -182,15 +165,18 @@ test.describe('a verified card', () => {
     await expect(page.getByTestId('action-input')).not.toBeEditable();
     await shot(page, info, 'action-drafting');
     release();
-    await expect(page.getByTestId('action-input')).toHaveValue(/^feat: land /);
-    // what came back is the draft stored for the branch, and the hint
-    // says that — not that gummi drafted it just now
-    await expect(page.getByTestId('action-hint')).toContainText('Drafted for this branch');
+    await expect(page.getByTestId('action-input')).toHaveValue(/^feat: /, { timeout: 60_000 });
+    // what came back is gummi's draft, and the hint says so
+    await expect(page.getByTestId('action-hint')).toContainText('Drafted by gummi just now');
     await expect(page.getByTestId('action-confirm')).toHaveText('Squash');
     await expect(page.getByTestId('action-input')).toBeEditable();
     await page.unroute(`**/api/cards/${id}/actions/squash`);
     await page.getByTestId('action-cancel').click();
+    // the landing, sent with no message, drafts its own for the person to
+    // read, and the second press lands it
     await menu(page, 'merge');
+    await page.getByTestId('action-confirm').click();
+    await expect(page.getByTestId('action-input')).toHaveValue(/^feat: /, { timeout: 60_000 });
     await page.getByTestId('action-confirm').click();
     await expect(page.getByTestId('action-dialog')).toHaveCount(0, { timeout: 30_000 });
     if (phone(info)) await page.getByTestId('card-back').click();
@@ -199,31 +185,8 @@ test.describe('a verified card', () => {
     // headed as if each one landed
     await expect(page.getByTestId('rail-group-done')).toContainText('Done');
     await expect(page.getByTestId('rail-group-done')).not.toContainText('Landed');
-    expect(await workspace.git('log', '-1', '--format=%s', 'main')).toMatch(/^feat: land /);
+    expect(await workspace.git('log', '-1', '--format=%s', 'main')).toMatch(/^feat: /);
     await shot(page, info, 'landed');
-  });
-});
-
-test.describe('a verified card’s menu', () => {
-  let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a farewell helper'); } } });
-
-  // "next stage" out of verify lands the branch: the menu says so in the
-  // decision's own words, and presses it as the line it crosses
-  test('next stage at verify reads as the landing it is', async ({ pairedPage: page, server }, info) => {
-    await open(page, server, id, phone(info));
-    await page.getByTestId('card-actions').click();
-    const entry = page.getByTestId('action-advance');
-    await expect(entry).toContainText('land on main');
-    await expect(entry).toHaveClass(/\bdanger\b/);
-    await entry.click();
-    const dlg = page.getByTestId('action-dialog');
-    await expect(dlg).toBeVisible({ timeout: 30_000 });
-    await expect(dlg).toContainText('Land on main');
-    await expect(page.getByTestId('action-confirm')).toHaveClass(/\bdanger\b/);
-    await expect(page.getByTestId('action-hint')).toContainText('Drafted when verify passed');
-    await shot(page, info, 'action-next-lands');
-    await page.getByTestId('action-cancel').click();
   });
 });
 

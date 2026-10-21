@@ -226,54 +226,40 @@ export class Workspace {
   // ------------------------------------------------------------------
 
   /**
-   * A feature parked at its design gate: plan ran, the critique passed, the
-   * spec has every section and a passing gummi-checks block, nothing is
-   * implemented. `gummi run --gate-approval attended --until plan`.
+   * A session started by `gummi run` from title and driven until its first
+   * turn is answered: the scripted agent's turn edits a file, so its diff
+   * is not empty. Returns the session's id.
    */
-  async seedDesignGate(title: string, opts: RunOpts = {}): Promise<string> {
-    const r = await this.drive(['run', '--gate-approval', 'attended', '--until', 'plan', ...runFlags(opts), title]);
-    expectEvent(r, 'stopped');
+  async seedSession(title: string, opts: RunOpts = {}): Promise<string> {
+    const r = await this.drive(['run', ...runFlags(opts), title]);
+    expectEvent(r, 'done');
     return r.id;
   }
 
   /**
-   * A feature whose architect is waiting on an ask_user question with two
-   * options ("A new file (recommended)", "Extend the existing file"). The
-   * title gets the [ask] keyword if it lacks it.
+   * A session whose work is committed on its branch — ready to land.
+   * `gummi run`, then `gummi commit` of what its turn left in the tree.
+   */
+  async seedReady(title: string, opts: RunOpts = {}): Promise<string> {
+    const id = await this.seedSession(title, opts);
+    await this.gummiOK(['commit', id, '-m', commitSubject(title)]);
+    return id;
+  }
+
+  /**
+   * A session whose agent is waiting on an ask_user question with two
+   * options ("Left", "Right"). The [ask] keyword rides a line of its own
+   * under the title, so the card keeps the title it was given.
    */
   async seedAsk(title: string, opts: RunOpts = {}): Promise<{ id: string; question: string; options: string[]; decision: string }> {
-    const r = await this.drive(['run', '--gate-approval', 'attended', '--until', 'plan', ...runFlags(opts), withKeyword(title, '[ask]')]);
+    const r = await this.drive(['run', ...runFlags(opts), title.includes('[ask]') ? title : `${title}\n\n[ask]`]);
     const q = expectEvent(r, 'question');
     return { id: r.id, question: String(q.q), options: q.options as string[], decision: String(q.decision) };
   }
 
-  /**
-   * A feature driven all the way to a verified branch (stage verify,
-   * verified: true) — ready to land. `gummi run --gate-approval autopilot`.
-   */
-  async seedVerified(title: string, opts: RunOpts = {}): Promise<string> {
-    const r = await this.drive(['run', '--gate-approval', 'autopilot', ...runFlags(opts), title]);
-    expectEvent(r, 'verified');
-    return r.id;
-  }
-
-  /**
-   * A feature whose verify stage failed and escalated to a person
-   * (escalation.kind "verify"). how "check" (default) fails a real
-   * gummi-checks command at verify ([fail-check]); "verdict" has every check
-   * pass and the verifier fail it anyway ([fail-verify]).
-   */
-  async seedVerifyFailed(title: string, opts: RunOpts & { how?: 'check' | 'verdict' } = {}): Promise<string> {
-    const keyword = opts.how === 'verdict' ? '[fail-verify]' : '[fail-check]';
-    const r = await this.drive(['run', '--gate-approval', 'autopilot', ...runFlags(opts), withKeyword(title, keyword)]);
-    const esc = expectEvent(r, 'escalation');
-    if (esc.stage !== 'verify') throw new Error(`expected a verify escalation, got ${JSON.stringify(esc)}\n${r.stdout}`);
-    return r.id;
-  }
-
-  /** A verified feature landed on main with `gummi merge` (stage done). */
-  async seedLanded(title: string, message = `feat: ${title.toLowerCase()}`, opts: RunOpts = {}): Promise<string> {
-    const id = await this.seedVerified(title, opts);
+  /** A ready session landed on main with `gummi merge` (stage done). */
+  async seedLanded(title: string, message = commitSubject(title), opts: RunOpts = {}): Promise<string> {
+    const id = await this.seedReady(title, opts);
     await this.gummiOK(['merge', id, '-m', message]);
     return id;
   }
@@ -338,16 +324,9 @@ export class Workspace {
     }
   }
 
-  /** Approve a design gate and drive on to a verified branch (or the next stop). */
-  async approve(id: string): Promise<DriveResult> {
-    return this.drive(['resume', id, '--approve']);
-  }
-
-  /** Answer an open ask_user question; `untilPlan` stops again at the design gate. */
-  async answer(id: string, text: string, opts: { untilPlan?: boolean } = {}): Promise<DriveResult> {
-    const args = ['resume', id, '--answer', text];
-    if (opts.untilPlan !== false) args.push('--until', 'plan');
-    return this.drive(args);
+  /** Answer a stopped session's open question with `gummi resume --answer`. */
+  async answer(id: string, text: string): Promise<DriveResult> {
+    return this.drive(['resume', id, '--answer', text]);
   }
 
   /**
@@ -407,6 +386,7 @@ export interface DriveResult extends Exec {
 /** Flags every seeding helper forwards to `gummi run`. */
 export interface RunOpts {
   envelope?: number;
+  repo?: string;
   profile?: string;
   base?: string;
   ref?: string;
@@ -433,8 +413,15 @@ function runFlags(o: RunOpts): string[] {
   if (o.envelope !== undefined) f.push('--envelope', String(o.envelope));
   if (o.profile) f.push('--profile', o.profile);
   if (o.base) f.push('--base', o.base);
+  if (o.repo) f.push('--repo', o.repo);
   if (o.ref) f.push('--ref', o.ref);
   return f;
+}
+
+/** A Conventional Commits subject a landing or commit accepts, from a title. */
+export function commitSubject(title: string): string {
+  const words = title.toLowerCase().replace(/\[[^\]]*\]/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return `feat: ${words || 'work'}`;
 }
 
 function withKeyword(title: string, keyword: string): string {

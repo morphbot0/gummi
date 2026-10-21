@@ -50,15 +50,15 @@ test('the main surfaces pass axe in both themes', async ({ pairedPage: page, ser
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
     const at = (s: string) => `${theme}/${s}`;
 
-    await open(page, b.failed);
-    await audit(page, at('board, failed verify'), found);
+    await open(page, b.commented);
+    await audit(page, at('board, a commented diff'), found);
     for (const tab of ['spec', 'diff', 'pr', 'stats']) {
       await showTab(page, tab);
       await expect(page.getByTestId('panel-pane')).toHaveAttribute('data-tab', tab);
       await expect(page.getByTestId('panel-loading')).toHaveCount(0);
       await audit(page, at(`tab ${tab}`), found);
     }
-    for (const id of [b.gate, b.ask, b.running!, b.freeform!, b.landed]) {
+    for (const id of [b.ready, b.ask, b.running!, b.freeform!, b.landed]) {
       await open(page, id);
       await audit(page, at(`card ${id}`), found);
     }

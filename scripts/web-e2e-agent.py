@@ -76,7 +76,8 @@ turn) gets a short acknowledgement quoting it; a freeform card's turn
 also edits a file so its diff is non-empty. A freeform turn
 containing [watch] starts a Monitor watch it leaves open, one containing
 [ask] asks the person which way with ask_user and says back what they
-answered, and one containing [tasks-done] completes its checklist.
+answered, one containing [spec] writes the session's spec before its edit,
+and one containing [tasks-done] completes its checklist.
 
 A session turn containing [crew] calls a crew (DESIGN §24): it starts the
 session's spec (spec_start), writes its Done when as one item checked by
@@ -675,6 +676,13 @@ def freeform_turn(turn, text):
         })
         turn.say("You said: %s" % answer.strip().splitlines()[0])
         return
+    if "[spec]" in text:
+        # the session writes its spec first, then edits its tree as any
+        # turn does, so a test has a spec and a diff to read
+        call_tool("spec_start", args={"title": "Notes for the helper"})
+        call_tool("spec_replace_section", args={"section": "Problem", "body": "The helper needs a note.\n"})
+        call_tool("spec_replace_section", args={"section": "Approach", "body": "Write it in NOTES.md.\n"})
+        call_tool("spec_replace_section", args={"section": "Done when", "body": CREW_DONE_WHEN})
     wd = turn.ctx["workdir"]
     notes = os.path.join(wd, "NOTES.md")
     with open(notes, "a", encoding="utf-8") as fh:

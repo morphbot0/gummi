@@ -3,9 +3,8 @@ import type { Page } from '@playwright/test';
 import { shot } from '../fixtures/shots';
 
 // Fleet stats: the board's run over a window, fleetrun's fold. Seeded with
-// a landed card (every stage ran, gates crossed, a landing mark), one
-// parked at its design gate, and one whose architect asked a question (an
-// open wait on you).
+// a landed session (a landing mark), one ready to land, and one whose
+// agent asked a question (an open wait on you).
 
 let ids: { landed: string; gate: string; ask: string };
 
@@ -14,7 +13,7 @@ test.use({
   seed: {
     run: async (ws) => {
       const landed = await ws.seedLanded('Add a wave helper');
-      const gate = await ws.seedDesignGate('Add a nod helper');
+      const gate = await ws.seedReady('Add a nod helper');
       const ask = (await ws.seedAsk('Add a bow helper')).id;
       ids = { landed, gate, ask };
     },
@@ -43,12 +42,11 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
 
   // by stage, in the stage order; by model, biggest first
   const stages = page.getByTestId('fleet-stage-bars').locator('th');
-  await expect(stages.first()).toHaveText('plan');
-  await expect(page.getByTestId('fleet-stage-bars')).toContainText('implement');
-  await expect(page.getByTestId('fleet-model-bars')).toContainText('e2e-architect');
+  await expect(stages.first()).toHaveText('open');
+  await expect(page.getByTestId('fleet-model-bars')).toContainText('e2e-implementer');
 
-  // one lane per card; the landed one shows its landing and gates, the
-  // asking one its open wait on you
+  // one lane per card; the landed one shows its landing, the asking one
+  // its open wait on you
   const landed = page.getByTestId(`fleet-lane-${ids.landed}`);
   const gate = page.getByTestId(`fleet-lane-${ids.ask}`);
   await expect(landed).toBeVisible();
@@ -56,7 +54,6 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
   await expect(gate).toBeVisible();
   await expect(landed.locator('.blk')).not.toHaveCount(0);
   await expect(landed.locator('.land')).toHaveCount(1);
-  await expect(landed.locator('.gate')).not.toHaveCount(0);
   await expect(gate.locator('.wait.open')).toHaveCount(1);
   await expect(gate).toContainText('on you since');
   await expect(page.getByTestId('fleet-legend')).toContainText('waiting on you');
@@ -70,7 +67,7 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
     // every mark carries its numbers on hover: value first, then the name
     await page.getByTestId('fleet-stage-bars').locator('tr').first().hover();
     await expect(page.getByTestId('fleet-tip')).toBeVisible();
-    await expect(page.getByTestId('fleet-tip')).toContainText(/\$.*plan$/);
+    await expect(page.getByTestId('fleet-tip')).toContainText(/\$.*open$/);
     await landed.locator('.land').hover();
     await expect(page.getByTestId('fleet-tip')).toContainText('landed');
   } else {

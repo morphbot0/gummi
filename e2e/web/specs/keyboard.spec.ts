@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
+import { api } from '../fixtures/server';
 
 // The board without a mouse: pair, walk the rail with j and k, open the
 // documents with the g keys, answer a decision with a digit and enter,
@@ -12,7 +13,7 @@ let ids: { wave: string; nod: string };
 test.use({
   seed: {
     run: async (ws) => {
-      ids = { wave: await ws.seedDesignGate('Add a wave helper'), nod: await ws.seedDesignGate('Add a nod helper') };
+      ids = { wave: await ws.seedReady('Add a wave helper'), nod: await ws.seedReady('Add a nod helper') };
     },
   },
 });
@@ -41,7 +42,7 @@ test('the whole loop, from the keyboard alone', async ({ page, server }, info) =
   await page.keyboard.type(await server.freshCode());
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /FD-/);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /FF-/);
 
   // tabbing through the page: every stop shows where it is
   const unseen: string[] = [];
@@ -72,20 +73,24 @@ test('the whole loop, from the keyboard alone', async ({ page, server }, info) =
   await page.keyboard.press('s');
   await expect(page.getByTestId('tab-spec')).toHaveAttribute('aria-selected', 'true');
 
-  // a digit highlights an answer and enter gives it
+  // a digit highlights an answer and enter gives it: a session asks
+  const made = await api(page.request, server, 'POST', '/api/cards', { kind: 'freeform', title: '[ask] Pick a side' });
+  const asking = String(made.json?.id);
+  await page.evaluate((i) => { location.hash = i; }, asking);
   const d = page.getByTestId('decision');
-  await expect(d).toHaveAttribute('data-kind', 'gate');
-  await page.keyboard.press('3');
-  await expect(page.getByTestId('decision-option-pause')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('composer-says')).toHaveText('stop here');
+  await expect(d).toHaveAttribute('data-kind', 'ask', { timeout: 30_000 });
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+  await page.keyboard.press('2');
+  await expect(page.getByTestId('decision-option-1')).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('1');
-  await expect(page.getByTestId('decision-option-advance')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('decision-option-0')).toHaveAttribute('aria-pressed', 'true');
   await shot(page, info, 'keyboard-answer');
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('toast').filter({ hasText: 'Answered: approve' })).toBeVisible();
+  await expect(page.locator('[data-testid="decision"][data-kind="ask"]')).toHaveCount(0, { timeout: 30_000 });
 
   // the palette jumps to a card by its id
   const other = first === ids.wave ? ids.nod : ids.wave;
+  // (from the session that asked, any seeded card is another)
   await page.keyboard.press('Control+k');
   await expect(page.getByTestId('palette-input')).toBeFocused();
   await page.keyboard.type(other);

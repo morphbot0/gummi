@@ -1,21 +1,12 @@
 import { expect, showCard, showTab, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
-// The card page against a real `gummi web` and a card the scripted agent
-// walked to a failed verify, with a linked pull request (fake gh): the
-// thread, spec, diff, PR and stats tabs as the server serves them.
+// The card page against a real `gummi web` and a session the scripted
+// agent gave a spec and a commit, with a linked pull request (fake gh):
+// the spec, diff, PR and stats tabs as the server serves them.
 
 let id: string;
-test.use({ seed: { run: async (ws) => { id = await ws.seedVerifyFailed('Add a regressing helper'); await ws.linkPR(id); } } });
-
-test('the thread shows the stages the card walked and its verify', async ({ pairedPage: page }, info) => {
-  await showCard(page, id);
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
-  await expect(page.getByTestId('stage-group-verify').last()).toBeVisible();
-  await expect(page.getByTestId('stage-group-plan').first()).not.toHaveAttribute('open', '');
-  await expect(page.getByTestId('thread-items').getByTestId('verify').last()).toContainText('failed');
-  await shot(page, info, 'real-thread');
-});
+test.use({ seed: { run: async (ws) => { id = await ws.seedReady('[spec] Add a noted helper'); await ws.linkPR(id); } } });
 
 test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage: page }, info) => {
   await showCard(page, id);
@@ -23,20 +14,19 @@ test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage
   // the outline is a menu, on a phone as well; picking a section goes to it
   await page.getByTestId('spec-toc').click();
   const outline = page.getByTestId('spec-toc-menu');
-  await expect(outline).toContainText('Chosen approach');
-  await outline.getByRole('menuitem', { name: /Chosen approach/ }).click();
+  await expect(outline).toContainText('Approach');
+  await outline.getByRole('menuitem', { name: /Approach/ }).click();
   await expect(outline).toHaveCount(0);
-  await expect(page.getByTestId('spec-doc').getByRole('heading', { name: /Chosen approach/ })).toBeInViewport();
-  await expect(page.getByTestId('spec-checks')).toContainText('go build');
+  await expect(page.getByTestId('spec-doc').getByRole('heading', { name: /Approach/ })).toBeInViewport();
   await shot(page, info, 'real-spec');
 
   await showTab(page, 'diff');
-  await expect(page.getByTestId('diff-files')).toContainText(`${id.replace('-', '').toLowerCase()}.go`);
-  const line = page.locator('[data-testid^="diff-line-"]').nth(3);
+  await expect(page.getByTestId('diff-files')).toContainText('NOTES.md');
+  const line = page.locator('[data-testid^="diff-line-"]').first();
   await line.locator('.n').click();
-  await page.getByTestId('annotation-input').fill('Name the helper after what it does');
+  await page.getByTestId('annotation-input').fill('Say what the helper returns');
   await page.getByTestId('annotation-save').click();
-  await expect(page.locator('[data-testid^="annotation-"]').filter({ hasText: 'Name the helper' }).first()).toBeVisible();
+  await expect(page.locator('[data-testid^="annotation-"]').filter({ hasText: 'Say what the helper' }).first()).toBeVisible();
   await expect(page.getByTestId('diff-pending')).toContainText('comment');
   await shot(page, info, 'real-diff');
 
@@ -44,6 +34,6 @@ test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage
   await expect(page.getByTestId('pr-state')).toContainText('open');
   await expect(page.getByTestId('pr-push-cmd')).toContainText('git push');
   await showTab(page, 'stats');
-  await expect(page.getByTestId('stats-table')).toContainText('implement');
+  await expect(page.getByTestId('stats-spent')).toBeVisible();
   await shot(page, info, 'real-stats');
 });

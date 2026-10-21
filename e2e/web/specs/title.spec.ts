@@ -4,7 +4,7 @@ import { expect, test } from '../fixtures/test';
 // characters, so a named instance has to put its name ahead of the word
 // every board shares.
 
-test.use({ seed: { run: async (ws) => { await ws.seedDesignGate('Add a wave helper'); } } });
+test.use({ seed: { run: async (ws) => { await ws.seedAsk('Add a wave helper'); } } });
 
 test('a named instance leads the tab title', async ({ pairedPage: page, api }) => {
   await expect(page).toHaveTitle('(1) gummi · repo');

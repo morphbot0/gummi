@@ -18,7 +18,7 @@ const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, 
 test.use({
   seed: {
     run: async (ws) => {
-      id = await ws.seedVerified('Add a log helper');
+      id = await ws.seedReady('Add a log helper');
       const wt = ws.worktree(id);
       fs.writeFileSync(path.join(wt, 'one.txt'), 'one\n');
       git(wt, 'add', '-A');

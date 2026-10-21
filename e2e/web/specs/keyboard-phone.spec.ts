@@ -9,7 +9,7 @@ import { shot } from '../fixtures/shots';
 // takes focus and the visible viewport shrinks.
 test.describe('typing on a phone', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedDesignGate('Add a wave helper'); } } });
+  test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a wave helper'); } } });
 
   test('the composer and Send stay on screen above the keyboard', async ({ pairedPage: page, server }, info) => {
     test.skip(info.project.name !== 'phone', 'the typing layout is the phone’s');

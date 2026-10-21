@@ -11,7 +11,7 @@ import type { Page } from '@playwright/test';
 
 let id: string;
 let other: string;
-test.use({ seed: { run: async (ws) => { id = await ws.seedDesignGate('Add a wave helper'); [other] = await ws.seedSessions(['Add a shrug helper']); } } });
+test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a wave helper'); [other] = await ws.seedSessions(['Add a shrug helper']); } } });
 
 test.beforeEach(({}, info) => {
   test.skip(info.project.name === 'phone', 'the panel sits beside the thread here; the phone moves the same tabs into the card screen');

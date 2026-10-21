@@ -7,12 +7,12 @@ import { shot } from '../fixtures/shots';
 // the keyboard. Routes the server does not answer yet (501) must leave a
 // quiet "not available yet", never a broken page.
 
-let ids: { gate: string; session: string; others: string[] };
+let ids: { gate: string; session: string; others: string[] }; // gate: a session waiting on its question
 
 test.use({
   seed: {
     run: async (ws) => {
-      const gate = await ws.seedDesignGate('Add a wave helper');
+      const gate = (await ws.seedAsk('Add a wave helper')).id;
       const [session, ...others] = await ws.seedSessions(['Greet panics on an empty name', 'Add a shrug helper', 'Add a nod helper']);
       ids = { gate, session, others };
     },
@@ -58,8 +58,9 @@ test('the rail shows the seeded cards and a card opens with its head', async ({ 
   if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   await page.getByTestId(`rail-row-${ids.gate}`).click();
   await expect(page.getByTestId('card-title')).toHaveText('Add a wave helper');
-  await expect(page.getByTestId('card-stages')).toContainText('plan');
-  await shot(page, info, 'gate');
+  // a session walks no stages: its head draws none
+  await expect(page.getByTestId('card-stages')).toHaveCount(0);
+  await shot(page, info, 'asking');
   expect(errors).toEqual([]);
 });
 
@@ -235,28 +236,29 @@ test('the rail filters from one menu, names what applies, and matches a status i
   await page.getByTestId('rail-filters').click();
   await expect(page.getByTestId('rail-group-by-repo')).toHaveCount(0);
   // a kind says how many cards it has, and ticking it leaves the menu open
-  await expect(page.getByTestId('rail-kind-FF')).toContainText('3');
+  await expect(page.getByTestId('rail-kind-FF')).toContainText('4');
   await page.getByTestId('rail-kind-FF').click();
   await expect(page.getByTestId('rail-kind-FF')).toHaveAttribute('aria-checked', 'true');
   await expect(row(ids.session)).toBeVisible();
-  await expect(row(ids.gate)).toHaveCount(0);
-  await page.getByTestId('rail-kind-FD').click();
+  await expect(row(ids.gate)).toBeVisible();
   await page.getByTestId('rail-status-needs').click();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('rail-filters')).toBeFocused();
-  // sessions and features that need you: the gate and nothing else
+  // sessions that need you: the one waiting on its question and nothing else
   await expect(row(ids.gate)).toBeVisible();
   await expect(row(ids.session)).toHaveCount(0);
   await expect(row(ids.others[0])).toHaveCount(0);
-  await expect(page.getByTestId('rail-filters')).toContainText('3');
+  await expect(page.getByTestId('rail-filters')).toContainText('2');
   // each filter is named under the box with its own way off
   await page.getByTestId('rail-token-status-needs').getByRole('button').click();
   await expect(row(ids.session)).toBeVisible();
   await expect(row(ids.others[0])).toBeVisible();
-  await page.getByTestId('rail-tokens-clear').click();
+  await page.getByTestId('rail-token-kind-FF').getByRole('button').click();
   await expect(page.getByTestId('rail-tokens')).toBeHidden();
   // the box matches what a row says, not only its title
-  await page.getByTestId('rail-filter').fill('design gate');
+  const word = ((await page.getByTestId(`rail-row-word-${ids.gate}`).textContent()) ?? '').trim();
+  expect(word).not.toBe('');
+  await page.getByTestId('rail-filter').fill(word);
   await expect(row(ids.gate)).toBeVisible();
   await expect(row(ids.session)).toHaveCount(0);
   await page.getByTestId('rail-filter').fill('no such card');

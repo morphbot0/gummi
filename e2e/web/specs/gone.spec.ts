@@ -9,7 +9,7 @@ import { shot } from '../fixtures/shots';
 let verified: string;
 let doomed: string;
 test.use({ seed: { run: async (ws) => {
-  verified = await ws.seedVerified('Add a finished helper');
+  verified = await ws.seedReady('Add a finished helper');
   [doomed] = await ws.seedSessions(['Add a doomed helper']);
 } } });
 
@@ -34,7 +34,7 @@ test('a card deleted elsewhere stays gone where it was open', async ({ pairedPag
   // enter answers nothing
   await page.getByTestId('composer-input').press('Enter');
   await page.waitForTimeout(500);
-  expect((await api('GET', `/api/cards/${verified}`)).json.stage).toBe('verify');
+  expect((await api('GET', `/api/cards/${verified}`)).json.stage).toBe('open');
 });
 
 // Deleting the open card from its own screen is the reader's own doing, so

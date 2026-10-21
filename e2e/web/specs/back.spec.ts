@@ -7,8 +7,8 @@ import { expect, showTab, test } from '../fixtures/test';
 test.describe('back', () => {
   let a: string, b: string;
   test.use({ seed: { run: async (ws) => {
-    a = await ws.seedDesignGate('Add a wave helper');
-    b = await ws.seedDesignGate('Add a nod helper');
+    a = await ws.seedReady('Add a wave helper');
+    b = await ws.seedReady('Add a nod helper');
   } } });
 
   test('on a phone it walks back to the cards, closing what is open first', async ({ pairedPage, server }, info) => {
@@ -113,8 +113,11 @@ test.describe('back', () => {
     await page.getByTestId(`palette-row-${b}`).click();
     await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
     await page.waitForTimeout(800);
-    expect(page.url()).toContain(`#${b}`);
-    expect(page.url()).not.toContain('/log');
+    // the address names the card picked and the tab its panel shows, never
+    // the old card's address left standing
+    const shown = await page.getByTestId('panel-pane').getAttribute('data-tab');
+    expect(page.url()).toContain(shown ? `#${b}/${shown}` : `#${b}`);
+    expect(page.url()).not.toContain(`#${a}`);
   });
 
   test('on a phone a reload keeps the screen it was on, and back still works', async ({ pairedPage: page, server }, info) => {
