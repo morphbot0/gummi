@@ -424,8 +424,7 @@ func driftActions(in nextInput, acts []nextAction) []nextAction {
 	}
 	out := []nextAction{nextStep("rebase", "r", "rebase onto "+in.landBase(), why)}
 	for _, a := range acts {
-		switch {
-		case a.id == "rebase":
+		if a.id == "rebase" {
 			continue // already leading
 		}
 		out = append(out, a)

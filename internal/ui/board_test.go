@@ -412,7 +412,6 @@ func bugRow(num int, title string, sev domain.Severity) featureRow {
 	return r
 }
 
-
 // TestBoardCardLineSeverity golden-captures the severity badge rendering
 // for each canonical level plus the unclassified (empty) case.
 func TestBoardCardLineSeverity(t *testing.T) {

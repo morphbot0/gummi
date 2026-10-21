@@ -13,12 +13,14 @@ import (
 // and where each node is. A crew that ended draws nothing: its report says.
 func TestAnOpenCrewDrawsItsNodesUnderTheThread(t *testing.T) {
 	s := theme.New(theme.GummiDark())
-	crew := &domain.Crew{Seq: 2, State: domain.CrewRunning, Budget: 400, OwnSpent: 30,
+	crew := &domain.Crew{
+		Seq: 2, State: domain.CrewRunning, Budget: 400, OwnSpent: 30,
 		Plan: domain.CrewPlan{Nodes: []domain.CrewNode{
 			{ID: "t1", Role: domain.CrewScout, Title: "Map the memory pair"},
 			{ID: "t2", Role: domain.CrewImplementer, Title: "Add the column"},
 			{ID: "t3", Role: domain.CrewTester, Title: "Test the header"},
-		}}}
+		}},
+	}
 	r := featureRow{Crew: crew, CrewNodes: []domain.CrewNodeRun{
 		{Node: "t1", State: domain.NodeLanded, Spent: 20},
 		{Node: "t2", State: domain.NodeRunning, Spent: 10, Reworks: 1},

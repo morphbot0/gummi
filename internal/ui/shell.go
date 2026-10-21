@@ -110,7 +110,7 @@ type Shell struct {
 	// rebase clears it (rebaseFeature).
 	landConflicts map[domain.FeatureID][]string
 
-	inboxSel int      // cursor into m.inbox.list(), the inbox tab's own selection
+	inboxSel int // cursor into m.inbox.list(), the inbox tab's own selection
 	notice   noticeMsg
 	spec     *specView // non-nil while the spec surface is open
 	diff     *diffView // non-nil while the diff surface is open

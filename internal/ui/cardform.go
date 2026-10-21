@@ -29,7 +29,6 @@ import (
 //
 // PROPOSAL-new-card.md holds the rationale and the settled decisions.
 type cardForm struct {
-
 	// sessionBackend and sessionModel are the agent and model a freeform
 	// card's session will run on. The form has no row for them — the web
 	// face's session draft picks them in its composer and webFill sets
@@ -981,10 +980,9 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 // runsLine is the collapsed options readout.
 func (d *cardForm) runsLine(s *theme.Styles) string {
 	env := strings.TrimSpace(d.env.Value())
-	switch {
-	case env == "":
+	if env == "" {
 		env = "default budget"
-	default:
+	} else {
 		env = "$" + strings.TrimPrefix(env, "$")
 	}
 	out := env + " · " + d.profiles[d.profile]
