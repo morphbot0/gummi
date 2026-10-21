@@ -19,41 +19,6 @@ func TestRemaining(t *testing.T) {
 	}
 }
 
-func TestEstimateEnvelope(t *testing.T) {
-	// no history → no estimate (caller keeps its default)
-	if env, n := EstimateEnvelope(nil); env != 0 || n != 0 {
-		t.Errorf("no history = (%v,%d), want (0,0)", env, n)
-	}
-	// features that never metered anything are ignored
-	if env, n := EstimateEnvelope([]Spend{{}, {}}); env != 0 || n != 0 {
-		t.Errorf("zero-spend history = (%v,%d), want (0,0)", env, n)
-	}
-	// a runaway 900 doesn't drag the median (that's why median, not mean);
-	// the padded median lands under MinEnvelope, so the floor applies.
-	hist := []Spend{
-		{Credits: 80}, {Credits: 100}, {Credits: 120}, {Credits: 900},
-	}
-	env, n := EstimateEnvelope(hist)
-	if n != 4 {
-		t.Errorf("samples = %d, want 4", n)
-	}
-	// median of [80,100,120,900] = (100+120)/2 = 110 → ×1.25 = 137.5 →
-	// 140, floored at MinEnvelope 150
-	if env != 150 {
-		t.Errorf("estimate = %v, want 150 (MinEnvelope floor)", env)
-	}
-	// a history rich enough to clear the floor is used as-is
-	rich := []Spend{{Credits: 200}, {Credits: 240}, {Credits: 280}}
-	if env, _ := EstimateEnvelope(rich); env != 300 { // 240 × 1.25 = 300
-		t.Errorf("rich estimate = %v, want 300", env)
-	}
-	// BYOK token-only spend converts to credits before estimating
-	tok := []Spend{{OutputTokens: 200000}} // 200k tok × 0.5/1k = 100 credits
-	if env, _ := EstimateEnvelope(tok); env != 150 {
-		t.Errorf("byok estimate = %v, want 150 (100 × 1.25 = 125 → floor)", env)
-	}
-}
-
 func TestCreditEquivalentAt(t *testing.T) {
 	tok := Spend{OutputTokens: 10000}
 	if got := tok.CreditEquivalentAt(2.0); got != 20 { // 10000/1000 × 2.0

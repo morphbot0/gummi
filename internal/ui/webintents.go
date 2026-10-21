@@ -589,12 +589,6 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 	msg := strings.TrimSpace(req.Message)
 	m.clearTransientNotice()
 	switch id {
-	case "deps":
-		want := make([]domain.FeatureID, 0, len(req.Cards))
-		for _, c := range req.Cards {
-			want = append(want, domain.FeatureID(strings.TrimSpace(c)))
-		}
-		return m.setDependencies(r.F, want), nil
 	case "model":
 		if m.engine == nil {
 			return nil, webErr(WebUnavailable, "%s", m.noAgent(" (set a model/provider to enable agents)"))
@@ -625,22 +619,7 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; commit once this turn ends"}
 		}
 		return m.commitSession(r.F.ID, msg), nil
-	case "profile":
-		if !slices.ContainsFunc(entry.Choices, func(c webapi.Choice) bool { return c.Value == req.Profile }) {
-			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(req.Profile)+" is not one "+r.F.Name()+" can switch to")
-		}
-		return m.confirmCardProfileChange(r.F.ID, req.Profile), nil
-	case "run":
-		if msg != "" {
-			// a run with a note: the kickoff carries it, as the re-run
-			// "send it back" row's words do
-			return m.runStageWithNote(r.F, msg), nil
-		}
-	case "bounce":
-		if msg != "" {
-			return m.deliverWords(r, "bounce", msg), nil
-		}
-	case "changes", "newbug":
+	case "newbug":
 		if msg == "" {
 			return nil, &WebError{
 				Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
@@ -653,94 +632,4 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		// runs every pre-check the dialog's opening runs
 	}
 	return m.runCardAction(cardAction{id: entry.ID, key: entry.Key, label: entry.Label, why: entry.Detail, danger: entry.Danger}), nil
-}
-
-// setDependencies makes want the card's dependency set, edge by edge
-// through the dependency picker's own add and remove (deppicker.go), after
-// checking every edge the picker would refuse — a cycle, the card
-// itself, a card already coding — so nothing is half-applied.
-func (m *Shell) setDependencies(f domain.Feature, want []domain.FeatureID) tea.Cmd {
-	store := m.store
-	if store == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		ctx := context.Background()
-		dp := &depPicker{}
-		if err := dp.buildCands(ctx, store, f); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
-		}
-		wanted := map[domain.FeatureID]bool{}
-		for _, id := range want {
-			wanted[id] = true
-		}
-		// check first: every wanted card must be addable or attached
-		for id := range wanted {
-			i := slices.IndexFunc(dp.cands, func(c depCandidate) bool { return c.f.ID == id })
-			switch {
-			case i < 0 && dp.removeOnly:
-				return noticeMsg{text: f.Name() + ": " + depReasonLate, isErr: true, id: f.ID}
-			case i < 0:
-				return noticeMsg{text: f.Name() + ": no card " + id.Ref() + " to depend on", isErr: true, id: f.ID}
-			case dp.cands[i].state == candSelf || dp.cands[i].state == candCycle:
-				return noticeMsg{text: f.Name() + " → " + dp.cands[i].f.Name() + ": " + dp.cands[i].reason, isErr: true, id: f.ID}
-			}
-		}
-		changed := 0
-		for i, c := range dp.cands {
-			var cmd tea.Cmd
-			switch {
-			case wanted[c.f.ID] && c.state == candOK:
-				dp.cursor = i
-				cmd = dp.add(m)
-			case !wanted[c.f.ID] && (c.state == candAttached || c.state == candRemove):
-				dp.cursor = i
-				cmd = dp.remove(m)
-			}
-			if cmd == nil {
-				continue
-			}
-			changed++
-			if n, ok := cmd().(noticeMsg); ok && n.isErr {
-				return n
-			}
-		}
-		if changed == 0 {
-			return noticeMsg{text: f.Name() + ": dependencies unchanged"}
-		}
-		return noticeMsg{text: f.Name() + ": " + dependencyCount(len(wanted)), reload: true}
-	}
-}
-
-// Resume is POST /api/board/resume: the quit-resume question a headless
-// board holds (quitresume.go), answered. Cards picks those back up
-// through the dialog's own resume; None is "Not now", which leaves every
-// card parked where the quit stopped it. Either way the question is
-// settled — as the TUI's dialog is once answered.
-func (b *Bridge) Resume(ctx context.Context, req webapi.ResumeRequest, person string) error {
-	out, werr := b.intent(ctx, "", webInput{actor: state.PersonActor(person)}, webWait, func(m *Shell, _ featureRow) (tea.Cmd, error) {
-		m.settleQuitResume()
-		o := m.resumeOffer
-		if o == nil {
-			return nil, refuse(WebConflict, "there is nothing to pick back up")
-		}
-		if req.None || len(req.Cards) == 0 {
-			m.resumeOffer = nil
-			return nil, nil
-		}
-		picked := o.cards[:0:0]
-		for _, id := range req.Cards {
-			i := slices.IndexFunc(o.cards, func(c engine.QuitStoppedCard) bool { return string(c.Feature.ID) == id })
-			if i < 0 {
-				return nil, refuse(WebBadRequest, id+" is not one of the cards the quit stopped")
-			}
-			picked = append(picked, o.cards[i])
-		}
-		m.resumeOffer = nil
-		return m.resumeQuitStopped(picked), nil
-	})
-	if werr != nil {
-		return werr
-	}
-	return out.err()
 }

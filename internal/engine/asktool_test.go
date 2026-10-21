@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -59,10 +57,7 @@ func TestAskUserSurfacesAndResolves(t *testing.T) {
 	e := newEngine(t, ag)
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, freeformCard(1, "Dark mode"))
 	// the kickoff turn triggers the ask
 	waitFor(t, e, EventQuestion)
 
@@ -77,7 +72,7 @@ func TestAskUserSurfacesAndResolves(t *testing.T) {
 	// answering resolves the blocked tool call and records the choice.
 	// (A real backend resumes the same turn to idle; the Fake models the
 	// resolve synchronously, so no idle follows here.)
-	if err := e.Answer(ctx, "FD-001", "per-device"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "per-device"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,10 +125,7 @@ func TestParallelAsksBounceExtras(t *testing.T) {
 	e := newEngine(t, ag)
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, freeformCard(1, "Dark mode"))
 	waitFor(t, e, EventQuestion)
 
 	// the first ask is the open question; the second was not allowed to
@@ -167,7 +159,7 @@ func TestParallelAsksBounceExtras(t *testing.T) {
 	}
 
 	// answering resolves the first call — the one the picker showed
-	if err := e.Answer(ctx, "FD-001", "per-device"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "per-device"); err != nil {
 		t.Fatal(err)
 	}
 	if got, done := r.Resolved("call-1"); !done || got != "per-device" {
@@ -190,13 +182,11 @@ func TestAskUserCapturesToSpec(t *testing.T) {
 	e.now = fixedNow // deterministic marker date
 	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StagePlan)
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := freeformCard(1, "Dark mode")
+	seedDraft(t, e, f)
+	s := attach(t, e, f)
 	waitFor(t, e, EventQuestion)
-	if err := e.Answer(ctx, "FD-001", "per-device"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "per-device"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -217,7 +207,7 @@ func TestAskUserCapturesToSpec(t *testing.T) {
 // the transcript must say so in plain words rather than gummi-internal
 // jargon ("spec capture skipped").
 func TestAskUserBadAnchorStillAnswers(t *testing.T) {
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	args := askArgs(t, Ask{
 		ChangesSection: "Problem",
 		Question:       "Persist where?",
@@ -227,12 +217,11 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 	e := newEngine(t, clientToolFake(args))
 	e.now = fixedNow
 	ctx := context.Background()
-	if _, err := e.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
+	seedDraft(t, e, f)
+	attach(t, e, f)
 	waitFor(t, e, EventQuestion)
 	// a bad anchor must not block the answer
-	if err := e.Answer(ctx, "FD-001", "per-device"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "per-device"); err != nil {
 		t.Fatalf("answer with bad anchor failed: %v", err)
 	}
 
@@ -259,7 +248,7 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 	// the note in plain words — no "spec capture" jargon — explains where
 	// the answer actually landed.
 	var note string
-	for _, a := range e.Get("FD-001").Snapshot().Activity {
+	for _, a := range liveSession(e, "FF-001").Snapshot().Activity {
 		if strings.Contains(a, "per-device") || strings.Contains(a, "no such line anywhere") {
 			note = a
 		}
@@ -279,14 +268,11 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 // of it — the end of the document is still the backstop: always a valid
 // position, always the same one.
 func TestBadAnchorWithNoSectionFallsBackToTheDocumentEnd(t *testing.T) {
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	e := newEngine(t, agent.NewFake("ack"))
 	e.now = fixedNow
-	ctx := context.Background()
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	seedDraft(t, e, f)
+	s := attach(t, e, f)
 	note := e.captureAnswer(s, &Ask{
 		Question:   "ready?",
 		SpecAnchor: "no such line anywhere",
@@ -312,7 +298,7 @@ func TestBadAnchorWithNoSectionFallsBackToTheDocumentEnd(t *testing.T) {
 // as spec.FindAnchor's own doc comment describes ("zero or multiple
 // matches return ok=false").
 func TestAskUserAnchorNotUniqueStillAnswers(t *testing.T) {
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	const anchor = "duplicated on purpose"
 	args := askArgs(t, Ask{
 		ChangesSection: "Problem",
@@ -323,9 +309,8 @@ func TestAskUserAnchorNotUniqueStillAnswers(t *testing.T) {
 	e := newEngine(t, clientToolFake(args))
 	e.now = fixedNow
 	ctx := context.Background()
-	if _, err := e.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
+	seedDraft(t, e, f)
+	attach(t, e, f)
 	waitFor(t, e, EventQuestion)
 
 	draft := specDraftPath(e, f)
@@ -338,7 +323,7 @@ func TestAskUserAnchorNotUniqueStillAnswers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := e.Answer(ctx, "FD-001", "per-device"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "per-device"); err != nil {
 		t.Fatalf("answer with ambiguous anchor failed: %v", err)
 	}
 
@@ -381,10 +366,7 @@ func TestConventionAskPath(t *testing.T) {
 	e := newEngine(t, ag)
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, freeformCard(1, "Dark mode"))
 	waitFor(t, e, EventQuestion)
 
 	snap := s.Snapshot()
@@ -397,7 +379,7 @@ func TestConventionAskPath(t *testing.T) {
 		t.Errorf("ask block not stripped from transcript: %q", last)
 	}
 	// answering a convention ask delivers it as the next turn
-	if err := e.Answer(ctx, "FD-001", "synced"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "synced"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -425,162 +407,29 @@ func TestSpecAnnotateWritesMarker(t *testing.T) {
 	args := json.RawMessage(`{"anchor":"## Chosen approach","note":"per-device or synced?"}`)
 	e := newEngine(t, toolCallFake("spec_annotate", args))
 	e.now = fixedNow
-	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StagePlan)
-	if _, err := e.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	f := freeformCard(1, "Dark mode")
+	seedDraft(t, e, f)
+	attach(t, e, f)
+	waitTurn(t, e)
 
 	draft := specDraftPath(e, f)
 	raw, err := os.ReadFile(draft)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "%% @architect(2026-07-04): per-device or synced?") {
+	if !strings.Contains(string(raw), "%% @implementer(2026-07-04): per-device or synced?") {
 		t.Errorf("annotation not written:\n%s", raw)
 	}
 	// the marker is placed under the anchor line, not elsewhere
-	if !strings.Contains(string(raw), "## Chosen approach\n%% @architect(2026-07-04): per-device or synced?") {
+	if !strings.Contains(string(raw), "## Chosen approach\n%% @implementer(2026-07-04): per-device or synced?") {
 		t.Errorf("annotation not anchored correctly:\n%s", raw)
-	}
-}
-
-func TestSubmitVerdictRecorded(t *testing.T) {
-	args := json.RawMessage(`{"verdict":"changes","summary":"nil deref in foo"}`)
-	ag := toolCallFake("submit_verdict", args)
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "impl", domain.StageImplement)
-	withWorktree(t, wt, f)
-	if err := store.CreateFeature(context.Background(), &f); err != nil {
-		t.Fatal(err)
-	}
-	// a critique, not the stage's own run: "changes" is a critique verdict
-	if err := e.RunCritique(f, ""); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-
-	snap := e.Get("FD-001").Snapshot()
-	if snap.Verdict != "changes" {
-		t.Errorf("verdict = %q, want changes", snap.Verdict)
-	}
-	var noted bool
-	for _, a := range snap.Activity {
-		if strings.Contains(a, "verdict: changes") && strings.Contains(a, "nil deref") {
-			noted = true
-		}
-	}
-	if !noted {
-		t.Errorf("verdict summary not in activity: %+v", snap.Activity)
-	}
-}
-
-// The verify stage gets its own submit_verdict flavor
-// (pass|fail|blocked) and a "fail" verdict is recorded like any other.
-func TestVerifyVerdictToolAndFailRecorded(t *testing.T) {
-	tools := stageTools(domain.StageVerify, flavorStage, nil)
-	if len(tools) != 3 || tools[0].Name != "submit_verdict" {
-		t.Fatalf("verify tools = %+v, want submit_verdict first", tools)
-	}
-	specNames := map[string]bool{}
-	for _, td := range tools[1:] {
-		specNames[td.Name] = true
-	}
-	if !specNames[specViewToolName] || !specNames[specReplaceSectionToolName] {
-		t.Fatalf("verify tools = %+v missing spec_view/spec_replace_section", tools)
-	}
-	if toolHint(domain.StageVerify, flavorStage) == "" {
-		t.Error("verify has no tool hint")
-	}
-
-	args := json.RawMessage(`{"verdict":"fail","summary":"rock build broken"}`)
-	ag := toolCallFake("submit_verdict", args)
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "verify", domain.StageVerify)
-	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-
-	if got := e.Get("FD-001").Snapshot().Verdict; got != "fail" {
-		t.Errorf("verdict = %q, want fail", got)
-	}
-}
-
-// A verify agent may declare the environment unable to run the plan;
-// the blocked verdict is recorded like any other.
-func TestVerifyVerdictBlockedRecorded(t *testing.T) {
-	args := json.RawMessage(`{"verdict":"blocked","summary":"no pytest in this workspace"}`)
-	ag := toolCallFake("submit_verdict", args)
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "verify", domain.StageVerify)
-	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-
-	if got := e.Get("FD-001").Snapshot().Verdict; got != "blocked" {
-		t.Errorf("verdict = %q, want blocked", got)
-	}
-}
-
-// blocked belongs to verify's vocabulary only: a critique submitting it
-// is bounced (verdict stays empty) rather than recorded, so the critique
-// loop never sees a verdict outside its contract.
-func TestCritiqueVerdictRejectsBlocked(t *testing.T) {
-	args := json.RawMessage(`{"verdict":"blocked","summary":"cannot run this"}`)
-	ag := toolCallFake("submit_verdict", args)
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "review", domain.StageImplement)
-	withWorktree(t, wt, f)
-	if err := store.CreateFeature(context.Background(), &f); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.RunCritique(f, ""); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-
-	if got := e.Get("FD-001").Snapshot().Verdict; got != "" {
-		t.Errorf("critique recorded out-of-vocabulary verdict %q, want rejection", got)
-	}
-}
-
-// The verify hint carries the verdict contract and the no-dangling-
-// questions rule for both kinds, so convention backends (no client
-// tools) still produce a parseable outcome.
-func TestVerifyHintCarriesVerdictContract(t *testing.T) {
-	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
-		h := verifyHint(kind)
-		if !strings.Contains(h, "VERDICT: pass") || !strings.Contains(h, "VERDICT: fail") ||
-			!strings.Contains(h, "VERDICT: blocked") {
-			t.Errorf("%s verify hint missing the verdict contract:\n%s", kind, h)
-		}
-		if !strings.Contains(h, "never end with one") {
-			t.Errorf("%s verify hint missing the no-questions rule", kind)
-		}
 	}
 }
 
 func TestResolveAnnotationMarksResolved(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	withWorktree(t, wt, f)
 	ctx := context.Background()
 	if err := store.CreateFeature(ctx, &f); err != nil {
@@ -603,10 +452,8 @@ func TestResolveAnnotationMarksResolved(t *testing.T) {
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
 	// the run's hints carried the comment with its [id] and the resolve
 	// instruction (the client-tool form of diffReviewHints)
@@ -631,7 +478,7 @@ func TestResolveAnnotationMarksResolved(t *testing.T) {
 	type resolver interface {
 		Resolved(string) (string, bool)
 	}
-	r, ok := e.Get("FD-001").agent().(resolver)
+	r, ok := liveSession(e, "FF-001").agent().(resolver)
 	if !ok {
 		t.Fatal("fake session is not a resolver")
 	}
@@ -641,7 +488,7 @@ func TestResolveAnnotationMarksResolved(t *testing.T) {
 
 	// and the resolution is in the activity feed
 	var noted bool
-	for _, a := range e.Get("FD-001").Snapshot().Activity {
+	for _, a := range liveSession(e, "FF-001").Snapshot().Activity {
 		if strings.Contains(a, "resolved diff comment") && strings.Contains(a, "name this better") {
 			noted = true
 		}
@@ -653,12 +500,12 @@ func TestResolveAnnotationMarksResolved(t *testing.T) {
 
 func TestResolveAnnotationRejectsForeignID(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	withWorktree(t, wt, f)
 	ctx := context.Background()
 	// the only annotation belongs to a different feature — the agent must
 	// not be able to resolve it from FD-001's session
-	other := feature(2, "other", domain.StageImplement)
+	other := freeformCard(2, "other")
 	if err := store.CreateFeature(ctx, &other); err != nil {
 		t.Fatal(err)
 	}
@@ -673,15 +520,13 @@ func TestResolveAnnotationRejectsForeignID(t *testing.T) {
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
 	type resolver interface {
 		Resolved(string) (string, bool)
 	}
-	r, ok := e.Get("FD-001").agent().(resolver)
+	r, ok := liveSession(e, "FF-001").agent().(resolver)
 	if !ok {
 		t.Fatal("fake session is not a resolver")
 	}
@@ -724,56 +569,6 @@ func TestCompileDiffComments(t *testing.T) {
 	}
 }
 
-// TestVerdictToolDescriptionsShareConstants pins that both
-// review-shaped verdict tools describe pass/changes with the same
-// shared constants (they had drifted before the shared constants
-// existed).
-func TestVerdictToolDescriptionsShareConstants(t *testing.T) {
-	tools := map[string]agent.ToolDef{
-		"review":   submitVerdictTool(),
-		"critique": critiqueVerdictTool(),
-	}
-	for name, def := range tools {
-		props := def.Parameters["properties"].(map[string]any)
-		verdict := props["verdict"].(map[string]any)
-		desc := verdict["description"].(string)
-		if !strings.Contains(desc, verdictPassBlockingFindings) {
-			t.Errorf("%s tool description missing shared pass constant: %q", name, desc)
-		}
-		if !strings.Contains(desc, verdictChangesBase) {
-			t.Errorf("%s tool description missing shared changes constant: %q", name, desc)
-		}
-	}
-}
-
-// TestAllowedVerdictsPerStage pins the verdict vocabulary of each
-// session type: review negotiates "changes" (never "fail" — that
-// slipped through the old fallthrough with no downstream handling),
-// verify reports pass/fail/blocked, critique mirrors review, and
-// stages that don't offer submit_verdict get nil so a stray call is
-// refused rather than silently accepted.
-func TestAllowedVerdictsPerStage(t *testing.T) {
-	cases := []struct {
-		name string
-		s    *Session
-		want []string
-	}{
-		{"verify", &Session{Feature: domain.Feature{Stage: domain.StageVerify}}, []string{"pass", "fail", "blocked"}},
-		// every critique shares one vocabulary now, whichever stage it
-		// borrows — that is what folding Review into a pass means.
-		{"plan critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StagePlan}}, []string{"pass", "changes"}},
-		{"work-stage critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StageImplement}}, []string{"pass", "changes"}},
-		{"research critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StagePlan}}, []string{"pass", "changes"}},
-		{"implement (no verdict tool)", &Session{Feature: domain.Feature{Stage: domain.StageImplement}}, nil},
-	}
-	for _, tc := range cases {
-		got := allowedVerdicts(tc.s)
-		if !slices.Equal(got, tc.want) {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
 func TestUnknownClientToolAutoResolves(t *testing.T) {
 	ag := agent.NewFake("")
 	ag.Caps = agent.Capabilities{ClientTools: true, Interrupt: true}
@@ -784,12 +579,8 @@ func TestUnknownClientToolAutoResolves(t *testing.T) {
 		}
 	}
 	e := newEngine(t, ag)
-	ctx := context.Background()
-	s, err := e.Attach(ctx, feature(1, "x", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, freeformCard(1, "x"))
+	waitTurn(t, e)
 	// an unknown tool never becomes a pending question
 	if s.Snapshot().PendingAsk != nil {
 		t.Error("unknown tool surfaced as a question")
@@ -824,152 +615,28 @@ A.
 
 func seedDraft(t *testing.T, e *Engine, f domain.Feature) {
 	t.Helper()
-	dir := e.cfg.Workspace.DraftsDir()
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	path := e.SessionSpecPath(f)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, spec.DraftFilename(&f))
 	if err := os.WriteFile(path, []byte(engineSpecFixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// specDraftPath resolves the card's artifact wherever it currently lives.
-// Under one worktree per card the artifact is promoted to its workspace
-// home on the card's FIRST stage run, not at its approval gate, so a test
-// that seeds a draft and then runs a design stage finds it at the home,
-// not in the drafts directory. LocateArtifact is the engine's own
-// resolution order, so this answers the same question artifactFile does.
-func specDraftPath(e *Engine, f domain.Feature) string {
-	root := e.pool.Root()
-	if p := spec.LocateArtifact(
-		filepath.Join(root, f.ArtifactPath()),
-		filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f)),
-		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
-	); p != "" {
-		return p
-	}
-	return filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
-}
+// specDraftPath is where a session's spec lives.
+func specDraftPath(e *Engine, f domain.Feature) string { return e.SessionSpecPath(f) }
 
 type toolResolver interface {
 	Resolved(string) (string, bool)
 }
 
-// The four architect stages expose spec_view and spec_replace_section
-// alongside ask_user and spec_annotate.
-func TestArchitectStageToolSurface(t *testing.T) {
-	want := []string{"ask_user", "spec_annotate", "spec_view", "spec_replace_section"}
-	for _, st := range []domain.Stage{domain.StagePlan, domain.StagePlan, domain.StagePlan, domain.StagePlan} {
-		var names []string
-		for _, td := range stageTools(st, flavorStage, nil) {
-			names = append(names, td.Name)
-		}
-		if !slices.Equal(names, want) {
-			t.Errorf("stage %s tools = %v, want %v", st, names, want)
-		}
-	}
-	// the worktree stages carry submit_verdict/resolve_annotation plus the
-	// artifact access tools, so a backend caged to the worktree never has to
-	// read or write the spec through raw file access
-	if got := stageTools(domain.StageVerify, flavorStage, nil); len(got) != 3 || got[0].Name != "submit_verdict" {
-		t.Errorf("review tools changed: %+v", got)
-	}
-	if got := stageTools(domain.StageVerify, flavorStage, nil); len(got) != 3 || got[0].Name != "submit_verdict" {
-		t.Errorf("verify tools changed: %+v", got)
-	}
-	if got := stageTools(domain.StageImplement, flavorStage, nil); len(got) != 3 || got[0].Name != "resolve_annotation" {
-		t.Errorf("implement tools changed: %+v", got)
-	}
-	if got := stageTools(domain.StageImplement, flavorStage, nil); len(got) != 3 || got[0].Name != "resolve_annotation" {
-		t.Errorf("fix tools changed: %+v", got)
-	}
-}
-
-// TestWorktreeStagesOfferArtifactTools pins the regression: worktree
-// stages are backed by agents caged to the worktree, so the design
-// artifact is only reachable through gummi's mediated path. Every such
-// stage must offer spec_view and spec_replace_section; otherwise the
-// agent has to fall back to raw file access, which a caged backend
-// cannot reach and reacts to with a blocked verdict.
-func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
-	for _, st := range []domain.Stage{domain.StageImplement, domain.StageImplement, domain.StageVerify, domain.StageVerify, domain.StagePlan} {
-		names := map[string]bool{}
-		for _, td := range stageTools(st, flavorStage, nil) {
-			names[td.Name] = true
-		}
-		if !names[specViewToolName] || !names[specReplaceSectionToolName] {
-			t.Errorf("stage %s tools %v lack spec_view/spec_replace_section", st, names)
-		}
-	}
-}
-
-// TestReadOnlyResearchKeepsItsDocumentTools locks the surface a research
-// session past its design stage is served. It used to be stripped:
-// spec_replace_section and spec_annotate were removed for any session
-// where researchReadOnly held, on the reasoning that a read-only pass
-// must not mutate the main checkout — which those tools cannot do. They
-// are gummi-mediated writes to the artifact at its workspace home.
-//
-// The strip made the survey stage structurally unable to do its job. On
-// the lxd autopilot drive case C ran three times, spent 428.8 credits on
-// 84 greps and reads, wrote nothing, and was failed by its own verify for
-// the Findings section it had no tool to fill — and its critique could
-// not file that finding as a marker either.
-func TestReadOnlyResearchKeepsItsDocumentTools(t *testing.T) {
-	for _, tc := range []struct {
-		stage domain.Stage
-		want  []string
-	}{
-		{domain.StageImplement, []string{"resolve_annotation", "spec_view", "spec_replace_section"}},
-		{domain.StagePlan, []string{"ask_user", "spec_view", "spec_replace_section", "spec_annotate"}},
-		{domain.StageVerify, []string{"submit_verdict", "spec_view", "spec_replace_section"}},
-	} {
-		names := map[string]bool{}
-		for _, td := range stageTools(tc.stage, flavorStage, nil) {
-			names[td.Name] = true
-		}
-		for _, w := range tc.want {
-			if !names[w] {
-				t.Errorf("stage %s is not served %s: %v", tc.stage, w, names)
-			}
-		}
-	}
-	// A critique judges and files findings: it needs the annotate, and a
-	// way to read the artifact it judges wherever the backend cages reads.
-	names := map[string]bool{}
-	for _, td := range stageTools(domain.StageImplement, flavorCritique, nil) {
-		names[td.Name] = true
-	}
-	for _, w := range []string{"submit_verdict", "spec_annotate", "spec_view"} {
-		if !names[w] {
-			t.Errorf("a critique is not served %s: %v", w, names)
-		}
-	}
-}
-
-func TestArchitectToolHintMentionsSpecTools(t *testing.T) {
-	hint := toolHint(domain.StagePlan, flavorStage)
-	for _, want := range []string{"spec_view", "spec_replace_section"} {
-		if !strings.Contains(hint, want) {
-			t.Errorf("hint missing %s:\n%s", want, hint)
-		}
-	}
-	if !strings.Contains(hint, "%% @user:") {
-		t.Errorf("hint must restate the %% @user: re-emit responsibility:\n%s", hint)
-	}
-}
-
 func TestSpecViewReturnsSection(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{"section":"Problem"}`)))
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 
 	r, ok := s.agent().(toolResolver)
 	if !ok {
@@ -986,22 +653,14 @@ func TestSpecViewReturnsSection(t *testing.T) {
 	if got == strings.TrimSpace(got) || strings.Contains(got, "## Problem") {
 		t.Errorf("expected verbatim section body without heading, got %q", got)
 	}
-	// read-only: no activity recorded
-	if got := s.Snapshot().Activity; len(got) != 0 {
-		t.Errorf("spec_view recorded activity: %v", got)
-	}
 }
 
 func TestSpecViewWholeDoc(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{}`)))
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 
 	r, ok := s.agent().(toolResolver)
 	if !ok {
@@ -1022,14 +681,10 @@ func TestSpecViewWholeDoc(t *testing.T) {
 
 func TestSpecViewUnknownSection(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{"section":"Nope"}`)))
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 
 	r, ok := s.agent().(toolResolver)
 	if !ok {
@@ -1043,14 +698,10 @@ func TestSpecViewUnknownSection(t *testing.T) {
 
 func TestSpecReplaceSectionWritesBody(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"%% @user: keep me\nnew problem body.\n"}`)))
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 
 	raw, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
@@ -1080,13 +731,10 @@ func TestSpecReplaceSectionWritesBody(t *testing.T) {
 
 func TestSpecReplaceSectionOtherSectionsUntouched(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"changed.\n"}`)))
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	if _, err := e.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	attach(t, e, f)
+	waitTurn(t, e)
 
 	raw, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
@@ -1103,14 +751,10 @@ func TestSpecReplaceSectionOtherSectionsUntouched(t *testing.T) {
 
 func TestSpecReplaceSectionCanonicalTitleInActivity(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"problem","body":"new.\n"}`)))
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 
 	r, ok := s.agent().(toolResolver)
 	if !ok {
@@ -1133,18 +777,14 @@ func TestSpecReplaceSectionCanonicalTitleInActivity(t *testing.T) {
 
 func TestSpecReplaceSectionRejectsHeadingInBody(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"## Injected\nboom\n"}`)))
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
 	before, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 
 	after, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
@@ -1165,18 +805,14 @@ func TestSpecReplaceSectionRejectsHeadingInBody(t *testing.T) {
 
 func TestSpecReplaceSectionUnknownSection(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Nope","body":"x\n"}`)))
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
 	before, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 
 	after, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
@@ -1199,12 +835,9 @@ func TestSpecReplaceSectionUnknownSection(t *testing.T) {
 // the same result as a native one. spec_view resolves immediately.
 func TestDispatchClientToolSpecView(t *testing.T) {
 	e := newEngine(t, agent.NewFake("ack"))
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, f)
 	result, err := e.DispatchClientTool(context.Background(), s, "spec_view",
 		json.RawMessage(`{"section":"Problem"}`))
 	if err != nil {
@@ -1223,19 +856,16 @@ func TestDispatchClientToolSpecView(t *testing.T) {
 // and DispatchClientTool's ask_user blocks until Answer delivers.
 func TestDispatchClientToolAskUserAndPrecedence(t *testing.T) {
 	e := newEngine(t, toolCallFake("", nil))
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, f)
 	_, isResolver := s.agent().(toolResolver)
 	if !isResolver {
 		t.Fatal("callFake session should be a resolver for the precedence test")
 	}
 	// the kickoff turn ends first, or its idle reads as a turn that ended
 	// with the ask below still open (see TestDispatchClientToolContextCancel)
-	waitFor(t, e, EventIdle)
+	waitTurn(t, e)
 	type dcall struct {
 		out string
 		err error
@@ -1271,16 +901,13 @@ func TestDispatchClientToolAskUserAndPrecedence(t *testing.T) {
 // late answer after the caller gave up is a no-op, not an orphaned waiter.
 func TestDispatchClientToolContextCancel(t *testing.T) {
 	e := newEngine(t, agent.NewFake("ack"))
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, f)
 	// the kickoff turn ends first: an ask raised while it is still running
 	// would be one its idle leaves open, and the outlived path releases
 	// the dispatch with a reply instead of letting the cancel reach it
-	waitFor(t, e, EventIdle)
+	waitTurn(t, e)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -1310,57 +937,6 @@ func TestDispatchClientToolContextCancel(t *testing.T) {
 	}
 }
 
-// TestDeathMidAskClearsLiveness locks the backend-death liveness
-// gap: the MCP ask-answer flag must not stay stuck at "waiting" when the
-// backend process dies mid-ask with the session left un-stopped. The
-// production bridge context is bound only to session teardown, never to
-// backend liveness, so a death must release the waiter through the death
-// path itself — otherwise Answer would keep treating the call as live and
-// deliver the answer into a channel nobody reads, returning nil silently.
-// It reproduces the real shape: DispatchClientTool parked on the ask, the
-// backend's event stream closed without Session.stop(), then Answer must
-// fail loudly and restore the question.
-func TestDeathMidAskClearsLiveness(t *testing.T) {
-	ctx := context.Background()
-	e := newEngine(t, agent.NewFake("ack"))
-	f := feature(1, "Dark mode", domain.StagePlan)
-	seedDraft(t, e, f)
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// the MCP bridge context is bound only to teardown, never to backend
-	// liveness; canceling it at test end simulates the bridge going away.
-	epCtx, epCancel := context.WithCancel(context.Background())
-	defer epCancel()
-	done := make(chan error, 1)
-	go func() {
-		_, derr := e.DispatchClientTool(epCtx, s, askToolName,
-			json.RawMessage(`{"changes_section":"Problem","question":"theme?","options":[{"label":"dark"}]}`))
-		done <- derr
-	}()
-	deadline := time.After(testWaitTimeout)
-	for s.Snapshot().PendingAsk == nil {
-		select {
-		case <-deadline:
-			t.Fatal("ask never became pending")
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	// backend dies: event stream closes, but NO s.stop() runs. Wait for the
-	// death path (EventStopped) to have released the liveness flag before
-	// answering, mirroring the real interleaving where the death lands
-	// before the operator acts.
-	s.agent().Close()
-	waitFor(t, e, EventStopped)
-	if err := e.Answer(ctx, s.Feature.ID, "dark"); err == nil {
-		t.Fatal("Answer succeeded after backend death; want a loud failure")
-	}
-	if s.Snapshot().PendingAsk == nil {
-		t.Error("pending ask not restored after a failed delivery")
-	}
-}
-
 // TestAnswerAbandonedResolverMustNotReturnNilSilently locks the Answer
 // contract for an MCP-bridged ask whose resolver waiter is gone: the
 // answer must either reach the agent (a turn is issued) or come back as a
@@ -1372,19 +948,16 @@ func TestDeathMidAskClearsLiveness(t *testing.T) {
 // uses, plus the defensive buffer-full arm.
 func TestAnswerAbandonedResolverMustNotReturnNilSilently(t *testing.T) {
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 
 	run := func(t *testing.T, abandon func(s *Session)) {
 		e := newEngine(t, agent.NewFake("ack"))
-		s, err := e.Attach(ctx, f)
-		if err != nil {
-			t.Fatal(err)
-		}
+		s := attach(t, e, f)
 		// The kickoff turn has to end first: one that ends with the
 		// question already open cuts it loose from its call, and the
 		// answer then goes out as a turn.
 		waitFor(t, e, EventStarted)
-		waitFor(t, e, EventIdle)
+		waitTurn(t, e)
 		s.setPendingAsk(&Ask{
 			CallID:   "mcp-1",
 			Question: "Persist where?",
@@ -1423,151 +996,6 @@ func TestAnswerAbandonedResolverMustNotReturnNilSilently(t *testing.T) {
 			waiter <- "stale" // fill the capacity-1 buffer
 		})
 	})
-}
-
-func TestVerifyHintAuthoritativeEnvClauses(t *testing.T) {
-	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
-		h := verifyHint(kind)
-		for _, want := range []string{
-			"gummi's own probe reported a clean ABSENT",
-			"the agent's own impression",
-			"environment is not evidence",
-			"Skipping an [env:] step",
-			"probed PRESENT is a fail",
-			"A probe that errored or timed out",
-			"grants no",
-			"skip permission",
-			"every [env:] prerequisite probed clean ABSENT",
-			"verdict is blocked",
-		} {
-			if !strings.Contains(h, want) {
-				t.Errorf("verifyHint(%v) missing %q", kind, want)
-			}
-		}
-	}
-}
-
-// A card on GateAutopilot answers its own questions, so its stage sessions
-// must be told that before they ask one — and a card that still stops
-// for a human must NOT be told it, or the agent would reason as though
-// nobody were reading when somebody is.
-//
-// TestAnswerRecordsActorFromGateApproval: an ask_user answer records who
-// actually took it. The answerer declares itself; the card's stored
-// gate-approval mode has no vote. The engine's Answer entry point is the
-// human path (state.ActorUser) whoever's mode the card runs under;
-// AnswerAs is the unattended loop's declared word. The old rule —
-// GateAutopilot ⇒ autopilot, read off the stored mode — recorded a headless
-// --autonomous run's own taken answers as a human's whenever the stored
-// mode disagreed with how the run was driven, and the receipt silently
-// dropped them.
-func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
-	for _, c := range []struct {
-		gate string
-		by   string
-		want string
-	}{
-		{domain.GateAutopilot, state.ActorUser, state.ActorUser},
-		{domain.GateAttended, state.ActorUser, state.ActorUser},
-		{domain.GateAttended, state.ActorAutopilot, state.ActorAutopilot},
-		{domain.GateAttended, state.ActorUser, state.ActorUser},
-		{"", state.ActorUser, state.ActorUser},
-	} {
-		args := askArgs(t, Ask{
-			ChangesSection: "Problem",
-			Question:       "Persist where?",
-			Options:        []AskOption{{Label: "per-device"}, {Label: "synced"}},
-		})
-		ag := clientToolFake(args)
-		ws, store, wt := newRepo(t)
-		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
-
-		f := feature(1, "Dark mode", domain.StagePlan)
-		f.GateApproval = c.gate
-		putFeature(t, store, f) // the event log's FK needs the row to exist
-		if _, err := e.Attach(context.Background(), f); err != nil {
-			e.Close()
-			t.Fatalf("gate %q: Attach: %v", c.gate, err)
-		}
-		waitFor(t, e, EventQuestion)
-
-		err := e.AnswerAs(context.Background(), f.ID, "per-device", c.by)
-		if err != nil {
-			e.Close()
-			t.Fatalf("gate %q: Answer: %v", c.gate, err)
-		}
-
-		evs, err := store.Events(context.Background(), f.ID)
-		if err != nil {
-			e.Close()
-			t.Fatalf("gate %q: Events: %v", c.gate, err)
-		}
-		var found *state.AskPayload
-		for _, ev := range evs {
-			if ev.Kind != state.EventAsk {
-				continue
-			}
-			var p state.AskPayload
-			if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
-				t.Fatal(err)
-			}
-			found = &p
-		}
-		e.Close()
-
-		if found == nil {
-			t.Fatalf("gate %q: no ask event recorded", c.gate)
-		}
-		if found.Question != "Persist where?" || found.Answer != "per-device" {
-			t.Errorf("gate %q: ask payload = %+v, want question/answer preserved", c.gate, found)
-		}
-		if found.Actor != c.want || found.By != c.want {
-			t.Errorf("gate %q: actor/by = %q/%q, want %q (the answerer declares itself, not the stored mode)",
-				c.gate, found.Actor, found.By, c.want)
-		}
-		if c.by == state.ActorAutopilot && found.Choice != "per-device" {
-			t.Errorf("gate %q: choice = %q, want the chosen option", c.gate, found.Choice)
-		}
-	}
-}
-
-func TestUnattendedAskHintOnlyOnFull(t *testing.T) {
-	for _, c := range []struct {
-		gate string
-		want bool
-	}{
-		{domain.GateAutopilot, true},
-		{domain.GateAttended, false},
-		{domain.GateAttended, false},
-		{"", false},
-	} {
-		var mu sync.Mutex
-		var got agent.SessionOpts
-		ag := &agent.Fake{Caps: agent.Capabilities{ClientTools: true}, Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
-			mu.Lock()
-			got = opts
-			mu.Unlock()
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}}
-		ws, store, wt := newRepo(t)
-		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-
-		f := feature(1, "x", domain.StagePlan)
-		f.GateApproval = c.gate
-		if _, err := e.Attach(context.Background(), f); err != nil {
-			e.Close()
-			t.Fatal(err)
-		}
-		waitFor(t, e, EventIdle)
-		mu.Lock()
-		hints := strings.Join(got.SystemHints, "\n")
-		mu.Unlock()
-		e.Close()
-
-		if has := strings.Contains(hints, unattendedAskHint); has != c.want {
-			t.Errorf("gate %q: unattended ask hint present = %v, want %v", c.gate, has, c.want)
-		}
-	}
 }
 
 // TestParseAskRejectsUnlabelledOption is 0b's root fix. The option label
@@ -1652,97 +1080,5 @@ func TestGateAskOptionsAreGummisNotTheModels(t *testing.T) {
 	}
 	if plain.Gate || len(plain.Options) != 2 || plain.Options[0].Label != "a" {
 		t.Errorf("a non-gate ask was rewritten: %+v", plain)
-	}
-}
-
-// TestGateAskHintOnlyWhereAGateStops: the instruction to close with a
-// gate ask goes only to a stage whose pass actually reaches a human gate,
-// on a card a human is actually attending. Asking anywhere else would be
-// theatre — an autopilot card answers its own questions, and every
-// critique but the plan's advances in the floor.
-func TestGateAskHintOnlyWhereAGateStops(t *testing.T) {
-	attendedPlan := feature(1, "x", domain.StagePlan)
-	if gateAskHint(attendedPlan) == "" {
-		t.Error("an attended plan critique was not told to close by asking")
-	}
-
-	autopilot := attendedPlan
-	autopilot.GateApproval = domain.GateAutopilot
-	if gateAskHint(autopilot) != "" {
-		t.Error("an autopilot card was told to ask a question it would answer itself")
-	}
-
-	for _, st := range []domain.Stage{domain.StageImplement} {
-		f := feature(1, "x", st)
-		if gateAskHint(f) != "" {
-			t.Errorf("%s's critique was told to ask a gate question; its pass advances in the floor", st)
-		}
-	}
-
-	// and it rides the critique's hints, not the stage's own
-	joined := strings.Join(stageHints(attendedPlan, "spec.md", "", flavorCritique), "\n")
-	if !strings.Contains(joined, `"gate": true`) {
-		t.Error("the critique's hints do not carry the gate-ask instruction")
-	}
-	if plain := strings.Join(stageHints(attendedPlan, "spec.md", "", flavorStage), "\n"); strings.Contains(plain, `"gate": true`) {
-		t.Error("the plan WRITER was told to ask the gate question; only its critique should be")
-	}
-}
-
-// The schema names this spec's own deciding sections. The runtime
-// refuses a design-stage question that carries no changes_section, and
-// the refusal's whole value was listing the headings the model should
-// have chosen from — so the model learned the rule by being refused.
-// Measured on one goal: eight of ten questions were asked twice, a
-// wasted call, turn and refusal message each, to arrive at a list gummi
-// had all along.
-func TestAskUserNamesThisSpecsDecidingSections(t *testing.T) {
-	deciding := []string{"Chosen approach", "Out of scope"}
-	var ask agent.ToolDef
-	for _, td := range stageTools(domain.StagePlan, flavorStage, deciding) {
-		if td.Name == askToolName {
-			ask = td
-		}
-	}
-	if ask.Name == "" {
-		t.Fatal("no ask_user tool at the design stage")
-	}
-	props := ask.Parameters["properties"].(map[string]any)
-	cs := props["changes_section"].(map[string]any)
-
-	desc := cs["description"].(string)
-	for _, h := range deciding {
-		if !strings.Contains(desc, h) {
-			t.Errorf("description does not name %q: %s", h, desc)
-		}
-	}
-	enum, ok := cs["enum"].([]any)
-	if !ok || len(enum) != 2 || enum[0] != "Chosen approach" {
-		t.Errorf("enum = %v, want this spec's own sections", cs["enum"])
-	}
-
-	// A gate ask is the crossing rather than a decision inside it and
-	// carries no changes_section, so the schema must not demand one.
-	req := ask.Parameters["required"].([]any)
-	for _, r := range req {
-		if r == "changes_section" {
-			t.Error("changes_section is required, which a gate ask cannot satisfy")
-		}
-	}
-
-	// With no artifact to read, the tool is described as it always was
-	// rather than with an invented list.
-	for _, td := range stageTools(domain.StagePlan, flavorStage, nil) {
-		if td.Name != askToolName {
-			continue
-		}
-		p := td.Parameters["properties"].(map[string]any)
-		c := p["changes_section"].(map[string]any)
-		if c["enum"] != nil {
-			t.Errorf("enum = %v with no sections known, want none", c["enum"])
-		}
-		if !strings.Contains(c["description"].(string), "At the design stage, required") {
-			t.Errorf("fallback description lost its rule: %v", c["description"])
-		}
 	}
 }

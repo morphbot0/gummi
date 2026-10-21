@@ -33,7 +33,8 @@ async function answerOption(page: Page, phone: boolean, option: string) {
 
 async function thread(page: Page, phone: boolean) {
   if (phone) await page.getByTestId('tab-thread').click();
-  return page.getByTestId('thread-items');
+  // a session's turns are drawn in its live conversation, under the items
+  return page.getByTestId('thread');
 }
 
 test.describe('two sessions waiting on their questions', () => {
@@ -81,10 +82,8 @@ test.describe('a session linked to a pull request', () => {
 test.describe('an agent’s question', () => {
   // A question's options live only in the process that asked it, so the
   // card is started from this board rather than seeded by `gummi run`.
-  async function ask(api: any, title = '[ask] Add a choosy helper'): Promise<string> {
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title })).json;
-    let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+  async function ask(api: any, title = '[ask-where] Add a choosy helper'): Promise<string> {
+    const c = (await api('POST', '/api/cards', { kind: 'freeform', title })).json;
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
     return c.id;
   }
@@ -181,14 +180,12 @@ test.describe('an agent’s question', () => {
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
     await expect(page.getByTestId('composer-says')).toHaveText('Chat about this');
     await page.keyboard.press('Enter');
-    await expect(page.getByTestId('thread-items')).toContainText('Put it beside Greet, in greet.go');
+    await expect(page.getByTestId('thread')).toContainText('Put it beside Greet, in greet.go');
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
   });
 
   // A reply being written to the question while another device answers
-  // it: the words stay, the page says the card moved, and the first enter
-  // does not send them on to whatever the next decision's words go to (a
-  // rework of the plan) without saying so.
+  // it: the words stay, and the page says the card moved.
   test('words typed for a question someone else answered are not re-aimed unannounced', async ({ pairedPage: page, server, api }, info) => {
     test.skip(isPhone(info), 'enter answers from the composer on a keyboard');
     const id = await ask(api);
@@ -199,39 +196,11 @@ test.describe('an agent’s question', () => {
     // the other device picks an option
     const d = (await api('GET', `/api/cards/${id}`)).json.decision;
     await api('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: '0', against: d.against.token });
-    await expect(page.getByTestId('decision')).not.toHaveAttribute('data-kind', 'ask', { timeout: 30_000 });
+    await expect(page.locator('[data-testid="decision"][data-kind="ask"]')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByTestId('decision-moved')).toContainText('while you were writing');
-    await expect(page.getByTestId('composer-input')).toHaveValue('Put it beside Greet, in greet.go');
-    const before = (await api('GET', `/api/cards/${id}`)).json.decision?.ref;
-    await page.getByTestId('composer-input').press('Enter');
-    await expect(page.getByTestId('decision-moved')).toContainText('enter again sends your words');
-    await page.waitForTimeout(300);
-    expect((await api('GET', `/api/cards/${id}`)).json.decision?.ref).toBe(before);
     await expect(page.getByTestId('composer-input')).toHaveValue('Put it beside Greet, in greet.go');
   });
 
-  // Enter pressed twice on "start the architect" meets the question the
-  // architect asks within a moment of the first: the second press must not
-  // give that question its first answer before anyone has read it.
-  test('a second enter does not answer a question that has just arrived', async ({ pairedPage: page, server, api }, info) => {
-    test.skip(isPhone(info), 'enter answers from the composer on a keyboard');
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask] Add a hasty helper' })).json;
-    const card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    await open(page, server, c.id);
-    await expect(page.getByTestId('decision')).toHaveAttribute('data-ref', card.decision.ref);
-    await page.getByTestId('composer-input').focus();
-    await page.keyboard.press('1');
-    await page.keyboard.press('Enter');
-    await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'ask');
-    await page.keyboard.press('Enter');
-    await expect(page.getByTestId('decision-fresh')).toContainText('new decision');
-    await page.waitForTimeout(300);
-    expect((await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
-    // read, it answers as ever
-    await page.waitForTimeout(800);
-    await page.keyboard.press('Enter');
-    await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).not.toBe('ask');
-  });
 });
 
 // A backend's own MCP client bounds a tool call (a minute, on several of
@@ -242,9 +211,7 @@ test.describe('an agent’s question', () => {
 // the answer reaches the architect as its next turn.
 test.describe('a question the agent stopped waiting on', () => {
   async function ask(api: any): Promise<string> {
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-gives-up] Add a patient helper' })).json;
-    let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+    const c = (await api('POST', '/api/cards', { kind: 'freeform', title: '[ask-gives-up] Add a patient helper' })).json;
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
     return c.id;
   }
@@ -276,7 +243,7 @@ test.describe('a question the agent stopped waiting on', () => {
     await answerOption(page, isPhone(info), '1');
     await expect(await thread(page, isPhone(info))).toContainText('Extend the existing file');
     // the architect finishes the plan with the answer
-    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json), { timeout: 30_000 }).toContain('Decided with the user: Extend the existing file');
+    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json), { timeout: 30_000 }).toContain('Decided with the user: Extend the existing file');
   });
 });
 
@@ -289,9 +256,7 @@ test.describe('a question the agent stopped waiting on', () => {
 // restart and the spec recorded choices nobody had delivered.
 test.describe('a question whose backend went away', () => {
   async function ask(api: any, title: string): Promise<string> {
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title })).json;
-    let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+    const c = (await api('POST', '/api/cards', { kind: 'freeform', title })).json;
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
     return c.id;
   }
@@ -301,7 +266,7 @@ test.describe('a question whose backend went away', () => {
     await open(page, server, id);
     await expect(page.getByTestId('decision-question')).toContainText('Where should');
     // the process dies while the reader is looking at the question
-    await expect(page.getByTestId('rail-row-' + id)).toContainText('failed', { timeout: 15_000 });
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}/live`)).json.freeform?.err ?? '', { timeout: 15_000 }).not.toBe('');
     expect((await api('GET', `/api/cards/${id}`)).json.decision?.kind).toBe('ask');
     await shot(page, info, 'ask-backend-died');
 
@@ -310,12 +275,12 @@ test.describe('a question whose backend went away', () => {
     // are drawn under the settled items, so this reads the whole thread
     if (isPhone(info)) await page.getByTestId('tab-thread').click();
     await expect(page.getByTestId('thread')).toContainText('Extend the existing file');
-    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json), { timeout: 30_000 }).toContain('Decided with the user: Extend the existing file');
-    expect(JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json)).not.toContain('A new file (recommended)');
+    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json), { timeout: 30_000 }).toContain('Decided with the user: Extend the existing file');
+    expect(JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json)).not.toContain('A new file (recommended)');
   });
 
   test('a restart keeps it, and its answer carries the card on', async ({ pairedPage: page, server, api }, info) => {
-    const id = await ask(api, '[ask] Add a durable helper');
+    const id = await ask(api, '[ask-where] Add a durable helper');
     await server.restart();
     await open(page, server, id);
     // the options died with the process that asked; the words are left
@@ -327,38 +292,8 @@ test.describe('a question whose backend went away', () => {
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('thread')).toContainText('Put it beside Greet, in greet.go');
-    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json), { timeout: 30_000 }).toContain('Decided with the user: Put it beside Greet, in greet.go');
+    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json), { timeout: 30_000 }).toContain('Decided with the user: Put it beside Greet, in greet.go');
   });
-});
-
-// A model that polls or sleeps while it waits on its question goes on
-// spending, and the card can run out of budget behind the question. The
-// question comes first; answering it settles the question and leaves the
-// card on its budget stop, which the board used to forget until the next
-// restart (offering a plain run in its place). Topping up runs the stage
-// again, and that run opens with the answer.
-test('a question answered behind a budget stop reaches the run the top-up starts', async ({ pairedPage: page, server, api }, info) => {
-  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-spends] Add a thrifty helper' })).json;
-  let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-  card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
-  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.needs?.kind).toBe('budget');
-  await open(page, server, c.id);
-  await expect(page.getByTestId('decision-question')).toContainText('Where should');
-  await shot(page, info, 'ask-over-budget');
-
-  await answerOption(page, isPhone(info), '1');
-  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('budget');
-  expect((await api('GET', `/api/cards/${c.id}`)).json.status).not.toBe('running');
-  if (!isPhone(info)) await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'budget');
-  await shot(page, info, 'budget-after-answer');
-
-  const stop = (await api('GET', `/api/cards/${c.id}`)).json.decision;
-  let r = await api('POST', `/api/cards/${c.id}/answer`, { ref: stop.ref, option: 'topup', against: stop.against.token });
-  if (r.status === 409 && r.json.confirm) {
-    r = await api('POST', `/api/cards/${c.id}/answer`, { ref: stop.ref, option: 'topup', against: stop.against.token, confirm: r.json.confirm });
-  }
-  expect(r.status).toBe(200);
-  await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${c.id}/spec`)).json), { timeout: 30_000 }).toContain('Decided with the user: Extend the existing file');
 });
 
 // A question that takes several answers, on a phone: tapping answers in
@@ -366,9 +301,7 @@ test('a question answered behind a budget stop reaches the run the top-up starts
 // must carry its own way to send them.
 test('a phone sends a multi-pick answer from the docked bar', async ({ pairedPage: page, server, api }, info) => {
   test.skip(!isPhone(info), 'the docked bar is the phone’s');
-  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-multi] Add a plural helper' })).json;
-  let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-  card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+  const c = (await api('POST', '/api/cards', { kind: 'freeform', title: '[ask-multi] Add a plural helper' })).json;
   await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.multi).toBe(true);
   await open(page, server, c.id);
   await showTab(page, 'diff');

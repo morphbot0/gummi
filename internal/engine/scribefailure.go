@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -100,28 +98,6 @@ func (e *Engine) scribeFailed(ctx context.Context, f domain.Feature, pass, model
 	return sf
 }
 
-// noChecksNoteKey marks the card note saying discovery left a card with
-// no gummi-checks block — and so marks a card whose verify retries it.
-const noChecksNoteKey = "no-gummi-checks"
-
-// cardHasEvent reports whether a card's log holds an event written under
-// the idempotency key.
-func (e *Engine) cardHasEvent(ctx context.Context, id domain.FeatureID, key string) bool {
-	if e.cfg.Store == nil {
-		return false
-	}
-	evs, err := e.cfg.Store.Events(ctx, id)
-	if err != nil {
-		return false
-	}
-	for _, ev := range evs {
-		if ev.Dedupe == key {
-			return true
-		}
-	}
-	return false
-}
-
 // cardNoteOnce is cardNote with an idempotency key: the note is written
 // the first time and never again for that card and key.
 func (e *Engine) cardNoteOnce(ctx context.Context, f domain.Feature, key, text string) {
@@ -148,49 +124,3 @@ const NoChecksRow = "no gummi-checks"
 // NoChecksConsequence is what a missing block costs a card, in the words
 // every surface uses.
 const NoChecksConsequence = "verify gates nothing but the reviewer's own commands"
-
-// ChecksBlockMissing reports whether a feature or bug card that has an
-// artifact carries no gummi-checks block in it at all — the state in which
-// verify runs no gummi checks. A block that does not parse is not
-// "missing" (it is reported as the plan defect it is), and a card kind
-// with no such block (research, goal, freeform) is never missing one.
-func (e *Engine) ChecksBlockMissing(ctx context.Context, f domain.Feature) bool {
-	if !checksKind(f) {
-		return false
-	}
-	_, specPath, err := e.locate(ctx, f)
-	if err != nil || specPath == "" {
-		return false
-	}
-	raw, err := os.ReadFile(specPath)
-	if err != nil {
-		return false
-	}
-	_, found, perr := spec.ParseChecks(string(raw))
-	return perr == nil && !found
-}
-
-// checksKind is whether a card's verify runs a gummi-checks block.
-func checksKind(f domain.Feature) bool {
-	switch f.Kind {
-	case domain.KindResearch, domain.KindGoal, domain.KindFreeform:
-		return false
-	}
-	return true
-}
-
-// noteNoChecks says, once per card, that discovery left the card with no
-// gummi-checks block, why, and what that costs.
-func (e *Engine) noteNoChecks(ctx context.Context, f domain.Feature, discoveryErr error) {
-	why := "check discovery found no commands"
-	var sf *ScribeFailure
-	switch {
-	case errors.As(discoveryErr, &sf):
-		why = "check discovery failed (the scribe: " + sf.Short() + ")"
-	case discoveryErr != nil:
-		why = "check discovery failed (" + discoveryErr.Error() + ")"
-	}
-	noun := f.Kind.ArtifactNoun()
-	e.cardNoteOnce(ctx, f, noChecksNoteKey, fmt.Sprintf("%s — %s, so %s. Add a ```gummi-checks block to the %s's Verification section; discovery also retries when verify starts.",
-		NoChecksRow, why, NoChecksConsequence, noun))
-}

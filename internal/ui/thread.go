@@ -299,21 +299,6 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		blank()
 	}
 
-	// A finished `v` run's results have nowhere else to surface: with no
-	// live session there is no stage block to carry them, and they are
-	// not events on the card. The detail pane showed them in exactly this
-	// slot, so the thread does too.
-	if m.sessionFor(f.ID) == nil {
-		if res := m.checksFor(f); len(res) > 0 {
-			for _, l := range strings.Split(verifySummary(s, res), "\n") {
-				if l != "" {
-					add(l)
-				}
-			}
-			blank()
-		}
-	}
-
 	// todo and done are the two stages currentSpecSection has no anchor
 	// for, and todo is exactly the stage where "what is this card about"
 	// is the whole question — with nothing run yet there is no receipt,
@@ -837,11 +822,7 @@ func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 		return ""
 	}
 	head := "⌄ " + artifactNoun(f.Kind) + " · " + section
-	tail := ""
-	if r.OpenSpecQs > 0 {
-		tail = itoa(r.OpenSpecQs) + " open comment" + plural(r.OpenSpecQs) + "  "
-	}
-	tail += "alt+s"
+	tail := "alt+s"
 
 	// a rule carries the eye from the section name to the key that opens
 	// it, and right-aligns the hint the way a folded receipt's timestamp
@@ -850,9 +831,6 @@ func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 	fill := max(w-ansi.StringWidth(head)-ansi.StringWidth(tail)-2, 1)
 	out := s.Faint.Render("⌄ ") + s.Muted.Render(artifactNoun(f.Kind)) + s.Faint.Render(" · "+section) +
 		" " + s.Separator.Render(strings.Repeat("─", fill)) + " "
-	if r.OpenSpecQs > 0 {
-		out += s.Warning.Render(itoa(r.OpenSpecQs)+" open comment"+plural(r.OpenSpecQs)) + "  "
-	}
 	// alt+s, not s: the composer owns every printable key on this page
 	// (threadinput.go), so a bare s landed in the reader's draft instead
 	// of opening anything — the one surface that draws this line was the
@@ -946,83 +924,8 @@ func foldedReceiptLine(s *theme.Styles, seg threadfold.Segment, spend map[domain
 // return a nil evAt. A resize (BG-057) uses it to find whichever event
 // was at the top of the scrolled window before the reflow, so it can ask
 // for that same event again after.
-// liveBusyLabel is the live stage's busy line: what is actually running,
-// plus how long this run has been at it. It is not simply
-// m.runningLabel(snap, since) (loopline.go), for two reasons — a bug fix
-// and a value it already has that runningLabel does not:
-//
-//   - runningVerb (loopline.go) distinguishes a critique pass from the
-//     stage's own work for Plan (snap.Critique flips "writing plan" to
-//     "critiquing plan") but has no equivalent branch for Implement,
-//     whose review→fix loop runs its own fresh-context reviewer pass the
-//     same way (engine.CritiqueRoundKind lists both stages). So a review
-//     turn on Implement read "implementing" here while the section rule
-//     drawn a few lines above it, and the transcript inside it, both
-//     said reviewer — the user was told code was being written while it
-//     was being read. runningVerb also backs cardBusyWord (the board
-//     row, which has no room for a role distinction) and
-//     planLoopLine's breadcrumb, so the fix belongs here, at the one
-//     caller that both knows the difference and has somewhere to put it,
-//     rather than in the shared table every other reader of it trusts to
-//     mean "the stage".
-//   - since here is the caller's own segs[len(segs)-1].enterAt (see the
-//     "at" local in liveStageBlock's sess branch), which is this RUN's
-//     start — mirrorEvents (internal/engine/persist.go) stamps each
-//     session generation's own stage_enter with that generation's own
-//     startedAt, so a retry after a failure gets a fresh timestamp even
-//     though the stage never changed. runningLabel's only caller used to
-//     pass r.F.UpdatedAt instead, the STAGE's own start, which a retry
-//     does not move: a run that failed at 20:35 and restarted at 20:37
-//     read "2m38s" a minute later, counting the two minutes the TUI sat
-//     closed between them.
-func (m *Shell) liveBusyLabel(snap engine.Snapshot, since time.Time) string {
-	verb := m.runningVerb(snap)
-	if snap.Critique && !snap.Interactive && snap.Feature.Stage == domain.StageImplement {
-		verb = "reviewing"
-	}
-	return withElapsed(verb, m.now(), since)
-}
-
 func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.Segment, w int, answered map[string]bool) (lines []string, evAt []int) {
 	f := r.F
-	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
-		snap := sess.Snapshot()
-		at := time.Time{}
-		if len(segs) > 0 {
-			at = segs[len(segs)-1].EnterAt
-		}
-		// the rule names a context reset; the blank line under it is what
-		// makes it read as a boundary rather than a heading glued to the
-		// first thing that happened after it
-		lines = []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w), ""}
-		lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
-		if meta := sessionMeta(snap); meta != "" {
-			lines = append(lines, "  "+s.Faint.Render(meta))
-		}
-		if snap.Err != nil {
-			// a failure's diagnosis lives in its tail; wrap the whole
-			// message rather than truncating it away, capped to errLines
-			for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {
-				lines = append(lines, "  "+s.Error.Render(l))
-			}
-		}
-		// The status line names the session's now-state. It is live-computed
-		// per frame, so it does not outlive the state it names.
-		if snap.Busy {
-			// at, not r.F.UpdatedAt: the row field names when the STAGE
-			// began, which a retry after a failed run does not move, so a
-			// run that failed at 20:35 and restarted at 20:37 read
-			// "2m38s" a minute later — counting the two minutes the TUI
-			// sat closed between them. at is this run's own generation
-			// (mirrorEvents stamps its stage_enter with the session's own
-			// startedAt), the same stamp the boundary rule two lines above
-			// already prints, so the clock and the rule it sits under can
-			// no longer disagree about when this run began.
-			lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+m.liveBusyLabel(snap, at)))
-		}
-		return lines, nil
-	}
-
 	// an open tail is the freshest thing this board has for this card, so
 	// it renders whether or not the foreign-drive probe still reports the
 	// card as driven abroad — a run that ended between probes is what the

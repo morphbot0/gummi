@@ -129,12 +129,12 @@ func TestAConfirmAnswersOnlyItsOwnCard(t *testing.T) {
 	}
 }
 
-// The verify gate's "land on main" answer hands the stored scribe draft
+// A retired card's "land it on main" answer hands the stored scribe draft
 // back to be read — as the TUI's dialog arms on an unreviewed draft and
 // lands only on a second ctrl+s — and lands nothing until it is sent back
 // (TestOnlyALandingRequestAnswersTheLandingDialog lands the sent one).
 func TestALandingAnswerHandsBackTheDraftToRead(t *testing.T) {
-	b, _, _, f, _ := headlessBoard(t, agent.NewFake("ok"))
+	b, _, _, f, _ := headlessBoardFor(t, agent.NewFake("ok"), domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageVerify})
 	ctx := context.Background()
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
 	var m0 *Shell
@@ -142,12 +142,6 @@ func TestALandingAnswerHandsBackTheDraftToRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := m0.store
-	for _, to := range []domain.Stage{domain.StageImplement, domain.StageVerify} {
-		if _, err := store.Transition(ctx, f.ID, to, "user"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	f, _ = store.GetFeature(ctx, f.ID)
 	dir, err := m0.wt.Create(ctx, &f)
 	if err != nil {
 		t.Fatal(err)
@@ -161,9 +155,6 @@ func TestALandingAnswerHandsBackTheDraftToRead(t *testing.T) {
 		}
 	}
 	tip, _ := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
-	if err := store.SetVerifiedAt(ctx, f.ID, time.Now(), strings.TrimSpace(string(tip))); err != nil {
-		t.Fatal(err)
-	}
 	const draft = "feat: what the scribe wrote"
 	if err := store.SetCommitDraft(ctx, f.ID, draft, strings.TrimSpace(string(tip))); err != nil {
 		t.Fatal(err)
@@ -171,21 +162,22 @@ func TestALandingAnswerHandsBackTheDraftToRead(t *testing.T) {
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd { return m.loadRows }); err != nil {
 		t.Fatal(err)
 	}
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 && bd.Rows[0].Stage == "verify" })
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { m.raiseAttention(f.ID, attnGate, "verify passed"); return nil }); err != nil {
-		t.Fatal(err)
-	}
-	c, err := b.Card(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Decision == nil {
-		t.Fatal("no decision")
-	}
+	// the reload that sees the worktree is what puts the landing on offer
+	c := waitCard(t, b, "FD-001", "the landing on offer", func(c webapi.Card) bool {
+		if c.Decision == nil {
+			return false
+		}
+		for _, o := range c.Decision.Options {
+			if o.ID == "merge" {
+				return true
+			}
+		}
+		return false
+	})
 	for _, o := range c.Decision.Options {
 		t.Logf("option %s: %q — %q", o.ID, o.Label, o.Detail)
 	}
-	_, err = b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "advance", Against: c.Decision.Against.Token}, "Simon")
+	_, err = b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "merge", Against: c.Decision.Against.Token}, "Simon")
 	we, ok := IsWebError(err)
 	if !ok || we.Reason != webapi.ConflictNeeds || we.Needs != string(webapi.ActionNeedsMessage) || we.Draft == nil || *we.Draft != draft {
 		t.Fatalf("a bare landing answer = %v, want the draft %q handed back to read", err, draft)
@@ -197,43 +189,5 @@ func TestALandingAnswerHandsBackTheDraftToRead(t *testing.T) {
 	}
 	if mainTip() == draft {
 		t.Fatalf("the verify answer landed a message the person never saw (%q)", draft)
-	}
-}
-
-// A decision whose kind changed under the page (the stop at plan became a
-// gate: the architect finished) is reported "moved", not "answered" after
-// an old crossing nobody made against this decision.
-func TestAKindChangeReadsAsMovedNotAnswered(t *testing.T) {
-	b, _, _, f, _ := headlessBoard(t, agent.NewFake("ok"))
-	ctx := context.Background()
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	var store *state.Store
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { store = m.store; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	// an old crossing, by someone, long ago
-	if _, err := store.Transition(ctx, f.ID, domain.StageImplement, state.PersonActor("Ana")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Transition(ctx, f.ID, domain.StagePlan, state.PersonActor("Ana")); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { return m.loadRows }); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(100 * time.Millisecond)
-	c, _ := b.Card(ctx, "FD-001")
-	stale := c.Decision
-	t.Logf("page read %s", stale.Ref)
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { m.raiseAttention(f.ID, attnGate, "plan is ready"); return nil }); err != nil {
-		t.Fatal(err)
-	}
-	c, _ = b.Card(ctx, "FD-001")
-	t.Logf("now %s", c.Decision.Ref)
-	_, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: stale.Ref, Option: "run", Against: stale.Against.Token}, "Simon")
-	we, _ := IsWebError(err)
-	t.Logf("answer against the idle stop: %+v", we)
-	if we != nil && we.Reason == webapi.ConflictAnswered {
-		t.Errorf("reported answered (by %q: %q) though nobody answered this stop — it moved", we.By, we.Receipt)
 	}
 }

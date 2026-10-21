@@ -9,7 +9,7 @@ import (
 )
 
 func TestResolveAttachSuccess(t *testing.T) {
-	m, root := diffWorkspace(t) // FD-001 at review with a worktree
+	m, root := diffWorkspace(t) // FF-001, a session with a worktree
 	t.Setenv("GUMMI_ATTACH_CMD", "sh -c true")
 	f := m.rows[0].F
 	argv, dir, problem := m.resolveAttach(f)
@@ -27,7 +27,7 @@ func TestResolveAttachSuccess(t *testing.T) {
 
 func TestResolveAttachNoWorktree(t *testing.T) {
 	m, _ := newWorkspace(t)
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "x", Slug: "x", Stage: domain.StageTodo}
+	f := domain.Feature{ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "x", Slug: "x", Stage: domain.StageOpen}
 	_, _, problem := m.resolveAttach(f)
 	if !strings.Contains(problem, "no worktree") {
 		t.Errorf("problem = %q, want a no-worktree message", problem)

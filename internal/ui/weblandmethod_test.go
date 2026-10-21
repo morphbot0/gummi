@@ -79,16 +79,13 @@ func TestWebLandingKeepsTheBranchWhenAsked(t *testing.T) {
 	}
 }
 
-// TestWebAnswerAdvanceWithMergeMethod: the verify decision's advance option
+// TestWebLandingAnswerWithMergeMethod: the decision's landing option
 // offers the choice, and an answer that picks merge with the message the
 // person read lands the branch as a merge commit on the base.
-func TestWebAnswerAdvanceWithMergeMethod(t *testing.T) {
+func TestWebLandingAnswerWithMergeMethod(t *testing.T) {
 	m, root, _ := mergeFixture(t)
 	b := bridgeOver(t, m)
 	ctx := context.Background()
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { m.raiseAttention("FD-001", attnGate, "verify passed"); return nil }); err != nil {
-		t.Fatal(err)
-	}
 	c, err := b.Card(ctx, "FD-001")
 	if err != nil {
 		t.Fatal(err)
@@ -98,17 +95,17 @@ func TestWebAnswerAdvanceWithMergeMethod(t *testing.T) {
 	}
 	var offered bool
 	for _, o := range c.Decision.Options {
-		if o.ID == "advance" {
+		if o.ID == "merge" {
 			offered = strings.Join(o.Methods, ",") == "squash,merge"
 		}
 	}
 	if !offered {
-		t.Fatalf("advance option does not offer the method choice: %+v", c.Decision.Options)
+		t.Fatalf("the landing option does not offer the method choice: %+v", c.Decision.Options)
 	}
 	before := gitOut(t, root, "rev-parse", "HEAD")
 	message := "FD-001: rebase me\n\nKeeps the feature commit on main."
 
-	card, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "advance", Words: message, Method: "merge", Against: c.Decision.Against.Token}, "Simon")
+	card, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "merge", Words: message, Method: "merge", Against: c.Decision.Against.Token}, "Simon")
 	if err != nil {
 		t.Fatalf("advance answer with merge: %v", err)
 	}

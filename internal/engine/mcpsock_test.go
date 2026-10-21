@@ -87,8 +87,8 @@ func (c *sockConn) nextID() string {
 // the returned path succeeds synchronously before any child spawns.
 func TestMCPSockBindOrderingDial(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	f := domain.Feature{ID: "FF-001", Kind: domain.KindFreeform, Stage: domain.StageOpen, Profile: "default"}
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +108,8 @@ func TestMCPSockBindOrderingDial(t *testing.T) {
 // closes the connection rather than serving it.
 func TestMCPSockHandshakeFeatureMismatch(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	f := domain.Feature{ID: "FF-001", Kind: domain.KindFreeform, Stage: domain.StageOpen, Profile: "default"}
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,95 +121,45 @@ func TestMCPSockHandshakeFeatureMismatch(t *testing.T) {
 	}
 }
 
-// a correct hello is acknowledged and list_tools returns stageTools for
-// the feature's stage, in order.
+// a correct hello is acknowledged and list_tools returns the session's
+// own tools (freeformTools), in order.
 func TestMCPSockListTools(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	f := domain.Feature{ID: "FF-001", Kind: domain.KindFreeform, Stage: domain.StageOpen, Profile: "default"}
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer teardown()
 	c := dialSock(t, path)
-	if r := c.hello("FD-001"); r["error"] != nil {
+	if r := c.hello("FF-001"); r["error"] != nil {
 		t.Fatalf("hello error: %v", r["error"])
 	}
 	id := c.nextID()
 	c.send(mcp.Request{JSONRPC: mcp.JSONRPC, ID: jsonRaw(id), Method: "list_tools"})
 	resp := c.read(id)
 	tools := resp["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 4 {
-		t.Fatalf("tools length = %d, want 4", len(tools))
+	if len(tools) != 2 {
+		t.Fatalf("tools length = %d, want 2", len(tools))
 	}
-	for i, want := range []string{"ask_user", "spec_annotate", "spec_view", "spec_replace_section"} {
+	for i, want := range []string{"ask_user", "resolve_annotation"} {
 		if tools[i].(map[string]any)["name"] != want {
 			t.Fatalf("tool[%d] = %v, want %s", i, tools[i].(map[string]any)["name"], want)
 		}
 	}
 }
 
-// list_tools honors the run's pass flavor, not the flavorStage default:
-// a plan-critique pass at StagePlan advertises the critique tools it was
-// prompted with (submit_verdict + spec_annotate + spec_view), and a rebase-resolve
-// pass at StageVerify advertises none — otherwise the tool list drifts
-// from the toolHint the model was told about (BG-022).
-func TestMCPSockListToolsRespectsFlavor(t *testing.T) {
-	// plan-critique pass borrowing StagePlan: three critique tools, not the
-	// empty set flavorStage would compute for StagePlan.
-	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorCritique)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer teardown()
-	c := dialSock(t, path)
-	c.hello("FD-001")
-	id := c.nextID()
-	c.send(mcp.Request{JSONRPC: mcp.JSONRPC, ID: jsonRaw(id), Method: "list_tools"})
-	resp := c.read(id)
-	tools := resp["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 3 {
-		t.Fatalf("plan-critique tools length = %d, want 3", len(tools))
-	}
-	for i, want := range []string{"submit_verdict", "spec_annotate", "spec_view"} {
-		if tools[i].(map[string]any)["name"] != want {
-			t.Fatalf("plan-critique tool[%d] = %v, want %s", i, tools[i].(map[string]any)["name"], want)
-		}
-	}
-
-	// rebase-resolve pass sitting at StageVerify: no tools, even though
-	// flavorStage would list verify's verdict tool here.
-	e2 := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f2 := domain.Feature{ID: "FD-002", Stage: domain.StageVerify, Profile: "default"}
-	path2, teardown2, err := e2.startMCPEndpoint(context.Background(), f2, flavorRebase)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer teardown2()
-	c2 := dialSock(t, path2)
-	c2.hello("FD-002")
-	id2 := c2.nextID()
-	c2.send(mcp.Request{JSONRPC: mcp.JSONRPC, ID: jsonRaw(id2), Method: "list_tools"})
-	resp2 := c2.read(id2)
-	tools2 := resp2["result"].(map[string]any)["tools"].([]any)
-	if len(tools2) != 0 {
-		t.Fatalf("rebase-resolve tools length = %d, want 0", len(tools2))
-	}
-}
-
 // call_tool with no live session for the feature answers an error.
 func TestMCPSockCallToolNoSession(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	f := domain.Feature{ID: "FF-001", Kind: domain.KindFreeform, Stage: domain.StageOpen, Profile: "default"}
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer teardown()
 	c := dialSock(t, path)
-	c.hello("FD-001")
+	c.hello("FF-001")
 	id := c.nextID()
 	c.send(mcp.Request{
 		JSONRPC: mcp.JSONRPC, ID: jsonRaw(id), Method: "call_tool",
@@ -222,32 +172,27 @@ func TestMCPSockCallToolNoSession(t *testing.T) {
 
 // two in-flight call_tools on one connection interleave: spec_view (fast,
 // resolves immediately) returns while ask_user is still blocked on the
-// human. The session is registered directly with a real spec file.
+// human. The session reads a real spec file.
 func TestMCPSockCallToolInterleave(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	specBody := "# FD-001\n\n## Problem\n\nsome problem\n"
 	if err := os.WriteFile(specPath, []byte(specBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := &Session{
-		Feature: f, Role: agent.RoleArchitect, Interactive: true, specPath: specPath,
-		state: StateInteractive, done: make(chan struct{}),
-	}
-	if !e.replace(f.ID, s) {
-		t.Fatal("replace")
-	}
-	defer s.stop()
+	f := freeformCard(1, "interleave")
+	s := attach(t, e, f)
+	waitIdle(t, e, f.ID)
+	s.setSpecPath(specPath)
 
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer teardown()
 	c := dialSock(t, path)
-	if r := c.hello("FD-001"); r["error"] != nil {
+	if r := c.hello("FF-001"); r["error"] != nil {
 		t.Fatalf("hello error: %v", r["error"])
 	}
 
@@ -313,8 +258,8 @@ func TestMCPSockCallToolInterleave(t *testing.T) {
 // teardown removes the socket file and leaves the accept loop done.
 func TestMCPSockTeardown(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	f := domain.Feature{ID: "FF-001", Kind: domain.KindFreeform, Stage: domain.StageOpen, Profile: "default"}
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +281,7 @@ func TestMCPSockTeardown(t *testing.T) {
 func TestMCPSockPathStaysUnderUnixLimit(t *testing.T) {
 	longRoot := filepath.Join(t.TempDir(), strings.Repeat("d", 130))
 	ws := state.Workspace{Root: longRoot}
-	path := mcpSockPath(ws, "FD-001")
+	path := mcpSockPath(ws, "FF-001")
 	if len(path) > unixPathMax {
 		t.Fatalf("socket path %d bytes exceeds unix limit: %s", len(path), path)
 	}
@@ -353,7 +298,7 @@ func TestMCPSockPathStaysUnderUnixLimit(t *testing.T) {
 
 	// short roots keep the workspace-scoped location unchanged.
 	wsShort := state.Workspace{Root: t.TempDir()}
-	if p := mcpSockPath(wsShort, "FD-001"); !strings.HasPrefix(p, filepath.Join(wsShort.StateDir(), "mcp")) {
+	if p := mcpSockPath(wsShort, "FF-001"); !strings.HasPrefix(p, filepath.Join(wsShort.StateDir(), "mcp")) {
 		t.Errorf("short root moved off the workspace: %s", p)
 	}
 }

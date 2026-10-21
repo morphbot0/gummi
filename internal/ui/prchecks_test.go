@@ -30,12 +30,13 @@ func stubPRChecks(m *Shell, checks pr.Checks) *int {
 	return &calls
 }
 
-// A verified card whose PR went red has no writer to hand the failures
-// to: it goes back over its rerun edge, and the checks ride the next
-// implement run's kickoff.
-func TestPRChecksSendAVerifyCardBackWithTheFailures(t *testing.T) {
-	m := linkFixture(t)
-	if _, err := m.store.Transition(context.Background(), "FD-001", domain.StageVerify, "test"); err != nil {
+// A session whose PR went red gets the failing checks as a turn, with the
+// end of each failed job's log; nothing is stored as a diff comment.
+func TestPRChecksSendASessionTheFailures(t *testing.T) {
+	m, eng := sessionWorkspace(t, agent.NewFake("fixing"))
+	settleChat(t, eng)
+	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: strings.Repeat("a", 40)}
+	if err := m.store.SetPullRequest(context.Background(), sessionID, ref); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
@@ -46,20 +47,13 @@ func TestPRChecksSendAVerifyCardBackWithTheFailures(t *testing.T) {
 
 	m = runPRChecks(t, m)
 
-	f, err := m.store.GetFeature(context.Background(), "FD-001")
-	if err != nil {
-		t.Fatal(err)
+	if m.notice.isErr || !strings.Contains(m.notice.text, "sent 1 failing check to its session") {
+		t.Fatalf("notice = %q (err=%v)", m.notice.text, m.notice.isErr)
 	}
-	if f.Stage != domain.StageImplement {
-		t.Errorf("stage = %s, want implement (notice %q)", f.Stage, m.notice.text)
-	}
-	note := m.bounceNotes["FD-001"]
 	for _, want := range []string{"1 failing check on commit aaaaaaa", "- test (CI)", "--- FAIL: TestThing"} {
-		if !strings.Contains(note, want) {
-			t.Errorf("kickoff note lacks %q:\n%s", want, note)
-		}
+		waitForTurn(t, eng, sessionID, want)
 	}
-	anns, err := m.store.ListDiffAnnotations(context.Background(), "FD-001")
+	anns, err := m.store.ListDiffAnnotations(context.Background(), sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,22 +76,17 @@ func TestPRChecksWithNothingFailingMoveNothing(t *testing.T) {
 	if !strings.Contains(m.notice.text, "no failing checks on o/r#42 (1 still running)") {
 		t.Errorf("notice = %q", m.notice.text)
 	}
-	f, err := m.store.GetFeature(context.Background(), "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Stage != domain.StageImplement {
-		t.Errorf("stage = %s, want implement", f.Stage)
-	}
-	if note := m.bounceNotes["FD-001"]; note != "" {
-		t.Errorf("a kickoff note was left with nothing failing: %q", note)
-	}
 }
 
-// At the work stage itself there is no edge to take: with no implement
-// run in flight a fresh one starts, carrying the failures in its kickoff.
-func TestPRChecksRerunAnIdleImplementStage(t *testing.T) {
-	m := linkFixture(t)
+// A retired workflow card is never run again, so nothing takes the
+// failing checks: the notice says so rather than claiming they were sent.
+func TestPRChecksRefuseARetiredCard(t *testing.T) {
+	m, _ := newWorkspace(t)
+	f := mkFeature(t, m.store, 1, "dark mode", domain.StageVerify)
+	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: strings.Repeat("a", 40)}
+	if err := m.store.SetPullRequest(context.Background(), f.ID, ref); err != nil {
+		t.Fatal(err)
+	}
 	eng := engine.New(engine.Config{
 		Agents: singleAgent(agent.NewFake("fixed")), Store: m.store, Pool: m.wt,
 		Workspace: m.ws,
@@ -109,12 +98,8 @@ func TestPRChecksRerunAnIdleImplementStage(t *testing.T) {
 
 	m = runPRChecks(t, m)
 
-	if !strings.Contains(m.notice.text, "re-running implement with 1 failing check") {
+	if !m.notice.isErr || !strings.Contains(m.notice.text, "retired workflow card") {
 		t.Errorf("notice = %q", m.notice.text)
-	}
-	settleChat(t, eng)
-	if s := eng.Get("FD-001"); s == nil || s.Feature.Stage != domain.StageImplement {
-		t.Fatal("the failing checks did not start an implement run")
 	}
 }
 

@@ -11,7 +11,6 @@ package state
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -707,42 +706,6 @@ func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage
 		}
 	}
 	return tx.Commit()
-}
-
-// appendGateEventTx records a stage crossing inside the caller's own
-// transaction, so the event and the transition it describes commit
-// together or not at all. Unlike the best-effort mirror writes, a failure
-// here fails the crossing: a history that silently skipped a gate would
-// under-report exactly the crossings nobody watched. It reports whether
-// the row was actually inserted (a deduped retried crossing inserts
-// nothing), so the caller reports the crossing to hooks only when the
-// log took it.
-//
-// answerID, when non-empty, correlates the crossing to the open
-// EventDecisionOpen it answers — the newest still-open gate decision,
-// looked up by the caller in this same transaction so the crossing and
-// its answer cannot diverge. The dedupe key rides that id (scoped per
-// generation when the decision was minted), so a retried transaction
-// cannot leave two events behind, and two crossings of the same edge can
-// no longer collide on a shared timestamp; crossings with no open
-// decision to answer keep the crossing's own timestamp as their key.
-func appendGateEventTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID, from, to domain.Stage, actor string, at time.Time, answerID string) (bool, error) {
-	payload, err := json.Marshal(GatePayload{From: string(from), To: string(to), Actor: actor, ID: answerID})
-	if err != nil {
-		return false, fmt.Errorf("encoding gate event for %s: %w", id, err)
-	}
-	dedupe := "gate:" + string(from) + "->" + string(to) + ":" + at.Format(timeFmt)
-	if answerID != "" {
-		dedupe = "decision:" + answerID
-	}
-	res, err := tx.ExecContext(ctx, appendEventSQL,
-		string(id), string(from), EventGate, "", at.Format(timeFmt),
-		string(payload), "", dedupe)
-	if err != nil {
-		return false, fmt.Errorf("recording gate event for %s: %w", id, err)
-	}
-	inserted, err := res.RowsAffected()
-	return inserted > 0, err
 }
 
 // AppendPark records a card coming to a stop and waiting for someone,

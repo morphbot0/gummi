@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 )
 
@@ -17,8 +16,7 @@ import (
 // card's consult session without delivering anything — no consult
 // session opens on the strength of arming alone.
 func TestAskArmsWithEmptyLine(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("hi"))
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, agent.NewFake("hi"))
 	settleChat(t, eng)
 
 	m = typeString(t, m, "/ask")
@@ -30,7 +28,7 @@ func TestAskArmsWithEmptyLine(t *testing.T) {
 	if m.threadInput.Value() != "" {
 		t.Fatalf("input not cleared after arming: %q", m.threadInput.Value())
 	}
-	if eng.Consult("FD-001") != nil {
+	if eng.Consult(sessionID) != nil {
 		t.Fatal("arming alone must not open a consult session")
 	}
 }
@@ -39,8 +37,7 @@ func TestAskArmsWithEmptyLine(t *testing.T) {
 // composer and delivers the question as the first consult turn in one
 // motion — never a confirm chip (ask is chip-free).
 func TestAskWithRemainderArmsAndDelivers(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("looks fine"))
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, agent.NewFake("looks fine"))
 	settleChat(t, eng)
 
 	m = typeString(t, m, "/ask is the envelope close to the cap?")
@@ -49,7 +46,7 @@ func TestAskWithRemainderArmsAndDelivers(t *testing.T) {
 	if !m.threadAsk {
 		t.Fatal("`ask <question>` did not arm the composer")
 	}
-	c := eng.Consult("FD-001")
+	c := eng.Consult(sessionID)
 	if c == nil {
 		t.Fatal("`ask <question>` did not open the consult session")
 	}
@@ -69,16 +66,15 @@ func TestAskWithRemainderArmsAndDelivers(t *testing.T) {
 // attached stage session exists for the same card — arming overrides
 // steering, which is the whole point of the channel.
 func TestAskFollowUpReachesConsultNotLiveStage(t *testing.T) {
-	m, eng := agentWorkspace(t, liveFake("architect reply"))
-	m = openAndAttach(t, m) // a live, attached architect session on FD-001
-	waitLive(t, eng, "FD-001")
+	m, eng := sessionWorkspace(t, liveFake("architect reply"))
+	waitLive(t, eng, sessionID)
 	// let the kickoff's own reply land before the count is taken, or it
 	// races the assertion below and reads as a steered turn.
-	waitForTurn(t, eng, "FD-001", "architect reply")
-	if !eng.Get("FD-001").Live() {
+	waitForTurn(t, eng, sessionID, "architect reply")
+	if !eng.Freeform(sessionID).Busy() {
 		t.Fatal("setup: want a live, attached stage session")
 	}
-	stageBefore := len(eng.Get("FD-001").Snapshot().Transcript)
+	stageBefore := len(eng.Freeform(sessionID).Snapshot().Transcript)
 
 	m = typeString(t, m, "/ask")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // arm, empty line
@@ -86,7 +82,7 @@ func TestAskFollowUpReachesConsultNotLiveStage(t *testing.T) {
 	m = typeString(t, m, "what did you just do?")
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // deliver to consult
 
-	c := eng.Consult("FD-001")
+	c := eng.Consult(sessionID)
 	if c == nil {
 		t.Fatal("armed follow-up did not open/reach the consult session")
 	}
@@ -99,7 +95,7 @@ func TestAskFollowUpReachesConsultNotLiveStage(t *testing.T) {
 	if !saw {
 		t.Errorf("consult transcript = %+v, missing the follow-up question", c.Snapshot().Transcript)
 	}
-	stageAfter := eng.Get("FD-001").Snapshot().Transcript
+	stageAfter := eng.Freeform(sessionID).Snapshot().Transcript
 	if len(stageAfter) != stageBefore {
 		t.Errorf("the live stage session's transcript grew from %d to %d entries — the armed follow-up steered it instead of asking", stageBefore, len(stageAfter))
 	}
@@ -109,9 +105,8 @@ func TestAskFollowUpReachesConsultNotLiveStage(t *testing.T) {
 // (draft kept) and a subsequent plain line goes back to steering the
 // live stage session.
 func TestAskEscDisarmsAndRestoresSteering(t *testing.T) {
-	m, eng := agentWorkspace(t, liveFake("architect reply"))
-	m = openAndAttach(t, m)
-	waitLive(t, eng, "FD-001")
+	m, eng := sessionWorkspace(t, agent.NewFake("architect reply"))
+	settleChat(t, eng)
 
 	m = typeString(t, m, "/ask")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // arm
@@ -125,10 +120,10 @@ func TestAskEscDisarmsAndRestoresSteering(t *testing.T) {
 
 	m = typeString(t, m, "please add a loading spinner")
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitForTurn(t, eng, "FD-001", "please add a loading spinner")
+	waitForTurn(t, eng, sessionID, "please add a loading spinner")
 
 	var steered bool
-	for _, msg := range eng.Get("FD-001").Snapshot().Transcript {
+	for _, msg := range eng.Freeform(sessionID).Snapshot().Transcript {
 		if msg.Content == "please add a loading spinner" {
 			steered = true
 		}
@@ -155,7 +150,7 @@ func TestDrivenAbroadComposerAsksNotSteers(t *testing.T) {
 	m = typeString(t, m, "approve")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	if got := eng.Get("FD-001"); got != nil {
+	if got := eng.Freeform("FD-001"); got != nil {
 		t.Fatalf("a verb line on a driven-abroad card reached the local engine: %+v", got.Snapshot())
 	}
 	if m.rows[0].F.Stage != stageBefore {
@@ -176,11 +171,10 @@ func TestDrivenAbroadComposerAsksNotSteers(t *testing.T) {
 	}
 }
 
-// TestThreadConsultBlockGolden: a card carrying both a finished live
-// stage block and a consult exchange renders the two as visually
-// distinguishable segments — a captioned, dash-dot bordered block for
-// the consult exchange, appended after the stage's own boundary-ruled
-// one, never interleaved with it.
+// TestThreadConsultBlockGolden: a retired card's consult exchange renders
+// as its own visually distinguishable segment — a captioned, dash-dot
+// bordered block appended after the card's history, never interleaved
+// with it.
 func TestThreadConsultBlockGolden(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		if opts.Role == agent.RoleConsult {
@@ -200,7 +194,7 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 	// A backend that confines a consult: the golden is the read-only
 	// caption (TestThreadConsultBlockSaysWhenUnconfined is the other one).
 	ag.Caps.ReadOnlyEnforce = true
-	m, eng := agentWorkspace(t, ag)
+	m, _ := agentWorkspace(t, ag)
 	// tall enough that the consult block's own caption survives the
 	// thread's bottom-anchored scroll alongside everything above it
 	// (the folded spec receipt, the finished stage's tool call, the
@@ -209,10 +203,7 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
 	m = model.(*Shell)
 	m = pump(t, m, m.loadRows)
-	m = advanceTo(t, m, domain.StageImplement)
-	m = openAndAttach(t, m)
-	settleChat(t, eng)
-	m = drainEngineLoop(t, m)
+	m = openCardPage(t, m)
 
 	m = typeString(t, m, "/ask is the envelope close to the cap?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -233,14 +224,11 @@ func TestThreadConsultBlockSaysWhenUnconfined(t *testing.T) {
 		}
 		return []agent.Event{{Kind: agent.EventMessage, Text: "Done."}, {Kind: agent.EventIdle}}
 	}}
-	m, eng := agentWorkspace(t, ag)
+	m, _ := agentWorkspace(t, ag)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
 	m = model.(*Shell)
 	m = pump(t, m, m.loadRows)
-	m = advanceTo(t, m, domain.StageImplement)
-	m = openAndAttach(t, m)
-	settleChat(t, eng)
-	m = drainEngineLoop(t, m)
+	m = openCardPage(t, m)
 
 	m = typeString(t, m, "/ask is the envelope close to the cap?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})

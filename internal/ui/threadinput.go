@@ -2,14 +2,12 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -80,7 +78,7 @@ import (
 // while the decision is open, but off the top of it the very same key
 // escapes into the inventory — one route, reachable everywhere the
 // composer is empty — so the two placeholders collapsed back into one.
-const placeholderText = "message the agent, /approve /verify /diff…, or ↑ for actions"
+const placeholderText = "ask about this retired card, /diff /land…, or ↑ for actions"
 
 // researchPlaceholderText is the same promise for a card with no branch.
 // The verb vocabulary is shared across kinds (verbs.go), but `diff` is
@@ -88,7 +86,7 @@ const placeholderText = "message the agent, /approve /verify /diff…, or ↑ fo
 // no worktree and no branch to diff — so naming it as the example is an
 // example of what not to type. `ask` takes its place: it is in the same
 // closed vocabulary and it is on a research card's own action inventory.
-const researchPlaceholderText = "message the agent, /approve /verify /ask…, or ↑ for actions"
+const researchPlaceholderText = "ask about this retired card, /spec /ask…, or ↑ for actions"
 
 // composerPlaceholder is the placeholder for a card the reader can type
 // to. The examples are illustrative rather than exhaustive — the ↑
@@ -606,13 +604,7 @@ func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *thr
 		return c
 	}
 	// Prose at a stop goes with the answer that takes words, when the
-	// stop offers one; otherwise it is a message to the card's agent. A
-	// live session is a conversation, and a line typed into one is the
-	// next thing said in it.
-	if sess := m.sessionFor(r.F.ID); sess != nil && sess.Live() {
-		c.route = lineInput
-		return c
-	}
+	// stop offers one; otherwise it is a message to the card's agent.
 	if i := d.wordConsumer(); i >= 0 {
 		c.route, c.consumer = lineWords, i
 		return c
@@ -622,19 +614,9 @@ func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *thr
 }
 
 // deliverWords carries a line to the answer that takes words: the
-// follow-up session, and a legacy workflow card's re-run, send-back or
-// change note.
+// follow-up session.
 func (m *Shell) deliverWords(r featureRow, id, note string) tea.Cmd {
 	switch id {
-	case "bounce":
-		return m.bounceStage(r.F.ID, note)
-	case "run":
-		return m.runStageWithNote(r.F, note)
-	case "changes":
-		if note == "" {
-			return nil
-		}
-		return m.sendThreadMessage(r.F, note)
 	case "newbug":
 		return m.bugFromLine(r, note)
 	}
@@ -715,9 +697,6 @@ func (m *Shell) submitThreadInput(r featureRow) tea.Cmd {
 		// has somewhere to go (fireVerb routes both through the same
 		// reader the highlighted row takes), and losing the reason is
 		// the one outcome worse than either firing or refusing.
-		if parsed.Remainder != "" && verbCarriesReason(parsed.Verb) {
-			return m.routeVerb(r.F, parsed.Verb, parsed.Remainder)
-		}
 		if m.verbDegrades(r, parsed.Verb) {
 			return m.openCommandMenu(parsed.Verb)
 		}
@@ -725,14 +704,6 @@ func (m *Shell) submitThreadInput(r featureRow) tea.Cmd {
 	default: // verbNone
 		return m.sendThreadMessage(r.F, text)
 	}
-}
-
-// verbCarriesReason names the verbs whose remainder is the point of
-// typing them: the two "send it back" words, whose sentence is what the
-// router reads. Every other verb's remainder is noise the verb ignores,
-// so a bare on-screen check is the right one for them.
-func verbCarriesReason(verb string) bool {
-	return verb == "bounce" || verb == "changes"
 }
 
 // openCommandMenu opens the "/" overlay, pre-filtered by filter (empty
@@ -757,39 +728,21 @@ var verbActionIDs = map[string]string{
 	// the person changes, not a workflow answer, so it is never in the
 	// answer set — the word degrades to the menu, whose row opens the
 	// model picker on both faces.
-	"approve": "advance",
-	// model is the freeform card's own switch (DESIGN §19.8): a setting
-	// the person changes, not a workflow answer, so it is never in the
-	// answer set — the word degrades to the menu, whose row opens the
-	// model picker on both faces.
 	"model": "model",
-	// land maps to merge, not to advance. Landing IS what advance does
-	// from the verify gate, but advance is also "advance to verify" at
-	// implement and "approve" at the design stage — so treating /land as
-	// on-screen wherever an advance row is would fire the merge dialog
-	// from a card two stages short of a branch worth landing. Mapped to
-	// the action it actually performs (verbKeys sends it to "m"), it is
-	// never in the answer set and always degrades to the menu, where the
-	// merge row answers to "land" by name.
+	// land maps to merge, the action it performs (verbKeys sends it to
+	// "m").
 	"land": "merge",
 	// close is hand-off: close the card without landing it. It maps to the
-	// handoff id, and unlike land it IS in the answer set wherever it is
-	// legal: hand-off is offered at exactly one stage, the one where the
-	// row is on screen, so "/close" fires from the same place the reader is
-	// already looking rather than degrading to a menu for a row two lines
-	// above the composer. The word is not "handoff": on a freeform card
+	// handoff id. The word is not "handoff": on a freeform card
 	// that is the session's own command (engine's freeformbuiltins.go),
 	// and a verb is parsed first, so it would shadow it.
-	"close":   "handoff",
-	"changes": "changes",
-	"bounce":  "bounce",
-	"park":    "pause",
-	"verify":  "verify",
-	"rebase":  "rebase",
-	"squash":  "squash",
-	"clean":   "clean",
-	"spec":    "spec",
-	"diff":    "diff",
+	"close":  "handoff",
+	"park":   "pause",
+	"rebase": "rebase",
+	"squash": "squash",
+	"clean":  "clean",
+	"spec":   "spec",
+	"diff":   "diff",
 }
 
 // verbDegrades reports whether a verb should open the "/" menu instead
@@ -919,15 +872,13 @@ func (m *Shell) routeVerb(f domain.Feature, verb, remainder string) tea.Cmd {
 // "park" below to reach exactly that action and nothing else (parkVerb,
 // shell.go), rather than routing through the ambiguous key.
 var verbKeys = map[string]string{
-	"approve": "g",
-	"diff":    "d",
-	"spec":    "s",
-	"verify":  "v",
-	"land":    "m",
-	"close":   "h",
-	"rebase":  "r",
-	"clean":   "c",
-	"squash":  "z",
+	"diff":   "d",
+	"spec":   "s",
+	"land":   "m",
+	"close":  "h",
+	"rebase": "r",
+	"clean":  "c",
+	"squash": "z",
 }
 
 // fireVerb performs a parsed verb's action: routes to the same key
@@ -942,22 +893,6 @@ func (m *Shell) fireVerb(verb, remainder string) tea.Cmd {
 	}
 	if key, ok := verbKeys[verb]; ok {
 		return m.boardVerb(key)
-	}
-	// The two "send it back" verbs reach here only when the answer set
-	// offers that answer (submitThreadInput's on-screen rule), so each
-	// performs the delivery the highlighted row performs. The remainder is
-	// what is wrong, and it rides along; typed bare, each says what it
-	// wants rather than sending an empty complaint.
-	switch verb {
-	case "bounce", "changes":
-		if remainder == "" {
-			m.notice = noticeMsg{text: "say what should change — /" + verb + " <what is wrong>, or pick \"send it back\" and type the line"}
-			return nil
-		}
-		if r, ok := m.selected(); ok {
-			return m.deliverWords(r, verb, remainder)
-		}
-		return nil
 	}
 	return m.notWiredVerb(verb, remainder)
 }
@@ -1008,30 +943,9 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 	if f.IsFreeform() {
 		return m.sendFreeformTurn(f, text, images)
 	}
-	sess := m.sessionFor(f.ID)
-	if !sess.Live() {
-		return m.sendConsultMessage(f, text, images)
-	}
-	m.threadInput.Reset()
-	eng := m.engine
-	id := f.ID
-	ctx := engine.WithActor(context.Background(), m.lineActor())
-	name := m.cardName(id)
-	return func() tea.Msg {
-		if eng.Get(id) != sess {
-			return noticeMsg{text: "session is no longer active", isErr: true}
-		}
-		if err := eng.SendTurn(ctx, id, text, images); err != nil {
-			if errors.Is(err, agent.ErrBusy) {
-				return noticeMsg{
-					text:    name + ": the agent is still mid-turn — your line is back in the composer, send it when the turn ends",
-					restore: text,
-				}
-			}
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		return nil
-	}
+	// a retired workflow card runs no agent: a line on it is a question
+	// to its read-only consult session
+	return m.sendConsultMessage(f, text, images)
 }
 
 // sendConsultMessage delivers a line to the card's consult session,
@@ -1233,8 +1147,7 @@ func (m *Shell) startFreeform(f domain.Feature, opening string) tea.Cmd {
 // consultSentMsg settles one consult delivery: the session has the line
 // (and renders it from its own transcript from here on), or it never
 // took it. Either way the asking marker comes down — a marker that
-// outlived its send would leave a card reading busy forever, the same
-// rule Shell.scribing settles under.
+// outlived its send would leave a card reading busy forever.
 type consultSentMsg struct {
 	id  domain.FeatureID
 	err error

@@ -83,8 +83,8 @@ func reposOnlyWorkspace(t *testing.T) *Shell {
 	m = model.(*Shell)
 
 	f := domain.Feature{
-		ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode",
-		Stage: domain.StageTodo, Profile: "thrifty", Repo: "a",
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Dark mode", Slug: "dark-mode",
+		Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind, Profile: "thrifty", Repo: "a",
 		CreatedAt: fixedTime, UpdatedAt: fixedTime,
 	}
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
@@ -164,12 +164,12 @@ func TestDuplicateThenDeleteInAReposOnlyWorkspace(t *testing.T) {
 	m := reposOnlyWorkspace(t)
 	ctx := context.Background()
 
-	if msg := m.duplicateFeature("FD-001")(); msg != nil {
+	if msg := m.duplicateFeature("FF-001")(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("duplicate failed: %s", nm.text)
 		}
 	}
-	dup, err := m.store.GetFeature(ctx, "FD-002")
+	dup, err := m.store.GetFeature(ctx, "FF-002")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,11 +186,11 @@ func TestDuplicateThenDeleteInAReposOnlyWorkspace(t *testing.T) {
 	}
 
 	// the source is untouched by either action.
-	src, err := m.store.GetFeature(ctx, "FD-001")
+	src, err := m.store.GetFeature(ctx, "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if src.Repo != "a" || src.Stage != domain.StageTodo {
+	if src.Repo != "a" || src.Stage != domain.StageOpen {
 		t.Errorf("source changed by duplicate+delete: repo=%q stage=%q", src.Repo, src.Stage)
 	}
 }

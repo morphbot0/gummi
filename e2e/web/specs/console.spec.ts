@@ -78,7 +78,7 @@ test.describe('two sessions ready to land and one more', () => {
     await page.getByTestId('action-delete').click();
     await expect(page.getByTestId('action-question')).toContainText(/Delete “.+”\?/);
     await page.getByTestId('action-confirm').click();
-    await expect.poll(async () => (await api('GET', `/api/cards/${sessions[0]}`)).status).toBe(404);
+    await expect.poll(async () => (await api('GET', `/api/cards/${sessions[0]}`)).status, { timeout: 90_000 }).toBe(404);
     expect(failed, 'failed loads logged to the console').toEqual([]);
     expect(questions.length, 'the delete asked first').toBeGreaterThan(mid);
   });

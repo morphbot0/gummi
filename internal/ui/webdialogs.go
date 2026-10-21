@@ -255,24 +255,3 @@ func tooLong(limit int, what, value string) string {
 	}
 	return fmt.Sprintf("%s is too long — at most %d characters", what, limit)
 }
-
-// Running verify's checks is a confirm, and the question names every
-// command in full, one to a line, as the terminal's dialog shows them:
-// what runs in the worktree is read before it runs, never behind a bare
-// yes — and the yes is bound to those commands, so a list that changed
-// since the page showed it is asked again rather than run.
-func (d *verifyDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
-	if d.feature != in.card && in.card != "" {
-		return webAnswer{dismiss: true}
-	}
-	lines := make([]string, 0, len(d.checks)+1)
-	lines = append(lines, "run "+d.feature.Ref()+"'s verify checks in its worktree?")
-	for _, ch := range d.checks {
-		lines = append(lines, sanitize(ch.Name)+": "+sanitize(ch.Cmd))
-	}
-	q := strings.Join(lines, "\n")
-	if !in.takeConfirm(webConfirmToken(d.ID(), d.feature, q)) {
-		return confirmAsk(d.ID(), d.feature, q)
-	}
-	return webAnswer{cmd: d.onRun()}
-}

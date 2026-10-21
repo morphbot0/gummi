@@ -17,19 +17,15 @@ const (
 // nothing outside it is ever recognised, and nothing inside it is ever
 // fuzzy-matched.
 var verbs = map[string]bool{
-	"approve": true,
-	"changes": true,
-	"diff":    true,
-	"spec":    true,
-	"bounce":  true,
-	"verify":  true,
-	"park":    true,
-	"land":    true,
-	"close":   true,
-	"rebase":  true,
-	"squash":  true,
-	"clean":   true,
-	"ask":     true,
+	"diff":   true,
+	"spec":   true,
+	"park":   true,
+	"land":   true,
+	"close":  true,
+	"rebase": true,
+	"squash": true,
+	"clean":  true,
+	"ask":    true,
 }
 
 // parsedInput is parseInput's result.

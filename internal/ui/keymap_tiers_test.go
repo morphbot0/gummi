@@ -33,13 +33,9 @@ func openSurfaces(t *testing.T) map[string]*Shell {
 	withDiff := populatedShell(100, 30)
 	withDiff.diff = newDiffView(f, "diff --git a/x b/x\n@@ -1 +1 @@\n+x\n", nil)
 
-	withDeps := populatedShell(100, 30)
-	withDeps.deps = &depPicker{f: f}
-
 	return map[string]*Shell{
 		"spec": withSpec,
 		"diff": withDiff,
-		"deps": withDeps,
 	}
 }
 
@@ -155,7 +151,6 @@ func TestNoSurfaceRebindsTab(t *testing.T) {
 		"stats": m.wsStatsBindings(),
 		"spec":  (&specView{f: f, content: content, doc: spec.Parse(content), cursor: 1}).bindings(),
 		"diff":  newDiffView(f, "diff --git a/x b/x\n@@ -1 +1 @@\n+x\n", nil).bindings(),
-		"deps":  (&depPicker{f: f}).bindings(),
 	}
 	for name, bs := range tables {
 		for _, b := range bs {

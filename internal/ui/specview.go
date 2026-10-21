@@ -327,14 +327,6 @@ func (d *resolveDialog) View(s *theme.Styles, w, h int) string {
 	return s.DialogFrame.Render(b.String())
 }
 
-// approveSurface leaves the active spec/diff surface and runs the same
-// gate the board's g does — advanceStage. Exactly one approve path, so
-// the two surfaces can't disagree about what "approved" means.
-func (m *Shell) approveSurface(f domain.Feature) tea.Cmd {
-	m.spec, m.diff = nil, nil
-	return m.advanceStage(f.ID)
-}
-
 // editSpec suspends the TUI and opens the doc in $EDITOR at the cursor
 // line (best effort — plain `$EDITOR file` when unknown).
 func (m *Shell) editSpec() tea.Cmd {
@@ -373,24 +365,19 @@ func (sv *specView) threadAtCursor() *spec.Thread {
 	return nil
 }
 
-// bindings is the spec surface's key table (see keymap.go). Near enough to
-// one table: the surface has one mode, so every verb it lists is live
-// whenever the surface is — which is exactly why the one verb that can
-// stop being live, the gate crossing, is added by withGateKey rather
-// than sitting here.
+// bindings is the spec surface's key table (see keymap.go): the surface
+// has one mode, so every verb it lists is live whenever the surface is.
 func (sv *specView) bindings() []binding {
 	// Bar order is shedding order: the status bar drops hints from the
 	// second-to-last backwards and never the last, so the two rows that
 	// answer "what do I do about this document" lead, and the way out
 	// goes last where it outlives everything else (threadInputBindings
 	// keeps esc last for the same reason). Reading and annotating are
-	// what the surface is obviously for; approving it, sending it back
-	// and leaving are the rows a reader would otherwise have to go
-	// looking for.
+	// what the surface is obviously for; leaving is the row a reader
+	// would otherwise have to go looking for.
 	bs := []binding{
 		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
 		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
-		{key: "R", label: "request changes", help: "send the open comments to the architect", bar: true},
 		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 		{key: "x", label: "resolve", help: "resolve the comment thread at the cursor", bar: true},
 		{key: "n/p", label: "comments", help: "jump between comments", bar: true},
@@ -398,7 +385,7 @@ func (sv *specView) bindings() []binding {
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 	}
-	return withGateKey(sv.f, bs)
+	return bs
 }
 
 // handleSpecKey processes keys while the spec surface is open.
@@ -409,12 +396,6 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		m.spec = nil
 	case "e":
 		return m.editSpec()
-	case "R":
-		// request changes: send the open comments to the architect
-		return m.requestSpecChanges(sv)
-	case "g":
-		// cross the gate: leave the surface and run the board's g
-		return m.approveSurface(sv.f)
 	case "j", "down":
 		sv.setCursor(sv.cursor + 1)
 	case "k", "up":

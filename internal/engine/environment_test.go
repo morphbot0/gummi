@@ -7,26 +7,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/spec"
 )
 
 const testCard = "ENVIRONMENT CARD: this repo is built inside a container; the real hardware is a remote ARM dev VM at 10.0.0.7."
-
-// bugFeatureAt builds a bug-kind work item at the requested stage, mirroring
-// the package helper but with a stage override.
-func bugFeatureAt(num int, title string, stage domain.Stage) domain.Feature {
-	id, _ := domain.NewID(domain.KindBug, num)
-	slug, _ := domain.Slugify(title)
-	now := time.Now()
-	return domain.Feature{
-		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug, Stage: stage,
-		CreatedAt: now, UpdatedAt: now,
-	}
-}
 
 func writeEnvironmentCard(t *testing.T, wsRoot, content string) {
 	t.Helper()
@@ -43,11 +28,8 @@ func TestEnvironmentCardAbsent(t *testing.T) {
 	rec := recordingAgent()
 	e := newEngine(t, rec)
 
-	ctx := context.Background()
-	if _, err := e.Attach(ctx, feature(1, "x", domain.StagePlan)); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	attach(t, e, freeformCard(1, "x"))
+	waitTurn(t, e)
 
 	for _, h := range rec.opts().SystemHints {
 		if h == testCard {
@@ -63,11 +45,8 @@ func TestEnvironmentCardIsFirstHint(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
-	ctx := context.Background()
-	if _, err := e.Attach(ctx, feature(1, "x", domain.StagePlan)); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	attach(t, e, freeformCard(1, "x"))
+	waitTurn(t, e)
 
 	hints := rec.opts().SystemHints
 	if len(hints) == 0 {
@@ -75,30 +54,6 @@ func TestEnvironmentCardIsFirstHint(t *testing.T) {
 	}
 	if hints[0] != testCard {
 		t.Errorf("SystemHints[0] = %q, want %q", hints[0], testCard)
-	}
-}
-
-func TestEnvironmentCardStageAgnostic(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	writeEnvironmentCard(t, ws.Root, testCard)
-	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	// Triage is an interactive bug stage: the card should still be first.
-	f := bugFeatureAt(1, "x", domain.StagePlan)
-	ctx := context.Background()
-	if _, err := e.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
-
-	hints := rec.opts().SystemHints
-	if len(hints) == 0 {
-		t.Fatal("no SystemHints captured")
-	}
-	if hints[0] != testCard {
-		t.Errorf("bug Triage SystemHints[0] = %q, want %q", hints[0], testCard)
 	}
 }
 
@@ -117,7 +72,7 @@ func TestEnvironmentCardNotInOneShot(t *testing.T) {
 		e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 		t.Cleanup(func() { e.Close() })
 
-		f := feature(1, "x", domain.StageImplement)
+		f := freeformCard(1, "x")
 		withWorktree(t, wt, f)
 		if _, err := e.DraftCommitMessage(context.Background(), f); err != nil {
 			// Only NewSession failures matter here; guard/parse errors happen
@@ -177,12 +132,9 @@ func TestEnvironmentCardOversizeSurfacesOnNextSession(t *testing.T) {
 	// Trigger the lazy read (and warning) without a session that flushes.
 	_ = e.environmentCard()
 
-	f := feature(1, "x", domain.StagePlan)
-	s, err := e.Attach(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	f := freeformCard(1, "x")
+	s := attach(t, e, f)
+	waitTurn(t, e)
 
 	acts := s.Snapshot().Activity
 	found := false
@@ -210,11 +162,8 @@ func TestEnvironmentCardAppendsInstructions(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Instructions: []string{inst}})
 	t.Cleanup(func() { e.Close() })
 
-	ctx := context.Background()
-	if _, err := e.Attach(ctx, feature(1, "x", domain.StagePlan)); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	attach(t, e, freeformCard(1, "x"))
+	waitTurn(t, e)
 
 	hints := rec.opts().SystemHints
 	if len(hints) == 0 {
@@ -273,50 +222,5 @@ func TestEnvironmentCardMissingInstructionWarns(t *testing.T) {
 	}
 	if atomic.LoadInt32(&warnings) != 1 {
 		t.Errorf("warnings = %d, want 1", atomic.LoadInt32(&warnings))
-	}
-}
-
-func TestEnvironmentCardOversizeSurfacesAfterDiscoverChecks(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	oversize := strings.Repeat("x", maxEnvironmentCard+100)
-	writeEnvironmentCard(t, ws.Root, oversize)
-
-	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "discover env", domain.StagePlan)
-	withWorktree(t, wt, f)
-	p := filepath.Join(wt.Root(), f.ArtifactPath())
-	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, []byte(spec.Template(&f)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// DiscoverChecks triggers the lazy environment-card read but never
-	// flushes notices; the warning must survive to the next live session.
-	if _, err := e.DiscoverChecks(context.Background(), f); err != nil {
-		t.Fatal(err)
-	}
-
-	sf := feature(2, "x", domain.StagePlan)
-	s, err := e.Attach(context.Background(), sf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
-
-	acts := s.Snapshot().Activity
-	found := false
-	for _, a := range acts {
-		if strings.Contains(a, "environment card") && strings.Contains(a, "exceeds") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("oversize warning not found in activity feed after DiscoverChecks: %v", acts)
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // givesUpFake asks its question and then ends the turn without waiting on
@@ -61,14 +60,12 @@ func TestAQuestionOutlivesTheCallThatAskedIt(t *testing.T) {
 	}))
 	e := newEngine(t, ag.Fake)
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
+	f := freeformCard(1, "Dark mode")
+	attach(t, e, f)
 	waitFor(t, e, EventQuestion)
 
 	// the turn ends behind the question; give the idle time to be handled
-	s := e.Get(f.ID)
+	s := liveSession(e, f.ID)
 	deadline := time.After(testWaitTimeout)
 	for !slices.ContainsFunc(s.Snapshot().Transcript, func(m Message) bool {
 		return strings.Contains(m.Content, AskOutlivedNote)
@@ -76,7 +73,7 @@ func TestAQuestionOutlivesTheCallThatAskedIt(t *testing.T) {
 		select {
 		case ev := <-e.Events():
 			if ev.Kind == EventIdle {
-				t.Fatal("the stage reported itself finished with its question unanswered")
+				t.Fatal("the session reported itself finished with its question unanswered")
 			}
 		case <-deadline:
 			t.Fatalf("the card never said the agent stopped waiting: %+v", s.Snapshot().Transcript)
@@ -86,8 +83,8 @@ func TestAQuestionOutlivesTheCallThatAskedIt(t *testing.T) {
 	if snap.PendingAsk == nil || snap.PendingAsk.Question != "Persist where?" {
 		t.Fatalf("the question did not stay open: %+v", snap.PendingAsk)
 	}
-	if snap.State != StateRunning {
-		t.Fatalf("state = %s, want the stage still running behind its question", snap.State)
+	if snap.State != StateInteractive {
+		t.Fatalf("state = %s, want the session still open behind its question", snap.State)
 	}
 	if snap.Busy {
 		t.Error("a card waiting on a person shows no spinner")
@@ -96,7 +93,7 @@ func TestAQuestionOutlivesTheCallThatAskedIt(t *testing.T) {
 	if err := e.Answer(ctx, f.ID, "synced"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, e, EventIdle)
+	waitTurn(t, e)
 	turns := ag.sent()
 	if len(turns) != 1 {
 		t.Fatalf("the answer reached the agent as %d turns, want 1: %q", len(turns), turns)
@@ -109,8 +106,8 @@ func TestAQuestionOutlivesTheCallThatAskedIt(t *testing.T) {
 	if strings.Contains(turns[0], "fresh session") {
 		t.Errorf("the session that asked was told it is a fresh one:\n%s", turns[0])
 	}
-	if got := e.Get(f.ID).Snapshot(); got.PendingAsk != nil || got.State != StateDone {
-		t.Errorf("after the answer: ask %+v, state %s; want none, done", got.PendingAsk, got.State)
+	if got := liveSession(e, f.ID).Snapshot(); got.PendingAsk != nil || got.State != StateInteractive {
+		t.Errorf("after the answer: ask %+v, state %s; want none, the session open", got.PendingAsk, got.State)
 	}
 }
 
@@ -128,13 +125,10 @@ func TestABridgedQuestionOutlivesItsCall(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
 	}
 	e := newEngine(t, ag)
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle) // the kickoff turn
+	s := attach(t, e, f)
+	waitTurn(t, e) // the kickoff turn
 	done := make(chan string, 1)
 	go func() {
 		out, _ := e.DispatchClientTool(context.Background(), s, "ask_user",
@@ -150,7 +144,7 @@ func TestABridgedQuestionOutlivesItsCall(t *testing.T) {
 		}
 	}
 	// the backend's client gave up on the call, and the turn ended
-	e.handle(s, agent.Event{Kind: agent.EventIdle})
+	e.handleFreeform(e.Freeform(f.ID), s, agent.Event{Kind: agent.EventIdle})
 	select {
 	case out := <-done:
 		if out != askOutlivedReply {
@@ -168,7 +162,7 @@ func TestABridgedQuestionOutlivesItsCall(t *testing.T) {
 	if err := e.Answer(context.Background(), f.ID, "dark"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, e, EventIdle)
+	waitTurn(t, e)
 	mu.Lock()
 	defer mu.Unlock()
 	if last := turns[len(turns)-1]; !strings.Contains(last, "The answer is: dark") {

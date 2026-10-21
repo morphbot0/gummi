@@ -3,15 +3,10 @@ package ui
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"strings"
 	"time"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -40,16 +35,6 @@ type nextAction struct {
 	why    string // why gummi recommends it for the current state
 	detail string // option detail rendered beside the label
 	danger bool   // the option crosses a destructive boundary
-	// sendBack marks the answer set's "send it back" row, whichever id
-	// it happens to wear at this stage. It is asked instead of the id
-	// because the id is the DELIVERY (bounce rewinds, run re-runs in
-	// place, changes turns) and the answer is one answer: a typed line
-	// aimed at this row is routed by internal/reentry rather than by the
-	// stage's fixed rule, and there is no other way to tell "send it
-	// back" apart from the plain "run implement" row, which is also a
-	// run and must not be classified — there is nothing to send back
-	// before a stage has produced anything.
-	sendBack bool
 	// web is detail as the web face shows it, for a row whose detail
 	// names terminal keys ("x resolves one"): the same sentence with the
 	// act named instead. Empty means detail reads the same on both faces
@@ -65,47 +50,8 @@ func (a nextAction) webDetail() string {
 	return a.detail
 }
 
-// keyed ends a row's detail with a clause that names terminal keys, and
-// gives the web face the same sentence ending in webClause instead — the
-// page has no such keys, and a detail telling someone to press one is a
-// dead end there.
-func keyed(a nextAction, keys, webClause string) nextAction {
-	base := a.detail
-	a.detail = base + keys
-	a.why = a.detail
-	a.web = base + webClause
-	return a
-}
-
 func nextStep(id, key, label, detail string) nextAction {
 	return nextAction{id: id, key: key, label: label, why: detail, detail: detail}
-}
-
-// sendBackStep is the answer set's "send it back" row. One flag, three
-// deliveries — the whole point of merging bounce, "request changes" and
-// re-run-with-a-note into one answer (PROPOSAL §4) is that a reader never
-// has to know which edge it takes, so the row is built once here rather
-// than spelled out at each of the arms that offer it.
-//
-// The label still says where the bare answer goes: to is the stage a
-// rewind lands on or re-runs in place, or who takes the turn. "send it
-// back" alone left the reader to guess between plan and implement at
-// exactly the stop where the difference is the whole decision. A typed
-// line can still be read as belonging elsewhere (internal/reentry); the
-// chip that follows names that destination before anything moves.
-func sendBackStep(id, key, to, detail string) nextAction {
-	a := nextStep(id, key, "send it back to "+to, detail)
-	a.sendBack = true
-	return a
-}
-
-// reworkStage is where a bare send-back from s rewinds to: the target of
-// the rerun edge the graph declares from it.
-func reworkStage(s domain.Stage) string {
-	if back, ok := workflow.RerunTarget(s); ok {
-		return string(back)
-	}
-	return string(s)
 }
 
 // nextInput is the in-memory state the suggestions derive from. All
@@ -135,29 +81,11 @@ type nextInput struct {
 	// only thing that makes attaching a raw agent CLI possible.
 	hasWorktree bool
 
-	sess   engine.SessionState // "" when the feature has no live session
-	live   bool                // sess.Live(): a backend is genuinely attached, not just persisted as interactive
-	busy   bool                // agent mid-turn
-	hasAsk bool                // agent blocked on a structured ask
-
-	attn      attnKind // "" when the feature has no attention item
-	escalated bool     // the gate is a loop give-up, not a clean finish
-	// exited is whether the current stage already finished a run, read
-	// from the event log rather than from any live session (featureRow.
-	// Exited). It is the third way a stage counts as finished, and the
-	// only one that survives a restart.
-	exited bool
-	// freeformBusy is a freeform card's own session mid-turn. Such a
-	// session is interactive and is not in e.live, so none of the sess/
-	// live/busy fields above ever describe it — they are read from
-	// Engine.Get, which knows nothing about it. It is a separate field
-	// rather than folded into busy because everything that reads busy
-	// reasons about a STAGE run (freeing a lane, parking a pass), and a
-	// freeform turn is neither.
+	attn attnKind // "" when the feature has no attention item
+	// freeformBusy is the card's session mid-turn.
 	freeformBusy bool
 	// cardOpen is whether the reader is on the card page itself rather
-	// than the board — the same test talkAction makes for the
-	// conversation, for the actions that would only re-open the surface
+	// than the board, for the actions that would only re-open the surface
 	// already under the cursor.
 	cardOpen bool
 
@@ -167,66 +95,9 @@ type nextInput struct {
 	// without one the row would only ever refuse what it offered.
 	agentWired bool
 
-	// verdict is the finished session's outcome (verify: pass/fail),
-	// verdictUnclear when none or when the session is gone — then the
-	// escalated flag on the gate still carries pass vs not-pass.
-	verdict reviewVerdict
-
-	// verdictFloorReason is why gummi overruled the agent's own verdict
-	// — the failing check, or the environment gate's sentence. It
-	// survives a restart now (BG-086), so the blocked arm can name the
-	// blocker instead of pointing vaguely at the artifact.
-	verdictFloorReason string
-
-	// verdictFloorKind names which floor holds the slot (engine.FloorPromise,
-	// FloorOmission, …). It separates a floor whose lever is the artifact
-	// it cited — the promise floor, where meeting or striking the promise
-	// clears the overrule on the next read — from one whose lever lives
-	// elsewhere.
-	verdictFloorKind string
-
-	// flooredPass marks a blocked verdict that is gummi's floor refusing
-	// a pass the verifier itself wrote (verdict.FloorOverruledPass):
-	// neither a verify that failed nor an environment gap, so the
-	// surfaces that report the stop word it as the overrule it is.
-	flooredPass bool
-
-	verifyBounces int    // verify→work bounces already burned (each one a failed verify)
-	failedCheck   string // first failing manual `v` check, "" if none
-	// backendNeverStarted marks the failure a first-time user hits most
-	// and can act on least: the coding CLI died before this stage's first
-	// turn (agent.RunFailure.FirstTurn), so nothing is wrong with the
-	// card — the backend is not set up. Re-running is the one thing
-	// guaranteed not to help, and it used to be the only thing offered.
-	backendNeverStarted bool
-	// backendUnavailable carries the backend's own words when the failure
-	// was the backend being unable to serve the turn at all — a provider
-	// quota, a rate limit, an overload (agent.Unavailable). It is the
-	// opposite advice from backendNeverStarted's: nothing here is
-	// misconfigured, and the sentence usually says when it comes back.
-	backendUnavailable string
-	openSpecQs         int // open user %% threads in the artifact (block gates)
-	openDiffComments   int // unresolved diff annotations (block gates)
-	// undrafted names the required section(s) the departing stage left
-	// blank — the artifact half of the same gate, resolved through the
-	// engine's own predicate so the panel can name what is missing before
-	// an approve that cannot cross is tried.
-	undrafted []string
+	openDiffComments int // unresolved diff annotations (hold a landing)
 
 	pullRequest domain.PullRequestRef // the card's linked outbound PR, empty when unlinked
-
-	// excusedChecks names the repo checks that were already failing when
-	// the branch was cut, which verify writes off rather than failing on
-	// (state.ExcusedChecks). Read from the shell's per-card cache, never
-	// from the store — this is assembled on the render path.
-	excusedChecks []string
-	// noChecks: the card's artifact carries no gummi-checks block, so its
-	// verify ran none and a pass rests on the reviewer's own commands
-	// (featureRow.NoChecks). The pass sentence says so.
-	noChecks bool
-	// excusedOn is the commit excusedChecks were measured failing on, ""
-	// when the baseline predates the record.
-	excusedOn string
 
 	// base is the branch this card lands on, resolved once at attach
 	// (Shell.baseBranch). The landing row used to write the literal
@@ -279,9 +150,6 @@ type nextInput struct {
 	// taken right now, so the picker says so instead of offering a row
 	// that comes back refused.
 
-	// depBlockers are the unmet dependencies that hold the design gate
-	// shut (featureRow.DepBlockers).
-	depBlockers []domain.FeatureID
 	// stackBlocker is the unlanded card below this one in its stack,
 	// which has to land first (stack.LandBlocker).
 	stackBlocker domain.FeatureID
@@ -297,22 +165,11 @@ type nextInput struct {
 	// it is "" (cardActionsFor), so no door lists a landing the same
 	// board would then refuse.
 	landRefused string
-	// verifyStale is a verified card whose branch moved past the revision
-	// its verify passed on (domain.Feature.VerifyStale, read off the row's
-	// Head): the pass no longer describes what would land, so the verify
-	// stop offers a re-verify where it offered the landing.
-	verifyStale bool
 
 	// attnText is the attention item's own sentence — for a failure, the
 	// cause, which the decision's question names rather than leaving it
 	// in the thread alone.
 	attnText string
-	// profiles is whether the board has profiles a card can switch to,
-	// so a failed stage can be offered another one.
-	profiles bool
-	// cutByQuit marks a paused run the last quit stopped (a host
-	// restart), so its decision says so instead of "the run is paused".
-	cutByQuit bool
 	// drifted is the card's fork drift (featureRow.Drift): its base no
 	// longer carries the commit it forked from, so every stage session is
 	// refused until a rebase clears it. driftForkedFrom names the unlanded
@@ -333,14 +190,6 @@ func (in nextInput) closed() bool {
 	return in.landed || in.stage == domain.StageDone
 }
 
-// agentAtWork reports a stage agent that has the card right now: running,
-// or mid-turn in a conversation. Moving the card to its next
-// stage under it would drop the work it is in the middle of, so neither
-// the menu nor g offers that until it stops (advanceStageAs).
-func (in nextInput) agentAtWork() bool {
-	return in.sess == engine.StateRunning || in.busy
-}
-
 // keptBranch names the branch a hand-off keeps, falling back to the
 // generic noun rather than emitting a sentence with a hole in it — the
 // same contract landBase() has for the trunk's name.
@@ -359,125 +208,6 @@ func (in nextInput) landBase() string {
 		return worktree.DefaultBaseBranchName
 	}
 	return in.base
-}
-
-// finished reports whether the card's current stage has produced its
-// result and is waiting on a person: a gate item is up, the session is
-// done, or — after a restart, when neither survives — the log carries
-// the stage's exit. Every arm that offers "send it back" rather than
-// "run the stage" asks this, so the three sources cannot disagree about
-// whether there is anything to send back.
-func (in nextInput) finished() bool {
-	return in.attn == attnGate || in.sess == engine.StateDone || in.exited
-}
-
-// critiqueUnsettled reports whether the critique standing behind a
-// design or work gate ended on anything other than a clean pass: it
-// asked for changes, or it gave no clear verdict and the loop escalated
-// rather than passing it.
-//
-// Live, such a verdict never raises a gate at all — it bounces into a
-// rework round (reviewloop's BounceToWork arm). A reader meets one here
-// because the loop was interrupted before that round ran (the process
-// stopped, and startup reconstructs the stop as a gate) or because the
-// round cap was hit and the loop handed the card over. Either way the
-// stage's own judge did NOT clear it, so the gate must not be presented
-// as a clean one: the verify gate has read its verdict this way all
-// along, and the design and work gates were the two that still led with
-// "approve" underneath a critique that had just said no.
-//
-// The predicate is the verify arm's, minus the verify-only verdicts: a
-// critique submits pass or changes, never fail/blocked.
-func critiqueUnsettled(in nextInput) bool {
-	// a pass gummi floored (a check the critique ran failed) reaches here
-	// as fail or blocked: that is not a critique that passed, whatever the
-	// reviewer wrote, and the row under it must not say it did
-	return in.verdict == verdictChanges || in.verdict == verdictFail || in.verdict == verdictBlocked ||
-		(in.verdict == verdictUnclear && in.escalated)
-}
-
-// critiqueVerdict names what the critique behind an unsettled gate
-// concluded, as a clause that can follow the stage's own name
-// ("plan critique asked for changes"). Only meaningful where
-// critiqueUnsettled holds. The gate's question and the narration above
-// it are both built from this one pair of cases, so the two can never
-// name different verdicts — and the advance row underneath, which says
-// only that crossing overrules the critique, never has to.
-func critiqueVerdict(in nextInput) string {
-	return critiqueVerdictWords(in.verdict, in.verdictFloorReason)
-}
-
-// critiqueVerdictWords is critiqueVerdict's sentence for a verdict and
-// the reason gummi floored it, if it did — shared with the loop's own
-// escalation (reviewloop.go), so the gate's reason, its question and the
-// rows under it name one verdict. A pass floored by a failing check used
-// to be reported as "no clear verdict" beside a reviewer's plain
-// "VERDICT: pass" and a row saying the critique passed.
-func critiqueVerdictWords(v reviewVerdict, floor string) string {
-	switch {
-	case v == verdictChanges:
-		return "critique asked for changes"
-	case (v == verdictFail || v == verdictBlocked) && floor != "":
-		return "critique was overruled — " + floor
-	case v == verdictFail || v == verdictBlocked:
-		return "critique found blocking problems"
-	}
-	return "critique gave no clear verdict"
-}
-
-// stageExited reads a stage's finished run out of the log: the newest
-// stage_exit event for stage, provided it is not older than the newest
-// transition INTO stage in the card's history. The second clause is the
-// generation check — a card that finished verify, was sent back, and
-// came round to verify again carries the old exit in its log, and that
-// exit belongs to a stage generation that no longer exists.
-//
-// It answers with the exit's verdict so a restarted card can still be
-// told apart as passed or failed, through the same FromTool mapping the
-// tool result itself took.
-func stageExited(events []state.CardEvent, hist []state.TransitionRecord, stage domain.Stage) (reviewVerdict, bool) {
-	var entered time.Time
-	for _, tr := range hist {
-		if tr.To == stage && tr.At.After(entered) {
-			entered = tr.At
-		}
-	}
-	// A rebase-resolve session borrows the stage it runs at and ends with
-	// no verdict: it judges nothing, so it says nothing about how the
-	// stage ended. Its exit is skipped, or a verify that passed read as one
-	// with no clear verdict once an agent rebase had run beside it.
-	rebases := map[string]bool{}
-	for _, ev := range events {
-		if ev.Kind != state.EventStageEnter || ev.Stage != stage {
-			continue
-		}
-		var p struct {
-			Flavor string `json:"flavor"`
-		}
-		if json.Unmarshal([]byte(ev.Payload), &p) == nil && p.Flavor == "rebase" {
-			if run, ok := strings.CutSuffix(ev.Dedupe, ":"+state.EventStageEnter); ok {
-				rebases[run] = true
-			}
-		}
-	}
-	for i := len(events) - 1; i >= 0; i-- {
-		ev := events[i]
-		if ev.Kind != state.EventStageExit || ev.Stage != stage {
-			continue
-		}
-		if run, ok := strings.CutSuffix(ev.Dedupe, ":"+state.EventStageExit); ok && rebases[run] {
-			continue
-		}
-		if ev.At.Before(entered) {
-			return verdictUnclear, false
-		}
-		var p struct {
-			Verdict string `json:"verdict"`
-		}
-		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		return verdictFromTool(p.Verdict), true
-	}
-	return verdictUnclear, false
 }
 
 // doneAt is when the card reached done, from the transitions table — the
@@ -501,21 +231,6 @@ func doneAt(hist []state.TransitionRecord) time.Time {
 	return at
 }
 
-// verifyBounces counts verify→work bounce edges in a feature's history:
-// each one is a verify failure someone sent back for rework. Derived
-// from the transitions table, so the count survives restarts. Verify
-// re-runs without a bounce leave no transition, making this a floor —
-// it can undercount, never over-warn.
-func verifyBounces(hist []state.TransitionRecord) int {
-	n := 0
-	for _, tr := range hist {
-		if tr.From == domain.StageVerify && tr.To == domain.StageImplement {
-			n++
-		}
-	}
-	return n
-}
-
 // nextInputFor assembles a feature's nextInput from board and session
 // state already held in memory.
 func (m *Shell) nextInputFor(r featureRow) nextInput {
@@ -527,16 +242,9 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		mainCheckout:     r.F.MainCheckout,
 		home:             r.F.Home,
 		hasWorktree:      r.HasWorktree,
-		verifyBounces:    verifyBounces(r.History),
-		openSpecQs:       r.OpenSpecQs,
 		openDiffComments: r.OpenDiffComments,
 		publish:          m.publishOffered(),
-		undrafted:        r.Undrafted,
 		pullRequest:      r.F.PullRequest,
-		exited:           r.Exited,
-		excusedChecks:    m.excusedChecks[r.F.ID],
-		noChecks:         r.NoChecks,
-		excusedOn:        m.excusedOn[r.F.ID],
 		base:             m.baseBranch(r.F),
 		branch:           r.F.BranchName(),
 		adopted:          r.F.Adopted(),
@@ -545,19 +253,16 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		commit:           r.F.LandedSHA,
 		spend:            r.F.Spend.Credits,
 		endedAt:          doneAt(r.History),
-		depBlockers:      r.DepBlockers,
 		stackBlocker:     m.stackLandBlocker(r.F.ID),
 		names:            m.cardName,
 		landConflicts:    m.landConflicts[r.F.ID],
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
-		in.attn, in.escalated, in.attnText = it.Kind, it.Escalated, it.Text
+		in.attn, in.attnText = it.Kind, it.Text
 	}
-	in.profiles = m.engine != nil && len(m.engine.CardProfiles(r.F.Stage)) > 0
 	// a session's model switch needs an agent to start, and a board with
 	// no engine has none to start (cardactions.go's model row).
 	in.agentWired = m.engine != nil
-	in.cutByQuit = m.quitCut[r.F.ID]
 	if r.Drift != nil {
 		in.drifted, in.driftForkedFrom, in.driftMissingBase = true, r.Drift.ForkedFrom, r.Drift.MissingBase
 	}
@@ -567,55 +272,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 			in.freeformBusy = ff.Snapshot().Busy
 		}
 	}
-	// An attached interactive session counts too. It used to be excluded,
-	// which left talkAction's own engine.StateInteractive branch — "the
-	// architect is already here, do not offer to start it" — unreachable,
-	// so a spec you were in the middle of still advertised starting the
-	// conversation you were having.
-	if sess := m.sessionFor(r.F.ID); sess != nil {
-		in.sess = sess.State()
-		in.live = sess.Live()
-		snap := sess.Snapshot()
-		in.busy = snap.Busy
-		in.hasAsk = snap.PendingAsk != nil
-		// A session paused after its run ended (stop here at the gate, a
-		// park, a restart that restored it paused) still holds the run's
-		// conclusion: the pause took the done state, not the verdict, and
-		// a passed verify parked by hand was headed "verify failed". One
-		// paused mid-turn has no verdict line yet and reads as unclear.
-		if in.sess == engine.StateDone || (in.sess == engine.StatePaused && !snap.Busy) {
-			in.verdict = sessionVerdict(snap)
-		}
-		in.verdictFloorReason = snap.VerdictFloorReason
-		in.verdictFloorKind = snap.VerdictFloorKind
-		in.flooredPass = flooredPass(snap)
-		var rf *agent.RunFailure
-		in.backendNeverStarted = errors.As(snap.Err, &rf) && rf.FirstTurn
-		if words, out := agent.Unavailable(snap.Err); out {
-			// an outage on a session's first turn is still an outage: the
-			// backend is set up, it is busy. Saying "setup problem" here
-			// sends the reader to `gummi doctor`, which will tell them
-			// everything is fine.
-			in.backendUnavailable, in.backendNeverStarted = words, false
-		}
-	}
-	// No session at all — a restart took it — but the log still says how
-	// the stage ended. The exit's verdict stands in for the session's,
-	// and goes through the same escalation guard below, so a restarted
-	// escalated gate still refuses to read as a clean pass.
-	if in.sess == "" && r.Exited {
-		in.verdict = r.ExitVerdict
-	}
-	for _, res := range m.checksFor(r.F) {
-		if !res.OK {
-			in.failedCheck = res.Name
-			break
-		}
-	}
-	in.verdict = escalatedGateVerdict(in.verdict, in.escalated)
-	in.verifyStale = r.F.Stage == domain.StageVerify && r.F.VerifyStale(r.Head)
-	// last, since the floor reads the answer set this input yields (a
-	// failed verify's "land anyway" is a landing it lets through)
+	// last, since the floor reads the answer set this input yields
 	in.landRefused = m.landingRefusalIn(r.F, r, true, &in)
 	return in
 }
@@ -641,167 +298,6 @@ func (m *Shell) stackLandBlocker(id domain.FeatureID) domain.FeatureID {
 		}
 	}
 	return blocker
-}
-
-// escalatedGateVerdict refuses to read an escalated gate as a clean pass.
-//
-// A gate the loop escalated is, by construction, not one: a clean verify
-// raises the plain gate (raiseAttention, recorded as DecisionKindGate),
-// and only a give-up escalates (raiseEscalation, recorded as
-// DecisionKindVerify). So a pass alongside an escalation is one the
-// engine already overruled — its verdict floor (setVerdictFloor, stamped
-// when a live gummi-check fails) lives on the session and is not
-// persisted, so after a restart verdict.SessionVerdict drops back to
-// parsing the agent's own "VERDICT: pass" out of the transcript and
-// resurrects the claim the floor existed to refuse. The card then read
-// as verified and recommended landing the branch on main.
-//
-// Unclear is what is actually known at that point, and it is the
-// fallback nextInput.verdict's own comment already describes: "the
-// escalated flag on the gate still carries pass vs not-pass".
-func escalatedGateVerdict(v reviewVerdict, escalated bool) reviewVerdict {
-	if escalated && v == verdictPass {
-		return verdictUnclear
-	}
-	return v
-}
-
-// blockedGate returns the resolve-first action when something blocks the
-// gate (DESIGN §6.1), or nil when g is clear. The undrafted-sections case
-// leads with the same lever the gate itself demands: the stage's writer
-// run again, now that the panel knows what is missing before approve is
-// tried and refused.
-//
-// It still returns exactly one row — spec, then diff, then undrafted, in
-// that priority — because that is genuinely the one lever this row can
-// pull: `s` resolves the spec, `d` resolves the diff, and there is no
-// single key that does both. But §1.3 found whyItStopped's sentence
-// naming only the first blocker it checked, so a reader who resolved the
-// one THIS row named found a second one waiting, never mentioned
-// anywhere on the page. otherBlockersNote is the fix at this end of the
-// same bug: the row's own why now says when there is more to it, even
-// though only one of them is what enter runs next.
-func blockedGate(in nextInput) *nextAction {
-	// A BLOCKER DESCRIBES A GATE, AND THERE IS NO GATE UNTIL THE STAGE
-	// HAS PRODUCED SOMETHING TO APPROVE. Before that, an open comment is
-	// what the person wrote for the agent that is about to read it —
-	// leading with "resolve open comments" tells them to take back the
-	// only thing they have said about the card, and a blank required
-	// section is blank because nothing has filled it yet. Both used to
-	// show anyway, above (and identical to) the one row that actually
-	// moves the card, which is how a comment written at todo turned into
-	// a card with nothing to do but undo it.
-	if !in.finished() {
-		return nil
-	}
-	if in.openSpecQs > 0 {
-		// x FIRST, and named at all. The blockers here are @user markers,
-		// and a @user marker closes only under a @user resolution
-		// (spec.Parse) — so R, which sends them back to the agent, is the
-		// one thing that provably cannot clear this gate no matter how
-		// well the agent answers. Round 3 §1.4 walked it: the architect
-		// addressed the comment and wrote its own "resolved —" directly
-		// beneath, the gate stayed shut, and the only key the row named was
-		// the one that would send it round again. The diff row has said
-		// "x resolves" all along; this is the row where it is load-bearing.
-		a := keyed(nextStep("spec", "s", "resolve open comments",
-			itoa(in.openSpecQs)+" open in the "+artifactNoun(in.kind)+" "+blockVerb(in.openSpecQs)+
-				" the gate"+otherBlockersNote(in, "spec")),
-			" — x resolves one, R sends them back to the agent",
-			" — resolve each one in the "+artifactNoun(in.kind)+", or send them back to the agent")
-		return &a
-	}
-	if in.openDiffComments > 0 {
-		a := keyed(nextStep("diff", "d", "resolve diff comments",
-			itoa(in.openDiffComments)+" open "+blockVerb(in.openDiffComments)+
-				" the gate"+otherBlockersNote(in, "diff")),
-			" — x resolves one, R sends them back to the agent",
-			" — resolve each one on the diff, or send them back to the agent")
-		return &a
-	}
-	if len(in.undrafted) > 0 {
-		blank := strings.Join(in.undrafted, ", ")
-		subject, object, be, label := "they", "them", "are", "draft the missing sections"
-		if len(in.undrafted) == 1 {
-			subject, object, be, label = "it", "it", "is", "draft the missing section"
-		}
-		a := keyed(nextStep("run", "enter", label,
-			blank+" "+be+" required in the "+artifactNoun(in.kind)+" and still blank — the gate stays shut until "+
-				subject+" "+be+" drafted"+otherBlockersNote(in, "undrafted")),
-			"; enter runs the stage to draft "+object,
-			"; this runs the stage to draft "+object)
-		return &a
-	}
-	return nil
-}
-
-// otherBlockersNote names the blockers blockedGate's own row is NOT
-// about, so that row's why does not repeat §1.3's mistake at one remove:
-// whyItStopped's sentence now names every blocker holding the gate shut,
-// but the action row underneath it used to name only its own — resolving
-// it could still leave the gate shut on something this row never
-// mentioned. which is the kind the row already covers, so its own count
-// is not echoed back at it. Empty for the ordinary case, one blocker
-// alone, so the row's why is unchanged wherever there is nothing else to
-// disclose.
-func otherBlockersNote(in nextInput, which string) string {
-	var extras []string
-	if which != "spec" && in.openSpecQs > 0 {
-		extras = append(extras, itoa(in.openSpecQs)+" in the "+artifactNoun(in.kind))
-	}
-	if which != "diff" && in.openDiffComments > 0 {
-		extras = append(extras, itoa(in.openDiffComments)+" on the diff")
-	}
-	if which != "undrafted" && len(in.undrafted) > 0 {
-		extras = append(extras, strings.Join(in.undrafted, ", ")+" still blank")
-	}
-	if len(extras) == 0 {
-		return ""
-	}
-	return " (plus " + joinList(extras) + ")"
-}
-
-// blockVerb agrees the blocker count's verb. One open comment blocks the
-// gate; two block it. The row sits directly under the narration sentence
-// stating the same count (narration.go), so a disagreement between the
-// two is read as one of them being wrong about the card rather than
-// about grammar.
-func blockVerb(n int) string {
-	if n == 1 {
-		return "blocks"
-	}
-	return "block"
-}
-
-// talkAction is how the next card offers an interactive stage's own
-// conversation.
-//
-// Once a session is live the thread IS that conversation — its input
-// sits at the bottom of the very same page — so "chat with the
-// architect" would be an action pointing at the surface you are already
-// looking at, costing a row of the one block that exists to tell you
-// something you did not know. It appears only when there is nobody to
-// talk to yet, and then it says what enter actually does: start them.
-func talkAction(in nextInput, who, why string) []nextAction {
-	// Only an attached conversation is the one already on screen. A row
-	// whose state merely persisted as interactive — a card rehydrated
-	// after a restart, or one a headless run seeded — reports
-	// StateInteractive with no backend behind it, and dropping the row
-	// there leaves the stage's gate as the card's recommendation:
-	// "approve — creates the worktree and starts the agent stages" as the
-	// answer to a conversation that went away. decisionQuestion learned
-	// this distinction as BG-043; this is the same in.live test.
-	if in.sess == engine.StateInteractive && in.live {
-		return nil
-	}
-	verb := "start"
-	// paused and rehydrated-interactive both have a transcript waiting:
-	// the run action attaches to the card's chat (decision.go's "run" →
-	// attachChatWith) rather than opening a blank one.
-	if in.sess == engine.StatePaused || in.sess == engine.StateInteractive {
-		verb = "resume"
-	}
-	return []nextAction{nextStep("run", "enter", verb+" "+who, why)}
 }
 
 // nextActions is the ACTION INVENTORY's ranking feed — the answer set,
@@ -891,51 +387,20 @@ func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
 	return append(acts, nextStep("prpull", "", "pull PR review", "read the PR's review comments back onto the diff"))
 }
 
-// stageActions is the card's ANSWER SET: the workflow answers to "what
-// now", and nothing else.
+// stageActions is the card's ANSWER SET: the answers to "what now", and
+// nothing else — read the diff, land it, hand it off, stop a turn, answer
+// a question, top up a budget.
 //
-// Four answers cover every stop (PROPOSAL-card-surface §4), and the
-// label a row wears is the arm's own name — "approve", "land on main",
-// "send it back" — because the category is what makes the set legible,
-// not what the reader presses:
-//
-//   - GO ON — every arm of advance (start / approve / advance to verify /
-//     land on main / merge the PR / mark done / clean up), plus the run
-//     that gets a stage moving when nothing is running yet.
-//   - SEND IT BACK — one answer, not three. bounce, "request changes"
-//     and re-run-with-a-note all meant *not right, try again*, and the
-//     reader re-derived the difference on every visit. Which edge it
-//     takes is a fixed rule in this phase: at verify it bounces to
-//     implement, at implement it re-runs in place, at the design stage it
-//     is the turn that asks the architect for the changes. The typed
-//     line rides along in all three (decision.go's wordConsumer, which
-//     still keys on these same three ids).
-//   - STOP HERE — pause and park, which were already one action wearing
-//     two words (pauseLabelWhy); the detail line still says which of the
-//     two this card's state means.
-//   - ANSWER IT — a pending ask_user, which replaces the rest rather
-//     than joining it: a blocked agent's question is not one option
-//     among four.
-//
-// What is NOT here is as load-bearing as what is. Reading surfaces
-// (the artifact, the diff, the thread) are tabs on the card page now,
-// not rows in this list, and card housekeeping (the envelope, the
-// autopilot switch, attach, rebase, merge, deps, the PR verbs) lives in
-// the action inventory and the "/" menu. Both were rendered here as
-// equal-weight options beside the actual decision, which is what made a
-// reader sweep all 22 every visit to be sure the fold hid nothing.
+// What is NOT here is as load-bearing as what is. Reading surfaces (the
+// diff, the thread) are tabs on the card page, and card housekeeping (the
+// envelope, attach, rebase, the PR verbs) lives in the action inventory
+// and the "/" menu.
 //
 // It stays a pure function of nextInput — table-tested, free, no agent
-// anywhere near it (DESIGN §6.3: the options are deterministic even
-// though the narration above them is not).
+// anywhere near it.
 func stageActions(in nextInput) []nextAction {
 	acts := stageAnswers(in)
 	if !in.drifted || in.closed() {
-		return acts
-	}
-	switch in.sess {
-	case engine.StateRunning:
-		// the run owns the screen; it will stop on the drift by itself
 		return acts
 	}
 	if in.freeformBusy {
@@ -945,13 +410,8 @@ func stageActions(in nextInput) []nextAction {
 }
 
 // driftActions leads a drifted card's stop with the one answer that can
-// work. Every stage session refuses a drifted card before it starts, so a
-// failure caused by the drift was offered "try again" and "change
-// profile" — two retries of the refusal — and nothing that cleared it:
-// the remedy its own sentence named was a board key the page does not
-// have. The rebase replaces those; every other answer the stop has (an
-// approve, a landing, stop here) stays behind it, since each is refused
-// or allowed on its own terms.
+// work: the rebase. Every other answer the stop has stays behind it, since
+// each is refused or allowed on its own terms.
 func driftActions(in nextInput, acts []nextAction) []nextAction {
 	why := in.landBase() + " no longer carries the commit this card forked from — nothing runs until this card's own commits are replayed onto it"
 	if in.driftForkedFrom != "" {
@@ -967,8 +427,6 @@ func driftActions(in nextInput, acts []nextAction) []nextAction {
 		switch {
 		case a.id == "rebase":
 			continue // already leading
-		case in.attn == attnFailure && (a.id == "run" || a.id == "profile"):
-			continue // a retry, under any profile, hits the same refusal
 		}
 		out = append(out, a)
 	}
@@ -978,495 +436,103 @@ func driftActions(in nextInput, acts []nextAction) []nextAction {
 // stageAnswers is stageActions before a drifted card's rebase is put in
 // front of it.
 func stageAnswers(in nextInput) []nextAction {
-	// A card that has ended answers for its ending, not for its stage.
-	// Both halves of this used to be a bare return — see closedActions.
+	// A card that has ended answers for its ending.
 	if in.closed() {
 		return closedActions(in)
 	}
-
-	// a scheduled or running agent owns the screen; only a blocking
-	// question needs the user before it finishes.
-	switch in.sess {
-	case engine.StateRunning:
-		if in.hasAsk {
-			return append([]nextAction{answerIt()}, stopOrResume(in)...)
-		}
-		return nil
-	case engine.StatePaused:
-		// a failed run also leaves its session paused, but it is not a
-		// pause: it has its own answers (the failure arm below), and
-		// "the run is paused" is the wrong word for a stage that failed
-		if !in.finished() && in.attn != attnFailure {
-			// stopped by hand before the stage produced anything: picking
-			// it back up is the only answer, and "stop here" would be a
-			// row offering what has already happened. attach is plumbing
-			// — it is in the inventory and answers /attach, it is not one
-			// of the four.
-			return []nextAction{nextStep("run", "enter", "pick it back up",
-				pausedWhy(in))}
-		}
-		// §1.1a: pausing stops a RUN. It does not un-pass a verify, or
-		// withdraw a design waiting on approval — the stage's own gate
-		// already fired, and finished() says so. The old comment above
-		// ("picking it back up is the only answer") was true of a paused
-		// run and false of a paused card sitting at a finished gate: a
-		// card parked right after verify passed used to lose "land on
-		// main" from the page entirely, because this case returned before
-		// the stage switch below ever ran. Falling through instead lets
-		// that switch render the gate's own answer set as it would for
-		// any other finished stop; stopOrResume (used throughout that
-		// switch in place of stopHere) is what puts "pick it back up"
-		// back on the page, as the re-run row, rather than as the only
-		// row.
+	// A retired workflow card is read-only: nothing runs it again, and the
+	// answers it has left are its endings.
+	if in.kind != domain.KindFreeform {
+		return legacyActions(in)
 	}
 
-	// failures, budget stops, and questions override stage guidance.
-	//
-	// attnFailure and attnQuestion keep plain stopHere here, not
-	// stopOrResume: each already carries its own id "run" / key "enter"
-	// row ("try again", answerIt's "answer it"), so on the rare paused+
-	// finished-by-exit combination stopOrResume's "pick it back up" would
-	// duplicate it — the same reason StagePlan's talk keeps stopHere,
-	// above. attnBudget's own row is keyless ("topup"), so it has nothing
-	// to duplicate and keeps stopOrResume.
+	// failures, budget stops, and questions come before the session's own
+	// answers.
 	switch in.attn {
 	case attnFailure:
-		// A backend that never produced a turn gets a different why: a
-		// retry runs the same command that just failed, and the reason it
-		// failed is not on this card. The ANSWER SET is unchanged — the
-		// pointer at `gummi doctor` belongs in the narration, which may
-		// say anything and change nothing (stageActions' own contract),
-		// not in a fifth arm.
-		why := "the session errored — a fresh run retries " + string(in.stage)
-		switch {
-		case in.backendUnavailable != "":
-			why = "the backend could not serve this turn — a retry works once it can"
-		case in.backendNeverStarted:
-			why = "the backend never started — a retry runs the same command"
+		why := "the session errored — your next line starts a fresh turn"
+		if in.attnText != "" {
+			why = "the session errored (" + in.attnText + ") — your next line starts a fresh turn"
 		}
-		acts := []nextAction{nextStep("run", "enter", "try again", why)}
-		if in.profiles {
-			// a failure that is the backend's (it cannot enforce what the
-			// stage needs, it is down, it never started) is answered by
-			// running the stage somewhere else
-			acts = append(acts, nextStep("profile", "", "change profile",
-				"run "+string(in.stage)+" under another profile — the failure may be this backend's"))
-		}
-		// stopHere offers nothing for a session that has already stopped,
-		// and a failed one has: this is the answer that leaves it so
-		return append(acts, nextStep("settle", "", "stop here",
-			"leave the card where it is — nothing runs until you start "+string(in.stage)+" again"))
+		// the session has already stopped: this is the answer that leaves
+		// it so, and takes the card off the inbox
+		return []nextAction{nextStep("settle", "", "stop here", why)}
 	case attnBudget:
-		// the two honest answers to an exhausted envelope, offered where
-		// the stop is rather than as a pointer at the inbox tab: raise it
-		// and carry on, or stop here. The inbox reaches the same top-up
-		// with u; this is the same act, not a second one.
-		return append([]nextAction{nextStep("topup", "", "top up and go on",
-			"raise the budget — "+string(in.stage)+" picks up where it stopped")}, stopOrResume(in)...)
+		// the honest answer to an exhausted envelope, offered where the
+		// stop is rather than as a pointer at the inbox tab: raise it and
+		// carry on. The inbox reaches the same top-up with u.
+		return []nextAction{nextStep("topup", "", "top up and go on",
+			"raise the budget — the session carries on with your next line")}
 	case attnQuestion:
-		return append([]nextAction{answerIt()}, stopHere(in)...)
+		return []nextAction{answerIt()}
 	}
 
-	finished := in.finished()
-
-	switch in.stage {
-	case domain.StageOpen:
-		// A turn in flight owns the screen, exactly as a running stage does
-		// (the session switch above returns nil for one). The difference is
-		// that stopping it is a real answer here: nothing else on this board
-		// would stop an interactive session, and a reader who can see a turn
-		// going the wrong way should not have to pay it out.
-		if in.freeformBusy {
-			return []nextAction{nextStep("pause", "p", "stop this turn",
-				"stop it mid-turn — whatever it has written stays in the worktree, uncommitted")}
-		}
-		// A freeform card (DESIGN §19). It has no gate to teach the reader
-		// what comes next and no stage to advance, so saying what its
-		// answers are matters MORE here than on a card with a gate, not
-		// less: the two ends of its review loop, and the ending that keeps
-		// the branch.
-		//
-		// Before anything has run there is nothing to read and nothing to
-		// land — the composer's placeholder is what says how to start, and
-		// a row offering to land an empty branch would be a row that
-		// refuses.
-		// A session minted into the main checkout: there is a diff to read
-		// (the loose work in the checkout) and an ending (hand-off keeps
-		// it, loose, for the person to commit) — but no landing, because
-		// there is no branch to squash. Offering one would be offering the
-		// refusal the floor answers with.
-		if in.home {
-			return []nextAction{nextStep("handoff", "h", "hand off",
-				"close the agent — its home stays where it is, with everything in it")}
-		}
-		if in.mainCheckout {
-			acts := []nextAction{
-				nextStep("diff", "d", "read the diff", "what the session has left loose in the main checkout"),
-				nextStep("handoff", "h", "hand off",
-					"close the card — its work stays loose in the main checkout, yours to commit"),
-			}
-			return acts
-		}
-		if !in.hasWorktree {
-			return nil
-		}
-		msgNote := "you review and approve the message"
-		if in.mergeChoice {
-			msgNote = "a squash has you review and approve the message; a merge commit takes git's own"
-		}
-		acts := []nextAction{
-			nextStep("diff", "d", "read the diff", "what it has written on this card's branch so far"),
-			nextStep("merge", "m", "land it on "+in.landBase(),
-				landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — uncommitted work has to be committed first, with your own message; "+msgNote),
+	// A turn in flight owns the screen. Stopping it is a real answer here:
+	// nothing else on this board would stop an interactive session, and a
+	// reader who can see a turn going the wrong way should not have to pay
+	// it out.
+	if in.freeformBusy {
+		return []nextAction{nextStep("pause", "p", "stop this turn",
+			"stop it mid-turn — whatever it has written stays in the worktree, uncommitted")}
+	}
+	// Saying what a session's answers are matters because it has no gate
+	// to teach the reader what comes next: the two ends of its review
+	// loop, and the ending that keeps the branch.
+	//
+	// An agent (a home of its own) has no diff a person reads and nothing
+	// to land: closing it keeps its home.
+	if in.home {
+		return []nextAction{nextStep("handoff", "h", "hand off",
+			"close the agent — its home stays where it is, with everything in it")}
+	}
+	// A session minted into the main checkout: there is a diff to read
+	// (the loose work in the checkout) and an ending (hand-off keeps it,
+	// loose, for the person to commit) — but no landing, because there is
+	// no branch to squash.
+	if in.mainCheckout {
+		return []nextAction{
+			nextStep("diff", "d", "read the diff", "what the session has left loose in the main checkout"),
 			nextStep("handoff", "h", "hand off",
-				"close the card without landing — a branch nothing else holds is kept"),
+				"close the card — its work stays loose in the main checkout, yours to commit"),
 		}
-		return acts
-
-	case domain.StageTodo:
-		// "the plan stage", the strip's own word for where this goes —
-		// not "flow", which is a noun nothing else on the screen uses.
-		//
-		// §3.1: the row's arm is advance, and advance only moves the stage
-		// marker — no agent runs on this keypress. The old label and why
-		// ("start — opens the plan stage — the agent reads the card, and
-		// any comments on it") promised the read would happen here; live,
-		// it produced a screen whose OWN row read "start the architect" —
-		// the real start, one keypress later, and the plan stage's own
-		// talkAction is what actually promises the agent will read the
-		// card. Say only what enter does on THIS screen.
-		return []nextAction{nextStep("advance", "g", "open the plan stage",
-			"moves the card into plan — start the agent there to have it read the card, and any comments on it")}
-
-	case domain.StagePlan:
-		// The design stage. Its answers are: get the conversation going,
-		// approve what it wrote, send it back, or stop. Reading the
-		// artifact it wrote — and the code a design stage may already have
-		// put on the card's branch — are the artifact and diff tabs.
-		// talk (below) already carries its own "resume" wording once
-		// in.sess is StatePaused (talkAction's own verb switch), so this
-		// branch keeps stopHere rather than stopOrResume: stopHere already
-		// returns nil for a paused session, and stopOrResume's generic
-		// "pick it back up" would otherwise double up with "resume the
-		// architect" as two rows for the one same act.
-		talk := talkAction(in, designPartner(in.kind), "shape the "+artifactNoun(in.kind)+" until it convinces you")
-		if b := blockedGate(in); b != nil {
-			// "you cannot cross yet" is a different sentence, not another
-			// way forward: it leads, and the rest still follows it.
-			return append(append([]nextAction{*b}, talk...), stopHere(in)...)
-		}
-		if finished && len(in.depBlockers) > 0 && in.kind != domain.KindGoal {
-			// an unmet dependency holds the gate the same way: approving
-			// is refused until it lands (engine.Advance), so the row that
-			// leads says what the card waits on instead of offering the
-			// approval that would come back refused
-			return append(append([]nextAction{waitOnDeps(in)}, talk...), stopHere(in)...)
-		}
-		// §3.2: approve's arm is also advance — it moves the card into
-		// implement and stops there, the same promise-only-what-happens
-		// fix as §3.1's todo row above. "hands the card to the agent
-		// stages" oversold it (nothing ran until a second keypress
-		// started the implementer) and "agent stages" is jargon nothing
-		// else on the screen uses; name the agent that actually runs
-		// next.
-		approve := nextStep("advance", "g", "approve",
-			"moves the card into implement — start the implementer there to begin")
-		switch in.kind {
-		case domain.KindGoal:
-			// a goal has no implementer to start: approving hands the plan
-			// to its lead, which starts the cards on its own
-			approve = nextStep("advance", "g", "approve",
-				"moves the goal into implement — its lead starts the cards and keeps within the budget")
-		case domain.KindResearch:
-			// research's implement stage is the investigation (DESIGN
-			// §13.2): nothing is implemented, and nobody is an implementer
-			approve = nextStep("advance", "g", "approve",
-				"moves the card into implement — start the investigation there to begin")
-		}
-		// The critique said no, and crossing here overrules it rather
-		// than agreeing with it — so the row says so, and the architect
-		// leads instead, because acting on the findings is what moves
-		// this card. Nothing is dropped: approve is still here, still g,
-		// for a reader who reads the findings and disagrees. The verify
-		// gate has drawn its failed arm this way since FD-004; this is
-		// the same shape one gate earlier.
-		if finished && critiqueUnsettled(in) {
-			sendBack := talkAction(in, designPartner(in.kind),
-				"the findings are in the "+artifactNoun(in.kind)+" — your line goes with them")
-			if in.live {
-				// the same row the clean gate offers while the architect
-				// is attached: with a conversation on screen the send-back
-				// is a turn in it, and talkAction withholds its own row
-				// there rather than offering to start what is running.
-				sendBack = append(sendBack, sendBackStep("changes", "", "the architect",
-					"say what is wrong — your line goes to the architect as the turn asking for it"))
-			}
-			crossed := "the card"
-			if in.kind == domain.KindGoal {
-				crossed = "the goal"
-			}
-			// which verdict is being overruled is the question one line
-			// above this picker (decisionQuestion's own unsettled arm), so
-			// the row spends its width on what crossing DOES instead of
-			// repeating it.
-			overrule := nextStep("advance", "g", "approve anyway",
-				"overrules the critique — moves "+crossed+" into implement")
-			return append(append(sendBack, overrule), stopHere(in)...)
-		}
-		var acts []nextAction
-		if finished {
-			// §3.3: this stop's own narration reads "plan is ready for
-			// your decision" — and the decision is approve (or send it
-			// back), not another paid pass through the architect. Leading
-			// with talk here put that re-run under the cursor at exactly
-			// the stop whose own sentence says the opposite; the verify
-			// gate already gets this right (its clean pass leads with
-			// "land on main"). A finished design gate is the same shape,
-			// so it leads with the decision the same way. Only the ORDER
-			// changes, and only in this one state — nothing here is
-			// added, dropped, or renamed, and an unfinished stop still
-			// talks first, because there is nothing to approve yet.
-			acts = append([]nextAction{approve}, talk...)
-		} else if len(in.undrafted) > 0 {
-			// nothing has written the design yet — the sections the gate
-			// owes are still the template's — so there is nothing to
-			// approve, and engine.Advance refuses the crossing. Starting
-			// the architect is the way forward.
-			acts = talk
-		} else {
-			acts = append(talk, approve)
-		}
-		// Only worth offering while the architect is here to receive it —
-		// with no session the "start" row above is the way in.
-		if in.live {
-			acts = append(acts, sendBackStep("changes", "", "the architect",
-				"say what is wrong — your line goes to the architect as the turn asking for it"))
-		}
-		return append(acts, stopHere(in)...)
-
-	case domain.StageImplement:
-		if !finished {
-			// nothing has been produced yet, so there is nothing to send
-			// back: the rewind to plan is /bounce, in the inventory.
-			//
-			// §3.2: "(or restart)" used to show unconditionally, including
-			// on the very first arrival here straight off approving the
-			// plan — where there is nothing yet TO restart. verifyBounces
-			// is the one edge that lands a card back in this branch a
-			// second time (a failed verify sent back to implement for
-			// rework); nothing else that reaches this branch has run
-			// implement before, so it is what tells "first run" and
-			// "restart" apart.
-			why := "no active run — start the stage"
-			if in.verifyBounces > 0 {
-				why = "no active run — start (or restart) the stage"
-			}
-			label := "run " + string(in.stage)
-			if in.kind == domain.KindResearch {
-				label = "run the investigation"
-			}
-			return append([]nextAction{nextStep("run", "enter", label, why)}, stopOrResume(in)...)
-		}
-		if b := blockedGate(in); b != nil {
-			// blockedGate's undrafted-sections row also wears id "run" /
-			// key "enter" (it is the redraft run, nextsteps.go's own
-			// blockedGate) — stopHere, not stopOrResume, so a paused card
-			// blocked on a blank section does not get a second, competing
-			// "enter" row underneath its own.
-			return append([]nextAction{*b}, stopHere(in)...)
-		}
-		// re-runs the stage in place rather than rewinding to it: the
-		// work stage's critique iterates the stage, so there is no edge
-		// to take. The bigger hammer — the whole plan, not this pass — is
-		// /bounce.
-		rework := sendBackStep("run", "", string(in.stage),
-			"re-runs "+string(in.stage)+" with what is wrong — your line goes with it")
-		if critiqueUnsettled(in) {
-			// "the critique passed" is the one thing this stop is not, so
-			// the rework leads and the advance says what crossing here
-			// would be overruling (the plan gate above does the same).
-			return append([]nextAction{
-				rework,
-				nextStep("advance", "g", "start verify",
-					"overrules the critique — runs the checks anyway"),
-			}, stopOrResume(in)...)
-		}
-		acts := []nextAction{
-			nextStep("advance", "g", "start verify", "the critique passed — run the checks"),
-			rework,
-		}
-		return append(acts, stopOrResume(in)...)
-
-	case domain.StageVerify:
-		if !finished {
-			return append([]nextAction{nextStep("run", "enter", "run verify",
-				"no active run — runs the checks and the verification plan")}, stopOrResume(in)...)
-		}
-		if b := blockedGate(in); b != nil {
-			// same reason as StageImplement's blockedGate branch above:
-			// the undrafted-sections row can itself wear id "run" / key
-			// "enter", so this stays stopHere rather than stopOrResume.
-			return append([]nextAction{
-				*b,
-				sendBackStep("bounce", "b", reworkStage(in.stage), "or send the open items back as rework"),
-			}, stopHere(in)...)
-		}
-		if in.verifyStale {
-			// verify passed, on a revision the branch has moved past: what
-			// would land now has not been checked, and every landing door
-			// refuses it (domain.Feature.MayLandAt). The answer is to check
-			// it — a re-run of the checks on the new tip, which records it
-			// — or to send it back; handing the branch off lands nothing.
-			return append([]nextAction{
-				nextStep("reverify", "", "re-verify", "the branch moved since verify passed — run the checks again on what would land"),
-				sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it"),
-				nextStep("handoff", "h", "hand off",
-					"close the card and keep "+in.keptBranch()+" — you push, PR or cherry-pick it"),
-			}, stopOrResume(in)...)
-		}
-		if in.failedCheck != "" {
-			// re-running the checks alone is /verify: it re-evaluates the
-			// gate rather than answering it, so it is not one of the four.
-			return append([]nextAction{
-				sendBackStep("bounce", "b", reworkStage(in.stage), "the failure is the implementation's fault — your line goes with it"),
-				nextStep("advance", "g", "land anyway", "overrule if the failure does not hold up"),
-			}, stopOrResume(in)...)
-		}
-		// blocked: the environment can't run the plan, so rework can't
-		// help — steer at the environment, not the bounce. The blocker
-		// itself is the narration's first sentence now (narration.go).
-		if in.verdict == verdictBlocked {
-			// "re-run verify" here is itself id "run" / key "enter" — the
-			// same collision the blockedGate branches above guard against
-			// — so this stays stopHere rather than stopOrResume too.
-			if in.flooredPass && in.verdictFloorKind == engine.FloorPromise {
-				// a pass the promise floor refused: the lever is the
-				// artifact it cited, and meeting or striking the promise
-				// clears the overrule at the next read — a re-run buys
-				// nothing the edit does not, and the landing gate
-				// re-reads the promises before anything lands anyway
-				return append([]nextAction{
-					nextStep("run", "enter", "re-run verify", "after meeting or striking the promise — a corrected plan clears the overrule without one"),
-					nextStep("advance", "g", "land anyway", "the landing gate re-reads the promises, so a plan that no longer makes the promise does not hold"),
-				}, stopHere(in)...)
-			}
-			return append([]nextAction{
-				nextStep("run", "enter", "re-run verify", "after fixing the environment or tagging the plan's env-bound steps"),
-				nextStep("advance", "g", "land anyway", "only if you verified it by hand — verify never proved this build"),
-			}, stopHere(in)...)
-		}
-		// a verify gate carries a verdict (or, session gone, at least the
-		// escalation flag): recommend landing only on a clean pass.
-		//
-		// The FD-004 loop-breaker used to live here as an ORDERING — after
-		// a repeated failed verify, bounce dropped to last with a warning.
-		// It cannot: "send it back" now carries the in-place re-run too,
-		// and de-ranking the merged row would demote an answer the guard
-		// was never about. The warning moved into the narration, where it
-		// is a sentence rather than a rank (narration.go's loopBreaker).
-		if in.verdict == verdictFail || in.verdict == verdictChanges ||
-			(in.verdict == verdictUnclear && in.escalated) {
-			return append([]nextAction{
-				sendBackStep("bounce", "b", reworkStage(in.stage), "send the failures back as rework — your line goes with them"),
-				nextStep("advance", "g", "land anyway", "overrule if the failures do not hold up"),
-			}, stopOrResume(in)...)
-		}
-		if in.kind == domain.KindResearch {
-			return append([]nextAction{
-				nextStep("advance", "g", "mark done", "verify passed — advance to done"),
-				sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it"),
-			}, stopOrResume(in)...)
-		}
-		// The card is finished and the question is no longer "is this
-		// good" but "how does this leave gummi". There are three honest
-		// answers to that, and this arm used to hold one: landing. The
-		// others were a keyless verb nobody finds (link a PR) and nothing
-		// at all (keep the branch), which is how a finished card ended up
-		// with `D` — delete, which destroys the branch — as the only way
-		// to say "I'll take it from here".
-		//
-		// Landing stays first, and stays what g does: it is still the
-		// recommendation on a clean pass. Hand-off is not a warning and is
-		// not folded; it is the second answer to the question just asked.
-		why := landWhy(in.mergeChoice, "squash-merge the branch", "land the branch") + " and mark the " + noun(in.kind) + " done"
-		if in.verdict == verdictPass {
-			why = "verify passed — " + why
-		}
-		gate := nextStep("advance", "g", "land on "+in.landBase(), why)
-		keep := nextStep("handoff", "h", "hand off",
-			"close the card and keep "+in.keptBranch()+" — you push, PR or cherry-pick it")
-		if hint := in.pullRequest.NextStepsHint(true); hint != "" {
-			gate = nextStep("advance", "g", "merge the PR", hint)
-			// With a PR open, hand-off is usually the real answer rather
-			// than the alternative one: gummi never merges on GitHub, so
-			// the landing is already someone else's, and waiting at verify
-			// for your own `git pull` is not a workflow step.
-			keep = nextStep("handoff", "h", "hand off",
-				"close the card now — the PR carries it from here")
-		}
-		// On an adopted card the two swap places. Landing squashes
-		// somebody else's commits into one of yours on the trunk, which is
-		// a real answer but never the assumed one; handing the branch back
-		// is what the card was for. The rows are the same rows — this
-		// changes which is recommended, not what is available.
-		if in.adopted && in.pullRequest.Empty() {
-			keep = nextStep("handoff", "h", "hand off",
-				"close the card and keep "+in.keptBranch()+" — it was never gummi's branch, and it is yours to push")
-			gate = nextStep("advance", "g", "land on "+in.landBase()+" anyway",
-				"squash the inherited commits and yours into one commit on "+in.landBase())
-			return append([]nextAction{
-				keep,
-				gate,
-				sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it"),
-			}, stopOrResume(in)...)
-		}
-		if in.stackBlocker != "" {
-			// the landing would be refused (merge.go): this card's branch
-			// carries the unlanded card below it, so it lands after that
-			// one does — said on the row that would have been the landing
-			gate = nextStep("wait", "", "lands after "+in.name(in.stackBlocker),
-				"it sits on "+in.name(in.stackBlocker)+" in its stack — "+in.name(in.stackBlocker)+
-					" lands first, or its commits would ride in under this card")
-		}
-		acts := []nextAction{gate, keep, sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it")}
-		if in.landConflicts != nil {
-			// the last landing hit conflicts with the base: landing again
-			// would hit them again, so the rebase that resolves them leads
-			acts = append([]nextAction{rebaseToLand(in)}, acts...)
-		}
-		return append(acts, stopOrResume(in)...)
 	}
-	return nil
+	// Before anything has run there is nothing to read and nothing to
+	// land — the composer's placeholder is what says how to start.
+	if !in.hasWorktree {
+		return nil
+	}
+	msgNote := "you review and approve the message"
+	if in.mergeChoice {
+		msgNote = "a squash has you review and approve the message; a merge commit takes git's own"
+	}
+	return []nextAction{
+		nextStep("diff", "d", "read the diff", "what it has written on this card's branch so far"),
+		nextStep("merge", "m", "land it on "+in.landBase(),
+			landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — uncommitted work has to be committed first, with your own message; "+msgNote),
+		nextStep("handoff", "h", "hand off",
+			"close the card without landing — a branch nothing else holds is kept"),
+	}
 }
 
-// waitOnDeps is the row a design gate held shut by unmet dependencies
-// leads with: what it waits on, and that the gate opens by itself once
-// they land. Taking it answers nothing; it says so (runCardAction's
-// "wait").
-func waitOnDeps(in nextInput) nextAction {
-	names := make([]string, 0, len(in.depBlockers))
-	for _, id := range in.depBlockers {
-		names = append(names, string(id))
+// legacyActions is the answer set of a retired workflow card (a feature,
+// bug, research or goal card from before sessions): it is never run
+// again, so what is left is to put it away — hand it off, keeping its
+// branch, or land the branch on a person's read of its diff.
+func legacyActions(in nextInput) []nextAction {
+	if in.kind == domain.KindResearch || in.kind == domain.KindGoal {
+		return nil
 	}
-	list := joinList(names)
-	verb, until := "has", "it does"
-	if len(names) > 1 {
-		verb, until = "have", "they do"
+	if !in.hasWorktree {
+		return []nextAction{nextStep("handoff", "h", "hand off",
+			"close the retired card — gummi no longer runs a workflow card")}
 	}
-	return nextStep("wait", "", "waits on "+list,
-		list+" "+verb+" not landed yet — approving is refused until "+until+"; the gate opens then")
-}
-
-// rebaseToLand is the row a verify gate leads with once a landing hit
-// conflicts with the base: the rebase that resolves them, with the agent
-// offered when git cannot.
-func rebaseToLand(in nextInput) nextAction {
-	why := "the last landing conflicted with " + in.landBase()
-	if len(in.landConflicts) > 0 {
-		why += " in " + joinList(in.landConflicts)
+	return []nextAction{
+		nextStep("diff", "d", "read the diff", "what the card left on its branch"),
+		nextStep("handoff", "h", "hand off",
+			"close the retired card and keep "+in.keptBranch()+" — gummi no longer runs a workflow card"),
+		nextStep("merge", "m", "land it on "+in.landBase(),
+			landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" on your read of its diff"),
 	}
-	return nextStep("rebase", "r", "rebase onto "+in.landBase(),
-		why+" — rebase first; an agent can resolve what git cannot")
 }
 
 // closedActions is the answer set for a card that has ended.
@@ -1540,93 +606,6 @@ func closedActions(in nextInput) []nextAction {
 // pending ask keep the full answer set": it replaces it.
 func answerIt() nextAction {
 	return nextStep("run", "enter", "answer it", "the agent asked a question and is blocked on your reply")
-}
-
-// stopHere is the "stop here" answer, or nothing when there is nothing
-// to stop.
-//
-// pause and park were never two actions — both are boardVerb's p, which
-// is engine.Pause either way (shell.go's pauseRun). Only the word
-// differed, by session state, which is a distinction the detail line can
-// carry without spending a second row on it. A session already paused
-// gets no row: it has already stopped.
-//
-// An INTERACTIVE session gets none either, and that is the lockstep rule
-// rather than a nicety. boardVerb's p pauses only a non-interactive
-// session (pauseRun refuses one outright); with an interactive session it
-// falls through to the dependency picker. So a "stop here" row keyed p on
-// a live design chat would name one act and perform an unrelated other —
-// exactly the divergence between the offered list and the key handler
-// that foreignBlockedKeys exists to prevent, and now stated for every
-// card rather than only for a foreign-driven one.
-func stopHere(in nextInput) []nextAction {
-	switch in.sess {
-	case "", engine.StatePaused, engine.StateInteractive:
-		return nil
-	}
-	if in.sess == engine.StateRunning {
-		return []nextAction{keyed(nextStep("pause", "p", "stop here", "free the slot"),
-			" — enter re-runs the stage later", " — run the stage again later")}
-	}
-	return []nextAction{nextStep("pause", "p", "stop here", "park it — nothing runs until you come back")}
-}
-
-// stopOrResume is stopHere's answer for every session state except a
-// paused one, where "pick it back up" takes its place instead.
-//
-// stopHere already returns nil for a paused session — it has already
-// stopped, so a second "stop here" row would offer what already
-// happened. §1.1a found that this meant a paused card at a FINISHED gate
-// rode with NOTHING in its place: the paused branch above used to return
-// early with a single "pick it back up" row and never reach the stage
-// switch at all, so the gate's own decision (land on main, approve, send
-// it back) disappeared along with it. Now that the paused branch falls
-// through into the same switch every other stop uses, every call site
-// below that used to append stopHere's row appends this one instead, so
-// a paused-but-finished stop still carries its way back into the run
-// beside the decision it is actually waiting on.
-//
-// Several call sites deliberately keep plain stopHere instead, because
-// they already carry their own id "run" / key "enter" row and this one
-// would only duplicate it: the design stage (talkAction grows its own
-// "resume the architect" wording once in.sess is StatePaused), implement's
-// and verify's blockedGate branches (the undrafted-sections row is itself
-// id "run" / key "enter" — nextsteps.go's own blockedGate), verify's
-// blocked-environment branch ("re-run verify" is the same id and key),
-// and attnFailure/attnQuestion ("try again", "answer it").
-func stopOrResume(in nextInput) []nextAction {
-	if in.sess == engine.StatePaused {
-		return []nextAction{nextStep("run", "enter", "pick it back up",
-			pausedWhy(in))}
-	}
-	return stopHere(in)
-}
-
-// pausedWhy is why a paused run's "pick it back up" row is there: a
-// pause, or the quit (a host restart) that cut the run mid-stage.
-func pausedWhy(in nextInput) string {
-	if in.cutByQuit {
-		return "gummi stopped while " + string(in.stage) + " ran — a fresh run picks it back up"
-	}
-	return "the run is paused — a fresh run picks " + string(in.stage) + " back up"
-}
-
-// noun names the work item kind for prose.
-func noun(k domain.Kind) string {
-	if k == domain.KindBug {
-		return "bug"
-	}
-	return "feature"
-}
-
-// designPartner names who the design stage's chat is with, by kind. One
-// stage, but a research topic is shaped by a researcher and a feature by
-// an architect, and the row should say which.
-func designPartner(kind domain.Kind) string {
-	if kind == domain.KindResearch {
-		return "the researcher"
-	}
-	return "the architect"
 }
 
 // repeatsLastPark reports whether the card's newest park already says

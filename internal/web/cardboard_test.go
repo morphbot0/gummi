@@ -16,7 +16,6 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -245,40 +244,6 @@ func (h *cardBoard) feature(id string) domain.Feature {
 		h.t.Fatal(err)
 	}
 	return f
-}
-
-// draft writes something into every section the card's current stage
-// owes, standing in for the stage agent's own output.
-func (h *cardBoard) draft(id string, sections ...string) {
-	h.t.Helper()
-	f := h.feature(id)
-	path := spec.LocateArtifact(
-		filepath.Join(h.root, f.ArtifactPath()),
-		filepath.Join(h.ws.DraftsDir(), spec.DraftFilename(&f)),
-		filepath.Join(h.root, f.WorktreePath(), f.ArtifactPath()),
-	)
-	if path == "" {
-		path = filepath.Join(h.ws.DraftsDir(), spec.DraftFilename(&f))
-		if err := spec.EnsureDraft(path, &f); err != nil {
-			h.t.Fatal(err)
-		}
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	content := string(raw)
-	for _, name := range spec.UndraftedSections(content, sections) {
-		body, _ := spec.ViewSection(content, name)
-		next, _, err := spec.ReplaceSection(content, name, body+"drafted by the fixture.\n\n")
-		if err != nil {
-			h.t.Fatal(err)
-		}
-		content = next
-	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		h.t.Fatal(err)
-	}
 }
 
 // option finds a decision's option by id.

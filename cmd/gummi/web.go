@@ -286,13 +286,6 @@ wait:
 		select {
 		case <-ctx.Done():
 			logf("web: closing the board…")
-			// Closing the web host is quitting the board, as q is in the TUI
-			// (Shell.quitNow): autopilot cards still running are stopped and
-			// marked, so the next host to open the board offers to pick them
-			// back up (Board.Resume) instead of leaving them silently parked.
-			if h.engine != nil {
-				h.engine.StopForQuit(context.Background())
-			}
 			break wait
 		case r := <-tailnetUp:
 			tailnetUp = nil

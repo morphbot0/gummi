@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -26,87 +24,6 @@ import (
 // card's CURRENT stage — stamped when the pass opens, the way
 // ConsultSession stamps its own — so the envelope the reader is looking
 // at is the money that was actually spent.
-
-// ErrNoScribe reports that there is no backend to run a one-shot card
-// pass on at all: no agent configured, or none the profile's scribe role
-// resolves to.
-//
-// It is deliberately distinct from a pass that ran and said nothing. A
-// caller must tell the two apart, because they mean opposite things: a
-// pass that answered nothing is a statement about the card (there is
-// nothing to say, so say nothing), while no backend at all is a
-// statement about the machine, and the caller keeps whatever it would
-// have done without a model.
-var ErrNoScribe = errors.New("no agent backend available for a one-shot card pass")
-
-// oneShot runs one scribe-role turn about f and returns the assistant's
-// text. hints are appended to the session's system prompt after the two
-// this always sets (read-only, and where the artifact is).
-//
-// The session is read-only by instruction and by shape: it is given the
-// card's worktree as its cwd and the artifact as an extra read allow,
-// and it is closed the moment the reply lands. Nothing here writes.
-func (e *Engine) oneShot(ctx context.Context, f domain.Feature, prompt string, hints ...string) (string, error) {
-	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
-	ag := e.agentFor(backend)
-	if ag == nil {
-		return "", ErrNoScribe
-	}
-	workDir, specPath, err := e.locate(ctx, f)
-	if err != nil {
-		return "", err
-	}
-	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:      workDir,
-		ArtifactPath: specPath,
-		Role:         agent.RoleScribe,
-		Model:        rc.Model,
-		Permission:   agent.PermissionAllowAll,
-		SystemHints: append([]string{
-			"You are reading this card read-only; do not modify any file.",
-			fmt.Sprintf("The card's artifact is at %s.", specPath),
-		}, hints...),
-		ExtraReadAllows: []string{specPath},
-	})
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = sess.Close() }()
-	if err := sess.Send(ctx, prompt); err != nil {
-		return "", err
-	}
-	// The stage is read once, here, and every sample is booked against
-	// it — not against whatever the card's stage has become by the time
-	// the reply lands. A pass that started at verify and finished after
-	// something bounced the card is still verify's spend.
-	stage := f.Stage
-	var text assistantText
-	for {
-		select {
-		case ev, ok := <-sess.Events():
-			if !ok {
-				return text.String(), nil
-			}
-			switch ev.Kind {
-			case agent.EventTextDelta:
-				text.delta(ev.Text)
-			case agent.EventMessage:
-				text.message(ev.Text)
-			case agent.EventUsage:
-				e.recordOneShotUsage(f.ID, stage, ev.Usage)
-			case agent.EventIdle, agent.EventBudgetExhausted:
-				// Budget exhaustion is a soft stop: the in-flight reply
-				// is done and no further turn will run, so waiting for an
-				// idle that is not coming would hang the caller.
-				return text.String(), nil
-			case agent.EventError:
-				return "", ev.Err
-			}
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
-	}
-}
 
 // recordOneShotUsage books one usage sample from a one-shot pass against
 // the card's overall spend and its (stage, role, model) breakdown, under

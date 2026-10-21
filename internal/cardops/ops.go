@@ -77,38 +77,23 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 		return o.fail(ctx, string(id), err)
 	}
 
-	// the verified-branch precondition, stricter than the TUI's any-stage m
-	// key: this command exists to land a verified branch.
-	//
-	// A HANDED-OFF card is the one exception, and it is exactly the TUI's:
-	// hand-off closes the card with its branch left unlanded, and landing
-	// it after all stays available for as long as the branch is there. Such
-	// a card is at done with a verified stamp already on it, so both
-	// preconditions below would refuse it on a technicality rather than on
-	// anything about the branch.
-	if f.HandedOff() {
-		if err := f.MayLandAfterAll(); err != nil {
-			return o.fail(ctx, string(id), fmt.Errorf("%s is %w", id, err))
+	// A HANDED-OFF card is the one closed card that may still land: hand-off
+	// closes the card with its branch left unlanded, and landing it after
+	// all stays available for as long as the branch is there.
+	if f.Stage == domain.StageDone && !f.HandedOff() {
+		return o.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
+	}
+	if !f.HandedOff() {
+		// a session's open crew is still working on its branch
+		if why := o.Eng.CrewHolds(ctx, id); why != "" {
+			return o.fail(ctx, string(id), fmt.Errorf("%s: %s", id, why))
 		}
-	} else {
-		if f.Stage == domain.StageDone {
-			return o.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
-		}
-		if f.IsFreeform() {
-			// a session's open crew is still working on its branch
-			if why := o.Eng.CrewHolds(ctx, id); why != "" {
-				return o.fail(ctx, string(id), fmt.Errorf("%s: %s", id, why))
-			}
-		}
-		// Two floors, one predicate: a card in the workflow lands on a
-		// verified branch; a freeform card lands on a human's read of its
-		// diff (domain.Feature.MayLand says which and why). The unresolved-
-		// annotation check further down is the freeform card's own floor,
-		// and it is the same one every landing crosses.
-		if err := f.MayLand(); err != nil {
-			return o.fail(ctx, string(id),
-				fmt.Errorf("%s is %w", id, err))
-		}
+	}
+	// The floor is a person's read of the diff (domain.Feature.MayLand
+	// says which cards have no landing at all); the unresolved-comment
+	// check further down is the part of it this command can enforce.
+	if err := f.MayLand(); err != nil {
+		return o.fail(ctx, string(id), fmt.Errorf("%s: %w", id, err))
 	}
 	// a card lands either via its linked PR or locally, never both: refuse
 	// before any git mutation, naming the PR and the unlink escape.
@@ -125,12 +110,10 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 			fmt.Errorf("%s sits on %s in its stack; land %s first, or its commits would ride in under %s",
 				id, blocker, blocker, id))
 	}
-	// the same open-thread / open-diff floor Advance applies before the
-	// verify→done gate; unresolved ones hold the merge.
-	if specOpen, diffOpen, _, err := o.Eng.GateBlockers(ctx, id); err != nil {
+	// unresolved diff comments hold the merge: the person's read of the
+	// diff is not finished while one is open
+	if diffOpen, err := o.Eng.OpenDiffComments(ctx, id); err != nil {
 		return o.fail(ctx, string(id), err)
-	} else if specOpen > 0 {
-		return o.fail(ctx, string(id), fmt.Errorf("%s has %d unresolved spec threads blocking the merge", id, specOpen))
 	} else if diffOpen > 0 {
 		return o.fail(ctx, string(id), fmt.Errorf("%s has %d unresolved diff annotations blocking the merge", id, diffOpen))
 	}
@@ -168,32 +151,12 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 		}
 	}
 
-	// commit any final uncommitted worktree work (matching the TUI's
-	// prepareMerge) so only committed work merges.
-	if f.IsFreeform() {
-		// a freeform card may land as a merge commit, which keeps every
-		// commit on its branch in history: loose work is committed by the
-		// person, with a message, never under a canned checkpoint subject
-		if dirty, err := wt.Dirty(ctx, &f); err != nil {
-			return o.fail(ctx, string(id), err)
-		} else if dirty {
-			return o.fail(ctx, string(id), fmt.Errorf("%s has uncommitted work in its worktree — commit it with `gummi commit %s -m <message>` first, or discard it", id, id))
-		}
-	} else if _, err := wt.CommitAll(ctx, &f, string(id)+": final checkpoint"); err != nil {
+	// loose work is committed by the person, with a message, never under a
+	// canned checkpoint subject: gummi never commits for the agent
+	if dirty, err := wt.Dirty(ctx, &f); err != nil {
 		return o.fail(ctx, string(id), err)
-	}
-	// the verified floor is about what lands, so it is read on the tip the
-	// squash takes — after that checkpoint, which is itself work no verify
-	// has seen when it committed anything (domain.Feature.MayLandAt)
-	if !f.HandedOff() && !f.IsFreeform() {
-		head, err := wt.Head(ctx, &f)
-		if err != nil {
-			return o.fail(ctx, string(id), err)
-		}
-		if err := f.MayLandAt(head); err != nil {
-			return o.fail(ctx, string(id),
-				fmt.Errorf("%s is %w", id, err))
-		}
+	} else if dirty {
+		return o.fail(ctx, string(id), fmt.Errorf("%s has uncommitted work in its worktree — commit it with `gummi commit %s -m <message>` first, or discard it", id, id))
 	}
 
 	sha, err := wt.Land(ctx, &f, message, method)
@@ -212,19 +175,9 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 			return o.fail(ctx, string(id), fmt.Errorf("landed %s but clearing its hand-off mark failed: %w", id, err))
 		}
 	}
-	// A handed-off card is already at done; only a card arriving from
-	// verify has a transition to record.
+	// A handed-off card is already at done; any other closes on landing.
 	if f.Stage != domain.StageDone {
-		// A freeform card's ending is not an edge in the graph — it holds
-		// StageOpen, which has none — so it closes through the store method
-		// that says so, and that refuses every other kind.
-		closed := o.Store.Transition
-		if f.IsFreeform() {
-			closed = func(ctx context.Context, id domain.FeatureID, _ domain.Stage, actor string) (domain.Feature, error) {
-				return o.Store.CloseFreeform(ctx, id, actor)
-			}
-		}
-		if _, err := closed(ctx, id, domain.StageDone, o.Actor); err != nil {
+		if _, err := o.Store.CloseCard(ctx, id, o.Actor); err != nil {
 			return o.fail(ctx, string(id), fmt.Errorf("landed %s but moving it to done failed: %w", id, err))
 		}
 	}
@@ -349,16 +302,14 @@ func (o *Ops) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 }
 
 // HandOff ends a card without landing it — the headless counterpart of the
-// TUI's h key and the third ending a verified card has. The branch stays
-// exactly where it is and the card moves to done; the caller owns whatever
-// happens to the branch next (a push, a PR opened by hand, a cherry-pick,
-// or nothing at all).
+// TUI's h key. The branch stays exactly where it is and the card closes at
+// done; the caller owns whatever happens to the branch next (a push, a PR
+// opened by hand, a cherry-pick, or nothing at all).
 //
-// The engine owns the three steps (final checkpoint commit, the hand-off
-// stamp, then Advance through the unchanged gate floor); this maps the
-// result to NDJSON + Outcome. A gate blocker is NOT a hand-off: the card
-// stays at verify and the refusal is reported as the error it is, because
-// waiving the landing never waived the quality floor.
+// The engine owns the act (engine.HandOff); this maps the result to NDJSON
+// + Outcome. An open diff comment is NOT a hand-off: the card stays open
+// and the refusal is reported as the error it is, because waiving the
+// landing never waived the person's read of the diff.
 func (o *Ops) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 	f, err := o.Store.GetFeature(ctx, id)
 	if err != nil {
@@ -369,47 +320,22 @@ func (o *Ops) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, error)
 	}
 	if f.Kind == domain.KindResearch {
 		return o.fail(ctx, string(id),
-			fmt.Errorf("%s carries no branch to hand off; advance it instead", id))
-	}
-	// the same precondition Merge applies, through the same predicate: a
-	// card in the workflow is handed off from a verified branch, and a
-	// freeform card is handed off whenever the person is done with it —
-	// which is what a freeform hand-off IS, the ending that keeps the
-	// branch and lands nothing.
-	if err := f.MayLand(); err != nil {
-		return o.fail(ctx, string(id),
-			fmt.Errorf("%s is %w", id, err))
+			fmt.Errorf("%s carries no branch to hand off", id))
 	}
 
 	res, err := o.Eng.HandOff(ctx, id, o.Actor)
 	if err != nil {
 		return o.fail(ctx, string(id), err)
 	}
-	if res.Status != engine.StatusAdvanced {
-		return o.fail(ctx, string(id), handOffRefusal(id, res))
+	switch res.Status {
+	case engine.HandOffClosed:
+	case engine.HandOffBlockedDiff:
+		return o.fail(ctx, string(id), fmt.Errorf("%s has %d unresolved diff annotation(s) holding it open", id, res.Blockers))
+	default:
+		return o.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
 	}
 	o.Out.Emit(handedOffEvent{Event: "handed off", ID: string(id), Branch: f.BranchName()})
 	return Outcome{Status: StatusDone, ID: string(id)}, nil
-}
-
-// handOffRefusal turns a non-advancing gate result into the sentence a
-// headless caller gets. Every one of these is a floor a hand-off does not
-// waive, so each names what to resolve rather than how to force it.
-func handOffRefusal(id domain.FeatureID, res engine.AdvanceResult) error {
-	switch res.Status {
-	case engine.StatusBlockedQuestions:
-		return fmt.Errorf("%s has %d unresolved spec thread(s) blocking the gate", id, res.Blockers)
-	case engine.StatusBlockedDiff:
-		return fmt.Errorf("%s has %d unresolved diff annotation(s) blocking the gate", id, res.Blockers)
-	case engine.StatusBlockedOmission:
-		return fmt.Errorf("%s: %s", id, res.Reason)
-	case engine.StatusBlockedUndrafted:
-		return fmt.Errorf("%s: %s wrote nothing in %s — the gate stays shut until the section is drafted",
-			id, res.From, strings.Join(res.Undrafted, ", "))
-	case engine.StatusNoop:
-		return fmt.Errorf("%s has nothing left to advance", id)
-	}
-	return fmt.Errorf("%s: the verify gate refused the hand-off", id)
 }
 
 // Squash collapses a card's branch to a single commit carrying the
@@ -519,7 +445,7 @@ func commitSubject(msg string) string {
 }
 
 // OpenReviewThreads reports the number of open review threads on id's
-// linked outbound PR (the diff-annotation half of GateBlockers) alongside
+// linked outbound PR (the card's open diff comments) alongside
 // the PR's URL, for the CLI's `--force` gate on `gummi squash`: collapsing a
 // branch a reviewer is actively commenting on force-pushes their comments
 // out from under them unless the operator explicitly acknowledges it.
@@ -528,7 +454,7 @@ func (o *Ops) OpenReviewThreads(ctx context.Context, id domain.FeatureID) (count
 	if err != nil {
 		return 0, "", err
 	}
-	_, diffOpen, _, err := o.Eng.GateBlockers(ctx, id)
+	diffOpen, err := o.Eng.OpenDiffComments(ctx, id)
 	if err != nil {
 		return 0, "", err
 	}

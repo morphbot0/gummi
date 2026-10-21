@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -345,7 +346,7 @@ func TestAFreeformCardHoldsItsCardLock(t *testing.T) {
 // stopping for a decision) and the review loop's resolve tool. No spec
 // tools, since there is no artifact for either to read or write.
 func TestAFreeformCardsToolSurfaceIsAskAndResolveOnly(t *testing.T) {
-	tools := stageTools(domain.StageOpen, flavorStage, nil)
+	tools := freeformTools()
 	if len(tools) != 2 || tools[0].Name != askToolName || tools[1].Name != resolveToolName {
 		var names []string
 		for _, td := range tools {
@@ -1310,4 +1311,24 @@ func TestARewrittenMainDoesNotLockAFreeformCardOut(t *testing.T) {
 	if err := ff.Send(ctx, "and then?"); err != nil {
 		t.Fatalf("a prompt after the rewrite was refused: %v", err)
 	}
+}
+
+// rewindMain rewinds the main checkout to an unrelated lineage that does not
+// descend from a feature's recorded fork — the FD-002 drift shape.
+func rewindMain(t *testing.T, root string) {
+	t.Helper()
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "rewound.ts"), []byte("rewound\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("checkout", "-q", "--orphan", "tmp-rewound")
+	git("commit", "-q", "-m", "rewound main")
+	git("branch", "-M", "tmp-rewound", "main")
 }

@@ -16,16 +16,16 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 )
 
-// diffWorkspace creates a feature at the review stage with a worktree that
-// has an uncommitted change, so the diff surface has something to show.
+// diffWorkspace creates a session with a worktree that has an uncommitted
+// change, so the diff surface has something to show.
 func diffWorkspace(t *testing.T) (*Shell, string) {
 	t.Helper()
 	m, root := newWorkspace(t)
 	m.now = func() time.Time { return fixedTime }
 	ctx := context.Background()
 	f := &domain.Feature{
-		ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode",
-		Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Dark mode", Slug: "dark-mode",
+		Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind, CreatedAt: fixedTime, UpdatedAt: fixedTime,
 	}
 	if err := m.store.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestDiffCommentPersistsAndAnchors(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	// persisted to the store
-	anns, err := m.store.ListDiffAnnotations(context.Background(), "FD-001")
+	anns, err := m.store.ListDiffAnnotations(context.Background(), "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestDiffCommentPersistsAndAnchors(t *testing.T) {
 	}
 
 	// change the annotated line's content → the anchor orphans on reload
-	changed := filepath.Join(root, (&domain.Feature{ID: "FD-001", Slug: "dark-mode"}).WorktreePath(), "README.md")
+	changed := filepath.Join(root, (&domain.Feature{ID: "FF-001", Slug: "dark-mode"}).WorktreePath(), "README.md")
 	if err := os.WriteFile(changed, []byte("x\ntotally different content\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -116,115 +116,6 @@ func TestDiffCommentPersistsAndAnchors(t *testing.T) {
 	if len(m.diff.orphans) != 1 {
 		t.Errorf("annotation did not orphan after its line changed: located=%v orphans=%v",
 			m.diff.located, m.diff.orphans)
-	}
-}
-
-func TestDiffRequestChangesGuardsStage(t *testing.T) {
-	m, _ := diffWorkspace(t)
-	eng := engine.New(engine.Config{
-		Agents: singleAgent(agent.NewFake("ok")), Store: m.store, Pool: m.wt,
-		Workspace: m.ws,
-	})
-	t.Cleanup(func() { eng.Close() })
-	m.AttachEngine(eng)
-	m = openDiffFor(t, m)
-	for i, l := range m.diff.lines {
-		if l == "+second line" {
-			m.diff.cursor = i + 1
-		}
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
-	m = typeString(t, m, "nit")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	// force a stage from which implement is unreachable; "request changes"
-	// must refuse without transitioning or tearing anything down.
-	m.diff.f.Stage = domain.StageDone
-	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
-	if m.diff == nil {
-		t.Fatal("surface closed on a rejected request-changes")
-	}
-	f, _ := m.store.GetFeature(context.Background(), "FD-001")
-	if f.Stage != domain.StageImplement {
-		t.Errorf("guard failed: stage changed to %s", f.Stage)
-	}
-	if !strings.Contains(m.notice.text, "implement or verify") {
-		t.Errorf("missing guard notice, got %q", m.notice.text)
-	}
-}
-
-func TestDiffRequestChangesRerunsWorkStage(t *testing.T) {
-	// R at the work stage itself (the "implement finished" gate) has no
-	// bounce edge to take: it re-runs implement in place, and the fresh
-	// run carries the open annotations via the engine's diff hints.
-	m, _ := diffWorkspace(t)
-	ctx := context.Background()
-	eng := engine.New(engine.Config{
-		Agents: singleAgent(agent.NewFake("addressed")), Store: m.store, Pool: m.wt,
-		Workspace: m.ws,
-	})
-	t.Cleanup(func() { eng.Close() })
-	m.AttachEngine(eng)
-	m = pump(t, m, m.Init()) // reload rows at the new stage
-
-	m = openDiffFor(t, m)
-	for i, l := range m.diff.lines {
-		if l == "+second line" {
-			m.diff.cursor = i + 1
-		}
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
-	m = typeString(t, m, "extract this into a helper")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
-	if m.diff != nil {
-		t.Fatal("request-changes did not close the diff surface")
-	}
-	if !strings.Contains(m.notice.text, "re-running implement") {
-		t.Errorf("notice = %q, want a re-run confirmation", m.notice.text)
-	}
-	f, _ := m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StageImplement {
-		t.Errorf("stage changed to %s, want implement (no transition)", f.Stage)
-	}
-	settleChat(t, eng)
-	s := eng.Get("FD-001")
-	if s == nil || s.Feature.Stage != domain.StageImplement {
-		t.Fatal("request-changes did not re-run the implement stage")
-	}
-}
-
-func TestOpenDiffCommentBlocksGate(t *testing.T) {
-	// unresolved diff annotations block g (DESIGN §6.1), same as spec
-	// annotations; resolving unblocks.
-	m, _ := diffWorkspace(t) // FD-001 at review with a worktree
-	ctx := context.Background()
-	ann := domain.DiffAnnotation{
-		Feature: "FD-001", File: "README.md",
-		Anchor: "second line", Excerpt: "+second line", Comment: "nit",
-	}
-	id, err := m.store.AddDiffAnnotation(ctx, ann, fixedTime)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	m = pressAdvance(t, m)
-	f, _ := m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StageImplement {
-		t.Fatalf("open diff comment did not block the gate (stage=%s)", f.Stage)
-	}
-	if !strings.Contains(m.notice.text, "diff comment") {
-		t.Errorf("notice = %q, want a blocking message", m.notice.text)
-	}
-
-	if err := m.store.SetDiffAnnotationResolved(ctx, id, true); err != nil {
-		t.Fatal(err)
-	}
-	m = pressAdvance(t, m)
-	f, _ = m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StageVerify {
-		t.Fatalf("resolving the diff comment did not unblock the gate (stage=%s)", f.Stage)
 	}
 }
 
@@ -262,7 +153,7 @@ func TestDiffDeleteAnnotation(t *testing.T) {
 	if m.diff.openCount() != 0 {
 		t.Errorf("openCount = %d after delete, want 0", m.diff.openCount())
 	}
-	anns, err := m.store.ListDiffAnnotations(context.Background(), "FD-001")
+	anns, err := m.store.ListDiffAnnotations(context.Background(), "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +179,7 @@ func TestDiffShowsCommentsInline(t *testing.T) {
 func TestDiffWrapsLongLines(t *testing.T) {
 	m, root := diffWorkspace(t)
 	long := "x\n" + strings.Repeat("wide ", 40) + "ENDMARK\n"
-	wtFile := filepath.Join(root, (&domain.Feature{ID: "FD-001", Slug: "dark-mode"}).WorktreePath(), "README.md")
+	wtFile := filepath.Join(root, (&domain.Feature{ID: "FF-001", Slug: "dark-mode"}).WorktreePath(), "README.md")
 	if err := os.WriteFile(wtFile, []byte(long), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +222,7 @@ func TestDiffOrphanReachableWithCursor(t *testing.T) {
 	m = openDiffFor(t, m)
 	m = commentOnAddedLine(t, m, "stale nit")
 
-	wtFile := filepath.Join(root, (&domain.Feature{ID: "FD-001", Slug: "dark-mode"}).WorktreePath(), "README.md")
+	wtFile := filepath.Join(root, (&domain.Feature{ID: "FF-001", Slug: "dark-mode"}).WorktreePath(), "README.md")
 	if err := os.WriteFile(wtFile, []byte("x\ntotally different content\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +248,7 @@ func TestDiffOrphanReachableWithCursor(t *testing.T) {
 		t.Errorf("openCount = %d after resolving the orphan, want 0", m.diff.openCount())
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'D', Text: "D"})
-	anns, err := m.store.ListDiffAnnotations(context.Background(), "FD-001")
+	anns, err := m.store.ListDiffAnnotations(context.Background(), "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,43 +278,6 @@ func TestDiffResolveTogglesOpenCount(t *testing.T) {
 	}
 }
 
-func TestDiffApproveFromSurface(t *testing.T) {
-	// A from the diff surface advances the gate (Review → Verify).
-	m, _ := diffWorkspace(t)
-	ctx := context.Background()
-	m = openDiffFor(t, m)
-	m = pressAdvance(t, m)
-	if m.diff != nil {
-		t.Fatal("g did not close the diff surface")
-	}
-	f, _ := m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StageVerify {
-		t.Errorf("A did not advance the gate: stage = %s, want verify", f.Stage)
-	}
-
-	// with an open diff comment the surface closes but the gate stays shut.
-	m2, _ := diffWorkspace(t)
-	ann := domain.DiffAnnotation{
-		Feature: "FD-001", File: "README.md",
-		Anchor: "second line", Excerpt: "+second line", Comment: "open",
-	}
-	if _, err := m2.store.AddDiffAnnotation(ctx, ann, fixedTime); err != nil {
-		t.Fatal(err)
-	}
-	m2 = openDiffFor(t, m2)
-	m2 = pressAdvance(t, m2)
-	if m2.diff != nil {
-		t.Fatal("A should close the surface even when blocked")
-	}
-	f2, _ := m2.store.GetFeature(ctx, "FD-001")
-	if f2.Stage != domain.StageImplement {
-		t.Errorf("open diff comment did not hold the gate: stage = %s, want implement", f2.Stage)
-	}
-	if !strings.Contains(m2.notice.text, "diff comment") {
-		t.Errorf("blocked notice = %q, want a diff blocking message", m2.notice.text)
-	}
-}
-
 // TestDiffAnnotationTagsPRSource proves the render path reads
 // DiffAnnotation.SourceRef (diffrender.go's annBlock): an annotation
 // ingested from a PR review thread carries a non-empty SourceRef and gets
@@ -432,12 +286,12 @@ func TestDiffApproveFromSurface(t *testing.T) {
 func TestDiffAnnotationTagsPRSource(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	ctx := context.Background()
-	local := domain.DiffAnnotation{Feature: "FD-001", File: "README.md", Anchor: "second line", Comment: "local note here"}
+	local := domain.DiffAnnotation{Feature: "FF-001", File: "README.md", Anchor: "second line", Comment: "local note here"}
 	if _, err := m.store.AddDiffAnnotation(ctx, local, fixedTime); err != nil {
 		t.Fatal(err)
 	}
 	fromPR := domain.DiffAnnotation{
-		Feature: "FD-001", File: "README.md", Anchor: "second line",
+		Feature: "FF-001", File: "README.md", Anchor: "second line",
 		SourceRef: "PRRT_kwDOAbc", Comment: "please add a test",
 	}
 	if _, err := m.store.AddDiffAnnotation(ctx, fromPR, fixedTime); err != nil {
@@ -465,5 +319,60 @@ func TestDiffAnnotationTagsPRSource(t *testing.T) {
 	}
 	if !strings.Contains(prLine, "PR") {
 		t.Errorf("PR-origin annotation missing its tag: %q", prLine)
+	}
+}
+
+// R on a session's diff sends its open comments to the session as its
+// next turn.
+func TestDiffRequestChangesSendsToTheSession(t *testing.T) {
+	m, _ := diffWorkspace(t)
+	eng := engine.New(engine.Config{
+		Agents: singleAgent(agent.NewFake("addressed")), Store: m.store, Pool: m.wt,
+		Workspace: m.ws,
+	})
+	t.Cleanup(func() { eng.Close() })
+	m.AttachEngine(eng)
+	m = pump(t, m, m.Init())
+
+	m = openDiffFor(t, m)
+	for i, l := range m.diff.lines {
+		if l == "+second line" {
+			m.diff.cursor = i + 1
+		}
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "extract this into a helper")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	m = pump(t, m, nil)
+	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
+	if m.diff != nil {
+		t.Fatalf("request-changes did not close the diff surface (notice %q)", m.notice.text)
+	}
+	waitForTurn(t, eng, "FF-001", "extract this into a helper")
+}
+
+// An open diff comment holds the landing until it is resolved.
+func TestOpenDiffCommentHoldsTheLanding(t *testing.T) {
+	m, _ := diffWorkspace(t)
+	ctx := context.Background()
+	ann := domain.DiffAnnotation{
+		Feature: "FF-001", File: "README.md",
+		Anchor: "second line", Excerpt: "+second line", Comment: "nit",
+	}
+	id, err := m.store.AddDiffAnnotation(ctx, ann, fixedTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
+	if why := m.landingRefusal(m.rows[0].F); !strings.Contains(why, "open diff comment") {
+		t.Fatalf("landing refusal = %q, want the open comment named", why)
+	}
+	if err := m.store.SetDiffAnnotationResolved(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
+	if why := m.landingRefusal(m.rows[0].F); why != "" {
+		t.Fatalf("a resolved comment still holds the landing: %q", why)
 	}
 }

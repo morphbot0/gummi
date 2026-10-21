@@ -12,13 +12,12 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// handedOffCard walks a card to done and stamps the hand-off on it — the
-// ending whose closing block offers "open a bug from this" beside "land
-// it after all".
+// handedOffCard is a retired card closed by a hand-off — the ending whose
+// closing block offers a follow-up beside "land it after all".
 func handedOffCard(t *testing.T) *Shell {
 	t.Helper()
 	m, _ := chatWorkspace(t, agent.NewFake("ok"))
-	m = advanceTo(t, m, domain.StageDone)
+	m.rows[0].F.Stage = domain.StageDone
 	m.rows[0].F.HandedOffAt = time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
 	m.rows[0].Landed = false
 	// back to the board and into the card's own page, where the closing

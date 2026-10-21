@@ -31,8 +31,8 @@ func TestSanitizeStripsEscapes(t *testing.T) {
 // chat transcript.
 func TestChatRendersHostileModelOutputSafely(t *testing.T) {
 	hostile := "Sure!\x1b]52;c;bWFsaWNpb3Vz\x07 done."
-	m, eng := chatWorkspace(t, agent.NewFake(hostile))
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, agent.NewFake(hostile))
+	settleChat(t, eng)
 	m = typeString(t, m, "hi")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	settleChat(t, eng)

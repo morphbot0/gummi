@@ -34,16 +34,14 @@ func TestResolveRolePerProfile(t *testing.T) {
 	})
 	t.Cleanup(func() { e.Close() })
 
-	// a premium feature at review → the reviewer's model
-	f := feature(1, "review me", domain.StageVerify)
+	// a premium session → the implementer's model
+	f := freeformCard(1, "work on it")
 	f.Profile = "premium"
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-	if got := rec.opts(); got.Model != "gpt-5-codex" || got.Role != agent.RoleReviewer {
-		t.Errorf("premium review model = %q (role %s), want gpt-5-codex reviewer", got.Model, got.Role)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
+	if got := rec.opts(); got.Model != "claude-sonnet" || got.Role != agent.RoleImplementer {
+		t.Errorf("premium session model = %q (role %s), want claude-sonnet implementer", got.Model, got.Role)
 	}
 }
 
@@ -67,67 +65,16 @@ func TestResolveRoleBackend(t *testing.T) {
 	})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(2, "impl", domain.StageImplement)
+	f := freeformCard(2, "impl")
 	f.Profile = "thrifty"
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-002", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-002")
 	if got := head.opts(); got.Model != "qwen" {
 		t.Errorf("headless implementer model = %q, want qwen", got.Model)
 	}
 	if def.count() != 0 {
 		t.Errorf("default backend saw %d sessions, want 0 (implementer routed elsewhere)", def.count())
-	}
-}
-
-func TestResolveRoleFallback(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	rec := recordingAgent()
-	e := New(Config{
-		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback-model", Profiles: profilesFixture(),
-	})
-	t.Cleanup(func() { e.Close() })
-
-	// thrifty has no reviewer role; verify (reviewer) falls back to Model
-	f := feature(3, "verify", domain.StageVerify)
-	f.Profile = "thrifty"
-	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-003", StateDone)
-	if got := rec.opts(); got.Model != "fallback-model" {
-		t.Errorf("uncovered role model = %q, want the fallback", got.Model)
-	}
-}
-
-// Verify is reviewer work (adversarial judgment gating the landing) —
-// pin the mapping and that a profile's reviewer model carries over.
-func TestVerifyStageUsesReviewerRole(t *testing.T) {
-	if role, ok := roleForStage(domain.Feature{Stage: domain.StageVerify}); !ok || role != agent.RoleReviewer {
-		t.Fatalf("roleForStage(verify) = %s/%v, want reviewer", role, ok)
-	}
-
-	ws, store, wt := newRepo(t)
-	rec := recordingAgent()
-	e := New(Config{
-		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback-model", Profiles: profilesFixture(),
-	})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(5, "verify", domain.StageVerify)
-	f.Profile = "premium"
-	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-005", StateDone)
-	if got := rec.opts(); got.Model != "gpt-5-codex" || got.Role != agent.RoleReviewer {
-		t.Errorf("premium verify = %q (role %s), want gpt-5-codex reviewer", got.Model, got.Role)
 	}
 }
 
@@ -150,13 +97,11 @@ func TestResolveRoleUnknownProfileUsesDefault(t *testing.T) {
 
 	// a feature with an unknown profile name → the file's default (thrifty).
 	// thrifty's implementer names backend: headless.
-	f := feature(4, "impl", domain.StageImplement)
+	f := freeformCard(4, "impl")
 	f.Profile = "does-not-exist"
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-004", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-004")
 	if got := head.opts(); got.Model != "qwen" {
 		t.Errorf("unknown profile: headless model = %q, want the default profile's (qwen)", got.Model)
 	}

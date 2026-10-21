@@ -14,7 +14,7 @@ import (
 )
 
 // newLiveSession returns a session bound to a live file at path, with the
-// same header bindLiveLog stamps.
+// header a live file carries.
 func newLiveSession(t *testing.T, path string, f domain.Feature) *Session {
 	t.Helper()
 	w, err := livelog.Create(path, livelog.Record{
@@ -25,7 +25,7 @@ func newLiveSession(t *testing.T, path string, f domain.Feature) *Session {
 		t.Fatalf("create live file: %v", err)
 	}
 	s := &Session{Feature: f, Role: agent.RoleImplementer, done: make(chan struct{})}
-	s.bindLive(w)
+	s.live = w
 	return s
 }
 
@@ -178,37 +178,6 @@ func TestFollowerShowsAskReadOnly(t *testing.T) {
 	}
 	if len(ask.Options) != 0 {
 		t.Error("a followed ask carries options, implying a watcher could pick one")
-	}
-}
-
-// The transcript a session already carries (a restart-reattach) is
-// replayed onto the live file, so a follower joining later sees the whole
-// conversation rather than only what arrives next.
-func TestBindLiveReplaysCarriedTranscript(t *testing.T) {
-	f := domain.Feature{ID: "FD-104", Stage: domain.StagePlan}
-	path := filepath.Join(t.TempDir(), "FD-104.jsonl")
-
-	s := &Session{Feature: f, Role: agent.RoleArchitect, done: make(chan struct{})}
-	s.transcript = []Message{
-		{Author: AuthorSystem, Content: "kickoff"},
-		{Author: AuthorUser, Content: "use sqlite"},
-		{Author: AuthorAssistant, Content: "understood"},
-	}
-	w, err := livelog.Create(path, livelog.Record{Feature: string(f.ID), Stage: string(f.Stage)})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	s.bindLive(w)
-	s.stop()
-
-	fl := NewFollower(f)
-	collect(t, path, fl)
-	got := fl.Snapshot().Transcript
-	if len(got) != 3 {
-		t.Fatalf("replayed transcript = %d messages, want the 3 carried over", len(got))
-	}
-	if got[1].Author != AuthorUser || got[1].Content != "use sqlite" {
-		t.Errorf("message 1 = %s/%q, want user/\"use sqlite\"", got[1].Author, got[1].Content)
 	}
 }
 

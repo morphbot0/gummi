@@ -1044,6 +1044,6 @@ func (e *Engine) removeCrewCard(ctx context.Context, id domain.FeatureID, branch
 		_ = e.pool.DeleteBranch(ctx, &f, true)
 	}
 	if f.Stage != domain.StageDone {
-		_, _ = e.crewStore().CloseFreeform(ctx, id, state.ActorCrew)
+		_, _ = e.crewStore().CloseCard(ctx, id, state.ActorCrew)
 	}
 }

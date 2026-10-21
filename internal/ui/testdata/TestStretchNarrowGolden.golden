@@ -20,15 +20,15 @@ plan · architect · 1 turn · $1.80 ──────────── ✓ 00
     sure — nothing else is running.
 
 
-
-
-
-
-
-
+ This is a retired workflow card: gummi no longer
+ runs it. Hand it off to keep its branch, or land it
+ on your read of its diff.
 
 gummi
  nothing is running — choose what happens next.
-▸ 1. run implement — no active run — start the stage
+▸ 1. read the diff
+  what the card left on its branch
+  2. hand off — close the retired card and keep gum…
+  3. land it on main — land the branch — one squash…
 
-┃ message the agent, /approve /verify /diff…, or ↑  
+┃ ask about this retired card, /diff /land…, or ↑   

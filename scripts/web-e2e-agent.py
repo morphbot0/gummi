@@ -25,6 +25,9 @@ artifact):
                    puts the choice to the person with ask_user (two options,
                    changes_section "Chosen approach"), and finishes the spec
                    with whatever the answer was.
+    [ask-where]    a session asks where the helper lives (two options) and
+                   says back "Decided with the user: <answer>"; the
+                   [ask-*] variants below do the same in a session.
     [ask-multi]    as [ask], but the question takes several answers
                    (multi_select), so a test can pick more than one.
     [ask-long]     as [ask], but the question is a multi-paragraph text of
@@ -666,6 +669,15 @@ def freeform_turn(turn, text):
         turn.tool("Monitor", "tail -f build.log", "ff-watch")
         turn.say("Watching the build; I will tell you when it breaks.")
         return
+    answered = re.search(r"^The answer is: (.*)$", text, re.M)
+    if answered:
+        # an answer that reaches the session as a turn of its own (its
+        # backend was replaced, or gave up on the call that asked)
+        turn.say("Decided with the user: %s" % answered.group(1).strip())
+        return
+    if any(k in text for k in SESSION_ASKS):
+        session_where_ask(turn, text)
+        return
     if "[ask]" in text:
         # blocks inside ask_user until the person answers, then echoes the
         # answer as the tool result's words, so a test can read them back
@@ -694,6 +706,34 @@ def freeform_turn(turn, text):
     second = "completed" if "[tasks-done]" in text else "in_progress"
     turn.tasks(("Note the fix", "completed"), ("Say what was done", second))
     turn.say("Done: noted it in NOTES.md.")
+
+
+# The question variants a session can be started with: each asks where the
+# helper lives, the way the retired plan stage's [ask] did, and its answer
+# comes back as "Decided with the user: <answer>".
+SESSION_ASKS = ("[ask-where]", "[ask-multi]", "[ask-long]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]")
+
+
+def session_where_ask(turn, text):
+    ctx = turn.ctx
+    gives_up = "[ask-gives-up]" in text
+    dies = "[ask-dies]" in text
+    spends = "[ask-spends]" in text
+    long_q = "[ask-long]" in text
+    turn.say("There are two ways to place the helper. I need you to pick one.")
+    options = [
+        {"label": "A new file (recommended)", "detail": "one function and its test, nothing else touched"},
+        {"label": "Extend the existing file", "detail": "fewer files, noisier diff"},
+    ]
+    if long_q:
+        options.append({"label": "A shared package", "detail": "a new package other cards can import too"})
+    answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up or dies else None,
+                       spend=ASK_SPEND if spends else 0, args={
+        "question": (LONG_QUESTION % ctx["card"]) if long_q else "Where should %s's helper live?" % ctx["card"],
+        "options": options,
+        **({"multi_select": True} if "[ask-multi]" in text else {}),
+    })
+    turn.say("Decided with the user: %s" % answer.strip().splitlines()[0])
 
 
 CREW_PLAN = """lanes: 1
@@ -829,7 +869,7 @@ def scribe(ctx, prompt):
 # session
 # --------------------------------------------------------------------------
 
-KEYWORDS = ("[ask-multi]", "[ask-long]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[fold]", "[slow]", "[research]")
+KEYWORDS = ("[ask-where]", "[ask-multi]", "[ask-long]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[fold]", "[slow]", "[research]")
 
 
 def detect(frame):

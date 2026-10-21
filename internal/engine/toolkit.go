@@ -48,3 +48,19 @@ func resolve(ctx context.Context, sess agent.Session, callID, result string) {
 		_ = r.Resolve(ctx, callID, result)
 	}
 }
+
+// firstLine returns s's first non-blank line, trimmed and cut to a
+// length a card's error line can carry: opencode's denial is one line
+// that goes on to list every permission rule in force.
+func firstLine(s string) string {
+	const maxRunes = 200
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			if r := []rune(l); len(r) > maxRunes {
+				l = string(r[:maxRunes]) + "…"
+			}
+			return l
+		}
+	}
+	return ""
+}

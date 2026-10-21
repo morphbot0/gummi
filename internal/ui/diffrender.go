@@ -194,35 +194,32 @@ func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, pad, w int) stri
 	return strings.Join(rows, "\n")
 }
 
-// requestDiffChanges sends the open diff annotations to the implementer
-// (DESIGN §6.1). Already at the work stage (the implement gate) there is
-// no edge to take, so the stage takes them in place — the engine folds
-// the open annotations into every implement run's hints (see
-// newAgentSession). From verify, or with a spec comment open that an
-// earlier stage owns, the card goes back to the stage that owns them
-// (engine.RouteComments), asked first. Blocks with a notice when there is
-// nothing open to send.
+// requestDiffChanges sends the open diff annotations to the card's
+// session as its next turn (DESIGN §6.1). Blocks with a notice when there
+// is nothing open to send.
 func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
-	cmd, refused, ask := m.diffChanges(dv.f, dv.anns)
-	if ask != nil {
-		// the surface closes on the yes; the fix runs on the board
-		return m.confirmChanges(ask, func() { m.diff = nil })
-	}
+	cmd, refused := m.diffChanges(dv.f, dv.anns)
 	if cmd == nil {
 		m.notice = refused
 		return nil
 	}
-	m.diff = nil // close the surface; the fix runs on the board
+	m.diff = nil // close the surface; the session works on the board
 	return cmd
 }
 
 // diffChanges is requestDiffChanges for any face: the command that sends
-// anns' open comments on; or the question to ask before a send-back that
-// moves the card; or — both nil — the notice saying why nothing can be
+// anns' open comments on, or — nil — the notice saying why nothing can be
 // sent.
-func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea.Cmd, noticeMsg, *changesAsk) {
+//
+// A session has exactly one conversation and it is always the writer, so
+// the comments go to it as its next turn. If its backend idled out, Send
+// respawns one carrying the transcript; if the card page was never opened
+// this session, OpenFreeform is what opens it — idempotent per card, so
+// asking twice costs nothing. A retired workflow card is never run again,
+// so nothing takes its comments.
+func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea.Cmd, noticeMsg) {
 	if m.engine == nil {
-		return nil, noticeMsg{text: m.noAgent(""), isErr: true}, nil
+		return nil, noticeMsg{text: m.noAgent(""), isErr: true}
 	}
 	n := 0
 	for _, a := range anns {
@@ -231,70 +228,21 @@ func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea
 		}
 	}
 	if n == 0 {
-		return nil, noticeMsg{text: "no open diff comments to send"}, nil
+		return nil, noticeMsg{text: "no open diff comments to send"}
 	}
-	// A freeform card has exactly one session and it is always the writer,
-	// so all of the routing below collapses: there is no stage to
-	// transition to, no critique pass that must not receive the comments,
-	// and no kickoff to append them to. They go to that session as its
-	// next turn. If its backend idled out, Send respawns one carrying the
-	// transcript; if the card page was never opened this session,
-	// OpenFreeform is what opens it — idempotent per card, so asking twice
-	// costs nothing.
-	if f.IsFreeform() {
-		turn := engine.CompileDiffComments(anns, m.engine.ClientTools())
-		return func() tea.Msg {
-			ctx := context.Background()
-			ff, err := m.engine.OpenFreeform(ctx, f)
-			if err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-			if err := ff.Send(ctx, turn); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-			return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to its session", f.Name(), n, plural(n)), reload: true}
-		}, noticeMsg{}, nil
+	if !f.IsFreeform() {
+		return nil, noticeMsg{text: f.Name() + " is a retired workflow card — nothing runs it to take the comments", isErr: true}
 	}
-	// the diff's comments route with the artifact's: a design note left
-	// beside them sends the card to plan, not to the implementer, who
-	// would otherwise be handed a comment it has no business answering
-	route := engine.RouteComments(domain.CardTypeOf(&f), f.Stage, m.artifactDoc(f), n)
-	if route.Rewinds() {
-		return nil, noticeMsg{}, m.commentRewind(f, route)
-	}
-	// in place is only the work stage's: before it there is no code to
-	// have commented on as the implementer's work, and past verify there
-	// is no edge back
-	if f.Stage != domain.StageImplement {
-		return nil, noticeMsg{text: "request changes works from the implement or verify gate", isErr: true}, nil
-	}
-	// The notices below used to hard-code "comment(s)" and let a single
-	// open comment read "sent 1 diff comment(s) to the implementer"
-	// verbatim. plural(n) (reviewloop.go) picks the right suffix instead
-	// of punting the choice onto the reader.
 	turn := engine.CompileDiffComments(anns, m.engine.ClientTools())
 	return func() tea.Msg {
 		ctx := context.Background()
-		// deliver to a running session as a live turn, or re-run the
-		// stage (a fresh run reads the open annotations from the store).
-		if s := m.engine.Get(f.ID); s != nil {
-			switch s.State() {
-			case engine.StateRunning:
-				// implement runs carry the open diff comments in their
-				// hints, so a held one reaches the next writer run
-				if held := heldForWriter(s.Snapshot(), f, n, "diff comment"); held != "" {
-					return noticeMsg{text: held}
-				}
-				if err := m.engine.Send(ctx, f.ID, turn); err != nil {
-					return noticeMsg{text: sanitize(err.Error()), isErr: true}
-				}
-				return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to the running %s agent", f.Name(), n, plural(n), f.Stage), reload: true}
-			}
+		ff, err := m.engine.OpenFreeform(ctx, f)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		m.dropSession(f.ID)
-		if err := m.engine.Run(f); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
+		if err := ff.Send(ctx, turn); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d diff comment%s", f.Name(), f.Stage, n, plural(n)), reload: true}
-	}, noticeMsg{}, nil
+		return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to its session", f.Name(), n, plural(n)), reload: true}
+	}, noticeMsg{}
 }

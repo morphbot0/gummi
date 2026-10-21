@@ -49,7 +49,7 @@ func TestBG071ReviewSurfacesKeepTheWayOutAndTheGate(t *testing.T) {
 			{Text: "✉ 2 need you"},
 		}
 		bar := ansi.Strip(statusbar.Render(theme.New(theme.GummiDark()), 140, pills, hints))
-		for _, want := range []string{"approve", "back"} {
+		for _, want := range []string{"back"} {
 			if !strings.Contains(bar, want) {
 				t.Errorf("%s at 140 cols: %q shed from the bar\n%s", name, want, bar)
 			}

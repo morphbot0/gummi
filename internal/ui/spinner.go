@@ -47,7 +47,7 @@ func (m *Shell) spinnerActive() bool {
 	if !m.motionEnabled {
 		return false
 	}
-	if len(m.mergePrep) > 0 || m.squashPrep || len(m.baselining) > 0 || len(m.scribing) > 0 || len(m.ghWork) > 0 {
+	if len(m.mergePrep) > 0 || m.squashPrep || len(m.ghWork) > 0 {
 		return true
 	}
 	// a line on its way to a consult session that has not opened yet: no
@@ -62,14 +62,6 @@ func (m *Shell) spinnerActive() bool {
 	// be read from.
 	for _, r := range m.rows {
 		if r.DrivenAbroad && r.Foreign.Busy {
-			return true
-		}
-	}
-	if m.engine == nil {
-		return false
-	}
-	for _, s := range m.engine.Sessions() {
-		if s.Busy() {
 			return true
 		}
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui"
@@ -45,9 +46,11 @@ func publishBoard(t *testing.T) (b *docsBoard, fake, bare string) {
 	t.Setenv("GUMMI_GH_CMD", gh)
 	publish.RewriteAllowed = func(string) bool { return true }
 	docsShellSetup = func(s *ui.Shell) { s.EnablePublishing(gh) }
+	docsSeedSession = true
 	t.Cleanup(func() {
 		publish.RewriteAllowed = func(string) bool { return false }
 		docsShellSetup = nil
+		docsSeedSession = false
 	})
 	b = newDocsBoard(t, agent.NewFake("ok"))
 	gitIn(t, tmp, "init", "-q", "--bare", bare)
@@ -73,39 +76,46 @@ func publishBoard(t *testing.T) (b *docsBoard, fake, bare string) {
 	return b, fake, bare
 }
 
-func TestPublishOpensADraftPRForAnUnverifiedCardAndRecordsIt(t *testing.T) {
+func TestPublishOpensADraftPRBelowTheFloorAndRecordsIt(t *testing.T) {
 	b, fake, bare := publishBoard(t)
 	ctx := context.Background()
 	tip := gitIn(t, b.wt, "rev-parse", "HEAD")
 
+	// an open review comment on the diff holds the card below the floor
+	if _, err := b.store.AddDiffAnnotation(ctx, domain.DiffAnnotation{
+		Feature: b.f.ID, File: "main.go", Anchor: "h", Excerpt: "x", Comment: "why?",
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
 	var p webapi.PR
-	b.get("/api/cards/FD-001/pr?refresh=1", &p)
+	b.get("/api/cards/FF-001/pr?refresh=1", &p)
 	if p.Publish == nil || !p.Publish.Available || len(p.Publish.Acts) != 1 || p.Publish.Acts[0] != "create" {
 		t.Fatalf("the PR tab offers %+v, want create", p.Publish)
 	}
 
 	var fx webapi.PublishFacts
-	if st := b.get("/api/cards/FD-001/publish?act=create", &fx); st != http.StatusOK || fx.Error != nil {
+	if st := b.get("/api/cards/FF-001/publish?act=create", &fx); st != http.StatusOK || fx.Error != nil {
 		t.Fatalf("facts = %d %+v", st, fx.Error)
 	}
 	if fx.Tip != tip || fx.Head == "" || fx.BaseRepo != "me/widget" || fx.Fingerprint == "" || fx.Title == "" {
 		t.Fatalf("facts = %+v", fx)
 	}
-	// the card is mid-implement: the floor, not the person, makes it a draft
+	// the open comment, not the person, makes it a draft
 	if !fx.Draft || !fx.DraftLocked || fx.DraftWhy == "" {
-		t.Fatalf("an unverified card's PR must open as a locked draft: %+v", fx)
+		t.Fatalf("a PR below the floor must open as a locked draft: %+v", fx)
 	}
 
 	// a confirm that names no facts runs nothing
 	var refused webapi.PublishResult
-	b.send(http.MethodPost, "/api/cards/FD-001/publish", `{"act":"create","title":"x"}`, &refused)
+	b.send(http.MethodPost, "/api/cards/FF-001/publish", `{"act":"create","title":"x"}`, &refused)
 	if refused.Error == nil || refused.Error.Code != string(publish.CodeConfirmationNeeded) {
 		t.Fatalf("no fingerprint = %+v", refused)
 	}
 
 	body, _ := json.Marshal(webapi.PublishRequest{Act: "create", Fingerprint: fx.Fingerprint, Title: "feat: dark mode", Body: "why\n"})
 	var res webapi.PublishResult
-	if st := b.send(http.MethodPost, "/api/cards/FD-001/publish", string(body), &res); st != http.StatusOK {
+	if st := b.send(http.MethodPost, "/api/cards/FF-001/publish", string(body), &res); st != http.StatusOK {
 		t.Fatalf("publish = %d", st)
 	}
 	if res.Number != 512 || !res.Draft || res.Pushed != tip || res.LinkError != "" {
@@ -118,11 +128,11 @@ func TestPublishOpensADraftPRForAnUnverifiedCardAndRecordsIt(t *testing.T) {
 	if !strings.Contains(string(log), "pr create --repo me/widget") || !strings.Contains(string(log), "--draft") {
 		t.Fatalf("gh was called as:\n%s", log)
 	}
-	f, err := b.store.GetFeature(ctx, "FD-001")
+	f, err := b.store.GetFeature(ctx, "FF-001")
 	if err != nil || f.PullRequest.Number != 512 || f.PullRequest.HeadSHA != tip {
 		t.Fatalf("the card links %+v (%v)", f.PullRequest, err)
 	}
-	evs, err := b.store.Events(ctx, "FD-001")
+	evs, err := b.store.Events(ctx, "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,15 +151,15 @@ func TestPublishOpensADraftPRForAnUnverifiedCardAndRecordsIt(t *testing.T) {
 	// same confirm sent again publishes nothing
 	writeFile(t, filepath.Join(fake, "view.json"), `{"number":512,"url":"https://github.com/me/widget/pull/512","state":"OPEN","isDraft":true,"headRefOid":"`+tip+`","headRefName":"`+b.f.BranchName()+`","headRepositoryOwner":{"login":"me"}}`)
 	refused = webapi.PublishResult{}
-	b.send(http.MethodPost, "/api/cards/FD-001/publish", string(body), &refused)
+	b.send(http.MethodPost, "/api/cards/FF-001/publish", string(body), &refused)
 	if refused.Error == nil || refused.Error.Code != string(publish.CodeFactsChanged) {
 		t.Fatalf("a stale confirm = %+v", refused)
 	}
 	// and readying it is refused by the floor, not left to the person
 	var ready webapi.PublishFacts
-	b.get("/api/cards/FD-001/publish?act=ready", &ready)
+	b.get("/api/cards/FF-001/publish?act=ready", &ready)
 	if ready.Error == nil || ready.Error.Code != string(publish.CodeNotVerified) {
-		t.Fatalf("ready on an unverified card = %+v", ready.Error)
+		t.Fatalf("ready below the floor = %+v", ready.Error)
 	}
 }
 

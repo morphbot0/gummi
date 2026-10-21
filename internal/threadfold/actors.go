@@ -6,7 +6,6 @@ package threadfold
 import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // humanGateActors are the ways a person crosses a gate themselves: "user"
@@ -41,33 +40,8 @@ func AskedBy(p state.AskPayload) string {
 	return p.Actor
 }
 
-// StageSequence derives the ordered stage list a card walks, read out of
-// the workflow package rather than written down as a string. One graph
-// serves every kind now, so the sequence no longer varies by card — it
-// takes no feature and callers pass none. At each stage it picks the
-// same edge engine.Engine.nextStage (advance.go) would resolve g into:
-// workflow.Next lists the primary forward edge first and the rerun
-// bounces after it, so the first entry is always the one to take.
+// StageSequence is the ordered stage list a legacy workflow card walked
+// (domain.Stages): its thread is still drawn by stage, in that order.
 func StageSequence() []domain.Stage {
-	cur := workflow.Initial()
-	seq := []domain.Stage{cur}
-	// A backward edge picked here would walk in a circle, and this runs
-	// on every frame: stop the first time a stage repeats rather than
-	// trusting the edge tables to stay acyclic under this rule.
-	seen := map[domain.Stage]bool{cur: true}
-	for !workflow.Terminal(cur) {
-		nexts := workflow.Next(cur)
-		if len(nexts) == 0 {
-			break
-		}
-		// nexts[0] is the forward edge; the rerun bounces follow it.
-		next := nexts[0]
-		if seen[next] {
-			break
-		}
-		seen[next] = true
-		seq = append(seq, next)
-		cur = next
-	}
-	return seq
+	return append([]domain.Stage(nil), domain.Stages...)
 }

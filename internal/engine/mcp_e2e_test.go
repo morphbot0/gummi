@@ -10,11 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 )
 
@@ -57,7 +57,7 @@ type mcpChild struct {
 }
 
 func startChild(t *testing.T, socket string) *mcpChild {
-	return startChildFor(t, socket, "FD-001")
+	return startChildFor(t, socket, "FF-001")
 }
 
 func startChildFor(t *testing.T, socket, featureID string) *mcpChild {
@@ -144,25 +144,24 @@ func (c *mcpChild) call(section string, args string) (text string, isErr bool) {
 	return text, isErr
 }
 
-// mcpE2ESetup builds a live in-test engine with a non-ClientTools fake,
-// attaches a Spec-stage session (binding the MCP socket), and returns the
-// engine, the socket path, and the session.
+// mcpE2ESetup builds a live in-test engine with a fake that takes its
+// tools over MCP, opens a session with a spec (binding the MCP socket),
+// and returns the engine, the socket path, and the session.
 func mcpE2ESetup(t *testing.T) (*Engine, string, *Session) {
 	t.Helper()
-	e := newEngine(t, &fakeNoTools{agent.NewFake("ack")})
-	f := feature(1, "Dark mode", domain.StagePlan)
+	ag := agent.NewFake("ack")
+	ag.Caps.MCPTools = true
+	e := newEngine(t, ag)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, f)
 	socket := mcpSockPath(e.cfg.Workspace, f.ID)
 	t.Cleanup(func() { s.stop() })
 	return e, socket, s
 }
 
-// initialize over MCP stdio succeeds; tools/list mirrors stageTools for
-// the live Spec-stage feature in order.
+// initialize over MCP stdio succeeds; tools/list leads with the session's
+// own tools and carries its spec tools.
 func TestMCPEndToEndListAndSpecView(t *testing.T) {
 	_, socket, _ := mcpE2ESetup(t)
 	child := startChild(t, socket)
@@ -179,13 +178,16 @@ func TestMCPEndToEndListAndSpecView(t *testing.T) {
 	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"tools/list"}`)
 	resp = child.receive(id)
 	tools := resp["result"].(map[string]any)["tools"].([]any)
-	want := []string{"ask_user", "spec_annotate", "spec_view", "spec_replace_section"}
-	if len(tools) != len(want) {
-		t.Fatalf("tools length = %d, want %d", len(tools), len(want))
+	var names []string
+	for _, tl := range tools {
+		names = append(names, tl.(map[string]any)["name"].(string))
 	}
-	for i, w := range want {
-		if tools[i].(map[string]any)["name"] != w {
-			t.Fatalf("tool[%d] = %v, want %s", i, tools[i].(map[string]any)["name"], w)
+	if len(names) < 2 || names[0] != "ask_user" || names[1] != "resolve_annotation" {
+		t.Fatalf("tools = %v, want ask_user and resolve_annotation first", names)
+	}
+	for _, w := range []string{"spec_annotate", "spec_view", "spec_replace_section"} {
+		if !slices.Contains(names, w) {
+			t.Fatalf("tools = %v, want %s among them", names, w)
 		}
 	}
 	if tools[0].(map[string]any)["inputSchema"] == nil {
@@ -227,7 +229,7 @@ func TestMCPEndToEndAskUserRoundTrip(t *testing.T) {
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
-	if err := e.Answer(context.Background(), "FD-001", "dark"); err != nil {
+	if err := e.Answer(context.Background(), "FF-001", "dark"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -280,7 +282,7 @@ func TestMCPEndToEndConcurrency(t *testing.T) {
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
-	if err := e.Answer(context.Background(), "FD-001", "picked"); err != nil {
+	if err := e.Answer(context.Background(), "FF-001", "picked"); err != nil {
 		t.Fatal(err)
 	}
 	if resp := child.receive(slow); resp["result"] == nil {

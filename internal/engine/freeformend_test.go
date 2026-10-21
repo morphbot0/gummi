@@ -46,7 +46,7 @@ func TestAFreeformHandOffCommitsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != StatusAdvanced || res.Feature.Stage != domain.StageDone {
+	if res.Status != HandOffClosed || res.Feature.Stage != domain.StageDone {
 		t.Fatalf("hand-off = %v at %s, want the session closed", res.Status, res.Feature.Stage)
 	}
 	tree := filepath.Join(ws.Root, f.WorktreePath())
@@ -81,7 +81,7 @@ func TestAHeldFreeformHandOffIsNotStamped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != StatusBlockedDiff {
+	if res.Status != HandOffBlockedDiff {
 		t.Fatalf("hand-off = %v, want held by the open comment", res.Status)
 	}
 	got, err := store.GetFeature(ctx, f.ID)

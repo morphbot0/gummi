@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // TestAnswerRestoredAskWithNoAgentMustNotSwallowIt locks the same contract
@@ -23,13 +22,10 @@ import (
 // brings the backend up itself and lands, as the driver's resume does.
 func TestAnswerRestoredAskWithNoAgentMustNotSwallowIt(t *testing.T) {
 	ctx := context.Background()
-	f := feature(1, "Greeting prefix", domain.StagePlan)
+	f := freeformCard(1, "Greeting prefix")
 
 	e := newEngine(t, agent.NewFake(""))
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, f)
 
 	// the shape openAskFor produces for a restored ask: no CallID (the
 	// blocked call died with the process), no options (they are never
@@ -45,8 +41,8 @@ func TestAnswerRestoredAskWithNoAgentMustNotSwallowIt(t *testing.T) {
 	if err := e.Answer(ctx, f.ID, "CLI flag"); err != nil {
 		t.Fatalf("the answer was refused: %v", err)
 	}
-	waitFor(t, e, EventIdle)
-	now := e.Get(f.ID)
+	waitTurn(t, e)
+	now := liveSession(e, f.ID)
 	if now == s {
 		t.Fatal("the answer went to the session with no backend behind it")
 	}

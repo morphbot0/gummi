@@ -85,7 +85,6 @@ type cardStatusItem struct {
 	// "is the card closed" is stage == "done".
 	Ending           domain.Ending `json:"ending,omitempty"`
 	Running          bool          `json:"running"`
-	OpenQuestions    int           `json:"open_questions"`
 	OpenDiffComments int           `json:"open_diff_comments"`
 }
 
@@ -101,7 +100,7 @@ func (e *Engine) cardStatus(ctx context.Context, args json.RawMessage) (string, 
 	if err != nil {
 		return "", err
 	}
-	specOpen, diffOpen, _, err := e.GateBlockers(ctx, f.ID)
+	diffOpen, err := e.OpenDiffComments(ctx, f.ID)
 	if err != nil {
 		return "", err
 	}
@@ -117,7 +116,6 @@ func (e *Engine) cardStatus(ctx context.Context, args json.RawMessage) (string, 
 		Verified:         !f.VerifiedAt.IsZero(),
 		Ending:           f.Ending(bs == "landed"),
 		Running:          state.ProcessAlive(state.ReadPIDFile(e.cfg.Workspace.PIDFile(f.ID))),
-		OpenQuestions:    specOpen,
 		OpenDiffComments: diffOpen,
 	}
 	b, err := json.Marshal(item)
@@ -126,7 +124,7 @@ func (e *Engine) cardStatus(ctx context.Context, args json.RawMessage) (string, 
 
 // cardSpec answers card_spec: the card's design artifact as raw markdown,
 // wherever it lives right now. Mirrors cmd/gummi/spec.go, but resolves the
-// path through the engine's own artifactFile instead of cmd/gummi's
+// path through the engine's own cardSpecFile instead of cmd/gummi's
 // unreachable artifactPath.
 func (e *Engine) cardSpec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a cardIDArgs
@@ -137,9 +135,9 @@ func (e *Engine) cardSpec(ctx context.Context, args json.RawMessage) (string, er
 	if err != nil {
 		return "", err
 	}
-	path := e.artifactFile(&f)
+	path := e.cardSpecFile(&f)
 	if path == "" {
-		return "", fmt.Errorf("%s has no spec yet — it is created when the design stage first runs", f.ID)
+		return "", fmt.Errorf("%s has no spec", f.ID)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

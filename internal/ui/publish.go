@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -11,9 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/publish"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/webapi"
@@ -98,25 +95,7 @@ func (p publishDoer) input(ctx context.Context) (*worktree.Manager, publish.Inpu
 	if err != nil {
 		return nil, publish.Input{}, err
 	}
-	return mgr, publish.InputFor(ctx, mgr, &f, p.busy, anns, OpenSpecThreads(p.root, p.drafts, f)), nil
-}
-
-// OpenSpecThreads counts the open spec threads holding f's gate, as its
-// landing counts them (Shell.openQuestionsBlockingGate), for a reader off
-// the loop: the workspace root and its drafts directory locate the spec.
-func OpenSpecThreads(root, drafts string, f domain.Feature) int {
-	if f.IsFreeform() {
-		return 0
-	}
-	path := artifactFileIn(root, drafts, &f)
-	if path == "" {
-		return 0
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	return len(engine.SpecCommentsHolding(domain.CardTypeOf(&f), f.Stage, spec.Parse(string(raw))))
+	return mgr, publish.InputFor(ctx, mgr, &f, p.busy, anns), nil
 }
 
 func publishErr(e *publish.Error) *webapi.PublishError {
@@ -712,7 +691,7 @@ func (d *WebDocs) PublishOffer(ctx context.Context) *webapi.PublishOffer {
 		}
 		out.Acts = append(out.Acts, string(publish.ActPush))
 	}
-	if fl := publish.Floor(&f, tip, in.OpenComments+in.OpenSpec); p.Draft && fl != nil {
+	if fl := publish.Floor(&f, in.OpenComments); p.Draft && fl != nil {
 		// a draft whose tip may not be offered as ready: the strip says
 		// why instead of offering an act that would be refused
 		out.Why = fl.Error()

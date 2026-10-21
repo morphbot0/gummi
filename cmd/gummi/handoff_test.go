@@ -155,19 +155,3 @@ func TestHandOffTakesAPushedBranchUnlessKept(t *testing.T) {
 		}
 	}
 }
-
-// Hand-off ends a card that finished; a card that never reached a
-// verified branch has nothing to end.
-func TestHandOffCommandRefusesUnverified(t *testing.T) {
-	store, f := verifiedCLIRepo(t)
-	if _, err := store.Transition(context.Background(), f.ID, domain.StageImplement, "user"); err != nil {
-		t.Fatal(err)
-	}
-	out, err := captureNDJSON(t, func() error { return runCLI("handoff", string(f.ID)) })
-	if err == nil {
-		t.Fatal("handoff accepted a card mid-flight")
-	}
-	if !strings.Contains(out, "not at a verified branch") {
-		t.Fatalf("refusal does not say why: %s", out)
-	}
-}

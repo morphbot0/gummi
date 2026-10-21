@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 )
 
 // TestBG076NoTranscriptRowOnTheCardPage is BG-076's regression test. The
@@ -21,10 +20,7 @@ import (
 // board is unaffected: t still opens the card's thread, which is a
 // navigation key on the board's own table, not a card action.
 func TestBG076NoTranscriptRowOnTheCardPage(t *testing.T) {
-	in := nextInput{
-		stage: domain.StageImplement, kind: domain.KindFeature,
-		sess: engine.StateDone,
-	}
+	in := nextInput{stage: domain.StageImplement, kind: domain.KindFeature}
 	row := featureRow{F: domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StageImplement}}
 
 	for _, cardOpen := range []bool{false, true} {

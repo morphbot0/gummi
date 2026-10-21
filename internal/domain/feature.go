@@ -739,82 +739,31 @@ func (f *Feature) CheckoutName() string {
 	return "the main checkout"
 }
 
-// ErrNotVerified is the refusal a card in the workflow gets when it is
-// asked to land before its branch is verified. It is a sentinel so a
-// caller can tell "this card has not earned a landing yet" from a git or
-// store failure, and so the two headless landing verbs and the TUI say
-// the same thing.
-var ErrNotVerified = errors.New("not at a verified branch")
-
-// MayLand reports whether this card may become a commit on main, and says
-// why not when it may not.
+// MayLand reports whether this card may become a commit on its base,
+// and says why not when it may not.
 //
-// There are two floors, because there are two kinds of card, and this is
-// the one place that says so:
+// There is one floor, and it is not here: a card lands on a person's read
+// of its diff (DESIGN §19.1, decision 27). Unresolved diff comments hold
+// the landing, enforced by the same open-comment check every landing
+// crosses, and an open crew holds its session's (Engine.CrewHolds). What
+// this refuses is the card that has no landing of its own: a session
+// whose work went on as a spec, which that spec lands; a legacy goal,
+// which never landed; and a legacy research card, which holds no branch.
 //
-//   - A card in the workflow lands on a VERIFIED branch — it walked the
-//     graph, its critique passed and its checks ran. That is DESIGN §10
-//     D3's quality floor, and nothing softens it.
-//   - A freeform card (KindFreeform) has no stage to be at and no verify
-//     to have passed: it lands on a human's read of its diff, which is
-//     the whole of what freeform means (DESIGN §19). Its own floor is
-//     the diff surface — unresolved annotations hold the landing, which
-//     is enforced by the same GateBlockers check every landing crosses,
-//     not here.
-//
-// A handed-off card is neither case: it already closed with a verified
-// stamp on it and landing it after all stays available, so callers check
-// HandedOff before asking, and ask MayLandAfterAll instead.
+// A handed-off card asks the same question: hand-off closes a card with
+// its branch left unlanded, and landing it after all stays available for
+// as long as the branch is there.
 func (f *Feature) MayLand() error {
-	if f.IsFreeform() {
-		return nil
+	if f.ContinuedAs != "" {
+		return fmt.Errorf("%w — its work continues as %s, which lands it", ErrContinued, f.ContinuedAs)
 	}
-	if f.Stage != StageVerify || f.VerifiedAt.IsZero() {
-		return fmt.Errorf("%w (stage %s)", ErrNotVerified, f.Stage)
-	}
-	return nil
-}
-
-// ErrVerifyStale is the refusal a verified card gets when its branch is
-// no longer the revision the verify pass ran on. It wraps ErrNotVerified:
-// what would land has not been verified, which is the same floor said
-// more precisely.
-var ErrVerifyStale = fmt.Errorf("%w: the branch moved since verify passed", ErrNotVerified)
-
-// MayLandAt is MayLand for a landing that knows what it would land: head
-// is the branch tip the squash would take. The verified floor is about
-// that revision, not about the card — a commit added after the verify
-// pass (by hand, by a later turn, by a landing's own final checkpoint) is
-// work no check has run on, so the card lands only once a verify has run
-// on its tip again. Every landing door asks this right before it lands.
-//
-// A card stamped before the revision was recorded (VerifiedAt set,
-// VerifiedRev empty) reads as stale: gummi cannot say what that pass saw,
-// and the safe answer to "was this verified?" without the evidence is
-// "verify it again" — a cheap re-run of the checks, which records the
-// revision from then on.
-//
-// A freeform card has no verify, and a handed-off card is checked by its
-// callers before they ask, as with MayLand.
-func (f *Feature) MayLandAt(head string) error {
-	if err := f.MayLand(); err != nil || f.IsFreeform() {
-		return err
-	}
-	if f.VerifiedRev == "" {
-		return fmt.Errorf("%w (verified before gummi recorded the revision it ran on)", ErrVerifyStale)
-	}
-	if head != f.VerifiedRev {
-		return fmt.Errorf("%w (verified %s, now %s)", ErrVerifyStale, ShortRev(f.VerifiedRev), ShortRev(head))
+	switch f.kind() {
+	case KindGoal:
+		return errors.New("a goal no longer lands")
+	case KindResearch:
+		return errors.New("a research card holds no branch to land")
 	}
 	return nil
-}
-
-// VerifyStale reports a card whose verify pass passed on a revision its
-// branch has since moved off (MayLandAt's refusal, asked of a card that
-// is otherwise ready to land), for the surfaces that offer a re-verify in
-// place of the landing.
-func (f *Feature) VerifyStale(head string) bool {
-	return f.MayLand() == nil && head != "" && errors.Is(f.MayLandAt(head), ErrVerifyStale)
 }
 
 // ShortRev is a commit id cut to the length a sentence quotes it at.
@@ -850,17 +799,6 @@ func (f *Feature) HandedOff() bool { return !f.HandedOffAt.IsZero() }
 // ErrContinued refuses landing a freeform card whose work went on as a
 // spec: that spec lands it (Feature.ContinuedAs).
 var ErrContinued = errors.New("continued as a spec")
-
-// MayLandAfterAll is the floor a handed-off card meets when it is landed
-// after all, which every landing door asks in place of MayLand. It holds
-// one card: a freeform session continued as a spec, whose work lands
-// through that spec on a verified branch and not from here.
-func (f *Feature) MayLandAfterAll() error {
-	if f.ContinuedAs != "" {
-		return fmt.Errorf("%w — its work continues as %s, which lands it on a verified branch", ErrContinued, f.ContinuedAs)
-	}
-	return nil
-}
 
 // Ending names how a card left gummi. It is the one word every surface
 // uses for that — the board badge, `gummi status`, `status --json`, the

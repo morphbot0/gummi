@@ -236,7 +236,7 @@ func TestAClosedSessionKeepsItsConversation(t *testing.T) {
 	if err := ff.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CloseFreeform(ctx, f.ID, "t"); err != nil {
+	if _, err := store.CloseCard(ctx, f.ID, "t"); err != nil {
 		t.Fatal(err)
 	}
 	if e1.Freeform(f.ID) != nil {

@@ -159,8 +159,5 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 		m.openOnLoad = msg.f.ID
 		return tea.Batch(append(cmds, m.startFreeform(msg.f, msg.opening))...)
 	}
-	if msg.run {
-		cmds = append(cmds, m.runStage(msg.f))
-	}
 	return tea.Batch(cmds...)
 }

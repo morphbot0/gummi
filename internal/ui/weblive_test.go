@@ -1,14 +1,9 @@
 package ui
 
 import (
-	"context"
 	"strconv"
 	"testing"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
-
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -109,46 +104,5 @@ func TestWebTranscriptACutOffMessageIsNotStreaming(t *testing.T) {
 	}
 	if _, _, streaming, _ = webTranscript(engine.Snapshot{Transcript: tr, Busy: true}); streaming != "Converged on the" {
 		t.Fatalf("a busy session's tail is what it is writing, got %q", streaming)
-	}
-}
-
-// A card whose busy word moves — a check that finished, a scribe pass
-// that settled — tells the open pages, whatever message moved it: the
-// page kept "implementer is checking" with a spinner for a card that had
-// long gone idle, because the pass's end was on no list of changes.
-func TestABusyWordThatEndsIsPushed(t *testing.T) {
-	b, log, _, f, _ := headlessBoard(t, agent.NewFake("ok"))
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	ctx := context.Background()
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { m.baselining[f.ID] = true; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Rows[0].Status == webapi.StatusRunning })
-	log.mu.Lock()
-	mark := len(log.all)
-	log.mu.Unlock()
-	// the check ends on a message the change hook has no arm for, and the
-	// row it reloads is the row it was
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		return func() tea.Msg { return baselineDoneMsg{id: f.ID} }
-	}); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		log.mu.Lock()
-		var live, card bool
-		for _, c := range log.all[mark:] {
-			live = live || (c.Kind == webapi.ChangeLive && c.ID == "FD-001")
-			card = card || (c.Kind == webapi.ChangeCard && c.ID == "FD-001")
-		}
-		log.mu.Unlock()
-		if live && card {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the check ended and no page was told: its spinner stays up")
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }

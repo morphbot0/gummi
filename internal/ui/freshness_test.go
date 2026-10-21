@@ -13,7 +13,6 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -49,42 +48,6 @@ func withWorktree(t *testing.T, b *Bridge, f domain.Feature) string {
 		t.Fatal(err)
 	}
 	return dir
-}
-
-// A verify pass the board itself drives is headed "verify passed" on the
-// page — without a restart. The Shell stamps VerifiedAt in a command it
-// batches with a row load of its own, and the row the page heads the
-// decision from used to be read before the stamp landed: every
-// board-driven pass read "VERIFY FAILED" until the server restarted,
-// while a CLI-driven one (stamped by engine.Advance, then read) read
-// right. The parity fixture set VerifiedAt by hand and never saw it.
-func TestABoardDrivenVerifyPassReadsPassedWithoutARestart(t *testing.T) {
-	ag := verdictAgent(func(opts agent.SessionOpts) string {
-		if isVerify(opts) {
-			return "All checks green.\nVERDICT: pass"
-		}
-		return "done"
-	})
-	b, _, _, f, _ := headlessBoardFor(t, ag, domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageVerify})
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	withWorktree(t, b, f)
-	ctx := context.Background()
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { return m.runStage(f) }); err != nil {
-		t.Fatal(err)
-	}
-	c := waitCard(t, b, "FD-001", "verify gate", func(c webapi.Card) bool {
-		return c.Decision != nil && c.Decision.Kind == webapi.DecisionVerify
-	})
-	// the store is stamped by now or never: the gate is raised in the
-	// same handler that dispatches the stamp
-	deadline := time.Now().Add(10 * time.Second)
-	for c.Decision.Word != "verify passed" && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-		c = waitCard(t, b, "FD-001", "verify gate", func(c webapi.Card) bool { return c.Decision != nil })
-	}
-	if c.Decision.Word != "verify passed" || c.Decision.Tone != "ok" {
-		t.Fatalf("a board-driven verify pass is headed %q (%s); want \"verify passed\"", c.Decision.Word, c.Decision.Tone)
-	}
 }
 
 // Board and card spend is the store's, however it was booked. A scribe
@@ -125,13 +88,11 @@ func TestBoardSpendFollowsTheStore(t *testing.T) {
 // row's store figure, once it is fresher, wins — and the mirror is never
 // added to it, so nothing is counted twice.
 func TestLiveSpendNeverUndercutsTheStore(t *testing.T) {
-	b, _, eng, f, _ := headlessBoard(t, agent.NewFake("ok"))
+	b, _, eng, f, _ := sessionBoard(t, agent.NewFake("ok"))
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
 	ctx := context.Background()
-	if _, err := eng.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	if err := eng.Send(ctx, f.ID, "hello"); err != nil {
+	startSession(t, eng, f)
+	if err := eng.Freeform(f.ID).Send(ctx, "hello"); err != nil {
 		t.Fatal(err)
 	}
 	// the fake books a credit a turn, on the session and on the row; wait
@@ -289,9 +250,9 @@ func waitChangeAfter(t *testing.T, log *changeLog, mark int, kind webapi.ChangeK
 	}
 }
 
-// Two autopilot cards started together both run: nothing holds the second
-// back, and the header counts both as running.
-func TestTwoAutopilotCardsBothRun(t *testing.T) {
+// Two sessions mid-turn both run: nothing holds the second back, and the
+// header counts both as running.
+func TestTwoSessionsBothRun(t *testing.T) {
 	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		<-release
@@ -299,19 +260,16 @@ func TestTwoAutopilotCardsBothRun(t *testing.T) {
 	}}
 	card := func(n int, slug string) domain.Feature {
 		return domain.Feature{
-			ID: domain.FeatureID(fmt.Sprintf("FD-%03d", n)), Num: n, Title: slug, Slug: slug,
-			Stage: domain.StageImplement, GateApproval: domain.GateAutopilot,
+			ID: domain.FeatureID(fmt.Sprintf("FF-%03d", n)), Num: n, Kind: domain.KindFreeform, Title: slug, Slug: slug,
+			Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind,
 		}
 	}
 	feats := []domain.Feature{card(1, "one"), card(2, "two")}
-	b, _, eng, _ := headlessBoardWith(t, ag, feats, func(*engine.Config) {})
+	b, _, eng, _ := headlessBoardWith(t, ag, feats, nil)
 	t.Cleanup(func() { close(release) })
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 2 })
 	for _, f := range feats {
-		withWorktree(t, b, f)
-		if err := eng.Run(f); err != nil {
-			t.Fatal(err)
-		}
+		startSession(t, eng, f)
 	}
 	bd := waitBoard(t, b, func(bd webapi.Board) bool { return bd.Counts.Running == 2 })
 	for _, r := range bd.Rows {

@@ -17,21 +17,24 @@ import (
 )
 
 // TestWebDecisionsMatchThePicker is the drift test DESIGN §20.1 asks for:
-// for a spread of stops — idle, a raised gate, an escalated one, a budget
-// stop, a failure, a finished verify, a closed card, a live question —
+// for a spread of stops — a session at rest, a budget stop, a failure,
+// retired workflow cards, a closed card, a live question —
 // the answers the web face serves are the answers the TUI's pinned picker
 // draws for the same card, in the same order, under the same question.
 // The golden is the served set, so a change to what a stop offers is
 // reviewed as the page will show it.
 func TestWebDecisionsMatchThePicker(t *testing.T) {
 	m := populatedShell(160, 50)
-	// the stops the inbox raises, on the populated board's cards
-	m.inbox.add("FD-047", attnGate, "plan is ready for your decision")
-	m.inbox.addEscalated("FD-049", attnGate, "the critique asked for changes the loop could not make")
-	m.inbox.add("FD-046", attnBudget, budgetAttentionText(domain.StageImplement, false))
-	m.inbox.addEscalated("FD-044", attnGate, "verification passed")
-	m.rows[4].Exited, m.rows[4].ExitVerdict = true, verdictPass
-	m.inbox.add("FD-042", attnFailure, "the implement session stopped: backend exited")
+	// sessions beside the populated board's retired cards, and the stops
+	// the inbox raises on them
+	m.rows = append(m.rows,
+		freeformRow(12, "drop the leaked pty fd", true),
+		freeformRow(13, "budgeted session", true),
+		freeformRow(14, "failing session", true),
+		freeformRow(15, "fresh session", false),
+	)
+	m.inbox.add("FF-013", attnBudget, budgetAttentionText(domain.StageOpen, false))
+	m.inbox.add("FF-014", attnFailure, "the session stopped: backend exited")
 
 	type served struct {
 		Card     string          `json:"card"`
@@ -127,10 +130,7 @@ func wordRows(d webapi.Decision) int {
 }
 
 // The stops the first test does not reach, each against what the TUI does
-// at it: a clean verify pass, a multi-pick question, a handed-off card,
-// and the re-entry chip — the last one not as rows (the chip has none in
-// the terminal) but as the rule the rows stand for, that a go which
-// spends is never given on enter.
+// at it: a handed-off card and a multi-pick question.
 func TestWebEdgeDecisionsMatchTheTUI(t *testing.T) {
 	m := populatedShell(160, 50)
 	check := func(label string, i int) *webOpenDecision {
@@ -146,18 +146,6 @@ func TestWebEdgeDecisionsMatchTheTUI(t *testing.T) {
 		}
 		requirePickerRows(t, label, tui, od.api)
 		return od
-	}
-
-	// a clean verify pass heads as one, and its first answer is the landing.
-	// The verified stamp is deliberately NOT set: a board-driven pass
-	// raises its gate before the stamp lands, and a research card is never
-	// stamped — the head reads what the question does, the verdict
-	// (TestABoardDrivenVerifyPassReadsPassedWithoutARestart drives the
-	// real path)
-	m.rows[4].Exited, m.rows[4].ExitVerdict = true, verdictPass
-	m.inbox.add("FD-044", attnGate, "verification passed")
-	if od := check("verify passed", 4); od.api.Word != "verify passed" || od.api.Tone != "ok" {
-		t.Errorf("a passed verify heads as %q (%s), want \"verify passed\" (ok)", od.api.Word, od.api.Tone)
 	}
 
 	// a handed-off card: its closing answers, "land it after all" first

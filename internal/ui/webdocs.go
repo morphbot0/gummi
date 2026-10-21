@@ -65,10 +65,7 @@ type WebDocs struct {
 	ws      state.Workspace
 	now     func() time.Time
 	threads func(ctx context.Context, ref domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error)
-	// liveStart is the start of the local session still writing the
-	// segment the card's log ends in (liveSessionActive), zero when none.
-	liveStart time.Time
-	live      *webapi.Live
+	live    *webapi.Live
 	// locks is the board's per-card lock registry (nil in a scaffold), and
 	// busy whether an agent had the card mid-turn when it was captured: the
 	// two things a history rewrite asks of the model.
@@ -80,10 +77,6 @@ type WebDocs struct {
 	// attachments is the workspace's image store, for resolving a spec
 	// note's attachment ids into links; nil on a board with no engine.
 	attachments *attachment.Store
-	// manual is the card's last verify run from the menu (the Shell's
-	// checksFor), which writes nothing to the log the thread folds; the
-	// spec's checks read it beside the log's rows.
-	manual stagedChecks
 	// eng is the board's engine, for a session spec's writes (each one a
 	// revision, DESIGN §24.2); nil on a board with none.
 	eng *engine.Engine
@@ -106,9 +99,6 @@ func (m *Shell) WebDocs(id string) (*WebDocs, error) {
 		locks: m.locks, busy: m.webCardBusy(r.F.ID) || m.cardBusy(r),
 		publish: webPublish{enabled: m.publishEnabled, checked: m.publishChecked, why: m.publishWhy, gh: m.publishGH, watch: r.watchOnly()},
 	}
-	if res := m.checksFor(r.F); len(res) > 0 {
-		d.manual = m.checks[r.F.ID]
-	}
 	if m.engine != nil {
 		d.attachments = m.engine.Attachments()
 		d.eng = m.engine
@@ -122,12 +112,6 @@ func (m *Shell) WebThreadDocs(id string) (*WebDocs, error) {
 	d, err := m.WebDocs(id)
 	if err != nil {
 		return nil, err
-	}
-	r, _ := m.rowByID(domain.FeatureID(id))
-	if sess := m.sessionFor(r.F.ID); sess != nil && !r.DrivenAbroad {
-		if snap := sess.Snapshot(); liveSessionActive(snap) {
-			d.liveStart = snap.StartedAt
-		}
 	}
 	if live, ok := m.WebLive(id); ok && liveWorthSending(live) {
 		d.live = &live
@@ -154,13 +138,6 @@ func (d *WebDocs) fresh(ctx context.Context) domain.Feature {
 
 // Thread is the card's folded log (threadfold.Items) with the items
 // newer than after, and the live block. d must come from WebThreadDocs.
-//
-// While a local session is still writing the log's last segment, its
-// turns reach the log only once per turn; the TUI draws that segment
-// from the session's snapshot instead, and so does the page. The items
-// after that segment's divider are therefore left out, and LastSeq stops
-// short of them, so the page picks them up — as upserts — once the
-// session hands the segment to the log.
 func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error) {
 	evs, err := d.store.Events(ctx, d.f.ID)
 	if err != nil {
@@ -171,33 +148,9 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 		spend = nil
 	}
 	items := threadfold.Items(evs, threadfold.Options{Spend: spend})
-	var held []threadfold.Item
-	if !d.liveStart.IsZero() {
-		for k := len(items) - 1; k >= 0; k-- {
-			if items[k].T == threadfold.ItemStage && items[k].At.Equal(d.liveStart) {
-				items, held = items[:k+1], items[k+1:]
-				break
-			}
-		}
-		// A consult turn is no turn of the stage session: the live block
-		// does not draw it, so it is never held back for the session to
-		// hand over.
-		kept := held[:0:0]
-		for _, it := range held {
-			if it.Via == threadfold.ViaConsult {
-				items = append(items, it)
-				continue
-			}
-			kept = append(kept, it)
-		}
-		held = kept
-	}
 	var last int64
 	for _, it := range items {
 		last = max(last, it.Seq)
-	}
-	for _, it := range held {
-		last = min(last, it.Seq-1)
 	}
 	cmds := d.checkCommands(ctx)
 	converted := make([]webapi.Item, 0, len(items))
@@ -322,14 +275,9 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 		out.Sections = append(out.Sections, webapi.SpecSection{Name: h.Title, Line: h.Line})
 	}
 	doc := spec.Parse(content)
-	// counted as the gate counts them, so the button's number is the one
-	// holding it
-	f := d.fresh(ctx)
 	if d.f.IsFreeform() {
 		// no gate reads a session's spec: its notes hold nothing back
 		d.sessionSpec(ctx, content, &out)
-	} else {
-		out.OpenComments = len(engine.SpecCommentsHolding(domain.CardTypeOf(&f), f.Stage, doc))
 	}
 	var notes []spec.Marker
 	for _, t := range doc.Threads() {
@@ -345,19 +293,8 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 	}
 	if checks, _, err := spec.ParseChecks(content); err == nil && len(checks) > 0 {
 		last := d.lastChecks(ctx)
-		excused := map[string]bool{}
-		excusedOn := ""
-		if base, err := d.store.CheckBaseline(ctx, d.f.ID); err == nil {
-			for _, n := range state.ExcusedChecks(base) {
-				excused[n] = true
-			}
-			excusedOn = state.ExcusedOn(base)
-		}
 		for _, c := range checks {
-			sc := webapi.SpecCheck{Name: c.Name, Cmd: c.Cmd, Excused: excused[c.Name]}
-			if sc.Excused {
-				sc.ExcusedOn = excusedOn
-			}
+			sc := webapi.SpecCheck{Name: c.Name, Cmd: c.Cmd}
 			if o, ok := last[c.Name]; ok {
 				sc.Last = &o
 			}
@@ -368,8 +305,7 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 }
 
 // lastChecks is each check's newest result: the verify rows the thread
-// draws from the card's log, or the menu's last verify run where that is
-// newer.
+// draws from the card's log.
 func (d *WebDocs) lastChecks(ctx context.Context) map[string]webapi.CheckOutcome {
 	out := map[string]webapi.CheckOutcome{}
 	if evs, err := d.store.Events(ctx, d.f.ID); err == nil {
@@ -377,11 +313,6 @@ func (d *WebDocs) lastChecks(ctx context.Context) map[string]webapi.CheckOutcome
 			for _, c := range it.Checks {
 				out[c.Name] = webapi.CheckOutcome{OK: c.OK, At: it.At}
 			}
-		}
-	}
-	for _, r := range d.manual.results {
-		if o, ok := out[r.Name]; !ok || d.manual.at.After(o.At) {
-			out[r.Name] = webapi.CheckOutcome{OK: r.OK, At: d.manual.at}
 		}
 	}
 	return out
@@ -950,73 +881,23 @@ func closedToReview(f domain.Feature, why string) error {
 	return &conflictError{msg: fmt.Sprintf("%s %s — %s", f.Name(), how, why)}
 }
 
-// WebRequestSpecChanges is the spec surface's R: the card's open spec
-// comments go to its writer, the way the terminal sends them
-// (specChanges). POST /api/cards/{id}/spec/changes.
-func (m *Shell) WebRequestSpecChanges(id, person, confirm string) (tea.Cmd, error) {
-	r, err := m.webRowFor(id)
-	if err != nil {
-		return nil, err
-	}
-	if err := closedToReview(r.F, "there is no stage left to send changes to"); err != nil {
-		return nil, webErr(WebConflict, "%s", err.Error())
-	}
-	f := r.F
-	path := ""
-	if !f.IsFreeform() {
-		path = m.artifactFile(&f)
-	}
-	if path == "" {
-		return nil, webErr(WebConflict, "%s has no %s to send comments from", f.ID, artifactNoun(f.Kind))
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, webErr(WebUnavailable, "reading the %s: %v", artifactNoun(f.Kind), err)
-	}
-	m.webActor = state.PersonActor(person)
-	defer func() { m.webActor = "" }()
-	cmd, refused, ask := m.specChanges(f, spec.Parse(string(raw)))
-	return m.webChanges(cmd, refused, ask, confirm)
-}
-
 // WebRequestDiffChanges is the diff surface's R: the card's open diff
-// comments go to the implementer, or to a freeform card's session, the
-// way the terminal sends them (diffChanges).
+// comments go to its session, the way the terminal sends them
+// (diffChanges).
 // POST /api/cards/{id}/diff/changes.
-func (m *Shell) WebRequestDiffChanges(id, person, confirm string) (tea.Cmd, error) {
+func (m *Shell) WebRequestDiffChanges(id string) (tea.Cmd, error) {
 	r, err := m.webRowFor(id)
 	if err != nil {
 		return nil, err
 	}
-	if err := closedToReview(r.F, "there is no stage left to send changes to"); err != nil {
+	if err := closedToReview(r.F, "there is no session left to send changes to"); err != nil {
 		return nil, webErr(WebConflict, "%s", err.Error())
 	}
 	anns, err := m.store.ListDiffAnnotations(context.Background(), r.F.ID)
 	if err != nil {
 		return nil, webErr(WebUnavailable, "reading the diff comments: %v", err)
 	}
-	// who asked, as a bounce to implement records it: diffChanges reads
-	// it through humanActor before it returns
-	m.webActor = state.PersonActor(person)
-	defer func() { m.webActor = "" }()
-	cmd, refused, ask := m.diffChanges(r.F, anns)
-	return m.webChanges(cmd, refused, ask, confirm)
-}
-
-// webChanges turns a surface's answer into the web's: a send-back that
-// moves the card is asked first, as the terminal's confirm asks it, and
-// goes only with the yes to that question's token (webConfirmToken); a
-// refusal is the terminal's status-band sentence, classed as the HTTP
-// answer will be.
-func (m *Shell) webChanges(cmd tea.Cmd, refused noticeMsg, ask *changesAsk, confirm string) (tea.Cmd, error) {
-	if ask != nil {
-		tok := webConfirmToken("confirm-request-changes", ask.card, ask.question)
-		in := webInput{confirm: confirm}
-		if !in.takeConfirm(tok) {
-			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictConfirm, Text: ask.question, Confirm: tok}
-		}
-		return ask.do(), nil
-	}
+	cmd, refused := m.diffChanges(r.F, anns)
 	if cmd != nil {
 		return cmd, nil
 	}

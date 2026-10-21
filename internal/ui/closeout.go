@@ -121,7 +121,7 @@ func (d *closeOutDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		// the ordinary merge flow, message dialog and all. It opens ON TOP
 		// of this one; when it finishes, the card leaves readyCards and
 		// this pass shows the next.
-		return false, d.m.prepareMerge(r.F, true)
+		return false, d.m.prepareMerge(r.F)
 	case "h":
 		return false, d.m.prepareHandOff(r.F)
 	case "s":

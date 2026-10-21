@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/decisions"
@@ -29,65 +28,18 @@ import (
 // highlighted answer while the head and body yield.
 func TestThreadDecisionVisibleAt36x9(t *testing.T) {
 	m := populatedShell(36, 9)
-	m.sel = 1 // FD-042, implement — nothing running, so a decision is open
+	m.rows[1] = freeformRow(42, "dark mode", true)
+	m.sel = 1 // a session stopped on its budget, so a decision is open
+	m.inbox.add(m.rows[1].F.ID, attnBudget, budgetAttentionText(domain.StageOpen, false))
 	out := ansi.Strip(m.threadView(33, 6))
-	if !strings.Contains(out, "nothing is running") {
+	if !strings.Contains(out, "budget") {
 		t.Errorf("36x9 thread missing the open decision's question:\n%s", out)
 	}
-	if !strings.Contains(out, "run implement") {
+	if !strings.Contains(out, "top up") {
 		t.Errorf("36x9 thread missing the highlighted answer:\n%s", out)
 	}
 	if !strings.Contains(out, "┃") {
 		t.Errorf("36x9 thread lost the composer under the decision:\n%s", out)
-	}
-	// the head yields to the decision: the pinned spec line is the first
-	// thing dropped, the masthead the second
-	if strings.Contains(out, "Implementation notes") {
-		t.Errorf("36x9 thread spent rows on the spec line while the decision showed:\n%s", out)
-	}
-}
-
-// TestDecisionQuestionRehydratedSessionIsNotClaimedLive: nextInputFor sets
-// in.sess from the persisted state, which a rehydrated row (a
-// state=interactive DB row surviving a restart, no backend attached) also
-// reports as StateInteractive. decisionQuestion must distinguish that from
-// a genuinely attached session via in.live (sess.Live()), or it renders "the
-// agent is waiting" for a session nothing is waiting in (BG-043).
-func TestDecisionQuestionRehydratedSessionIsNotClaimedLive(t *testing.T) {
-	rehydrated := nextInput{sess: engine.StateInteractive, live: false}
-	got := decisionQuestion(decisionIdle, featureRow{}, rehydrated)
-	if strings.Contains(got, "the agent is waiting") {
-		t.Fatalf("claimed a live wait for a detached/rehydrated session: got %q", got)
-	}
-
-	live := nextInput{sess: engine.StateInteractive, live: true}
-	got = decisionQuestion(decisionIdle, featureRow{}, live)
-	want := "the agent is waiting — keep talking, or choose what happens next."
-	if got != want {
-		t.Fatalf("decisionQuestion for a genuinely live session = %q, want %q", got, want)
-	}
-}
-
-// TestThreadDecisionAdvancesIdleTodo: a card in todo has no key at all
-// now that empty-composer enter runs nothing — the idle decision is what
-// keeps it reachable. Enter answers the highlighted option ("start"),
-// which routes through the same advance verb its accelerator names.
-func TestThreadDecisionAdvancesIdleTodo(t *testing.T) {
-	m, _ := chatWorkspace(t, agent.NewFake("hi"))
-	// a fresh second card sits in todo, untouched by the fixture's advance
-	m = openFeatureForm(t, m)
-	m = typeString(t, m, "Second card")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	selectRow(t, m, "FD-002")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open its card page
-
-	d := m.openDecision(m.rows[m.sel])
-	if d == nil || len(d.actions) == 0 || d.actions[0].id != "advance" {
-		t.Fatalf("todo card has no idle decision to answer: %+v", d)
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // answer it
-	if m.rows[m.sel].F.Stage != domain.StagePlan {
-		t.Fatalf("answering the idle decision left the card at %s, want brainstorm", m.rows[m.sel].F.Stage)
 	}
 }
 
@@ -95,10 +47,9 @@ func TestThreadDecisionAdvancesIdleTodo(t *testing.T) {
 // thread's pinned decision and the chat pane's picker render the same
 // control for the same pending ask, because they are the same renderer.
 func TestThreadDecisionMatchesTheChatPicker(t *testing.T) {
-	m, eng := chatWorkspace(t, askingFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, askingFake())
 	waitAsk(t, eng)
-	ask := eng.Get("FD-001").Snapshot().PendingAsk
+	ask := eng.Freeform(sessionID).Snapshot().PendingAsk
 	if ask == nil {
 		t.Fatal("precondition: the ask is pending")
 	}
@@ -120,13 +71,12 @@ func TestThreadDecisionMatchesTheChatPicker(t *testing.T) {
 // on the card page, from the composer that is already focused. This is
 // the capability the chat pane's retirement depends on.
 func TestThreadDecisionAnswersLiveAsk(t *testing.T) {
-	m, eng := chatWorkspace(t, askingFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, askingFake())
 	waitAsk(t, eng)
 
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // answer the pinned decision
 	deadline := time.After(testWaitTimeout)
-	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
+	for eng.Freeform(sessionID).Snapshot().PendingAsk != nil {
 		select {
 		case <-deadline:
 			t.Fatal("answering from the thread did not clear the pending ask")
@@ -134,7 +84,7 @@ func TestThreadDecisionAnswersLiveAsk(t *testing.T) {
 		}
 	}
 	var got string
-	for _, msg := range eng.Get("FD-001").Snapshot().Transcript {
+	for _, msg := range eng.Freeform(sessionID).Snapshot().Transcript {
 		if msg.Author == engine.AuthorUser {
 			got = msg.Content
 		}
@@ -353,116 +303,11 @@ func TestBG058InputAgreesWithDroppedDecisionBlock(t *testing.T) {
 	}
 }
 
-func reviewGateWorkspace(t *testing.T) *Shell {
-	t.Helper()
-	m, _ := newWorkspace(t)
-	m.SetCopilotHint(false)
-	m = pump(t, m, m.Init())
-	m = openFeatureForm(t, m)
-	m = typeString(t, m, "Bouncy")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 2 { // todo→plan→implement
-		m = pressAdvance(t, m)
-	}
-	// the work stage IS the review gate now — its critique is what Review
-	// used to be, judged without a stage of its own.
-	if m.rows[0].F.Stage != domain.StageImplement {
-		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)
-	}
-	m.raiseAttention("FD-001", attnGate, "review is ready for your decision")
-	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
-}
-
-// TestThreadDecisionTypingGolden is the coupled state's review surface:
-// the composer holds prose, so the decision's highlight has moved onto
-// the option that consumes the words, that option's label names what
-// enter will do with them, and the status bar's enter hint says the same
-// — the screen states the delivery before it happens (DESIGN §6.3).
-// 120 columns so the bar has room to name enter beside the pills.
-func TestThreadDecisionTypingGolden(t *testing.T) {
-	m := reviewGateWorkspace(t)
-	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
-	m = model.(*Shell)
-	m = typeString(t, m, "the contrast is off in dark mode")
-	golden.RequireEqual(t, []byte(m.View().Content))
-}
-
-// TestThreadDecisionTypingIsChoosing is the composer coupling (DESIGN
-// §6.3): typing prose while a decision is open aims the highlight at the
-// option that consumes words and relabels it to say what enter will do
-// with them, and enter delivers the line there. At a review gate that
-// option is the bounce: the findings go back with it.
-func TestThreadDecisionTypingIsChoosing(t *testing.T) {
-	m := reviewGateWorkspace(t)
-
-	d := m.openDecision(m.rows[m.sel])
-	if d == nil || d.kind != decisionGate {
-		t.Fatalf("review gate has no gate decision: %+v", d)
-	}
-	// the work stage's gate offers "advance to verify" then the merged
-	// "send it back" — the word consumer, at index 1 now that the diff is
-	// a tab rather than an option and the three rows that all meant "not
-	// right, try again" are one answer
-	if i := d.wordConsumer(); i != 1 {
-		t.Fatalf("word consumer = %d, want send-it-back at 1 (actions %v)", i, d.actions)
-	}
-
-	m = typeString(t, m, "the contrast is off in dark mode")
-	out := ansi.Strip(m.threadView(100, 30))
-	if !strings.Contains(out, "with your words") {
-		t.Errorf("typing did not aim and relabel the word-eating option:\n%s", out)
-	}
-	if m.decisionCursor != 1 {
-		t.Errorf("typed prose left the cursor at %d, want send-it-back at 1", m.decisionCursor)
-	}
-
-	// enter re-runs the work stage with the line rather than rewinding to
-	// it: the critique iterates the stage, so there is no edge to take.
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.rows[m.sel].F.Stage != domain.StageImplement {
-		t.Fatalf("request-changes moved the card off its stage: %s", m.rows[m.sel].F.Stage)
-	}
-}
-
-// TestThreadDecisionBounceNoteRidesTheNextRun: the note a bounce carries
-// has nowhere to land until the reborn work stage runs — it waits in
-// bounceNotes and rides that run's kickoff, the delivery the headless
-// --bounce note takes.
-func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
-	m, eng := chatWorkspace(t, agent.NewFake("on it"))
-	// advance to implement: the work stage a bounce rewinds to
-	m = advanceTo(t, m, domain.StageImplement)
-	if m.rows[m.sel].F.Stage != domain.StageImplement {
-		t.Fatalf("stage = %s, want implement", m.rows[m.sel].F.Stage)
-	}
-	m.bounceNotes = map[domain.FeatureID]string{
-		"FD-001": "the findings say retry the flaky check first",
-	}
-
-	// the run the stash waits for: enter answers the idle decision
-	m = openAndAttach(t, m)
-	settleChat(t, eng)
-
-	snap := eng.Get("FD-001").Snapshot()
-	// the kickoff is gummi's own turn, not the user's — the bounce note
-	// rides inside it, quoted, the same way a RunWith review note does
-	if len(snap.Transcript) == 0 || snap.Transcript[0].Author != engine.AuthorSystem {
-		t.Fatalf("kickoff missing from the transcript: %+v", snap.Transcript)
-	}
-	if !strings.Contains(snap.Transcript[0].Content, "the findings say retry the flaky check first") {
-		t.Errorf("bounce note did not ride the kickoff: %q", snap.Transcript[0].Content)
-	}
-	if _, ok := m.bounceNotes["FD-001"]; ok {
-		t.Error("the bounce note survived the run that consumed it")
-	}
-}
-
 // TestThreadDecisionTypedProseAnswersTheAsk: a free-form ask consumes the
 // composer's line as the answer — the pane's 'o' channel, always on here
 // because the composer is always on.
 func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
-	m, eng := chatWorkspace(t, askingFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, askingFake())
 	waitAsk(t, eng)
 
 	// The line starts with a word on purpose: on an empty line a digit is
@@ -487,7 +332,7 @@ func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
 
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	deadline := time.After(testWaitTimeout)
-	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
+	for eng.Freeform(sessionID).Snapshot().PendingAsk != nil {
 		select {
 		case <-deadline:
 			t.Fatal("typed prose did not answer the ask")
@@ -495,7 +340,7 @@ func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
 		}
 	}
 	var got string
-	for _, msg := range eng.Get("FD-001").Snapshot().Transcript {
+	for _, msg := range eng.Freeform(sessionID).Snapshot().Transcript {
 		if msg.Author == engine.AuthorUser {
 			got = msg.Content
 		}
@@ -528,11 +373,10 @@ func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
 // result, so the model reads the sentence the person actually wrote — and
 // enter says "answer" because that is what it does.
 func TestThreadDecisionStructuredAskAnswersWithProse(t *testing.T) {
-	m, eng := chatWorkspace(t, structuredAskFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, structuredAskFake())
 	waitAsk(t, eng)
 
-	ask := eng.Get("FD-001").Snapshot().PendingAsk
+	ask := eng.Freeform(sessionID).Snapshot().PendingAsk
 	if ask == nil {
 		t.Fatalf("precondition: a structured ask is pending, got %+v", ask)
 	}
@@ -557,7 +401,7 @@ func TestThreadDecisionStructuredAskAnswersWithProse(t *testing.T) {
 
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	deadline := time.After(testWaitTimeout)
-	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
+	for eng.Freeform(sessionID).Snapshot().PendingAsk != nil {
 		select {
 		case <-deadline:
 			t.Fatal("the typed line never answered the structured ask")
@@ -565,7 +409,7 @@ func TestThreadDecisionStructuredAskAnswersWithProse(t *testing.T) {
 		}
 	}
 	var answered string
-	for _, msg := range eng.Get("FD-001").Snapshot().Transcript {
+	for _, msg := range eng.Freeform(sessionID).Snapshot().Transcript {
 		if msg.Author == engine.AuthorUser {
 			answered = msg.Content
 		}
@@ -575,38 +419,46 @@ func TestThreadDecisionStructuredAskAnswersWithProse(t *testing.T) {
 	}
 }
 
-// TestThreadDecisionProseAimsAndSlashVerbKeepsTheParser is the sigil rule
-// at the one place it used to hurt most. "verify the contrast is right"
-// is a sentence about contrast, and under the old bare-word vocabulary it
-// was the verb `verify` — which is why every state-changing verb had to
-// raise a confirm chip. Now the first character decides: prose aims the
-// highlight at the option that eats words, and only "/verify" keeps the
-// parser.
+// TestThreadDecisionProseAimsAndSlashVerbKeepsTheParser is the sigil
+// rule: "diff the contrast change" is a sentence, and the first character
+// decides — prose aims the highlight at the option that eats words, and
+// only "/diff" keeps the parser.
 func TestThreadDecisionProseAimsAndSlashVerbKeepsTheParser(t *testing.T) {
 	t.Run("prose aims at the word consumer", func(t *testing.T) {
-		m := reviewGateWorkspace(t)
-		m = typeString(t, m, "verify the contrast is right")
-		out := ansi.Strip(m.threadView(100, 30))
-		if !strings.Contains(out, "with your words") {
-			t.Errorf("a sentence starting with a verb word did not aim at the word-eater:\n%s", out)
+		m, eng := sessionWorkspace(t, askingFake())
+		waitAsk(t, eng)
+		m = typeString(t, m, "diff the contrast change first")
+		d := m.openDecision(m.rows[m.sel])
+		if d == nil || d.ask == nil {
+			t.Fatalf("no live ask decision open: %+v", d)
+		}
+		if got, want := m.wordAim(d), len(d.ask.Options); got != want {
+			t.Errorf("a sentence starting with a verb word aims at %d, want the word-eater %d", got, want)
 		}
 	})
 
 	t.Run("slash verb keeps the parser", func(t *testing.T) {
-		m := reviewGateWorkspace(t)
-		m = typeString(t, m, "/verify the contrast is right")
-		out := ansi.Strip(m.threadView(100, 30))
-		if strings.Contains(out, "with your words") {
-			t.Errorf("a /verb line aimed the highlight at the word-eater:\n%s", out)
-		}
+		m, eng := sessionWorkspace(t, askingFake())
+		waitAsk(t, eng)
+		m = typeString(t, m, "/diff the contrast change first")
 		if m.decisionCursor != 0 {
 			t.Errorf("a /verb line moved the cursor to %d, want 0", m.decisionCursor)
+		}
+		var enterLabel string
+		for _, b := range m.threadInputBindings() {
+			if b.key == "enter" {
+				enterLabel = b.label
+			}
+		}
+		if enterLabel != "diff" {
+			t.Errorf("bar enter label = %q, want diff", enterLabel)
 		}
 	})
 }
 
 func TestVerbLeavesPickerAtFullBrightness(t *testing.T) {
-	m := reviewGateWorkspace(t)
+	m, eng := sessionWorkspace(t, askingFake())
+	waitAsk(t, eng)
 	s := m0Styles()
 	before := m.openDecisionBlock(s, m.rows[m.sel], 60, 8)
 
@@ -626,38 +478,6 @@ func TestVerbLeavesPickerAtFullBrightness(t *testing.T) {
 	if strings.Join(before, "\n") == strings.Join(after, "\n") {
 		t.Fatalf("picker rendered identically once the bar switched enter to %q — the picker still claims enter for its own highlighted option:\n%s",
 			enterLabel, strings.Join(after, "\n"))
-	}
-}
-
-// TestThreadDecisionDigitSelectsWorkflowOption is F14's other half: on a
-// workflow decision a digit used to type into the composer and, because
-// the line was then non-empty, wordAim yanked the highlight onto the
-// word-consuming option instead — on a four-option gate, pressing 2
-// selected 1. A digit now selects the option it names directly, on an
-// empty composer, the same as ↑↓, and leaves it to enter to commit. The
-// review gate is the reproduction case in the finding: four options,
-// bounce (a word-eater) sitting at index 1.
-func TestThreadDecisionDigitSelectsWorkflowOption(t *testing.T) {
-	m := reviewGateWorkspace(t)
-	d := m.openDecision(m.rows[m.sel])
-	// the work stage's gate: advance, then the word-eating send-it-back
-	// at index 1 (the diff moved to a tab, and bounce/changes/re-run
-	// merged into this one row)
-	if d == nil || len(d.actions) < 2 || d.actions[1].id != "run" {
-		t.Fatalf("precondition: a work-stage gate with send-it-back at 1, got %+v", d)
-	}
-
-	// digit 2 selects option index 1 — it must not land in the composer,
-	// and it must not commit on its own
-	m = press(t, m, tea.KeyPressMsg{Code: '2', Text: "2"})
-	if got := m.threadInput.Value(); got != "" {
-		t.Fatalf("the digit typed into the composer instead of selecting: %q", got)
-	}
-	if m.decisionCursor != 1 {
-		t.Fatalf("digit 2 left the cursor at %d, want 1", m.decisionCursor)
-	}
-	if m.rows[m.sel].F.Stage != domain.StageImplement {
-		t.Fatalf("the digit alone committed the option — stage moved to %s", m.rows[m.sel].F.Stage)
 	}
 }
 
@@ -733,8 +553,7 @@ func TestAskPickerOptionsAddsChatAboutThisRow(t *testing.T) {
 // is reachable the same way any other option is, via digit-select or
 // ↑↓, since optionCount folds it into every bound check.
 func TestThreadDecisionDigitAndArrowsReachChatAboutThisRow(t *testing.T) {
-	m, eng := chatWorkspace(t, askingFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, askingFake())
 	waitAsk(t, eng)
 
 	m = press(t, m, tea.KeyPressMsg{Code: '3', Text: "3"})
@@ -754,8 +573,7 @@ func TestThreadDecisionDigitAndArrowsReachChatAboutThisRow(t *testing.T) {
 // aims at the synthetic row's index once the composer holds prose — for
 // any ask, since every one of them carries that row and takes the line.
 func TestThreadDecisionTypedProseAimsAtChatAboutThis(t *testing.T) {
-	m, eng := chatWorkspace(t, askingFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, askingFake())
 	waitAsk(t, eng)
 
 	d := m.openDecision(m.rows[m.sel])
@@ -767,8 +585,7 @@ func TestThreadDecisionTypedProseAimsAtChatAboutThis(t *testing.T) {
 		t.Errorf("wordAim = %d, want %d (the synthetic row)", got, want)
 	}
 
-	m2, eng2 := chatWorkspace(t, structuredAskFake())
-	m2 = openAndAttach(t, m2)
+	m2, eng2 := sessionWorkspace(t, structuredAskFake())
 	waitAsk(t, eng2)
 	d2 := m2.openDecision(m2.rows[m2.sel])
 	if d2 == nil || d2.ask == nil {
@@ -785,8 +602,7 @@ func TestThreadDecisionTypedProseAimsAtChatAboutThis(t *testing.T) {
 // selecting an option, then typing prose, moves the bright marker onto
 // the synthetic row and off the previously-selected option.
 func TestThreadDecisionTypedProseLightsUpChatAboutThis(t *testing.T) {
-	m, eng := chatWorkspace(t, askingFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, askingFake())
 	waitAsk(t, eng)
 
 	m = press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"}) // select "per-device"
@@ -818,8 +634,7 @@ func TestThreadDecisionTypedProseLightsUpChatAboutThis(t *testing.T) {
 // on an empty composer with the synthetic row selected arms free-form,
 // the same as pressing 'o', rather than resolving to no answer.
 func TestThreadDecisionEnterOnChatAboutThisArmsFreeForm(t *testing.T) {
-	m, eng := chatWorkspace(t, askingFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, askingFake())
 	waitAsk(t, eng)
 
 	m = press(t, m, tea.KeyPressMsg{Code: '3', Text: "3"}) // select the synthetic row
@@ -834,7 +649,7 @@ func TestThreadDecisionEnterOnChatAboutThisArmsFreeForm(t *testing.T) {
 	if !strings.Contains(out, "your line is the answer") {
 		t.Errorf("thread does not show the armed free-form title:\n%s", out)
 	}
-	if eng.Get("FD-001").Snapshot().PendingAsk == nil {
+	if eng.Freeform(sessionID).Snapshot().PendingAsk == nil {
 		t.Error("the ask closed on its own — arming free-form should not answer it")
 	}
 }
@@ -846,8 +661,7 @@ func TestThreadDecisionEnterOnChatAboutThisArmsFreeForm(t *testing.T) {
 // call, not the asking model's, and the answer path already worked this
 // way; only the affordance was missing.
 func TestThreadDecisionStructuredAskShowsChatAboutThis(t *testing.T) {
-	m, eng := chatWorkspace(t, structuredAskFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, structuredAskFake())
 	waitAsk(t, eng)
 
 	out := ansi.Strip(m.threadView(100, 30))
@@ -894,8 +708,7 @@ func TestDecisionAnswerTextIgnoresSyntheticIndex(t *testing.T) {
 // the same class of "picker shows a state enter/space won't honour" bug
 // the one-liner describes.
 func TestThreadDecisionMultiPickNeverTogglesChatAboutThis(t *testing.T) {
-	m, eng := chatWorkspace(t, multiPickFreeFormAskFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, multiPickFreeFormAskFake())
 	waitAsk(t, eng)
 
 	m = press(t, m, tea.KeyPressMsg{Code: '3', Text: "3"})
@@ -921,7 +734,7 @@ func TestThreadDecisionMultiPickNeverTogglesChatAboutThis(t *testing.T) {
 // honest to say it was raised "against" (there is no revision in question,
 // just a turn to let finish or stop).
 func TestAFreeformTurnInFlightIsNotCalledIdle(t *testing.T) {
-	in := nextInput{stage: domain.StageOpen, freeformBusy: true}
+	in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, freeformBusy: true}
 	if acts := stageActions(in); len(acts) != 1 || acts[0].id != "pause" {
 		t.Errorf("answers = %+v, want the one that stops the turn", acts)
 	}

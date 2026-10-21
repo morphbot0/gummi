@@ -31,7 +31,7 @@ func rowSpend(t *testing.T, m *Shell, id domain.FeatureID) float64 {
 // keeps the spend it had before the run, and "budget exhausted" lands
 // beside a masthead still offering the credits the stage was denied.
 func TestExhaustionRefreshesTheBoardsSpend(t *testing.T) {
-	m, _ := chatWorkspace(t, verdictAgent(func(agent.SessionOpts) string { return "done" }))
+	m, _ := chatWorkspace(t, agent.NewFake("done"))
 	ctx := context.Background()
 
 	// the run's usage, booked against the store the way recordUsage books it
@@ -55,7 +55,7 @@ func TestExhaustionRefreshesTheBoardsSpend(t *testing.T) {
 // the board reloads on, so a card deep into its envelope stops quoting
 // the figure it had at spawn.
 func TestBudgetThresholdRefreshesTheBoardsSpend(t *testing.T) {
-	m, _ := chatWorkspace(t, verdictAgent(func(agent.SessionOpts) string { return "done" }))
+	m, _ := chatWorkspace(t, agent.NewFake("done"))
 	if err := m.store.AddSpend(context.Background(), "FD-001", 50, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}

@@ -840,7 +840,7 @@ func TestScheduleMintClosedOrphanMintsFresh(t *testing.T) {
 	orphan := fires[0].Outcome.Orphan
 	refuse.release()
 	// The person closes the orphaned card like any other.
-	if _, err := e.cfg.Store.CloseFreeform(ctx, orphan, "user"); err != nil {
+	if _, err := e.cfg.Store.CloseCard(ctx, orphan, "user"); err != nil {
 		t.Fatal(err)
 	}
 	fires, err = e.ScheduleTick(ctx, nextDue(t, e.cfg.Store, sc.ID))

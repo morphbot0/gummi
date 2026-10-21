@@ -164,38 +164,13 @@ func TestFoldedReceiptFallsBackToEnterTime(t *testing.T) {
 	}
 }
 
-// TestPinnedSpecLineNamesOpenQuestions checks the pinned line's anchor
-// (section) and its open-comment-count badge.
-//
-// It used to assert "2 open %%" — the artifact's own file syntax for a
-// comment marker, not a word — which a reader who has never opened the
-// file cannot read (2026-09-10 round-2 review, §5). Rewritten to pin
-// "2 open comments" instead of dropping the case: the pluralized count
-// is still the thing worth locking down, just spelled the way the rest
-// of the page spells anything else.
-func TestPinnedSpecLineNamesOpenQuestions(t *testing.T) {
-	r := featureRow{
-		F:          domain.Feature{Kind: domain.KindFeature, Stage: domain.StagePlan},
-		OpenSpecQs: 2,
-	}
+func TestPinnedSpecLineNamesTheSection(t *testing.T) {
+	r := featureRow{F: domain.Feature{Kind: domain.KindFeature, Stage: domain.StagePlan}}
 	line := ansi.Strip(pinnedSpecLine(m0Styles(), r, 80))
-	for _, want := range []string{"spec", "Chosen approach", "2 open comments", "s"} {
+	for _, want := range []string{"spec", "Chosen approach", "alt+s"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("pinned spec line %q missing %q", line, want)
 		}
-	}
-
-	// the singular reads as a word too, not "1 open comments"
-	r1 := featureRow{
-		F:          domain.Feature{Kind: domain.KindFeature, Stage: domain.StagePlan},
-		OpenSpecQs: 1,
-	}
-	line1 := ansi.Strip(pinnedSpecLine(m0Styles(), r1, 80))
-	if !strings.Contains(line1, "1 open comment ") {
-		t.Errorf("pinned spec line %q missing singular %q", line1, "1 open comment")
-	}
-	if strings.Contains(line1, "1 open comments") {
-		t.Errorf("pinned spec line %q pluralized a single open comment", line1)
 	}
 
 	// a stage with no natural section (todo) renders nothing to pin.
@@ -578,11 +553,11 @@ func TestThreadInputUpOpensCardActions(t *testing.T) {
 // one list on screen at a time (DESIGN §6.3).
 func TestThreadDecisionOwnsThePickerKeys(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
-	m.sel = 3 // FD-049, spec — nothing running, so a decision is open
+	m.sel = 1 // FD-042, a retired card with a worktree: its endings are open
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	d := m.openDecision(m.rows[m.sel])
 	if d == nil || len(d.actions) < 2 {
-		t.Fatalf("precondition: an idle spec card has a multi-option decision, got %+v", d)
+		t.Fatalf("precondition: a retired card with a branch has a multi-option decision, got %+v", d)
 	}
 	if m.decisionCursor != 0 {
 		t.Fatalf("precondition: decision opens on the first option, got %d", m.decisionCursor)
@@ -690,43 +665,6 @@ func TestSubmitThreadInputRoutesFreeVerbImmediately(t *testing.T) {
 	}
 }
 
-// TestSendItBackVerbsCarryTheirRemainder: changes and bounce are the two
-// verbs for the merged "send it back" answer, and the remainder is the
-// whole point of typing one instead of pressing the row — it is what is
-// wrong, and it has to ride along.
-//
-// Both used to land on notWiredVerb, which reported that the word was
-// parsed but not wired to anything. They reach the same delivery the
-// highlighted row performs now (deliverDecisionWords' own two cases), so
-// the vocabulary no longer contains two words that do nothing.
-func TestSendItBackVerbsCarryTheirRemainder(t *testing.T) {
-	for _, verb := range []string{"changes", "bounce"} {
-		t.Run(verb, func(t *testing.T) {
-			m := attachedBoard(t, 120, 34)
-			m.notice = noticeMsg{}
-			pump(t, m, m.fireVerb(verb, "the contrast check was never in the spec"))
-			if strings.Contains(m.notice.text, "wired") {
-				t.Errorf("/%s still reports itself unwired: %q", verb, m.notice.text)
-			}
-		})
-	}
-
-	// typed bare, each says what it wants rather than sending an empty
-	// complaint
-	for _, verb := range []string{"changes", "bounce"} {
-		t.Run(verb+" bare", func(t *testing.T) {
-			m := attachedBoard(t, 120, 34)
-			m.notice = noticeMsg{}
-			if cmd := m.fireVerb(verb, ""); cmd != nil {
-				t.Errorf("bare /%s sent something with nothing to say", verb)
-			}
-			if !strings.Contains(m.notice.text, "change") {
-				t.Errorf("bare /%s notice = %q, want it to ask for the line", verb, m.notice.text)
-			}
-		})
-	}
-}
-
 // TestVerbMenuOpensCommandMenuPreFiltered: a bare "/" (already consumed
 // by focusThreadInput on the way in, so this covers what happens once the
 // user re-types it as content) opens the same command menu boardKey's
@@ -830,6 +768,7 @@ func TestSlashVerbFiresAndBareWordIsProse(t *testing.T) {
 // route above instead of in this menu.
 func TestSlashMenuIncludesCardActionsOnCardPage(t *testing.T) {
 	m := populatedShell(120, 34)
+	m.rows[m.sel] = freeformRow(42, "dark mode", true)
 	m.cardOpen = true
 
 	m.threadInput.SetValue("/envelope")
@@ -912,8 +851,7 @@ func TestPlainMessageRoutesToConsultWithNoLiveSession(t *testing.T) {
 // path, reaches the card's live engine session exactly like the chat
 // pane's own send did — against a fake agent, never the network.
 func TestThreadInputSendsToLiveSession(t *testing.T) {
-	m, eng := agentWorkspace(t, liveFake("sure, got it"))
-	m = openAndAttach(t, m) // opens the card page, attaches the conversation, kicks off a turn
+	m, eng := sessionWorkspace(t, agent.NewFake("sure, got it"))
 	waitForTurns(t, eng, 2)
 	m = toKeys(t, m) // the accelerator layer; the session and the card page stay
 	if m.threadInput.Focused() {
@@ -936,7 +874,7 @@ func TestThreadInputSendsToLiveSession(t *testing.T) {
 	if m.threadInput.Value() != "" {
 		t.Fatalf("input not cleared after sending: %q", m.threadInput.Value())
 	}
-	sess := eng.Get("FD-001")
+	sess := eng.Freeform(sessionID)
 	if sess == nil {
 		t.Fatal("the session should still be live")
 	}
@@ -1035,30 +973,6 @@ func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 	}
 	if strings.Contains(out, "plan · architect") {
 		t.Error("the oldest folded receipt is still on screen — the body was not anchored to its end")
-	}
-}
-
-// TestPagingUpReachesTheLiveStageBoundary is Task 3's regression test:
-// the live stage's event list used to be capped to its last 6 entries,
-// with the transcript view (t) as the only way to see the rest. That cap
-// is gone — a long session is reached by scrolling instead — so paging
-// all the way up must surface the live stage's own boundary rule
-// ("fresh context"), not just the folded receipts above it. Without this
-// test, a future re-introduction of a cap would pass every other test in
-// this file unnoticed.
-func TestPagingUpReachesTheLiveStageBoundary(t *testing.T) {
-	m := threadWithHistory(t)
-	m.width, m.height = 80, 26
-	for range 6 { // more pages than the body has, to prove the clamp
-		m.scrollThread(true)
-	}
-	w, h := m.threadSize()
-	out := ansi.Strip(m.threadView(w, h))
-	if !strings.Contains(out, "fresh context") {
-		t.Errorf("pgup did not reach the live stage's boundary rule:\n%s", out)
-	}
-	if !strings.Contains(out, "plan · architect") {
-		t.Error("pgup did not also reach the oldest folded receipt")
 	}
 }
 
@@ -1170,79 +1084,40 @@ func TestSteppingCardsResetsTheScroll(t *testing.T) {
 	}
 }
 
-// --- FINDING 03: "park" must pause the live session, never open the
-// dependency picker off it, and every other verbKeys entry has to land on
-// a boardVerb case whose action matches the word. ---
+// --- FINDING 03: "park" must stop the turn in flight, never open
+// something unrelated, and every other verbKeys entry has to land on a
+// boardVerb case whose action matches the word. ---
 
-// TestParkVerbPausesRatherThanOpeningDeps is finding 03's repro and fix.
-// boardVerb's "p" case is two board-only actions sharing one reused
-// letter: pause a live non-interactive session, or — with nothing to
-// pause — open the dependency picker. That fallback makes sense for a
-// physical key someone can see is dual-purpose on the board itself, but a
-// user who types the word "park" never means "open something unrelated".
-// fireVerb now special-cases "park" (parkVerb, shell.go) so it only ever
-// pauses, and says something true instead of silently opening the picker
-// when there is nothing to pause — matching what cardactions.go's own
-// pauseLabelWhy already calls "park" (a settled session, "so it stops
-// asking") and what cardevents.go's ParkPayload doc calls "a human parked
-// them with p".
-func TestParkVerbPausesRatherThanOpeningDeps(t *testing.T) {
-	t.Run("live session pauses, deps picker never opens", func(t *testing.T) {
-		// No trailing idle event: the session stays busy/running so the
-		// test can fire "park" against a real live, non-interactive
-		// session instead of a raced one (mirrors run_test.go's
-		// TestWatchAttachesRunningSession).
+// TestParkVerbStopsTheTurn: "park" on a session mid-turn stops the turn;
+// on a card with nothing running it says so.
+func TestParkVerbStopsTheTurn(t *testing.T) {
+	t.Run("a turn in flight is stopped", func(t *testing.T) {
 		ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-			if opts.Role == agent.RoleScribe {
-				return []agent.Event{{Kind: agent.EventIdle}}
-			}
 			return []agent.Event{
 				{Kind: agent.EventMessage, Text: "Wiring the toggle."},
 				{Kind: agent.EventToolCall, Tool: "edit theme.go"},
 			}
 		}}
-		m, eng := agentWorkspace(t, ag)
-		m = advanceTo(t, m, domain.StageImplement)
-		m = openAndAttach(t, m)
+		ag.Caps.Interrupt = true
+		m, eng := sessionWorkspace(t, ag)
 		waitForActivity(t, eng)
 
-		s := m.sessionFor("FD-001")
-		if s == nil || s.Interactive {
-			t.Fatalf("setup: want a live non-interactive session, got %+v", s)
-		}
-
-		cmd := m.fireVerb("park", "")
-		pump(t, m, cmd)
-
-		if m.deps != nil {
-			t.Fatal("park opened the dependency picker — it must only ever pause the session")
-		}
-		if !strings.Contains(m.notice.text, "paused") {
-			t.Fatalf("notice = %q, want it to say the session paused", m.notice.text)
-		}
-		if got := eng.Get("FD-001"); got == nil || got.State() != engine.StatePaused {
-			state := "nil"
-			if got != nil {
-				state = string(got.State())
+		m = pump(t, m, m.fireVerb("park", ""))
+		deadline := time.After(testWaitTimeout)
+		for eng.Freeform(sessionID).Busy() {
+			select {
+			case <-deadline:
+				t.Fatalf("park left the turn running (notice %q)", m.notice.text)
+			case <-time.After(10 * time.Millisecond):
 			}
-			t.Fatalf("session state after park = %s, want paused", state)
 		}
 	})
 
-	t.Run("no live session says so instead of opening the deps picker", func(t *testing.T) {
+	t.Run("nothing running says so", func(t *testing.T) {
 		m, _ := agentWorkspace(t, agent.NewFake("hi"))
-		if m.sessionFor("FD-001") != nil {
-			t.Fatal("setup: expected no live session on the freshly created card")
-		}
-
-		cmd := m.fireVerb("park", "")
-		pump(t, m, cmd)
-
-		if m.deps != nil {
-			t.Fatal("park opened the dependency picker with nothing to pause")
-		}
+		pump(t, m, m.fireVerb("park", ""))
 		if !strings.Contains(m.notice.text, "nothing running to park") {
-			t.Fatalf("notice = %q, want a true explanation instead of an unrelated view opening", m.notice.text)
+			t.Fatalf("notice = %q, want a true explanation", m.notice.text)
 		}
 	})
 }
@@ -1277,46 +1152,12 @@ func TestVerbKeysLandOnMatchingHandler(t *testing.T) {
 		})
 	}
 
-	t.Run("verify", func(t *testing.T) {
-		m := attachedBoard(t, 120, 34)
-		m.rows[m.sel].F.Kind = domain.KindFeature
-		cmd := m.fireVerb("verify", "")
-		pump(t, m, cmd)
-		if !strings.Contains(m.notice.text, "no checks yet") {
-			t.Fatalf("verify notice = %q, want runChecks' no-artifact notice", m.notice.text)
-		}
-	})
-
 	t.Run("spec", func(t *testing.T) {
 		m := attachedBoard(t, 120, 34)
 		cmd := m.fireVerb("spec", "")
 		pump(t, m, cmd)
 		if m.spec == nil {
 			t.Fatalf("spec did not open the spec view (notice: %q)", m.notice.text)
-		}
-	})
-
-	t.Run("approve", func(t *testing.T) {
-		ctx := context.Background()
-		ws, store, wt := uiRepo(t)
-		m := NewShell(theme.GummiDark(), "v0-test")
-		m.Attach(store, wt, ws)
-		f := domain.Feature{ID: "FD-001", Num: 1, Title: "approve me", Slug: "approve-me", Stage: domain.StageTodo}
-		if err := store.CreateFeature(ctx, &f); err != nil {
-			t.Fatal(err)
-		}
-		m.rows = []featureRow{{F: f}}
-		m.sel = 0
-
-		cmd := m.fireVerb("approve", "")
-		pump(t, m, cmd)
-
-		got, err := store.GetFeature(ctx, "FD-001")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.Stage != domain.StagePlan {
-			t.Fatalf("stage after approve = %s, want brainstorm — approve means advance the stage", got.Stage)
 		}
 	})
 }
@@ -1642,23 +1483,22 @@ func TestSessionlessSpendGetsItsOwnLine(t *testing.T) {
 }
 
 // A host that came up with no engine knows why — the backend's binary was
-// not on its PATH, say — and the refusal to run a card has to repeat it:
-// "no agent configured" sends the reader to a configuration that is fine.
-func TestARefusedRunSaysWhyTheHostHasNoAgent(t *testing.T) {
+// not on its PATH, say — and a refusal for want of an agent has to repeat
+// it: "no agent configured" sends the reader to a configuration that is
+// fine.
+func TestARefusalSaysWhyTheHostHasNoAgent(t *testing.T) {
 	m := populatedShell(120, 34)
-	f := m.rows[m.sel].F
-	m.runStage(f)
-	if !strings.Contains(m.notice.text, "no agent configured") {
-		t.Fatalf("with no reason on record, notice = %q, want the plain no-agent-configured refusal", m.notice.text)
+	if got := m.noAgent(""); !strings.Contains(got, "no agent configured") {
+		t.Fatalf("with no reason on record = %q, want the plain no-agent-configured refusal", got)
 	}
 
 	const why = `claude binary "claude" not found: exec: "claude": executable file not found in $PATH`
 	m.SetEngineUnavailable(why)
-	m.runStage(f)
-	if !strings.Contains(m.notice.text, why) {
-		t.Fatalf("notice = %q, want it to carry the reason %q", m.notice.text, why)
+	got := m.noAgent("")
+	if !strings.Contains(got, why) {
+		t.Fatalf("refusal = %q, want it to carry the reason %q", got, why)
 	}
-	if strings.Contains(m.notice.text, "no agent configured") {
-		t.Fatalf("notice = %q: an agent that failed to start is not one that was never configured", m.notice.text)
+	if strings.Contains(got, "no agent configured") {
+		t.Fatalf("refusal = %q: an agent that failed to start is not one that was never configured", got)
 	}
 }

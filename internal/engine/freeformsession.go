@@ -363,7 +363,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			tools = append(tools, own...)
 			hints = append(hints, sessionCrewHint)
 		}
-		path, teardown, merr := e.startMCPEndpoint(ctx, f, flavorStage, extra...)
+		path, teardown, merr := e.startMCPEndpoint(ctx, f, extra...)
 		if merr != nil {
 			cancel()
 			return merr
@@ -432,6 +432,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	}
 	sess.setState(StateInteractive)
 	e.trackAgentPID(ff.id, agentSess)
+	e.flushEnvNotices(sess)
 
 	ff.mu.Lock()
 	ff.sess = sess
@@ -515,7 +516,10 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 	sess := ff.sess
 	ff.mu.Unlock()
 	spent := sess != nil && sess.isExhausted()
-	if sess != nil && sess.Live() && !spent {
+	// a backend that failed (its process died, its run errored) is not
+	// one to hand the next turn to: a fresh one picks the conversation up
+	failed := sess != nil && sess.errValue() != nil
+	if sess != nil && sess.Live() && !spent && !failed {
 		return sess, nil
 	}
 	// An exhausted session is respawned rather than refused — but only once
@@ -545,7 +549,7 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 		// the row carries it (restoreFreeformLocked).
 		resumeID = snap.AgentSessionID
 	}
-	if spent && sess.Live() {
+	if (spent || failed) && sess.Live() {
 		// A spent backend is still running — exhaustFreeform stops the turn,
 		// not the process — so it has to be stopped before its replacement
 		// exists. Otherwise its pump outlives the session it was started
@@ -1239,12 +1243,20 @@ func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session) {
 		case ev, ok := <-events:
 			if !ok {
 				if !sess.finalizedState() {
+					// its bridged tool calls died with it: an answer must
+					// reach a fresh backend as a turn, not a dead waiter
+					sess.clearResolversWaiting()
 					sess.setError(errSessionDied)
 					ff.settleObjective(domain.ObjectiveFailed, "the backend died: "+errSessionDied.Error())
 					e.send(Event{Feature: ff.id, Kind: EventError, Err: errSessionDied})
 					sess.stop()
 				}
 				return
+			}
+			// Process-backed adapters learn their durable conversation id
+			// from the first backend event, after NewSession has returned.
+			if id, ok := sess.agent().(agent.Identified); ok && id.SessionID() != "" {
+				sess.setAgentSessionID(id.SessionID())
 			}
 			e.handleFreeform(ff, sess, ev)
 		}

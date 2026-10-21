@@ -18,7 +18,6 @@ import (
 	"errors"
 	"os/exec"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 
@@ -130,33 +129,4 @@ func StatusString(r Result) string {
 	default:
 		return "ABSENT"
 	}
-}
-
-// FormatReport builds a compact PRESENT/ABSENT/errored report block listing
-// each prerequisite with its describe and output.
-func FormatReport(results []Result) string {
-	var b strings.Builder
-	for _, r := range results {
-		b.WriteString("- ")
-		b.WriteString(r.Name)
-		b.WriteString(": ")
-		b.WriteString(StatusString(r))
-		if r.Describe != "" {
-			b.WriteString(" — ")
-			b.WriteString(r.Describe)
-		}
-		b.WriteString("\n")
-		if r.Output != "" {
-			b.WriteString(indentLines(r.Output))
-			b.WriteString("\n")
-		}
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func indentLines(s string) string {
-	if s == "" {
-		return ""
-	}
-	return "    " + strings.ReplaceAll(s, "\n", "\n    ")
 }

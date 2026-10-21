@@ -17,7 +17,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,31 +26,11 @@ import (
 	"github.com/morphis/gummi/internal/attachment"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/envprobe"
-	"github.com/morphis/gummi/internal/livelog"
-	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/worktree"
 )
-
-// kickoff is the go-ahead sent to start an autonomous stage; the stage
-// hints already tell the agent what to do.
-//
-// It names the card's own document — a bug's report, a research card's
-// research document — rather than always saying "spec": the agent is
-// being told to go read a file whose name and sections belong to the
-// kind, and the thread renders this line back to the reader, who sees
-// the same document named correctly everywhere else on the page.
-func kickoff(k domain.Kind) string {
-	return "Proceed with this stage per your instructions and the " + k.ArtifactNoun() + "."
-}
-
-// rebaseKickoff opens a rebase-resolve session; the run's kickoff note
-// carries the target commit and the files expected to conflict.
-const rebaseKickoff = "Proceed with the rebase per your instructions."
 
 // runFlavor selects what an autonomous session does: the stage's own
 // work, the plan-critique pass (RunCritique), or the rebase-resolve
@@ -85,91 +64,9 @@ func flavorString(f runFlavor) string {
 	return flavorStageString
 }
 
-// parseFlavor recovers a restored session's pass identity from its
-// persisted form. An empty (legacy) or unknown flavor reads as a plain
-// stage run.
-func parseFlavor(s string) (critique, rebase bool) {
-	switch s {
-	case flavorCritiqueString:
-		return true, false
-	case flavorRebaseString:
-		return false, true
-	}
-	return false, false
-}
-
-// designKickoff opens a fresh design session with the agent leading — the
-// user shouldn't have to know what to say to start (DESIGN §3).
-//
-// One opener where there were five. Brainstorm, spec, triage, diagnose
-// and shape each had their own because each was its own stage; they are
-// one stage now, and what differs between a feature, a bug and a research
-// topic is the KIND, which the opener names rather than the stage.
-//
-// The MODE decides the rest of it. The opener used to say "the user just
-// opened the design chat" and "put the most consequential open question to
-// the user first" to every card, autopilot included, where both halves are
-// false: nobody opened anything, and the question is answered by the card's
-// own recommendation without a person ever seeing it. It is the first thing
-// a session reads, so it won: on the lxd autopilot drive all four cards
-// opened by asking, and all four were bounced by the ask toll — a tool call
-// and a model turn each, spent to be told not to ask. Two other mechanisms
-// (unattendedAskHint, askChangesSomething) existed to undo what this
-// sentence had just instructed.
-//
-// So an unattended card is told what is true. It is not told to stop
-// asking — unattendedAskHint still invites a real decision to be recorded
-// as a question, which is what the receipt is built from — only to stop
-// opening with one addressed to a reader who is not there.
-func designKickoff(f domain.Feature) string {
-	if f.GateApproval == domain.GateAutopilot {
-		return unattendedDesignKickoff(f)
-	}
-	switch f.Kind {
-	case domain.KindBug:
-		return "The user just opened the design chat on a bug. Read the report, try to " +
-			"reproduce it, and report what you found. Then drive toward root cause: state your " +
-			"leading hypothesis with your reasoning, and put the most consequential open " +
-			"question to the user first, with your recommended answer. Keep it short."
-	case domain.KindResearch:
-		return "The user just opened the design chat on a research topic. Read the research " +
-			"artifact at its workspace home, then shape the question with them: recommend " +
-			"how to scope it and which direction the survey should take, and put the most " +
-			"consequential open question to the user first. Keep it short."
-	default:
-		return "The user just opened the design chat. Read the spec draft and its open %% " +
-			"threads, then drive convergence: state the problem as you understand it, " +
-			"recommend one approach with your reasoning, and put the most consequential open " +
-			"question to the user first, with your recommended answer. Keep chat turns short; " +
-			"the detail belongs in the spec."
-	}
-}
-
-// unattendedDesignKickoff is designKickoff for a card running on
-// autopilot: same job, same artifact, no reader. Each one ends where its
-// attended twin ends — with the decision written down — because the
-// artifact is the only place an unattended decision can go.
-const unattendedPreamble = "This card is running unattended: no one is at the keyboard, and " +
-	"the design stage will be judged on what it writes, not on what it asks. "
-
-func unattendedDesignKickoff(f domain.Feature) string {
-	switch f.Kind {
-	case domain.KindBug:
-		return unattendedPreamble + "Read the report, try to reproduce it, and report what " +
-			"you found. Then drive toward root cause: state your leading hypothesis with the " +
-			"evidence for it, and write the diagnosis into the report. Keep it short."
-	case domain.KindResearch:
-		return unattendedPreamble + "Read the research artifact at its workspace home, then " +
-			"shape the question yourself: scope it, fix the constraints and success criteria " +
-			"it must meet, and pick the direction the survey will take, writing each decision " +
-			"into the document as it settles. Keep it short."
-	default:
-		return unattendedPreamble + "Read the spec draft and its open %% threads, then drive " +
-			"convergence: state the problem as you understand it, choose one approach with " +
-			"your reasoning, and write the decision into the spec where a reader will find it " +
-			"afterwards. Keep turns short; the detail belongs in the spec."
-	}
-}
+// errSessionDied is the error a session's pump records when its backend's
+// event stream ends without the session having been stopped.
+var errSessionDied = errors.New("agent session died without finishing")
 
 // Config wires an engine to its backends. Model is the M1 stand-in for
 // profiles: the fallback model when no profile applies. The default
@@ -246,23 +143,8 @@ type Engine struct {
 	events  chan Event
 	stopped chan struct{}
 
-	mu   sync.Mutex
-	live map[domain.FeatureID]*Session
-	// oneShot counts the engine's session-less passes currently running
-	// per card — check discovery and its baseline. They are the only work
-	// a card does that e.live cannot see, and on a repository the size of
-	// lxd they run for minutes: 4.6 on one drive's card, 14–25% of what
-	// the card cost. Everything that asks "is this card still working?"
-	// asked e.live and was told no, so the board rendered a live card as
-	// "autopilot stopped without saying so" and offered to restart the
-	// stage. Refcounted, not a flag: baseline follows discovery
-	// and a card can be re-entered.
-	oneShots map[domain.FeatureID]int
-	// oneShotLogs holds the live file those passes share, one per card;
-	// oneShotLogMu guards it and the file's create and close.
-	oneShotLogMu sync.Mutex
-	oneShotLogs  map[domain.FeatureID]*oneShotLog
-	closed       bool
+	mu     sync.Mutex
+	closed bool
 
 	// consult holds every card's consult session, keyed by feature:
 	// OpenConsult is idempotent per card for the engine's whole lifetime
@@ -415,13 +297,6 @@ type Engine struct {
 	// same mutex and with the same lifetime as repoCards.
 	repoInstructions map[string]string
 
-	// discoverLocks serializes check discovery per repository root
-	// (checkscache.go's discoveryLock), so two cards crossing their plan
-	// gates at once survey the repo once between them instead of each
-	// paying for the same answer.
-	discoverLocksMu sync.Mutex
-	discoverLocks   map[string]*sync.Mutex
-
 	// stackLocks serializes the restack walk per stack (stack.go's
 	// stackLock), so two ticks never replay two members at once.
 	stackLocksMu sync.Mutex
@@ -431,16 +306,6 @@ type Engine struct {
 	// pushes it now needs, kept so a surface opened after the walk still
 	// has the lines to show.
 	stackReplays map[domain.StackID]*stackWalk
-}
-
-// oneShotBusy reports whether a session-less pass (check discovery, its
-// baseline) is running on the card. It is the other half of "is this
-// card working?" that e.live cannot see — the gap that once had the
-// board call a live card stopped.
-func (e *Engine) oneShotBusy(id domain.FeatureID) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.oneShots[id] > 0
 }
 
 // New builds an engine from the config. The caller owns every agent's
@@ -463,8 +328,6 @@ func New(cfg Config) *Engine {
 		raw:            make(chan Event, 256),
 		events:         make(chan Event),
 		stopped:        make(chan struct{}),
-		live:           map[domain.FeatureID]*Session{},
-		oneShots:       map[domain.FeatureID]int{},
 		consult:        map[domain.FeatureID]*ConsultSession{},
 		freeform:       map[domain.FeatureID]*FreeformSession{},
 		freeformClosed: map[domain.FeatureID]*Session{},
@@ -540,253 +403,10 @@ func (e *Engine) forward() {
 	}
 }
 
-// Get returns the live session for a feature, or nil.
-func (e *Engine) Get(id domain.FeatureID) *Session {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.live[id]
-}
-
-// Sessions returns a snapshot of every live session, keyed by feature.
-func (e *Engine) Sessions() map[domain.FeatureID]*Session {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make(map[domain.FeatureID]*Session, len(e.live))
-	for id, s := range e.live {
-		out[id] = s
-	}
-	return out
-}
-
-// noAgentAtStage is the refusal for a stage no role is mapped to — in
-// practice todo, the one stage that exists before any agent has been
-// asked for anything. It names the way forward rather than only the
-// wall: the old wording ("stage todo has no agent action") was what a
-// person met after being told to request changes instead of approving,
-// and it left them with nothing to do at all.
-func noAgentAtStage(stage domain.Stage) error {
-	if stage == domain.StageTodo {
-		return errors.New("nothing has run yet — start the card, and the comments in its artifact go to the agent with it")
-	}
-	return fmt.Errorf("stage %s runs no agent", stage)
-}
-
-// Attach starts (or reuses) an interactive chat session for a feature's
-// current stage.
-func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error) {
-	role, ok := roleForStage(f)
-	if !ok {
-		return nil, noAgentAtStage(f.Stage)
-	}
-	// A run whose profile resolves to enforce must not start while any role
-	// names a backend without tool coverage — feature-level, before any
-	// session, queue slot, or engine event.
-	if res := e.resolveSandbox(f); res.Mode == sandbox.ModeEnforce && len(res.Gaps) > 0 {
-		return nil, &sandbox.RefusalError{Mode: res.Mode, Gaps: res.Gaps}
-	}
-
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return nil, errors.New("engine is closed")
-	}
-	prior := e.live[f.ID]
-	e.mu.Unlock()
-
-	// A live agent session for this stage is reused (keeps its context);
-	// a restored session (no agent) or a different stage starts fresh,
-	// carrying the prior transcript over so the history stays visible.
-	if prior != nil && prior.Feature.Stage == f.Stage && prior.agent() != nil {
-		return prior, nil
-	}
-
-	// Nothing expensive happens before the card is ours: a backend spawn
-	// against a card another gummi is already driving is exactly the race
-	// this lock exists to lose early. A prior session of ours holds a ref
-	// of its own, so this joins rather than fights it.
-	unlock, err := e.lockCard(f.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	// The session's lifecycle context is bound to nothing: it is canceled by
-	// Session.stop, not by the caller's ctx going away. Keep it distinct from
-	// the caller's ctx so the initial kickoff Send stays on the caller's
-	// cancellation semantics.
-	sctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, cardUnlock: unlock, startedAt: time.Now()}
-	var priorAgentSession string
-	if prior != nil && prior.Feature.Stage == f.Stage {
-		ps := prior.Snapshot()
-		// The backend conversation is only this session's to continue when
-		// the prior one was the same role doing the same job. A card keeps
-		// ONE session row per stage, so the id sitting there may belong to
-		// the critique pass that ran last (reviewer, flavorCritique) —
-		// handing that conversation to the architect would resume the
-		// wrong side of the argument. The transcript still carries over
-		// either way; only the resume is withheld.
-		if prior.Role == role && prior.flavor() == flavorStage {
-			priorAgentSession = ps.AgentSessionID
-		}
-		s.transcript = append(s.transcript, ps.Transcript...)
-		s.activity = append(s.activity, ps.Activity...)
-		s.spend = ps.Spend
-		// a restored ask rides the swap: the prior session was re-armed
-		// with the durably recorded question (DESIGN §6.3's reopen path),
-		// and the fresh backend behind this attach has never seen it —
-		// dropping the pending ask here would strand the question the
-		// record says is open.
-		s.setPendingAsk(ps.PendingAsk)
-	}
-	// A fresh conversation opens with a stage kickoff so the agent leads;
-	// a carried-over transcript means the interview is already underway
-	// (this is a restart-reattach), so reattaching stays silent. The same
-	// distinction decides the durable transcript's fate: a fresh attach
-	// must not inherit an unrelated earlier attempt's file, while a
-	// restart-reattach's carried transcript is exactly what that file
-	// preserves — it must be left alone.
-	fresh := len(s.transcript) == 0
-	if fresh {
-		e.clearResumeTranscript(s, flavorStage)
-	}
-
-	// A reattach continues a conversation: the backend is handed the id of
-	// the one it is continuing, so a restored ask lands in a session that
-	// still has the repository open instead of one that must re-read every
-	// file the last one read before it can act on a one-word answer. A
-	// fresh attach passes nothing — there is no conversation to continue,
-	// and the adapter opens a blank one exactly as it always has.
-	var resumeID string
-	if !fresh {
-		resumeID = priorAgentSession
-	}
-
-	// interactive chat is human-paced: no budget cap.
-	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage, true, resumeID)
-	if err != nil {
-		cancel()
-		unlock()
-		return nil, err
-	}
-	s.setSpecPath(specPath)
-	s.setMCPTeardown(mcpTeardown)
-	e.stampSpawnInfo(s)
-	// interactive chat is uncapped but not free: its spend moves the
-	// card's total the same way, so the masthead needs the same seed.
-	e.seedCardSpend(s)
-	// s is not yet reachable by Pause/Drop/Close (not in e.live), so
-	// attachAgent can't be racing a finalize here; the bool is checked for
-	// symmetry with the autonomous path.
-	if !s.attachAgent(sess) {
-		_ = sess.Close()
-		unlock()
-		return nil, errors.New("engine is closed")
-	}
-	e.trackAgentPID(f.ID, sess)
-	s.setState(StateInteractive)
-
-	if !e.replace(f.ID, s) {
-		s.stop() // engine closed during startup: don't leave the agent live
-		return nil, errors.New("engine is closed")
-	}
-	// replace stopped any prior session (closing its writer), so this one
-	// can safely truncate the card's live file and take it over.
-	e.bindLiveLog(s)
-	e.flushEnvNotices(s)
-	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.pump(s) }()
-	var ko string
-	var koImages []AttachmentRef
-	if fresh {
-		ko = designKickoff(f)
-		specText, _ := os.ReadFile(specPath)
-		ko, koImages = e.kickoffTurn(s, ko, string(specText))
-		s.appendSystem(ko)
-		s.setBusy(true)
-	}
-	e.persist(s)
-	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventStarted})
-	if fresh {
-		if err := e.sendKickoffTurn(ctx, sess, ko, koImages); err != nil {
-			s.setError(err)
-			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventError, Err: err})
-		}
-	}
-	return s, nil
-}
-
-// Run starts an autonomous stage for a feature. A no-op if the feature is
-// already running.
-
-func (e *Engine) Run(f domain.Feature) error { return e.RunWith(f, "") }
-
-// RunWith is Run with the user's review comments attached: note (the
-// open %% annotations, compiled by the UI) is appended to the stage
-// kickoff so the fresh session starts by addressing them — the
-// "request changes" path for autonomous stages, which have no chat to
-// send a turn to (DESIGN §6.1).
-func (e *Engine) RunWith(f domain.Feature, note string) error {
-	return e.run(f, note, flavorStage)
-}
-
-// RunCritique runs a stage's critique pass: a fresh-context reviewer
-// session that refutes what the stage just produced — the plan, or the
-// diff — writing findings as %% marker threads and ending with a
-// verdict. It replaces the done stage session like any re-run; the state
-// machine never sees it, so the card stays where it is throughout. note
-// is appended to the kickoff; a re-critique round uses it to point the
-// fresh session at the prior round's resolved threads.
-//
-// Every stage that ends with a critique must declare which round counter
-// that critique burns, and CritiqueRoundKind is where it declares it. A
-// critique with no counter would loop forever, so this refuses to start
-// one rather than defaulting: the failure mode is a loud error at the
-// first call, not an unbounded loop discovered in production.
-func (e *Engine) RunCritique(f domain.Feature, note string) error {
-	if _, ok := CritiqueRoundKind(f.Stage); !ok {
-		return fmt.Errorf("stage %s has no critique pass (no round counter declared for it)", f.Stage)
-	}
-	return e.run(f, note, flavorCritique)
-}
-
-// CritiqueRoundKind names the round counter a stage's critique burns, and
-// by existing at all it says which stages HAVE a critique. ok is false for
-// every other stage.
-//
-// Each critique burns the counter its predecessor burned, so no budget
-// changes hands when Review stops being a stage: the plan critique keeps
-// RoundKindPlan (cap 2), and every work stage's critique — which IS the
-// old Review — keeps RoundKindReview (cap 3). Investigate is research's
-// work stage and is in that group.
-//
-// A new stage that wants a critique has to add a row here, which is the
-// point: verdict.MaxRounds caps by round kind, so a critique whose kind
-// was left to a default would be capped by whatever that default happened
-// to be, or not capped at all.
-func CritiqueRoundKind(stage domain.Stage) (domain.RoundKind, bool) {
-	switch stage {
-	case domain.StagePlan:
-		return domain.RoundKindPlan, true
-	case domain.StageImplement:
-		return domain.RoundKindReview, true
-	}
-	return "", false
-}
-
-// RunRebase runs the rebase-resolve pass: an implementer session in the
-// feature's worktree that rebases the branch onto main and resolves the
-// conflicts a plain rebase stopped on — the agent hand-off behind the
-// UI's rebase key when RebaseOnMain aborts. files names the paths that
-// conflicted, so the kickoff can point the agent at them. Like the
-// critique, it borrows the current stage without advancing it; the
-// caller judges success by the resulting git state, not the transcript.
-func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string) error {
-	return e.RunRebaseStopped(ctx, f, files, "")
-}
-
-// RunRebaseStopped is RunRebase for a rebase that stopped on something
-// other than a plain conflict: reason is git's own account of the stop
-// (worktree.RebaseConflictError.Reason), put in the kickoff so the agent
+// RunRebaseStopped hands a rebase the board's own run could not finish to
+// the card's session: files names the paths that conflicted, and reason
+// is git's own account of a stop that was not a plain conflict
+// (worktree.RebaseConflictError.Reason), put in the turn so the agent
 // starts from what actually happened instead of looking for conflict
 // markers that are not there.
 func (e *Engine) RunRebaseStopped(ctx context.Context, f domain.Feature, files []string, reason string) error {
@@ -826,578 +446,14 @@ func (e *Engine) RunRebaseStopped(ctx context.Context, f domain.Feature, files [
 	if carried {
 		note += "\nThe worktree carries uncommitted work; it is this card's own. The --autostash in the command carries it across the rebase and puts it back — if applying the autostash conflicts at the end, resolve and keep it as the contract below says; never discard it."
 	}
-	// A freeform card has no stage to borrow: the hand-off is a turn in its
-	// own session, which the person reads in the thread. Nothing judges the
-	// result — the card has no gate that waits on it.
-	if f.IsFreeform() {
-		ff, err := e.OpenFreeform(ctx, f)
-		if err != nil {
-			return err
-		}
-		return ff.Send(ctx, note)
-	}
-	return e.run(f, note, flavorRebase)
-}
-
-// run is the shared autonomous-run path behind RunWith, RunCritique,
-// and RunRebase.
-func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
-	// Goals and research are retired: a legacy card of either is read,
-	// never run.
-	if f.Kind == domain.KindGoal || f.Kind == domain.KindResearch {
-		return fmt.Errorf("%s is a retired %s card, and it no longer runs", f.ID, f.Kind)
-	}
-	role, ok := roleForStage(f)
-	if !ok {
-		return noAgentAtStage(f.Stage)
-	}
-	switch flavor {
-	case flavorCritique:
-		role = agent.RoleReviewer
-	case flavorRebase:
-		role = agent.RoleImplementer
-	}
-
-	// Feature-level refusal at session start: enforce + any coverage gap
-	// fails the whole run before any stage begins. No auto-degrade to warn,
-	// no --force — the operator edits the profile to lift the guarantee.
-	if res := e.resolveSandbox(f); res.Mode == sandbox.ModeEnforce && len(res.Gaps) > 0 {
-		return &sandbox.RefusalError{Mode: res.Mode, Gaps: res.Gaps}
-	}
-
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return errors.New("engine is closed")
-	}
-	old := e.live[f.ID]
-	// replacedRunning: the dispatch below interrupts a stage session
-	// that was still mid-turn. Only the rebase hand-off does that — it
-	// is an explicit ask for a different pass on a card whose session is
-	// running, the steady state on autopilot, and absorbing it here
-	// reported the agent dispatched while doing nothing. A stage re-run
-	// or critique over a running session keeps the no-op this guard was
-	// written for.
-	replacedRunning := false
-	if old != nil {
-		// State() takes old.mu (state is written under it from pump
-		// goroutines); the engine's lock order is e.mu → s.mu, so taking it
-		// here while holding e.mu is safe.
-		if st := old.State(); st == StateRunning {
-			if flavor != flavorRebase {
-				e.mu.Unlock()
-				return nil // already running
-			}
-			replacedRunning = true
-		}
-	}
-	unlock, err := e.lockCard(f.ID)
+	// The hand-off is a turn in the card's own session, which the person
+	// reads in the thread. Nothing judges the result — the card has no
+	// gate that waits on it.
+	ff, err := e.OpenFreeform(ctx, f)
 	if err != nil {
-		e.mu.Unlock()
 		return err
 	}
-	// an answer the last run of this pass could not take (it had stopped
-	// on its budget) opens this one
-	if old != nil && old.Feature.Stage == f.Stage && old.flavor() == flavor {
-		if held := old.takeAnswerForNextRun(); held != "" {
-			note = strings.TrimSpace(strings.Join([]string{held, note}, "\n\n"))
-		}
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReplacedRunning: replacedRunning, state: StateRunning, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
-	e.stampSpawnInfo(s)
-	e.dropLocked(f.ID)
-	e.live[f.ID] = s
-	// The start below runs on the caller's goroutine and builds the card's
-	// worktree: Close joins it like the pump and kickoff it leads to. The
-	// Add shares the lock Close sets closed under, so it never races the
-	// Wait.
-	e.wg.Add(1)
-	defer e.wg.Done()
-	e.mu.Unlock()
-
-	if old != nil {
-		if replacedRunning {
-			// The interrupted session's pump must read the teardown as
-			// benign, not as a backend death: mark it terminal before
-			// the stop closes its agent, the way Pause marks paused
-			// first. Nothing reads the state afterwards — the session is
-			// out of the live map and never persisted — and a final idle
-			// that still lands must not advance the stage, which a
-			// non-running state also guarantees (finishRunning refuses).
-			old.setState(StateDone)
-		}
-		old.stop() // a replaced done/paused session; free its goroutine
-	}
-	// after the replaced session's writer is closed, never before: two
-	// writers on one live file would interleave.
-	e.bindLiveLog(s)
-	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventUpdated})
-	e.startAutonomous(s)
-	return nil
-}
-
-// startAutonomous creates the agent session for a run and kicks it off.
-// On setup failure it records the error and leaves the session paused.
-func (e *Engine) startAutonomous(s *Session) {
-	// price this session's token spend at the resolved adapter's rate
-	// (0 = default), and use the same rate for the remaining-envelope
-	// baseline so the budget math is self-consistent.
-	rc, backend := e.resolveRole(s.Feature.Profile, s.Role)
-	rate := 0.0
-	if a := e.agentFor(backend); a != nil {
-		rate = a.CreditRate(rc.Model)
-	}
-	s.setByokRate(rate)
-	// compute the stage budget once so the enforced cap, the budget-aware
-	// hint, and the session's own budget all agree.
-	budget := e.sessionBudget(s.Feature, rate)
-	// the same row the budget was just derived from, kept live on the
-	// session so displays stop reading a snapshot taken before the run
-	// (the masthead's "credits left" was frozen at spawn-time spend).
-	e.seedCardSpend(s)
-	// a budgeted feature with nothing left must not run uncapped (a 0
-	// budget elsewhere means "unbudgeted"): gate it immediately.
-	if s.Feature.Budget.Envelope > 0 && budget <= 0 && !s.Interactive {
-		e.exhaust(s)
-		return
-	}
-	// No dirty check on main: a research pass used to run in the main
-	// checkout, which made the operator's uncommitted work a hard stop
-	// before any session. It runs in the card's scratch tree now, so that
-	// dirt is out of reach and refusing here would park a card over a state
-	// it cannot touch.
-	// run() always builds a brand-new in-process Session with no carried
-	// transcript (kickoff, bounce, and restart-then-resume all dispatch
-	// through the same path), so every startAutonomous spawn is fresh: any
-	// transcript left at the derived path belongs to an unrelated earlier
-	// attempt and must not leak into this one.
-	e.clearResumeTranscript(s, s.flavor())
-	sess, specPath, mcpTeardown, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor(), s.Interactive, "")
-	if err != nil {
-		s.setError(err)
-		s.setState(StatePaused)
-		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
-		return
-	}
-	s.setSpecPath(specPath)
-	s.setBudget(budget)
-	s.setMCPTeardown(mcpTeardown)
-	// Pause/Drop/Close may have finalized this session while newAgentSession
-	// was spawning the backend (seconds). If so, attachAgent refuses: close
-	// the orphaned agent rather than run it unwatched.
-	if !s.attachAgent(sess) {
-		_ = sess.Close()
-		return
-	}
-	e.trackAgentPID(s.Feature.ID, sess)
-	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.pump(s) }()
-	e.flushEnvNotices(s)
-	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
-
-	// Only a stage's writer answers the human's spec comments: a critique
-	// judges what was written, a rebase resolves conflicts, and verify
-	// checks the result — any of them taking the comments would act on
-	// them in the wrong pass.
-	if !s.Critique && !s.Rebase && (s.Feature.Stage == domain.StagePlan || s.Feature.Stage == domain.StageImplement) {
-		s.specComments = e.openSpecComments(s.Feature)
-	}
-
-	// The kickoff is gummi's own turn, not the user's, on this loop the
-	// same as the interactive one (see startInteractive's appendSystem):
-	// it's boilerplate gummi composed, with any review note the user
-	// attached (RunWith) quoted inside it rather than spoken as it. The
-	// TUI labels every transcript turn by its author now, so appendUser
-	// here would put gummi's own words in the user's mouth on screen.
-	s.appendSystem(s.kickoffMessage())
-	s.setBusy(true)
-	e.persist(s)
-	// The kickoff is sent off the starting goroutine: the Verify stage
-	// runs the repo's fixed checks gummi-side first, which can take
-	// minutes, and must not hold up the run's start.
-	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.sendKickoff(s, sess) }()
-}
-
-// sendKickoff delivers the stage kickoff. For the Verify stage in
-// allow-all mode it first runs the artifact's gummi-checks commands
-// gummi-side and prepends their results, so the verify agent only does the
-// spec's feature-specific live checks and the write-up — no frontier
-// model shepherding `go test` output.
-func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
-	msg := s.kickoffMessage()
-	// only the stage's own run gets the pre-run check results: a rebase
-	// session borrowing the Verify stage isn't verifying anything yet.
-	if s.Feature.Stage == domain.StageVerify && !s.Rebase {
-		// env probes run even in guarded mode — they are operator config
-		// from .gummi/config.yaml, not agent-authored artifact checks.
-		if pre := e.runEnvProbes(s); pre != "" {
-			msg = pre + "\n\n" + msg
-		}
-		if s.Feature.Kind == domain.KindBug && hasCleanPresentProbe(s) {
-			msg = armedVerifyNote + "\n\n" + msg
-		}
-		if e.cfg.Permission != agent.PermissionGuarded {
-			if pre := e.runSpecChecks(s); pre != "" {
-				msg = pre + "\n\n" + msg
-			}
-		}
-	}
-	// Implement gets the plan's file manifest. Measured: gummi's
-	// implementer made its first edit at turn 32 of 97, while a bare agent
-	// with no spec at all first edits at turn 20-31 of 62-72 — it explored
-	// MORE than an agent working blind, despite a spec that had already
-	// located every file. The architect knew; the answer was prose the
-	// implementer re-derived from the repo.
-	if (s.Feature.Stage == domain.StageImplement) && !s.Rebase {
-		if pre := e.fileManifestPreamble(s); pre != "" {
-			msg = pre + "\n\n" + msg
-		}
-	}
-	// Review gets the same two things it was otherwise spending its own
-	// turns assembling. Measured on one review session: 33 turns, 28 Bash
-	// calls, zero edits — about twelve of them rebuilding `git diff
-	// base..HEAD` one file at a time, and then `go build ./...` and
-	// `go vet ./...` it could have been handed.
-	//
-	// The checks it is handed are the critique's own run, not verify's.
-	// They answer different questions at different times: a critique reads
-	// a branch that is not final, so a result here can be stale by the
-	// time verify asks. Nothing is recorded, and verify still runs its own
-	// — this only saves the critique from re-deriving what is already true
-	// right now.
-	if s.Critique && !s.Rebase && workStageCritique(s.Feature.Stage) {
-		if pre := e.reviewDiffPreamble(s); pre != "" {
-			msg = pre + "\n\n" + msg
-		}
-		if e.cfg.Permission != agent.PermissionGuarded {
-			if pre := e.runSpecChecks(s); pre != "" {
-				msg = pre + "\n\n" + msg
-			}
-		}
-	}
-	specText, _ := os.ReadFile(s.SpecPath())
-	msg, images := e.kickoffTurn(s, msg, string(specText))
-	if err := e.sendKickoffTurn(context.Background(), sess, msg, images); err != nil {
-		e.failRun(s, err)
-	}
-}
-
-// failRun records an unrecoverable autonomous-run failure: it sets the
-// error and moves the session to paused, so Run can retry it. Interactive
-// sessions keep their state.
-func (e *Engine) failRun(s *Session, err error) {
-	s.setError(err)
-	if !s.Interactive {
-		s.setState(StatePaused)
-	}
-	e.persist(s)
-	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
-}
-
-// fileManifestPreamble hands the implement session the plan's file
-// manifest — where the work goes — so the stage opens the right files
-// instead of rediscovering them.
-//
-// It is stated as a starting point, never a closed set. A wrong or stale
-// manifest is worse than none if the implementer treats it as exhaustive,
-// so the text says what to do in both failure directions: a file the work
-// needs that the manifest missed gets changed anyway (and noted), and a
-// listed file that turns out irrelevant gets left alone rather than
-// having work invented for it. Missing, empty, or malformed reads as no
-// manifest, and the stage proceeds exactly as it did before.
-func (e *Engine) fileManifestPreamble(s *Session) string {
-	raw, err := os.ReadFile(s.SpecPath())
-	if err != nil {
-		return ""
-	}
-	files, _, err := spec.ParseFiles(string(raw))
-	if err != nil || len(files) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("The plan's file manifest — where this work goes. Open these before searching for anything:\n")
-	for _, f := range files {
-		b.WriteString("  - " + f.Path)
-		if f.New {
-			b.WriteString("  (new file)")
-		}
-		if f.Role != "" {
-			b.WriteString("  — " + f.Role)
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("\nThis is where to start, not the whole boundary of the change. " +
-		"If the work needs a file the manifest does not list, change it and add a line to Progress saying which and why — " +
-		"the manifest was a plan-time guess and the next round should inherit the correction. " +
-		"If a listed file turns out to have nothing to do with the change, leave it alone and say so; " +
-		"do not invent work to justify an entry.")
-	return b.String()
-}
-
-// reviewDiffInlineMax caps how much diff rides inline in the review
-// kickoff. The kickoff preamble is re-read on every turn of the session,
-// so anything put here is paid for repeatedly — that mechanism is how a
-// ~32k floor came to be 41-44% of gummi's whole context volume. Below the
-// cap, handing over the patch beats a reviewer rebuilding it a file at a
-// time; above it, the stat plus the command is the cheaper shape, and the
-// reviewer fetches only the parts it reads.
-//
-// GUMMI_REVIEW_DIFF_MAX overrides it in bytes, so the two shapes can be
-// measured against each other without a rebuild; 0 forces the stat shape.
-const reviewDiffInlineMax = 48 << 10
-
-// reviewDiffLimit resolves the inline cap, honoring the override. A
-// malformed or negative value falls back to the constant rather than
-// silently disabling the preamble.
-func reviewDiffLimit() int {
-	raw := strings.TrimSpace(os.Getenv("GUMMI_REVIEW_DIFF_MAX"))
-	if raw == "" {
-		return reviewDiffInlineMax
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		return reviewDiffInlineMax
-	}
-	return n
-}
-
-// reviewDiffPreamble hands the review session the diff it would otherwise
-// spend its own turns reassembling, and — always — the base SHA to name a
-// range against, so "review the diff" never becomes a guess at a revision.
-//
-// Two shapes, chosen by size (see reviewDiffInlineMax). Any git failure
-// yields "" and the stage proceeds exactly as it did before: this is an
-// economy, never a gate.
-func (e *Engine) reviewDiffPreamble(s *Session) string {
-	wt, err := e.mgr(context.Background(), &s.Feature)
-	if err != nil {
-		return ""
-	}
-	ctx := context.Background()
-	base, err := wt.DiffBase(ctx, &s.Feature)
-	if err != nil {
-		return ""
-	}
-	diff, err := wt.Diff(ctx, &s.Feature)
-	if err != nil {
-		return ""
-	}
-	if strings.TrimSpace(diff) == "" {
-		return "" // nothing on the branch yet; the reviewer's own look is the honest one
-	}
-	header := fmt.Sprintf("gummi assembled this review's diff — it is `git diff %s` in your working directory. "+
-		"Do NOT rebuild it file by file.", base)
-	if len(diff) <= reviewDiffLimit() {
-		return header + "\n\n```diff\n" + diff + "\n```"
-	}
-	stat, err := wt.DiffStat(ctx, &s.Feature)
-	if err != nil {
-		return header
-	}
-	return fmt.Sprintf("%s It is %d bytes — too large to carry in every turn of this session, "+
-		"so here is the shape of it. Read the parts you need with `git diff %s -- <path>`.\n\n```\n%s```",
-		header, len(diff), base, stat)
-}
-
-// verifyStageTimeout bounds the gummi-side check run at the Verify stage
-// (mirrors the manual verify dialog's cap).
-const verifyStageTimeout = 10 * time.Minute
-
-// probeCleanPresent is a session-free counterpart of hasCleanPresentProbe:
-// it loads the layered env config and runs envprobe.Run fresh against the
-// feature's worktree, reporting whether any probe came back clean-present
-// (Err nil and Present true). It does not mutate or persist session state.
-func (e *Engine) probeCleanPresent(ctx context.Context, f *domain.Feature) bool {
-	cfg, err := e.layeredConfig()
-	if err != nil {
-		return false
-	}
-	if len(cfg.EnvProbes()) == 0 {
-		return false
-	}
-	workDir := filepath.Join(e.pool.Root(), f.WorktreePath())
-	for _, r := range envprobe.Run(ctx, workDir, cfg.EnvProbes()) {
-		if r.Err == nil && r.Present {
-			return true
-		}
-	}
-	return false
-}
-
-// runEnvProbes loads the layered user+workspace config, probes every
-// declared environment prerequisite in the card's worktree, records each
-// result in the activity feed, persists the snapshot, and returns a compact
-// report block. Env probes run in all sandbox/permission modes because their
-// command source is operator config from outside the worktree.
-func (e *Engine) runEnvProbes(s *Session) string {
-	cfg, err := e.layeredConfig()
-	if err != nil {
-		msg := "Environment prerequisites could not be probed: " + err.Error()
-		s.appendActivity(msg)
-		e.persist(s)
-		return msg
-	}
-	if len(cfg.EnvProbes()) == 0 {
-		return ""
-	}
-	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())
-	results := envprobe.Run(context.Background(), workDir, cfg.EnvProbes())
-	s.mu.Lock()
-	s.envProbes = results
-	s.mu.Unlock()
-	for _, r := range results {
-		ok := r.Err == nil && r.Present
-		s.appendToolDone(fmt.Sprintf("env %s: %s", r.Name, envprobe.StatusString(r)), ok, r.Output)
-	}
-	e.persist(s)
-	return "Environment prerequisites probed in this worktree:\n" + envprobe.FormatReport(results)
-}
-
-// runSpecChecks executes the artifact's gummi-checks commands in the
-// feature's worktree, records each outcome in the activity feed, and
-// returns a compact summary to hand the verify agent (empty when the artifact
-// carries no checks or can't be read — the verify agent then discovers and
-// runs them itself, per its stage hint).
-//
-// A block that does not parse is reported, not swallowed. It used to fall
-// through the dropped error into len(checks) == 0 and read as "this card
-// has no checks", so the deterministic floor ran zero commands and said
-// nothing about why — the parse error was loud exactly once, at the
-// approval gate, and silent for the rest of the card's life.
-func (e *Engine) runSpecChecks(s *Session) string {
-	raw, err := os.ReadFile(s.SpecPath())
-	if err != nil {
-		return ""
-	}
-	checks, _, parseErr := spec.ParseChecks(string(raw))
-	if parseErr != nil {
-		return "gummi could not run the artifact's gummi-checks: " + parseErr.Error() +
-			"\nThis is a plan defect. Repair the block in the Verification section, append a bullet there reading " +
-			"`finding: gummi-checks does not parse`, run the repaired commands yourself, and set your verdict to fail."
-	}
-	// A card that reaches verify with no block at all is one whose
-	// discovery failed or found nothing at approval — best-effort, and
-	// once silent: verify then "passed" on commands the reviewer chose.
-	// Discovery is retried here when it had left the card without a block
-	// (the repo's cached survey makes it cheap when any card found one),
-	// and a verify that still has nothing to run says so on the thread, as
-	// a row both faces draw as "no checks".
-	ownVerify := s.Feature.Stage == domain.StageVerify && !s.Critique && checksKind(s.Feature)
-	if len(checks) == 0 && ownVerify {
-		if _, found, _ := spec.ParseChecks(string(raw)); !found && e.cardHasEvent(context.Background(), s.Feature.ID, noChecksNoteKey) {
-			if got, _ := e.DiscoverChecks(context.Background(), s.Feature); len(got) > 0 {
-				if again, err := os.ReadFile(s.SpecPath()); err == nil {
-					raw = again
-					checks, _, _ = spec.ParseChecks(string(raw))
-				}
-				s.appendActivity(fmt.Sprintf("check discovery, retried at verify, found %d command%s", len(got), plural(len(got))))
-			}
-		}
-	}
-	if len(checks) == 0 {
-		if ownVerify {
-			s.appendActivity(NoChecksRow + " — this card has no gummi-checks block, so " + NoChecksConsequence)
-			e.persist(s)
-		}
-		return ""
-	}
-	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())
-	// The budgeted runner derives an overall deadline from the sum of the
-	// checks' own timeouts (or the package default) plus a small slack,
-	// bounded below by verifyStageTimeout. Each check also gets its own
-	// per-check bound so one hung command cannot starve the rest.
-	results, err := verify.RunWithBudget(context.Background(), workDir, checks, verifyStageTimeout)
-	if err != nil {
-		return ""
-	}
-
-	// An excusal is a claim about the commit it was measured on; a card
-	// whose base moved since (a rebase, a restack) has its excused checks
-	// measured again on the new base before any are written off.
-	if ownVerify {
-		if note := e.rebaselineNote(context.Background(), s.Feature); note != "" {
-			s.appendActivity(note)
-		}
-	}
-
-	// The approval-time baseline separates failures the feature caused
-	// from ones the branch was born with. A baseline entry speaks for a
-	// live check only when the command is unchanged — an edited command
-	// invalidates what the old run proved. No baseline (older features,
-	// guarded mode) degrades to today's unlabeled FAIL.
-	baseline := map[string]state.CheckResult{}
-	if rows, err := e.cfg.Store.CheckBaseline(context.Background(), s.Feature.ID); err == nil {
-		for _, r := range rows {
-			baseline[r.Name] = r
-		}
-	}
-
-	var b strings.Builder
-	preexisting := false
-	var liveFailures []string
-	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
-	for _, r := range results {
-		var status string
-		switch r.Status {
-		case verify.StatusPass:
-			status = "pass"
-		case verify.StatusTimeout:
-			status = "TIMEOUT (killed by deadline)"
-			liveFailures = append(liveFailures, r.Name)
-		case verify.StatusNotRun:
-			status = "NOT RUN (check budget exhausted)"
-			liveFailures = append(liveFailures, r.Name)
-		default:
-			if base, ok := baseline[r.Name]; ok && base.Cmd == r.Cmd && !base.OK {
-				status = fmt.Sprintf("FAIL (pre-existing, exit %d)", r.ExitCode)
-				preexisting = true
-			} else {
-				status = fmt.Sprintf("FAIL (exit %d)", r.ExitCode)
-				liveFailures = append(liveFailures, r.Name)
-			}
-		}
-		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
-		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
-		if !r.OK && len(r.Output) > 0 {
-			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))
-		}
-	}
-	if preexisting {
-		b.WriteString("\nChecks marked pre-existing already failed on the freshly created " +
-			"branch before this feature changed anything: report them, but do not fail " +
-			"verification because of them — only regressions count against this feature.\n")
-	}
-	// A live (non-pre-existing) check failure floors the verdict so a
-	// model's self-reported pass can never outrank gummi's own machine
-	// judgement — mirrors the floor gateVerifyVerdict already stamps for
-	// the env-omission condition.
-	if len(liveFailures) > 0 {
-		s.setVerdictFloor(FloorChecks, "blocked", fmt.Sprintf("check %s failed", strings.Join(liveFailures, ", ")))
-	}
-	// What the branch SHIPS, read from the tree rather than from the diff.
-	// A committed build artifact is a fact, and the one part of the floor
-	// that does not vary with the reviewer's model.
-	if findings := e.diffHygiene(s); len(findings) > 0 {
-		b.WriteString(hygieneBlock(findings))
-		if names, blocking := blockingHygiene(findings); blocking {
-			s.setVerdictFloor(FloorHygiene, "fail", "branch ships "+strings.Join(names, ", "))
-		}
-	}
-	// The inventory of what this branch changed, so the coverage question
-	// is answerable rather than assumed. A verify that cannot see the file
-	// list reports on the files it happened to look at, which is how a
-	// branch with three files no check could compile reached
-	// verified: true with the gap recorded only in prose.
-	paths := e.changedPaths(s.Feature)
-	b.WriteString(changedFileInventory(paths))
-	b.WriteString(grammarSweepHint(string(raw), paths))
-	b.WriteString("\nNow execute the spec's Verification plan (the feature-specific live " +
-		"checks), record all results in the spec's Verification plan and a summary " +
-		"line in Progress, and report pass or fail with the evidence.")
-	e.persist(s)
-	return b.String()
+	return ff.Send(ctx, note)
 }
 
 // tailLines keeps the last n lines of s (check failures are most
@@ -1408,13 +464,6 @@ func tailLines(s string, n int) string {
 		lines = append([]string{"…(earlier output trimmed)"}, lines[len(lines)-n:]...)
 	}
 	return strings.Join(lines, "\n")
-}
-
-func indentLines(s string) string {
-	if s == "" {
-		return ""
-	}
-	return "    " + strings.ReplaceAll(s, "\n", "\n    ")
 }
 
 // stampSpawnInfo records on the session which backend and model its
@@ -1464,33 +513,6 @@ func (e *Engine) lockCard(id domain.FeatureID) (func(), error) {
 	return e.cfg.CardLocks.Acquire(id)
 }
 
-// bindLiveLog opens the card's live file for s and binds it, so another
-// gummi process can follow this session (internal/livelog). The live
-// stream is a courtesy to watchers, never a dependency of the run: a
-// workspace-less engine (tests, transient board helpers) and a file that
-// cannot be opened both leave the session with a nil writer, which emits
-// nowhere and costs nothing.
-//
-// Call it once per session, after any prior session for the card has been
-// stopped — Create truncates, and two writers on one file interleave.
-func (e *Engine) bindLiveLog(s *Session) {
-	if e.cfg.Workspace.Root == "" {
-		return
-	}
-	snap := s.Snapshot()
-	w, err := livelog.Create(e.cfg.Workspace.LiveFile(s.Feature.ID), livelog.Record{
-		Feature: string(s.Feature.ID),
-		Stage:   string(s.Feature.Stage),
-		Role:    string(s.Role),
-		Agent:   snap.AgentName,
-		Model:   snap.Model,
-	})
-	if err != nil {
-		return
-	}
-	s.bindLive(w)
-}
-
 // trackAgentPID records sess's backing OS process at
 // ws.AgentPGIDFile(id) (BG-002), so a driver that dies without running its
 // own in-process cleanup (SIGKILL, crash, OOM-kill) still leaves behind a
@@ -1523,174 +545,6 @@ func (e *Engine) scratchFilesDirFor(id domain.FeatureID) string {
 		return ""
 	}
 	return dir
-}
-
-// newAgentSession builds an agent session for a feature's stage, with
-// the backend/model chosen by the feature's profile for this role. It
-// also returns the resolved spec path so the caller can record it on the
-// Session (ask_user answer capture writes there), and — when the resolved
-// backend cannot call client tools — the MCP inbound-endpoint teardown
-// stub, so the caller can bind it to the Session's lifecycle before the
-// child inherits GUMMI_MCP_SOCK.
-// resumeID, when non-empty, is the backend conversation this session
-// continues (see agent.SessionOpts.ResumeID): a reattach carrying a prior
-// transcript hands back the id that transcript came from, so the backend
-// picks up where it stopped instead of rediscovering the repository it
-// already had open. A fresh stage run passes "" — a stage is not one
-// session, and a restart is not a replay.
-//
-// newAgentSession builds the backend session for a stage run. attached
-// reports that this is a chat the user opened (Attach) rather than an
-// autonomous pass: a chat is not budgeted against the card's envelope and
-// is told the ask convention, which is the whole of what "interactive"
-// used to mean. It is a property of the SESSION, not of the stage — chat
-// is available against any stage now, and no stage is a chat by nature.
-func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor, attached bool, resumeID string) (agent.Session, string, func(), error) {
-	// The rebase pass is the one session a drifted card may start: it
-	// exists to clear the drift, and the refusal every other session gets
-	// would leave the board's own remedy unable to run.
-	workDir, specPath, err := e.locateFor(ctx, f, flavor == flavorRebase)
-	if err != nil {
-		return nil, "", nil, err
-	}
-	rc, backend := e.resolveRole(f.Profile, role)
-	ag := e.agentFor(backend)
-	if ag == nil {
-		if backend == "" {
-			return nil, "", nil, fmt.Errorf("no agent configured for feature %s stage %s", f.ID, f.Stage)
-		}
-		return nil, "", nil, fmt.Errorf("no agent registered for backend %q (feature %s role %s)", backend, f.ID, role)
-	}
-	// A real, per-card place for throwaway files, named in the boundary
-	// hint. Best-effort: a directory that cannot be created leaves the
-	// hint saying `mktemp -d`, as it always did.
-	scratch := e.scratchFilesDirFor(f.ID)
-	hints := stageHints(f, specPath, scratch, flavor)
-	if h := coAuthorHint(); h != "" {
-		hints = append(hints, h)
-	}
-	// The repository orientation card sits directly under the operator's
-	// environment card: the operator's own words lead, because they are a
-	// deliberate instruction, and the file tree is reference material the
-	// session reads rather than obeys. Prepended in that order — repo
-	// first, environment second — so the environment card ends up first.
-	if mgr, err := e.mgr(ctx, &f); err == nil && mgr != nil {
-		if card := e.repoCard(mgr.RepoRoot()); card != "" {
-			hints = append([]string{card}, hints...)
-		}
-		// The repo's own instructions sit above its file tree: they are
-		// rules to follow, not reference material, and the precedence
-		// hint every session already carries asserts they are in force.
-		// Quoting them is what makes that assertion true — a session on a
-		// backend that auto-loads only its own convention never saw an
-		// AGENTS.md otherwise.
-		if card := e.repoInstructionsCard(mgr.RepoRoot()); card != "" {
-			hints = append([]string{card}, hints...)
-		}
-	}
-	if card := e.environmentCard(); card != "" {
-		hints = append([]string{card}, hints...)
-	}
-	// implementation runs carry any open diff review comments so a fix-up
-	// (bounce from the diff surface's "request changes") addresses each
-	// (DESIGN §6.1). The store is the source of truth, so this reaches
-	// every implement run, not just the one that triggered it.
-	if flavor == flavorStage && (f.Stage == domain.StageImplement) {
-		hints = append(hints, e.diffReviewHints(ctx, f.ID, ag.Capabilities().ClientTools)...)
-	}
-	var maxCredits float64
-	// autonomous stages get a budget cap + budget-aware hint (interactive
-	// chat is human-paced, so it isn't capped). Envelope-derived budgets
-	// arrive already floored at one turn's reserve (sessionBudget), so the
-	// enforced cap is never an un-holdable sliver.
-	if budget > 0 && !attached {
-		maxCredits = budget * capHeadroom
-		// Read-mostly stages don't edit files: critique judges the plan,
-		// verify runs the artifact's checks. The write-focused hint
-		// pulls them in the wrong direction (critique needs breadth to
-		// walk closure tables; verify never batches edits).
-		if flavor == flavorCritique || f.Stage == domain.StageVerify {
-			hints = append(hints, budgetHintReadMostly(budget))
-		} else {
-			hints = append(hints, budgetHint(budget))
-		}
-	}
-	// gummi-owned client tools per stage. When the resolved backend
-	// supports them, register the tools and tell the agent they exist;
-	// otherwise fall back to prompt conventions (ask_user has a fenced-
-	// block convention; spec_annotate and submit_verdict degrade to the
-	// %% and VERDICT: text forms the stage hints already describe).
-	// A backend that reaches gummi's tools over MCP is told they exist the
-	// same way, so its stage sessions still receive the toolHint.
-	var tools, skillTools []agent.ToolDef
-	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
-		tools = stageTools(f.Stage, flavor, e.decidingHeadings(&f))
-		// Every pass but a rebase may stage a change to the skill pack
-		// (§23.5), where the pack reaches this backend at all.
-		if flavor != flavorRebase {
-			if skillTools = e.cardSkillToolsFor(ag); len(skillTools) > 0 {
-				tools = append(tools, skillTools...)
-				hints = append(hints, skillStageHint)
-			}
-		}
-		// Every session that has the tools is told how to use them,
-		// research included. This used to skip a read-only session,
-		// because its surface had spec_replace_section stripped out from
-		// under it and the hint would have described a tool it did not
-		// have. Nothing is stripped now (see asktool.go), so the hint is
-		// true for every session that gets one.
-		if h := toolHint(f.Stage, flavor); h != "" {
-			hints = append(hints, h)
-		}
-	} else {
-		// No client tools: the agent asks through the fenced-block
-		// convention instead. Every stage gets this now — the design
-		// stage is autonomous, and a stage that cannot ask is a stage
-		// that guesses.
-		hints = append(hints, askConventionHint)
-	}
-	// A card left to run alone answers its own questions, so the agent is
-	// told that before it asks one — whichever of the two routes above it
-	// would have used.
-	if f.GateApproval == domain.GateAutopilot {
-		hints = append(hints, unattendedAskHint)
-	}
-	// Every stage session gets its own inbound MCP endpoint, so a backend
-	// that consumes gummi's tools over MCP (rather than opts.Tools) has a
-	// socket to dial; one whose transport hasn't landed simply ignores it.
-	// The endpoint is bound before spawning the child so a child that dials
-	// on start never races the bind. The teardown is returned for the caller
-	// to stash on the Session's lifecycle; on any failure below the endpoint
-	// is released here, so callers see a nil teardown alongside an error.
-	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor, skillTools...)
-	if err != nil {
-		return nil, "", nil, err
-	}
-	sess, specErr := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:        workDir,
-		ArtifactPath:   specPath,
-		Role:           role,
-		Model:          rc.Model,
-		SystemHints:    hints,
-		Permission:     e.cfg.Permission,
-		MaxCredits:     maxCredits,
-		Tools:          tools,
-		OutputTokenMax: rc.OutputTokenMax,
-		MCPSockPath:    mcpPath,
-		FeatureID:      string(f.ID),
-		ResumePath:     resumeSessionPath(e.cfg.Workspace, f.ID, role, flavor),
-		ResumeID:       resumeID,
-		// The scratch directory the boundary hint names: a caged backend
-		// must let the session use the place it was told to use.
-		ScratchDir: scratch,
-		// The workspace skill pack at its published revision (§23.2).
-		SkillDirs: e.skillDirsFor(ctx, ag, &f, string(f.ID)+"/"+string(role)+"/"+flavorString(flavor), resumeID != ""),
-	})
-	if specErr != nil {
-		mcpTeardown()
-		return nil, "", nil, fmt.Errorf("starting %s session: %w", role, specErr)
-	}
-	return sess, specPath, mcpTeardown, nil
 }
 
 // recoverMissingWorktree rebuilds a work-stage feature's worktree after it
@@ -1822,81 +676,6 @@ func (e *Engine) Attachments() *attachment.Store {
 	return &attachment.Store{Dir: e.cfg.Workspace.AttachmentsDir()}
 }
 
-// Send routes a user/orchestrator turn to a feature's session. It is
-// SendTurn's text-only case.
-func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) error {
-	return e.SendTurn(ctx, id, msg, nil)
-}
-
-// SendTurn routes a user/orchestrator turn, optionally carrying images, to
-// a feature's session. A turn with images is delivered natively via the
-// backend's ImageSender, or refused with agent.ErrImagesUnsupported before
-// anything is appended or persisted — never silently sent text-only.
-func (e *Engine) SendTurn(ctx context.Context, id domain.FeatureID, msg string, images []AttachmentRef) error {
-	s := e.Get(id)
-	if s == nil {
-		return fmt.Errorf("no session for %s", id)
-	}
-	a := s.agent()
-	if a == nil {
-		return fmt.Errorf("%s is still starting", id)
-	}
-	// A turn blocked inside ask_user cannot take another one: the session
-	// reports itself not-busy there (handleAsk drops the spinner so the
-	// question can be read), but the backend's turn is very much still
-	// open, waiting on the person. Refused up front, before anything is
-	// consumed or recorded — and refused as ErrBusy, so the caller offers
-	// the line again rather than treating it as a failed run.
-	if s.Snapshot().PendingAsk != nil {
-		return fmt.Errorf("%s is waiting on your answer: %w", id, agent.ErrBusy)
-	}
-	if len(images) > 0 {
-		if err := e.checkImageCapable(s); err != nil {
-			return err
-		}
-	}
-	// deliver any queued budget nudge before the orchestrator's own text
-	// (DESIGN §5.1 layer 2: the mid-session threshold is folded into the
-	// next turn rather than injected mid-flight).
-	nudge := s.takePendingNudge()
-	if nudge != "" {
-		msg = nudge + "\n\n" + msg
-	}
-	s.appendUserImages(msg, actorOf(ctx), images)
-	s.setBusy(true)
-	e.persist(s)
-	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
-	// the agent is also asked, once, whether the pack skills this card's
-	// sessions used held up (skillstage.go); the transcript keeps msg
-	note, asked := e.takeSkillAsk(id, s.Snapshot().AgentName)
-	if err := e.deliverTurn(ctx, s, withSkillAsk(msg, note), images); err != nil {
-		e.requeueSkillAsk(id, asked)
-		// The backend is the authority on whether it can take a turn, and
-		// it said no. Undo what this call consumed and recorded, so a
-		// refusal leaves the session exactly as it found it: the nudge
-		// goes back on the queue for the turn that does land, and the
-		// echo comes back out of the transcript. An echo of a line the
-		// agent never received is worse than no echo — the reader sees
-		// their own sentence, believes it delivered, and has no way to
-		// tell otherwise. That is what a line typed while the spinner was
-		// up used to look like, right before failRun killed the stage
-		// under it.
-		// ErrImagesUnsupported gets the identical undo: checkImageCapable
-		// catches every real backend's mismatch before the echo lands, but
-		// a model-level refusal (copilot's per-model vision check) can
-		// only surface once the turn actually reaches the adapter, so the
-		// echo must still come back out when that happens.
-		if errors.Is(err, agent.ErrBusy) || errors.Is(err, agent.ErrImagesUnsupported) {
-			s.dropUnsentUser(msg)
-			s.requeueNudge(nudge)
-			e.persist(s)
-			e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
-		}
-		return err
-	}
-	return nil
-}
-
 // checkImageCapable reports agent.ErrImagesUnsupported when s's live
 // backend cannot take a Turn's images — it is not an agent.ImageSender or
 // its advertised capability says no — without sending anything. The
@@ -1940,9 +719,6 @@ type imagesSupporter interface {
 // structural answer covers a freeform card whose session nothing has
 // opened yet — a restart before its first turn.
 func (e *Engine) SessionTakesImages(ctx context.Context, id domain.FeatureID) bool {
-	if s := e.Get(id); s != nil {
-		return e.imageCapable(ctx, s)
-	}
 	if ff := e.Freeform(id); ff != nil {
 		if s := ff.Session(); s != nil {
 			return e.imageCapable(ctx, s)
@@ -2034,7 +810,9 @@ func (e *Engine) deliverTurn(ctx context.Context, s *Session, msg string, images
 		if errors.Is(err, agent.ErrBusy) || errors.Is(err, agent.ErrImagesUnsupported) {
 			return err
 		}
-		e.failRun(s, err)
+		s.setError(err)
+		e.persist(s)
+		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
 		return err
 	}
 	return nil
@@ -2119,124 +897,30 @@ func (e *Engine) imagePathLines(refs []AttachmentRef) string {
 	return strings.Join(lines, "\n")
 }
 
-// sendKickoffTurn dispatches a kickoff (system, not user — appendUser/
-// persist already happened on the caller's side): images, if any, ride
-// natively via the backend's ImageSender, exactly as kickoffTurn already
-// established it can take them. kickoffTurn's capability check is
-// structural only (ImageSender + Capabilities.Images) — it cannot see a
-// live per-model refusal (copilot's vision flag), which only surfaces once
-// SendTurn actually reaches the adapter. A spec-named attachment must
-// never be the reason a stage fails to start, so a late
-// agent.ErrImagesUnsupported here falls back to the same text-only shape
-// kickoffTurn already uses for a backend it knew up front couldn't take
-// images, rather than failing the run.
-func (e *Engine) sendKickoffTurn(ctx context.Context, sess agent.Session, text string, images []AttachmentRef) error {
-	if len(images) == 0 {
-		return sess.Send(ctx, text)
-	}
-	err := sess.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: text, Images: e.turnImages(images)})
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, agent.ErrImagesUnsupported) {
-		return err
-	}
-	if lines := e.imagePathLines(images); lines != "" {
-		text = text + "\n\n" + lines
-	}
-	return sess.Send(ctx, text)
-}
-
-// Interrupt aborts a feature's in-flight turn.
-func (e *Engine) Interrupt(ctx context.Context, id domain.FeatureID) error {
-	s := e.Get(id)
-	if s == nil {
-		return fmt.Errorf("no session for %s", id)
-	}
-	if a := s.agent(); a != nil {
-		return a.Interrupt(ctx)
-	}
-	return nil
-}
-
-// Pause stops a feature's autonomous session. The stage is unchanged; Run
-// resumes it.
-func (e *Engine) Pause(ctx context.Context, id domain.FeatureID) error {
-	s := e.Get(id)
-	if s == nil {
-		return fmt.Errorf("no session for %s", id)
-	}
-	if a := s.agent(); a != nil {
-		_ = a.Interrupt(ctx)
-	}
-	s.setState(StatePaused)
-	e.persist(s) // record the paused state before finalizing
-	s.stop()
-	return nil
-}
-
-// Drop stops and forgets a feature's session (on stage advance/delete).
+// Drop forgets a card's persisted session rows (on delete).
 func (e *Engine) Drop(id domain.FeatureID) {
-	e.mu.Lock()
-	s := e.live[id]
-	e.dropLocked(id)
-	e.mu.Unlock()
-	if s != nil {
-		s.stop()
-	}
 	e.persistDelete(id)
 }
 
-// dropLocked removes a feature's live session. Caller holds e.mu.
-func (e *Engine) dropLocked(id domain.FeatureID) {
-	delete(e.live, id)
-}
-
-// replace installs a session for a feature, stopping any prior one. It
-// reports false without installing when the engine has since closed, so a
-// session created concurrently with Close isn't left live (and its agent
-// running) past shutdown — the caller then stops the orphan.
-func (e *Engine) replace(id domain.FeatureID, s *Session) bool {
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return false
-	}
-	old := e.live[id]
-	e.live[id] = s
-	e.mu.Unlock()
-	if old != nil {
-		old.stop()
-	}
-	return true
-}
-
-// TopUp durably raises a feature's envelope and resumes the exhausted
-// stage from its checkpoint — the "top up" action of a budget-exhaustion
-// gate (DESIGN §5.1 layer 3). The raise is persisted to the store, so it
-// survives stage advances and gummi restarts; RaisedEnvelope sizes it so
-// the resumed stage always has real multi-turn headroom rather than a
-// sliver.
-//
-// The spend is priced at the default credit rate here; an adapter with
-// a much higher per-token rate can still re-gate after a top-up, since
-// the stage-budget math at session start prices spend at that adapter's
-// rate.
+// TopUp durably raises a card's envelope after its session stopped on it —
+// the "top up" answer to a budget stop (DESIGN §5.1 layer 3). The raise is
+// persisted, so it survives a restart; RaisedEnvelope sizes it so the
+// session has real multi-turn headroom rather than a sliver. Nothing is
+// resumed here: the session carries on with its next turn.
 func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
 	f, err := e.cfg.Store.GetFeature(ctx, id)
 	if err != nil {
 		return err
 	}
-	if f.Budget.Envelope > 0 {
-		raised := f.Budget.RaisedEnvelope(f.Spend.CreditEquivalent())
-		if int(raised) > f.Budget.Envelope {
-			f.Budget.Envelope = int(raised)
-			if err := e.cfg.Store.UpdateFeature(ctx, &f); err != nil {
-				return err
-			}
-		}
+	if f.Budget.Envelope <= 0 {
+		return nil
 	}
-	return e.Run(f)
+	raised := f.Budget.RaisedEnvelope(f.Spend.CreditEquivalent())
+	if int(raised) <= f.Budget.Envelope {
+		return nil
+	}
+	f.Budget.Envelope = int(raised)
+	return e.cfg.Store.UpdateFeature(ctx, &f)
 }
 
 // RaiseEnvelope durably sets a feature's envelope to an explicit credit
@@ -2261,136 +945,6 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 	return e.cfg.Store.UpdateFeature(ctx, &f)
 }
 
-// ChangeProfile switches a card's profile in place. It always persists
-// profile to the card's Feature.Profile — the same field every later
-// stage/role already reads, so this is not a one-off override that
-// reverts on the next stage — and, when the card has a live session
-// right now, restarts it immediately under the new profile rather than
-// waiting for the next resume. profile must name a declared profile;
-// an unknown name is refused before any store write or session is
-// touched.
-func (e *Engine) ChangeProfile(ctx context.Context, id domain.FeatureID, profile string) error {
-	known := false
-	for _, name := range e.currentProfiles().Names() {
-		if name == profile {
-			known = true
-			break
-		}
-	}
-	if !known {
-		return fmt.Errorf("no profile named %q", profile)
-	}
-	f, err := e.cfg.Store.GetFeature(ctx, id)
-	if err != nil {
-		return err
-	}
-	f.Profile = profile
-	if err := e.cfg.Store.UpdateFeature(ctx, &f); err != nil {
-		return err
-	}
-
-	s := e.Get(id)
-	if !s.Live() {
-		return nil // nothing running to restart
-	}
-
-	// captured before Pause, whose stop() finalizes s and would otherwise
-	// leave these unreadable once the restart needs them.
-	interactive := s.Interactive
-	flavor := s.flavor()
-	note := s.kickoffNote
-
-	// the single-session interrupt/persist/stop path —
-	// not StopForQuit's bulk, GateApproval-gated, quit-park-event path,
-	// which this restart has no use for.
-	if err := e.Pause(ctx, id); err != nil {
-		return err
-	}
-	if interactive {
-		// Pause's stop() leaves s.agentSess non-nil (Live's own doc
-		// comment); without clearing it, Attach's reuse check
-		// (prior.agent() != nil) would hand back the now-dead session
-		// instead of spawning fresh under the new profile.
-		s.clearAgent()
-		_, err := e.Attach(ctx, f)
-		return err
-	}
-	return e.run(f, note, flavor)
-}
-
-// exhaust checkpoints and stops a session that hit its credit budget —
-// whether the CLI reported it or gummi-side enforcement tripped first —
-// moving it to the needs-attention queue (never a silent death). When the
-// budget is reached at a stage that already committed its work (a
-// wrap-up exhaustion — the cap arithmetic tips over after the deliverable
-// is on the branch), the park says so instead of reading like lost work:
-// the top-up affordance stays, but the message reflects that nothing was
-// stranded.
-func (e *Engine) exhaust(s *Session) {
-	if !s.markExhausted() {
-		return // already checkpointed; a re-raised event must not duplicate the gate
-	}
-	// partial work survives on the branch across the gate; a fatal
-	// (worktree-gone) checkpoint is reported below via stageWorkCommitted
-	// returning false rather than by failing the run — exhaustion parks
-	// the stage for review either way, it never advances it (unlike the
-	// EventIdle completion path settle also serves).
-	_ = e.settle(s)
-	committed := e.stageWorkCommitted(s)
-	if committed {
-		s.appendActivity("budget reached — stage work committed, ready to review")
-	} else {
-		s.appendActivity("budget exhausted — stage stopped for review")
-	}
-	s.setState(StateDone)
-	e.persist(s)
-	// the budget stop is a decision like any other (the one kind autopilot
-	// must refuse — a top-up widens the card's reach, §10.17): the record
-	// goes down where the stop happens, so both loops see it by
-	// construction. Best-effort: the park above is already durable.
-	if e.cfg.Store != nil {
-		question := string(s.Feature.Stage) + " ran out of budget."
-		if committed {
-			question = string(s.Feature.Stage) + " ran out of budget with work committed."
-		}
-		_ = e.cfg.Store.OpenDecision(context.Background(), s.Feature.ID, s.Feature.Stage,
-			state.DecisionPayload{
-				ID:       "budget:" + strconv.FormatInt(time.Now().UnixNano(), 10),
-				Kind:     state.DecisionKindBudget,
-				Question: question,
-			}, e.now())
-	}
-	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventExhausted, Committed: committed})
-	s.stop() // finalizes the session, closing the underlying agent and MCP teardown
-}
-
-// stageWorkCommitted reports whether the exhausted stage left its work
-// safely committed — a submitted review verdict, or (after settle's
-// checkpoint) committed branch commits with a clean worktree. Best-effort
-// and conservative: any uncertainty (a git error, a rebase pass, an
-// interactive stage) reports false, so the park keeps its cautious
-// "stopped for review" wording rather than falsely claiming work is safe.
-func (e *Engine) stageWorkCommitted(s *Session) bool {
-	if s.Interactive || s.Rebase {
-		return false
-	}
-	if s.Snapshot().Verdict != "" {
-		return true // review/critique delivered its verdict
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
-	defer cancel()
-	wt, err := e.mgr(ctx, &s.Feature)
-	if err != nil {
-		return false
-	}
-	dirty, err := wt.Dirty(ctx, &s.Feature)
-	if err != nil || dirty {
-		return false // uncommitted work remains, or can't tell
-	}
-	ahead, err := wt.BranchAhead(ctx, &s.Feature)
-	return err == nil && ahead
-}
-
 // Close stops every session and closes the event stream.
 func (e *Engine) Close() error {
 	e.mu.Lock()
@@ -2402,11 +956,6 @@ func (e *Engine) Close() error {
 	if e.cancel != nil {
 		e.cancel()
 	}
-	sessions := make([]*Session, 0, len(e.live))
-	for _, s := range e.live {
-		sessions = append(sessions, s)
-	}
-	e.live = map[domain.FeatureID]*Session{}
 	consults := make([]*ConsultSession, 0, len(e.consult))
 	for _, c := range e.consult {
 		consults = append(consults, c)
@@ -2420,9 +969,6 @@ func (e *Engine) Close() error {
 	e.mu.Unlock()
 
 	e.stopCatalogProbes()
-	for _, s := range sessions {
-		s.stop()
-	}
 	for _, c := range consults {
 		c.stopBackend()
 	}
@@ -2468,70 +1014,6 @@ func (e *Engine) goBrief(fn func()) bool {
 	return true
 }
 
-// errSessionDied reports an agent session whose event stream ended without
-// a terminal turn (no Idle, no Error): the backend process died mid-flight
-// rather than finishing or failing cleanly.
-var errSessionDied = errors.New("agent session died without finishing")
-
-// pump relays one session's agent events into the engine stream and
-// accumulates its transcript/activity/spend. It exits when the session
-// stops or its agent channel closes.
-func (e *Engine) pump(s *Session) {
-	// The caller binds the agent before launching this goroutine, but a
-	// clearAgent (a drop, a pause, an Attach that replaces the session) can
-	// land before this line runs. Read it once under the lock and leave
-	// quietly if it is already gone: there is no stream left to relay, and
-	// dereferencing nil would take the process down with it.
-	a := s.agent()
-	if a == nil {
-		e.emitStopped(s)
-		return
-	}
-	events := a.Events()
-	for {
-		select {
-		case <-s.done:
-			e.emitStopped(s)
-			return
-		case ev, ok := <-events:
-			if !ok {
-				// The agent's event stream ended without a terminal turn.
-				// Distinguish a genuine backend death — the session was still
-				// running, so it never reached Idle/Error — from a benign
-				// teardown (replace/drop/pause set a terminal state before
-				// stopping the agent, so the stream closing there is expected).
-				// A death surfaces as an error so the driver escalates promptly
-				// instead of hanging out the whole stage timeout and misreading
-				// a dead agent as a backend stall.
-				// A backend death is not a teardown: nothing will run the
-				// session's MCP teardown to release in-flight bridge calls,
-				// so their liveness flag would otherwise stay stuck at
-				// "waiting" forever and Answer would keep delivering into a
-				// channel nobody will ever read. Clear every waiter's flag
-				// so Answer treats the in-flight calls as gone and fails
-				// loudly instead of silently succeeding into the void.
-				s.clearResolversWaiting()
-				// the backend is gone either way, so nothing of ours is
-				// driving this card any more: release its lock rather than
-				// holding a card hostage to a dead agent until the user
-				// pauses or advances it.
-				s.releaseCard()
-				if s.State() == StateRunning {
-					e.failRun(s, errSessionDied)
-				}
-				e.emitStopped(s)
-				return
-			}
-			// Process-backed adapters learn their durable conversation id from
-			// the first backend event, after NewSession has returned.
-			if id, ok := s.agent().(agent.Identified); ok {
-				s.setAgentSessionID(id.SessionID())
-			}
-			e.handle(s, ev)
-		}
-	}
-}
-
 // toolLine composes a tool-call event into one activity line: the tool
 // name, then its salient argument after a double space — the separator
 // the UI splits on to style name and detail differently.
@@ -2540,138 +1022,6 @@ func toolLine(ev agent.Event) string {
 		return ev.Tool
 	}
 	return ev.Tool + "  " + ev.Detail
-}
-
-func (e *Engine) handle(s *Session, ev agent.Event) {
-	kind := EventUpdated
-	switch ev.Kind {
-	case agent.EventTextDelta:
-		s.appendDelta(ev.Text)
-	case agent.EventReasoningDelta:
-		// shown as it streams, as a freeform session shows it; persist
-		// never mirrors it and lastAssistant never reads it, so the
-		// verdict and the handoff see only what the agent said.
-		s.appendThinking(ev.Text)
-	case agent.EventMessage:
-		s.finishAssistant(ev.Text)
-		kind = EventMessage
-	case agent.EventToolCall:
-		s.appendToolCall(ev.CallID, ev.Parent, toolLine(ev), ev.Tool, ev.Detail)
-		e.noteSkillUse(s.Feature.ID, ev.Tool, ev.Detail, time.Now())
-	case agent.EventToolResult:
-		if ev.Result == nil {
-			break
-		}
-		tool, detail := s.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)
-		if tool == "" {
-			tool = ev.Tool
-		}
-		// an autonomous run that keeps failing the same way is stopped
-		// here, since nothing else would stop it (toolloop.go). A chat
-		// has a person watching it, who can interrupt it themselves.
-		if err := s.noteToolOutcome(tool, detail, ev.Result.OK, ev.Result.Output); err != nil &&
-			!s.Interactive && s.State() == StateRunning {
-			if a := s.agent(); a != nil {
-				_ = a.Interrupt(context.Background())
-			}
-			e.failRun(s, err)
-			return
-		}
-	case agent.EventClientToolCall:
-		e.handleClientTool(s, ev.ToolCall)
-		return
-	case agent.EventPermission:
-		// A guarded board's tool call, held by the backend until it is
-		// answered. It becomes the card's open decision — the same
-		// machinery an ask_user question rides — so the ask's answer route
-		// delivers it to the session by request id.
-		e.handlePermissionEvent(s, ev)
-		return
-	case agent.EventContext:
-		s.setContext(ev.Context)
-	case agent.EventUsage:
-		s.addSpend(ev.Usage)
-		e.recordUsage(s, s.Feature.ID, s.Feature.Stage, s.Role, ev.Usage)
-		// budget awareness: on crossing a threshold, record a nudge, queue
-		// it for the next turn sent to the model, and signal the UI
-		// (DESIGN §5.1 layer 2).
-		if pct, spent := s.crossedThreshold(); pct > 0 {
-			s.appendActivity(nudge(pct, spent, s.Budget()))
-			s.queueNudge(nudge(pct, spent, s.Budget()))
-			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventBudget, Threshold: pct})
-		}
-		// gummi-side enforcement: interrupt and checkpoint once spend
-		// reaches the budget (covers token-only backends and sub-floor
-		// budgets the CLI cap can't).
-		if s.overBudget() {
-			if a := s.agent(); a != nil {
-				_ = a.Interrupt(context.Background())
-			}
-			e.exhaust(s)
-			return
-		}
-	case agent.EventBudgetExhausted:
-		// the credit cap was hit (CLI-reported): checkpoint and stop.
-		e.exhaust(s)
-		return
-	case agent.EventIdle:
-		s.setBusy(false)
-		// a turn that already exhausted its budget has raised the
-		// budget gate; the trailing idle must not
-		// downgrade that gate to a generic "finished" one.
-		if s.isExhausted() {
-			e.persist(s)
-			return
-		}
-		// convention-path ask (backends without client tools): a
-		// gummi-ask block in the final message becomes a pending question
-		// instead of a finished turn.
-		if e.maybeConventionAsk(s) {
-			e.persist(s)
-			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
-			return
-		}
-		// a turn that ended with its question still open has not finished
-		// the stage: the card stays parked on the question.
-		if e.askOutlivedItsCall(s) {
-			e.persist(s)
-			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
-			return
-		}
-		kind = EventIdle
-		// an autonomous turn completing finishes the run (atomically, so a
-		// racing Pause isn't overwritten)
-		if !s.Interactive && s.finishRunning() {
-			// a fatal settle (the worktree itself is gone, not just dirty or
-			// uncommitted) must fail the run instead of reading as a clean
-			// finish — otherwise the caller advances the stage with no
-			// worktree left to review it against.
-			if err := e.settle(s); err != nil {
-				e.failRun(s, err)
-				return
-			}
-			e.stageReceipt(s)
-			e.gateVerifyVerdict(s)
-			// and the promises floor: a verify that passed while one of
-			// the plan's own invariants is unanswered, or while a golden
-			// it pinned is on the branch nowhere, is a pass about the
-			// process rather than about the work.
-			e.gatePromiseVerdict(s)
-		}
-	case agent.EventError:
-		// a terminal error ends the turn with no trailing idle (the
-		// opencode/copilot failure paths emit only this), so recover the
-		// mark the run failed here, so Run can retry the feature.
-
-		e.failRun(s, ev.Err)
-		return
-	}
-	// persist once per turn, at idle (which follows the finalized
-	// message), rather than on every message + idle.
-	if ev.Kind == agent.EventIdle {
-		e.persist(s)
-	}
-	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: kind})
 }
 
 // recordUsage folds one usage sample into the store's running totals —
@@ -2751,156 +1101,6 @@ func (e *Engine) recordUsage(s *Session, id domain.FeatureID, stage domain.Stage
 	})
 }
 
-// checkpointTimeout bounds the checkpoint's git work; a commit is local
-// and fast, so a hang here is pathological and must not wedge the pump.
-const checkpointTimeout = 30 * time.Second
-
-// settle runs a finishing autonomous session's git epilogue: the
-// checkpoint commit for stage work, or — for a rebase session, which
-// must never CommitAll (a mid-rebase commit would capture conflict
-// markers onto a detached HEAD) — the abort of anything the agent left
-// mid-rebase, restoring the worktree's never-at-rest-mid-rebase
-// invariant. Returns a non-nil error only for checkpoint's one fatal
-// case (the worktree itself is gone) — every other failure stays
-// best-effort and surfaces through the activity feed instead.
-func (e *Engine) settle(s *Session) error {
-	if !s.Rebase {
-		return e.checkpoint(s)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
-	defer cancel()
-	wt, err := e.mgr(ctx, &s.Feature)
-	if err != nil {
-		s.appendActivity("rebase cleanup failed: " + err.Error())
-		return nil
-	}
-	aborted, err := wt.AbortRebase(ctx, &s.Feature)
-	if err != nil {
-		s.appendActivity("rebase cleanup failed: " + err.Error())
-		return nil
-	}
-	if aborted {
-		s.appendActivity("rebase left mid-flight — aborted, worktree restored")
-	}
-	return nil
-}
-
-// checkpoint commits whatever the stage left in the feature's worktree
-// to its branch, so agent work is never stranded uncommitted (DESIGN:
-// gummi owns the branch's commits; the user lands it as one squash
-// commit, so checkpoint granularity never reaches main's history). It
-// runs as an autonomous turn completes and at the budget-exhaustion
-// gate. Best-effort for every failure but one: a missing worktree means
-// there are no leftovers on disk for the merge flow to pick up later, so
-// that case is reported back instead of swallowed — callers on the
-// completion path (not the exhaustion gate, which never advances a
-// stage) must fail the run rather than let it read as a clean finish.
-func (e *Engine) checkpoint(s *Session) error {
-	if s.Interactive {
-		// A design chat runs in the card's own worktree now, so anything it
-		// writes survives to implement without a hand-off — but it is a
-		// conversation, not work, and checkpointing every turn of one would
-		// bury the branch's real history. The tree is no longer discarded,
-		// so nothing is lost by waiting.
-		//
-		// A freeform session is no exception. It is the work, but every
-		// commit on its branch is one somebody meant: the agent commits when
-		// the person asks it to or the work reaches a point worth keeping,
-		// never because a turn happened to end. What it leaves loose stays
-		// in the worktree, which Remove refuses to delete while dirty.
-		return nil
-	}
-	// Research stages are worktree-less by design (a research branch never
-	// receives a commit), not merely worktree-less because one went missing. There is nothing
-	// on disk to commit and there never will be, so the whole function is
-	// a no-op here — and, the reason this is a return rather than a
-	// swallow of CommitAll's ErrNoWorktree below, there is nothing to
-	// report either. That swallow still wrote the failure into the
-	// session's activity, so every autonomous research stage told the
-	// reader its checkpoint had failed, for a condition the design
-	// guarantees and no reader can act on.
-	if s.Feature.Kind == domain.KindResearch {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
-	defer cancel()
-	msg := fmt.Sprintf("%s: %s checkpoint", s.Feature.ID, s.Feature.Stage)
-	wt, err := e.mgr(ctx, &s.Feature)
-	if err != nil {
-		s.appendActivity("checkpoint commit failed: " + err.Error())
-		return nil
-	}
-	committed, err := wt.CommitAll(ctx, &s.Feature, msg)
-	if err != nil {
-		s.appendActivity("checkpoint commit failed: " + err.Error())
-		if !errors.Is(err, worktree.ErrNoWorktree) {
-			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventCheckpointFailed, Err: err})
-			return nil
-		}
-		// past the guard above this stage needs a worktree, so a missing
-		// one is the total-loss case: report it back rather than letting
-		// the run read as a clean finish.
-		return err
-	}
-	if committed {
-		s.appendActivity("worktree committed: " + msg)
-	}
-	return nil
-}
-
-// stageReceipt appends a muted one-line spend receipt to the session's
-// activity feed as an autonomous stage completes — "review · $0.42 ·
-// gpt-5" — read from the stage_spend rollup so it reports the same
-// realized cost the dashboard shows. Best-effort: with no store, a read
-// error, or a stage that recorded no spend, it simply adds nothing.
-func (e *Engine) stageReceipt(s *Session) {
-	if !e.cfg.Persist || e.cfg.Store == nil {
-		return
-	}
-	rows, err := e.cfg.Store.StageBreakdown(context.Background(), s.Feature.ID)
-	if err != nil {
-		return
-	}
-	var total, estimated float64
-	var dom state.StageSpend
-	seen := make(map[string]bool)
-	models := 0
-	for _, r := range rows {
-		if r.Stage != s.Feature.Stage {
-			continue
-		}
-		total += r.Credits
-		estimated += r.EstimatedCredits
-		// rows are ordered credits-desc within a stage, so the first match
-		// is the dominant model; guard on Model to also handle reordering.
-		if dom.Model == "" || r.Credits > dom.Credits {
-			dom = r
-		}
-		if r.Model != "" && !seen[r.Model] {
-			seen[r.Model] = true
-			models++
-		}
-	}
-	if models == 0 {
-		return
-	}
-	cost := domain.FormatDollars(total)
-	if estimated > 0 {
-		cost = "~" + cost
-	}
-	line := fmt.Sprintf("%s · %s · %s", s.Feature.Stage, cost, dom.Model)
-	if models > 1 {
-		line += fmt.Sprintf(" +%d more", models-1)
-	}
-	s.appendActivity(line)
-}
-
-func (e *Engine) emitStopped(s *Session) {
-	if s.markStopped() {
-		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStopped})
-	}
-}
-
 // send hands an event to the forwarder, applying backpressure rather
 // than dropping. A closed engine unblocks via stopped.
 func (e *Engine) send(ev Event) {
@@ -2908,15 +1108,4 @@ func (e *Engine) send(ev Event) {
 	case e.raw <- ev:
 	case <-e.stopped:
 	}
-}
-
-// workStageCritique reports whether a critique on this stage is judging a
-// diff — the ones that inherited the Review stage's job. The plan's
-// critique judges a document and has no diff to be handed.
-func workStageCritique(stage domain.Stage) bool {
-	switch stage {
-	case domain.StageImplement:
-		return true
-	}
-	return false
 }

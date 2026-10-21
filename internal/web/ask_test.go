@@ -55,17 +55,12 @@ func askingAgentWith(call string) *agent.Fake {
 	return f
 }
 
-// startArchitect answers the design stage's "start the architect" and
-// waits for the question the agent asks.
-func (h *cardBoard) startArchitect(id string) webapi.Card {
+// askSession starts a session whose agent asks on its first turn, and
+// waits for the question.
+func (h *cardBoard) askSession(title string) webapi.Card {
 	h.t.Helper()
-	c := h.card(id)
-	option(h.t, c.Decision, "run")
-	st, raw := h.answer(id, webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "run", Against: c.Decision.Against.Token})
-	if st != http.StatusOK {
-		h.t.Fatalf("start the architect: %d %s", st, raw)
-	}
-	return h.waitCard(id, "the question", func(c webapi.Card) bool {
+	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Title: title, Description: "ask me where"})
+	return h.waitCard(c.ID, "the question", func(c webapi.Card) bool {
 		return c.Decision != nil && c.Decision.Kind == webapi.DecisionAsk
 	})
 }
@@ -75,7 +70,7 @@ func (h *cardBoard) startArchitect(id string) webapi.Card {
 // the card is no longer waiting.
 func TestAnswerAnAsk(t *testing.T) {
 	h := newCardBoard(t, askingAgent())
-	c := h.startArchitect(h.planCard("Dark mode").ID)
+	c := h.askSession("Dark mode")
 	d := c.Decision
 	if d.Question != "Persist where?" || len(d.Options) != 3 || d.Options[0].Label != "per-device" ||
 		!option(t, d, "chat").Chat || !option(t, d, "chat").Words {
@@ -100,7 +95,7 @@ func TestAnswerAnAsk(t *testing.T) {
 // "Chat about this" answers with the person's own words.
 func TestAnswerAnAskWithWords(t *testing.T) {
 	h := newCardBoard(t, askingAgent())
-	c := h.startArchitect(h.planCard("Dark mode").ID)
+	c := h.askSession("Dark mode")
 	d := c.Decision
 	// the chat row with no words has nothing to say
 	if st, _ := h.answer(c.ID, webapi.AnswerRequest{Ref: d.Ref, Option: "chat", Against: d.Against.Token}); st != http.StatusBadRequest {
@@ -123,7 +118,7 @@ func TestAnswerAnAskWithWords(t *testing.T) {
 func TestAnswerAMultiPickAsk(t *testing.T) {
 	h := newCardBoard(t, askingAgentWith(`{"changes_section":"Problem","question":"Which surfaces?","multi_select":true,`+
 		`"options":[{"label":"board"},{"label":"card"},{"label":"stats"}]}`))
-	c := h.startArchitect(h.planCard("Dark mode").ID)
+	c := h.askSession("Dark mode")
 	d := c.Decision
 	if !d.Multi || len(d.Options) != 4 {
 		t.Fatalf("multi-pick decision = %+v", d)
@@ -213,7 +208,7 @@ func TestANeedsYouTransitionIsPushed(t *testing.T) {
 		t.Fatalf("stored subscriptions = %+v", subs)
 	}
 
-	c := h.startArchitect(h.planCard("Dark mode").ID)
+	c := h.askSession("Dark mode")
 	var d delivery
 	select {
 	case d = <-got:

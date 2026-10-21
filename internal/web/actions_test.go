@@ -12,20 +12,8 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 )
-
-// workingAgent runs a stage and keeps working: a turn that never ends,
-// which is what a pause stops.
-func workingAgent() *agent.Fake {
-	return &agent.Fake{Caps: agent.Capabilities{Interrupt: true}, Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleScribe {
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}
-		return []agent.Event{{Kind: agent.EventMessage, Text: "working on it"}}
-	}}
-}
 
 func (h *cardBoard) actionRaw(id, action string, req webapi.ActionRequest) (int, json.RawMessage) {
 	h.t.Helper()
@@ -34,50 +22,11 @@ func (h *cardBoard) actionRaw(id, action string, req webapi.ActionRequest) (int,
 	return st, raw
 }
 
-// Pausing a running stage is the menu's pause: the run stops and the
-// card reads paused.
-func TestActionPausesARun(t *testing.T) {
-	h := newCardBoard(t, workingAgent())
-	c := h.planCard("Dark mode")
-	st, raw := h.answer(c.ID, webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "advance", Against: c.Decision.Against.Token})
-	if st != http.StatusOK {
-		t.Fatalf("approve: %d %s", st, raw)
-	}
-	c = h.card(c.ID)
-	st, raw = h.answer(c.ID, webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "run", Against: c.Decision.Against.Token})
-	if st != http.StatusOK {
-		t.Fatalf("run implement: %d %s", st, raw)
-	}
-	c = h.waitCard(c.ID, "the implement run", func(c webapi.Card) bool {
-		return c.Status == webapi.StatusRunning && hasAction(c.Actions, "pause")
-	})
-	c = h.action(c.ID, "pause", webapi.ActionRequest{})
-	c = h.waitCard(c.ID, "the pause", func(c webapi.Card) bool { return c.Status == webapi.StatusPaused })
-	if c.Running != nil {
-		t.Errorf("a paused card still reads running: %+v", c.Running)
-	}
-	// the card's history says who took it back
-	evs, err := h.store.Events(context.Background(), domain.FeatureID(c.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var by []string
-	for _, ev := range evs {
-		var p state.PausePayload
-		if ev.Kind == state.EventPause && json.Unmarshal([]byte(ev.Payload), &p) == nil {
-			by = append(by, p.By)
-		}
-	}
-	if len(by) == 0 || by[len(by)-1] != state.PersonActor("Simon") {
-		t.Errorf("the pause is recorded by %q, want Simon", by)
-	}
-}
-
 // The budget is the budget dialog's number; delete asks first and then
 // removes the card.
 func TestActionBudgetAndDelete(t *testing.T) {
 	h := newCardBoard(t, agent.NewFake("ok"))
-	c := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Dark mode"})
+	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Title: "Dark mode"})
 	n := 750
 	if c = h.action(c.ID, "envelope", webapi.ActionRequest{Number: &n}); c.Envelope != 750 {
 		t.Errorf("envelope after setting it = %d", c.Envelope)
@@ -116,99 +65,57 @@ func TestActionBudgetAndDelete(t *testing.T) {
 		t.Errorf("the deleted card still answers %d", st)
 	}
 	// an action the card does not offer is refused, not guessed at
-	c = h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Later"})
+	c = h.create(webapi.CreateCardRequest{Kind: "freeform", Title: "Later"})
 	if st, _ := h.actionRaw(c.ID, "clean", webapi.ActionRequest{Confirm: e.Confirm}); st != http.StatusConflict {
 		t.Errorf("clean on an unlanded card = %d, want 409", st)
 	}
 }
 
-// verifiedCard is a feature that passed verify, whose branch carries one
-// commit of its own, and its worktree.
-func (h *cardBoard) verifiedCard(title string) (webapi.Card, string) {
-	h.t.Helper()
-	return h.verifyCard(title, true)
-}
-
-// verifyCard is a feature at verify whose branch carries one commit of
-// its own, and its worktree; passed says whether it passed verify, or
-// never ran it.
-func (h *cardBoard) verifyCard(title string, passed bool) (webapi.Card, string) {
+// sessionWithWork is a session whose branch carries one commit of its
+// own, and its worktree.
+func (h *cardBoard) sessionWithWork(title string) (webapi.Card, string) {
 	t := h.t
 	t.Helper()
 	ctx := context.Background()
-	c := h.create(webapi.CreateCardRequest{Kind: "feature", Title: title})
-	id := domain.FeatureID(c.ID)
-	for _, to := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify} {
-		if _, err := h.store.Transition(ctx, id, to, "user"); err != nil {
-			t.Fatal(err)
-		}
-	}
+	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Title: title})
 	f := h.feature(c.ID)
-	if _, err := h.pool.Create(ctx, &f); err != nil {
-		t.Fatal(err)
-	}
 	wt := filepath.Join(h.root, f.WorktreePath())
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(wt); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the session never cut its worktree")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if err := os.WriteFile(filepath.Join(wt, "dark.go"), []byte("package dark\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	gitIn(t, wt, "add", ".")
 	gitIn(t, wt, "commit", "-q", "-m", "work")
-	if passed {
-		// verified on the tip that lands: the revision is what a landing checks
-		if err := h.store.SetVerifiedAt(ctx, id, time.Now(), gitIn(t, wt, "rev-parse", "HEAD")); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := h.board.Reload(ctx); err != nil {
 		t.Fatal(err)
 	}
-	c = h.waitCard(c.ID, "the verified card", func(c webapi.Card) bool {
-		// a card that never finished a verify pass lists no landing
-		// (landingRefusal), so the worktree's own squash says it is up
-		return c.Stage == string(domain.StageVerify) && hasAction(c.Actions, "squash") && hasAction(c.Actions, "merge") == passed
+	c = h.waitCard(c.ID, "the session's landing", func(c webapi.Card) bool {
+		return hasAction(c.Actions, "squash") && hasAction(c.Actions, "merge")
 	})
 	return c, wt
 }
 
-// Landing a verified card with a message is the landing dialog's: the
-// branch is squash-merged onto main under that message and the card is
-// done.
-func TestActionLandsAVerifiedCard(t *testing.T) {
+// Landing a session with a message is the landing dialog's: the branch
+// is squash-merged onto main under that message and the card is done.
+func TestActionLandsASession(t *testing.T) {
 	h := newCardBoard(t, agent.NewFake("ok"))
-	c, _ := h.verifiedCard("Dark mode")
-	c = h.action(c.ID, "merge", webapi.ActionRequest{Message: "FD-001: dark mode\n\nThe board is dark at night."})
+	c, _ := h.sessionWithWork("Dark mode")
+	c = h.action(c.ID, "merge", webapi.ActionRequest{Message: "dark mode\n\nThe board is dark at night."})
 	c = h.waitCard(c.ID, "the landing", func(c webapi.Card) bool { return c.Stage == string(domain.StageDone) && c.Landed })
-	if got := gitIn(t, h.root, "log", "-1", "--format=%s", "main"); got != "FD-001: dark mode" {
+	if got := gitIn(t, h.root, "log", "-1", "--format=%s", "main"); got != "dark mode" {
 		t.Errorf("main's tip is %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(h.root, "dark.go")); err != nil {
 		t.Errorf("the landed work is not on main: %v", err)
-	}
-}
-
-// The menu's landing asks for the floor the verify stop's own landing
-// does: a card at verify that never finished a verify pass lists neither
-// the land entry nor "next stage", and either sent anyway is refused and
-// its branch stays off main. (Squash collapses the branch in place and
-// lands nothing.)
-func TestActionRefusesToLandAnUnverifiedCard(t *testing.T) {
-	h := newCardBoard(t, agent.NewFake("ok"))
-	c, _ := h.verifyCard("Dark mode", false)
-	for _, action := range []string{"merge", "advance"} {
-		if hasAction(c.Actions, action) {
-			t.Errorf("the menu offers %s on a card that never ran verify", action)
-		}
-		st, raw := h.actionRaw(c.ID, action, webapi.ActionRequest{Message: "FD-001: dark mode", Against: h.card(c.ID).Decision.Against.Token})
-		if st != http.StatusConflict {
-			t.Errorf("%s on a card that never ran verify = %d %s, want a refusal", action, st, raw)
-		}
-	}
-	time.Sleep(200 * time.Millisecond)
-	if after := h.card(c.ID); after.Landed || after.Stage != string(domain.StageVerify) {
-		t.Errorf("the unverified card landed: stage %s landed %v", after.Stage, after.Landed)
-	}
-	if _, err := os.Stat(filepath.Join(h.root, "dark.go")); err == nil {
-		t.Error("the unverified work is on main")
 	}
 }
 
@@ -217,12 +124,12 @@ func TestActionRefusesToLandAnUnverifiedCard(t *testing.T) {
 // to one commit and land nothing.
 func TestTheMessageQuestionSaysWhatHappens(t *testing.T) {
 	h := newCardBoard(t, agent.NewFake("ok"))
-	c, _ := h.verifiedCard("Dark mode")
+	c, _ := h.sessionWithWork("Dark mode")
 	for action, want := range map[string]string{
-		"squash": "squash feat/dark-mode to one commit in place — nothing lands on main",
-		"merge":  "land feat/dark-mode on main",
+		"squash": "squash ff/dark-mode to one commit in place — nothing lands on main",
+		"merge":  "land ff/dark-mode on main",
 	} {
-		st, raw := h.actionRaw(c.ID, action, webapi.ActionRequest{Against: h.card(c.ID).Decision.Against.Token})
+		st, raw := h.actionRaw(c.ID, action, webapi.ActionRequest{Against: h.against(c.ID)})
 		e := errorOf(t, raw)
 		if st != webapi.StatusQuestion || e.Needs != webapi.ActionNeedsMessage || !strings.Contains(e.Text, want) {
 			t.Errorf("%s with no message = %d %+v, want its question to say %q", action, st, e, want)
@@ -233,13 +140,13 @@ func TestTheMessageQuestionSaysWhatHappens(t *testing.T) {
 	}
 }
 
-// The landing entries offer the message the verify gate drafted as their
+// The landing entries offer the message drafted for the branch as their
 // default — the one the landing dialog would open on — so a person reads
 // it before landing; a draft the branch has moved past is not offered.
 func TestActionLandOffersTheDraftedMessage(t *testing.T) {
 	h := newCardBoard(t, agent.NewFake("ok"))
 	ctx := context.Background()
-	c, wt := h.verifiedCard("Dark mode")
+	c, wt := h.sessionWithWork("Dark mode")
 	for _, a := range c.Actions {
 		if (a.ID == "merge" || a.ID == "squash") && a.Default != "" {
 			t.Fatalf("%s offers %q with nothing drafted", a.ID, a.Default)
@@ -282,38 +189,11 @@ func actionOf(t *testing.T, acts []webapi.Action, id string) webapi.Action {
 	return webapi.Action{}
 }
 
-// Dependencies are set as a whole, through the picker's own add and
-// remove; an edge the picker refuses is refused whole.
-func TestActionSetsDependencies(t *testing.T) {
-	h := newCardBoard(t, agent.NewFake("ok"))
-	a := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Row loader"})
-	b := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Row cache"})
-	deps := func(id string) []domain.FeatureID {
-		t.Helper()
-		got, err := h.store.ListDependencies(context.Background(), domain.FeatureID(id))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return got
+// against is the revision token of the decision a card pins, "" when it
+// pins none (a session at rest).
+func (h *cardBoard) against(id string) string {
+	if d := h.card(id).Decision; d != nil {
+		return d.Against.Token
 	}
-	h.action(b.ID, "deps", webapi.ActionRequest{Cards: []string{a.ID}})
-	if got := deps(b.ID); len(got) != 1 || string(got[0]) != a.ID {
-		t.Fatalf("%s depends on %v", b.ID, got)
-	}
-	// the picker opens with what is set ticked
-	if d := actionOf(t, h.card(b.ID).Actions, "deps").Default; d != a.ID {
-		t.Errorf("deps default = %q, want %s", d, a.ID)
-	}
-	// the other way round would close a cycle
-	st, raw := h.actionRaw(a.ID, "deps", webapi.ActionRequest{Cards: []string{b.ID}})
-	if st != http.StatusConflict {
-		t.Errorf("a cycle = %d %s, want 409", st, raw)
-	}
-	if got := deps(a.ID); len(got) != 0 {
-		t.Errorf("a refused cycle left %s depending on %v", a.ID, got)
-	}
-	h.action(b.ID, "deps", webapi.ActionRequest{Cards: nil})
-	if got := deps(b.ID); len(got) != 0 {
-		t.Errorf("clearing left %s depending on %v", b.ID, got)
-	}
+	return ""
 }

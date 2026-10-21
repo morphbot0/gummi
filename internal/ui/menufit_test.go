@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -22,53 +21,29 @@ func offered(acts []cardAction, ids ...string) []string {
 }
 
 // The menu offers only what can work on the card as it stands: a closed
-// card has nothing left to verify, rebase, wait on, spend or gate; a plan
-// has built nothing to verify; and a stage whose agent is still on it is
-// not moved on from under it.
+// card has nothing left to rebase or spend.
 func TestCardMenuOffersOnlyWhatCanWork(t *testing.T) {
-	steering := []string{"verify", "rebase", "deps", "envelope", "gate"}
+	steering := []string{"rebase", "envelope"}
 
-	landed := cardRow(domain.KindFeature, domain.StageVerify, true, true)
-	landed.F.ID = "FD-003"
-	in := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, landed: true, sess: engine.StateDone}
+	landed := freeformRow(3, "landed", true)
+	landed.Landed = true
+	in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, landed: true, hasWorktree: true}
 	if got := offered(cardActionsFor(in, landed), steering...); len(got) > 0 {
 		t.Errorf("a landed card offers %v", got)
 	}
 
-	done := cardRow(domain.KindFeature, domain.StageDone, false, true)
-	if got := offered(cardActionsFor(nextInput{stage: domain.StageDone, kind: domain.KindFeature}, done), steering...); len(got) > 0 {
+	done := freeformRow(4, "done", true)
+	done.F.Stage = domain.StageDone
+	if got := offered(cardActionsFor(nextInput{stage: domain.StageDone, kind: domain.KindFreeform, hasWorktree: true}, done), steering...); len(got) > 0 {
 		t.Errorf("a done card offers %v", got)
 	}
 
-	// a done research card still re-runs decompose, which spends
-	rs := cardRow(domain.KindResearch, domain.StageDone, false, false)
-	if got := offered(cardActionsFor(nextInput{stage: domain.StageDone, kind: domain.KindResearch}, rs), "advance", "envelope"); len(got) != 2 {
-		t.Errorf("a done research card offers %v, want its decompose re-run and the budget that pays for it", got)
-	}
-
 	// a handed-off card can still be landed after all, so a rebase stays
-	handed := cardRow(domain.KindFeature, domain.StageDone, false, true)
-	handed.F.HandedOffAt = handed.F.CreatedAt.AddDate(2026, 0, 0)
-	if got := offered(cardActionsFor(nextInput{stage: domain.StageDone, kind: domain.KindFeature}, handed), "rebase"); len(got) != 1 {
+	handed := freeformRow(5, "handed", true)
+	handed.F.Stage = domain.StageDone
+	handed.F.HandedOffAt = handed.F.CreatedAt.AddDate(1, 0, 0)
+	if got := offered(cardActionsFor(nextInput{stage: domain.StageDone, kind: domain.KindFreeform, hasWorktree: true}, handed), "rebase"); len(got) != 1 {
 		t.Error("a handed-off card lost the rebase its later landing may need")
-	}
-
-	plan := cardRow(domain.KindFeature, domain.StagePlan, false, true)
-	if got := offered(cardActionsFor(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate}, plan), "verify"); len(got) > 0 {
-		t.Error("a plan with nothing built offers verify")
-	}
-
-	impl := cardRow(domain.KindFeature, domain.StageImplement, false, true)
-	for _, in := range []nextInput{
-		{stage: domain.StageImplement, kind: domain.KindFeature, sess: engine.StateRunning},
-		{stage: domain.StagePlan, kind: domain.KindFeature, sess: engine.StateInteractive, live: true, busy: true},
-	} {
-		if got := offered(cardActionsFor(in, impl), "advance"); len(got) > 0 {
-			t.Errorf("next stage offered while the agent is at work (%s, busy %v)", in.sess, in.busy)
-		}
-	}
-	if got := offered(cardActionsFor(nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: engine.StateRunning}, impl), "verify"); len(got) != 1 {
-		t.Error("an implement card lost its verify")
 	}
 }
 
@@ -78,18 +53,14 @@ func TestWithheldVerbsRefuseFromTheirKeys(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.rows = []featureRow{
 		{F: domain.Feature{ID: "FD-003", Title: "landed", Stage: domain.StageVerify}, Landed: true, HasWorktree: true},
-		{F: domain.Feature{ID: "FD-004", Title: "plan", Stage: domain.StagePlan}, HasWorktree: true},
 	}
 	for _, c := range []struct {
 		sel  int
 		key  string
 		want string
 	}{
-		{0, "v", "nothing left to verify"},
 		{0, "r", "nothing left to rebase"},
 		{0, "u", "nothing is left for a budget"},
-		{0, "p", "nothing left for it to wait on"},
-		{1, "v", "nothing has been built to verify yet"},
 	} {
 		m.sel = c.sel
 		m.notice = noticeMsg{}

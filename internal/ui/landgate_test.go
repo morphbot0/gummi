@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -57,32 +56,6 @@ func TestMergeKeyAtVerifyFinishesTheCard(t *testing.T) {
 	}
 	if it, ok := m.inbox.get("FD-001"); ok {
 		t.Errorf("the verify gate's inbox entry survived the landing: %q", it.Text)
-	}
-}
-
-// TestMergeKeyBeforeVerifyIsRefused is the landing floor (AGENTS.md;
-// domain.Feature.MayLand): a branch nobody has verified does not land,
-// by the m key or any other way. It used to land and leave the card at
-// its stage — the branch on main, the quality floor skipped.
-func TestMergeKeyBeforeVerifyIsRefused(t *testing.T) {
-	m, root, _ := implementFixture(t) // FD-001 sits at implement
-	if m.rows[0].F.Stage != domain.StageImplement {
-		t.Fatalf("fixture stage = %s, want implement", m.rows[0].F.Stage)
-	}
-	before := gitOut(t, root, "rev-parse", "main")
-
-	m = pressMerge(t, m)
-	if _, open := m.Overlay.Top().(*commitMsgDialog); open {
-		t.Fatal("m opened the landing message on a card at implement")
-	}
-	if !m.notice.isErr || !strings.Contains(m.notice.text, "lands from verify") {
-		t.Errorf("notice = %q (err=%v), want the landing floor's refusal", m.notice.text, m.notice.isErr)
-	}
-	if after := gitOut(t, root, "rev-parse", "main"); after != before {
-		t.Errorf("main moved from %s to %s: an unverified branch landed", before, after)
-	}
-	if len(m.mergePrep) > 0 {
-		t.Error("a refused landing left its preparation marked")
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -127,32 +126,6 @@ const TurnReserveCredits = 30
 // costs a human round-trip. Estimates only; an explicit envelope the
 // user chose is honored as given, and (0,0) still means unbudgeted.
 const MinEnvelope = 150
-
-// EstimateEnvelope proposes a feature's credit envelope from the actual
-// spend of previously completed features — the historical-spend signal
-// of plan-time estimation (DESIGN §5.1). It takes the median
-// credit-equivalent spend of the samples (robust to the odd runaway
-// feature), adds headroom, and rounds up to a tidy 10, so a repo's
-// features get budgets sized to what work there actually costs rather
-// than a flat default. Returns (0, 0) when there is no spend to learn
-// from, leaving the caller's existing envelope untouched.
-func EstimateEnvelope(history []Spend) (envelope float64, samples int) {
-	vals := make([]float64, 0, len(history))
-	for _, s := range history {
-		if c := s.CreditEquivalent(); c > 0 {
-			vals = append(vals, c)
-		}
-	}
-	if len(vals) == 0 {
-		return 0, 0
-	}
-	sort.Float64s(vals)
-	med := vals[len(vals)/2]
-	if len(vals)%2 == 0 {
-		med = (vals[len(vals)/2-1] + vals[len(vals)/2]) / 2
-	}
-	return math.Max(roundUpTo10(med*estimateHeadroom), MinEnvelope), len(vals)
-}
 
 // roundUpTo10 rounds a credit figure up to a tidy multiple of 10.
 func roundUpTo10(v float64) float64 { return math.Ceil(v/10) * 10 }

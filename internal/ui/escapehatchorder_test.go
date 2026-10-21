@@ -39,7 +39,6 @@ func TestEveryTableEndsWithItsWayOut(t *testing.T) {
 		wayOut   string
 	}{
 		{"inbox", m.inboxBindings(), "tab"},
-		{"dep picker", (&depPicker{}).bindings(), "esc"},
 		// the two BG-071 already fixed, kept here so one test owns the rule
 		{"spec", (&specView{}).bindings(), "esc"},
 		{"diff", (&diffView{}).bindings(), "esc"},

@@ -56,8 +56,7 @@ func mcpSockPath(w state.Workspace, id domain.FeatureID) string {
 type mcpEndpoint struct {
 	engine  *Engine
 	feature domain.Feature
-	flavor  runFlavor
-	// extra is tools offered beyond the stage's own (a freeform session's
+	// extra is tools offered beyond the session's own (a freeform session's
 	// watch, for a backend without one)
 	extra []agent.ToolDef
 	ln    net.Listener
@@ -80,7 +79,7 @@ type mcpEndpoint struct {
 // for the accept and per-connection goroutines, and removes the socket
 // file. It must be stashed on the Session (setMCPTeardown) so Session.stop
 // invokes it exactly once; an error here leaves nothing behind to release.
-func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor runFlavor, extra ...agent.ToolDef) (string, func(), error) {
+func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, extra ...agent.ToolDef) (string, func(), error) {
 	path := mcpSockPath(e.cfg.Workspace, f.ID)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -104,7 +103,6 @@ func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor 
 	ep := &mcpEndpoint{
 		engine:  e,
 		feature: f,
-		flavor:  flavor,
 		extra:   extra,
 		ln:      ln,
 		ctx:     epCtx,
@@ -254,13 +252,11 @@ func (ep *mcpEndpoint) dispatch(conn net.Conn, wmu *sync.Mutex, req *mcp.Request
 	ep.writeFrame(conn, wmu, mcp.Response{JSONRPC: mcp.JSONRPC, ID: req.ID, Result: result})
 }
 
-// listTools mirrors stageTools for the endpoint's feature and the pass
-// flavor the session was created for. The endpoint is bound per-run from
-// newAgentSession, which holds the same flavor it used to build the
-// session's stageHints/toolHint, so the tool list it advertises matches
-// what that pass's prompt told the model existed.
+// listTools is the session's own tool surface (freeformTools) and the
+// extras its spawn added, so the list it advertises matches what the
+// session's prompt told the model existed.
 func (ep *mcpEndpoint) listTools() (json.RawMessage, error) {
-	defs := stageTools(ep.feature.Stage, ep.flavor, ep.engine.decidingHeadings(&ep.feature))
+	defs := freeformTools()
 	return mcp.MarshalTools(append(defs, ep.extra...))
 }
 
@@ -278,14 +274,9 @@ func (ep *mcpEndpoint) callTool(req *mcp.Request) (json.RawMessage, error) {
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return nil, fmt.Errorf("call_tool: %w", err)
 	}
-	s := ep.engine.Get(ep.feature.ID)
-	// e.live never holds a freeform card's session (Answer has the same
-	// fallback): without it every ask_user a freeform card's MCP backend
-	// made was refused as "no live session"
-	if s == nil {
-		if ff := ep.engine.Freeform(ep.feature.ID); ff != nil {
-			s = ff.Session()
-		}
+	var s *Session
+	if ff := ep.engine.Freeform(ep.feature.ID); ff != nil {
+		s = ff.Session()
 	}
 	if s == nil {
 		return nil, fmt.Errorf("feature %s has no live session", ep.feature.ID)

@@ -74,18 +74,13 @@ func (m *Shell) refreshInboxFromDecisions(open map[domain.FeatureID][]state.Open
 		default:
 			continue
 		}
-		if s := m.sessionFor(it.Feature); s != nil && s.Live() {
-			continue
-		}
 		m.inbox.remove(it.Feature)
 	}
 }
 
 // seedInboxFromDecisions seeds the needs-attention queue from the durable
 // decision_open records the startup query read — the primary source
-// DESIGN §10.18 exists for, with reconstructInbox's session inference
-// (called right after this, in the openDecisionsMsg handler) as the
-// fallback for whatever it doesn't cover.
+// DESIGN §10.18 exists for.
 //
 // Every add goes through inbox.seed, never put/add: a live engine event
 // can raise a feature's item before this message lands (the query, and

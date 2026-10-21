@@ -16,8 +16,9 @@ import (
 // of a switch that had no case for its id: enter did nothing, twice, silently.
 func TestBudgetStopOffersAWorkingWayForward(t *testing.T) {
 	m := populatedShell(120, 40)
+	m.rows[m.sel] = freeformRow(42, "dark mode", true)
 	id := m.rows[m.sel].F.ID
-	m.inbox.add(id, attnBudget, "verify ran out of budget")
+	m.inbox.add(id, attnBudget, "the session ran out of budget")
 
 	acts := m.suggestFor(id)
 	if len(acts) == 0 {

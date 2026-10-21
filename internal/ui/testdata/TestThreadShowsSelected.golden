@@ -19,12 +19,12 @@
 
 
 
-
-
-
-
+ [38;2;247;246;251mThis is a retired workflow card: gummi no longer runs it. Hand it[m
+ [38;2;247;246;251moff to keep its branch, or land it on your read of its diff.[m
 
 [38;2;133;131;146mgummi[m  [38;2;247;246;251mnothing is running — choose what happens next.[m
-[1;38;2;255;96;255m[38;2;191;188;200m▸ [m1. run implement[38;2;96;95;107m — no active run — start the stage[m[m
+[1;38;2;255;96;255m[38;2;191;188;200m▸ [m1. read the diff[38;2;96;95;107m — what the card left on its branch[m[m
+[38;2;247;246;251m  2. hand off[38;2;96;95;107m — close the retired card and keep gummi/FD-042-dark…[m[m
+[38;2;247;246;251m  3. land it on main[38;2;96;95;107m — land the branch — one squash commit, or a …[m[m
 
-[38;2;96;95;107m┃ [m[38;2;96;95;107mm[m[38;2;96;95;107message the agent, /approve /verify /diff…, or ↑ for actions[m    
+[38;2;96;95;107m┃ [m[38;2;96;95;107ma[m[38;2;96;95;107msk about this retired card, /diff /land…, or ↑ for actions[m     

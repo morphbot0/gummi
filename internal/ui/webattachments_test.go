@@ -28,12 +28,34 @@ func waitSessionIdle(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if s := eng.Get(id); s != nil && !s.Snapshot().Busy && len(s.Snapshot().Transcript) > 0 {
+		if s := eng.Freeform(id); s != nil && !s.Snapshot().Busy && len(s.Snapshot().Transcript) > 0 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("%s's session never settled", id)
+}
+
+// sessionBoard is headlessBoard over one session, FF-001.
+func sessionBoard(t *testing.T, ag agent.Agent) (*Bridge, *changeLog, *engine.Engine, domain.Feature, *bytes.Buffer) {
+	t.Helper()
+	return headlessBoardFor(t, ag, domain.Feature{
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Dark mode", Slug: "dark-mode",
+		Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind,
+	})
+}
+
+// startSession opens f's session and sends its opening turn.
+func startSession(t *testing.T, eng *engine.Engine, f domain.Feature) {
+	t.Helper()
+	ctx := context.Background()
+	ff, err := eng.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Kickoff(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // testPNG is the smallest valid PNG: a 1x1 image, used wherever a test
@@ -63,21 +85,18 @@ func cardAgainst(t *testing.T, ctx context.Context, b *Bridge, id domain.Feature
 	return c.Decision.Against.Token
 }
 
-// TestWebSendAttachmentsSteer asserts that a steer (a line typed against a
-// live session) carrying an attachment id goes through, on a backend
+// TestWebSendAttachmentsSteer asserts that a line typed to a session carrying an attachment id goes through, on a backend
 // whose capability says it can take images.
 func TestWebSendAttachmentsSteer(t *testing.T) {
 	ag := agent.NewFake("ack")
 	ag.Caps.Images = true
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
 	defer unregister()
-	b, log, eng, f, _ := headlessBoard(t, ag)
+	b, log, eng, f, _ := sessionBoard(t, ag)
 	log.waitFor(t, "board", func(c webapi.Change) bool { return c.Kind == webapi.ChangeBoard })
 
 	ctx := context.Background()
-	if _, err := eng.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
+	startSession(t, eng, f)
 	waitSessionIdle(t, eng, f.ID)
 
 	ref, err := b.PutAttachment(bytes.NewReader(testPNG), "shot.png")
@@ -90,11 +109,12 @@ func TestWebSendAttachmentsSteer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Route != webapi.RouteSteer {
-		t.Fatalf("route = %s, want steer", res.Route)
+	if res.Route != webapi.RouteFreeform {
+		t.Fatalf("route = %s, want freeform", res.Route)
 	}
+	waitSessionIdle(t, eng, f.ID)
 
-	transcript := eng.Get(f.ID).Snapshot().Transcript
+	transcript := eng.Freeform(f.ID).Snapshot().Transcript
 	var found *engine.Message
 	for i := range transcript {
 		if transcript[i].Content == "look at this" {
@@ -118,13 +138,11 @@ func TestWebSendAttachmentsRefusedOnVerb(t *testing.T) {
 	ag.Caps.Images = true
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
 	defer unregister()
-	b, log, eng, f, _ := headlessBoard(t, ag)
+	b, log, eng, f, _ := sessionBoard(t, ag)
 	log.waitFor(t, "board", func(c webapi.Change) bool { return c.Kind == webapi.ChangeBoard })
 
 	ctx := context.Background()
-	if _, err := eng.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
+	startSession(t, eng, f)
 	waitSessionIdle(t, eng, f.ID)
 
 	ref, err := b.PutAttachment(bytes.NewReader(testPNG), "shot.png")
@@ -146,13 +164,11 @@ func TestWebSendAttachmentsRefusedOnVerb(t *testing.T) {
 // TestWebSendAttachmentsUnknownID asserts that an unresolvable attachment
 // id is refused with a 4xx and never reaches the engine.
 func TestWebSendAttachmentsUnknownID(t *testing.T) {
-	b, log, eng, f, _ := headlessBoard(t, agent.NewFake("ack"))
+	b, log, eng, f, _ := sessionBoard(t, agent.NewFake("ack"))
 	log.waitFor(t, "board", func(c webapi.Change) bool { return c.Kind == webapi.ChangeBoard })
 
 	ctx := context.Background()
-	if _, err := eng.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
+	startSession(t, eng, f)
 	waitSessionIdle(t, eng, f.ID)
 	_, err := b.Send(ctx, string(f.ID), webapi.SendRequest{
 		Text: "hello", Attachments: []string{"not-a-real-id"}, Against: cardAgainst(t, ctx, b, f.ID),
@@ -171,13 +187,11 @@ func TestComposerImagesFollowsBackend(t *testing.T) {
 	ag.Caps.Images = true
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
 	defer unregister()
-	b, log, eng, f, _ := headlessBoard(t, ag)
+	b, log, eng, f, _ := sessionBoard(t, ag)
 	log.waitFor(t, "board", func(c webapi.Change) bool { return c.Kind == webapi.ChangeBoard })
 
 	ctx := context.Background()
-	if _, err := eng.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
+	startSession(t, eng, f)
 	comp, err := b.Composer(ctx, string(f.ID), "hello")
 	if err != nil {
 		t.Fatal(err)
@@ -190,11 +204,9 @@ func TestComposerImagesFollowsBackend(t *testing.T) {
 	ag2 := agent.NewFake("ack") // Caps.Images left false
 	unregister2 := agent.RegisterCapabilities("fake", ag2.Caps)
 	defer unregister2()
-	b2, log2, eng2, f2, _ := headlessBoard(t, ag2)
+	b2, log2, eng2, f2, _ := sessionBoard(t, ag2)
 	log2.waitFor(t, "board", func(c webapi.Change) bool { return c.Kind == webapi.ChangeBoard })
-	if _, err := eng2.Attach(ctx, f2); err != nil {
-		t.Fatal(err)
-	}
+	startSession(t, eng2, f2)
 	comp2, err := b2.Composer(ctx, string(f2.ID), "hello")
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +219,7 @@ func TestComposerImagesFollowsBackend(t *testing.T) {
 // TestCreateCardAttachmentsLinkInSpec asserts that a description
 // attachment lands as a spec-anchored link in the card's seeded draft.
 func TestCreateCardAttachmentsLinkInSpec(t *testing.T) {
-	b, _, _, _, _ := headlessBoard(t, agent.NewFake("ack"))
+	b, _, _, _, _ := sessionBoard(t, agent.NewFake("ack"))
 	ctx := context.Background()
 	var ws state.Workspace
 	var store *state.Store
@@ -242,7 +254,7 @@ func TestCreateCardAttachmentsLinkInSpec(t *testing.T) {
 // TestCreateCardUnknownAttachmentMintsNothing asserts that an unresolvable
 // attachment id refuses the create before any card is minted.
 func TestCreateCardUnknownAttachmentMintsNothing(t *testing.T) {
-	b, _, _, _, _ := headlessBoard(t, agent.NewFake("ack"))
+	b, _, _, _, _ := sessionBoard(t, agent.NewFake("ack"))
 	ctx := context.Background()
 	var store *state.Store
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd { store = m.store; return nil }); err != nil {
@@ -343,7 +355,7 @@ func TestCreateCardAttachmentsRideTheSessionFirstTurn(t *testing.T) {
 	ag.Caps.Images = true
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
 	defer unregister()
-	b, _, eng, _, _ := headlessBoard(t, ag)
+	b, _, eng, _, _ := sessionBoard(t, ag)
 	ctx := context.Background()
 
 	ref, err := b.PutAttachment(bytes.NewReader(testPNG), "shot.png")

@@ -76,7 +76,7 @@ func TestGHErrorNamesSignInAndSSO(t *testing.T) {
 // Every place a push could go that the person did not mean, or that gummi
 // cannot name, is a typed refusal before anything is read on the network.
 func TestResolveRefusesAPushTargetItCannotStandBehind(t *testing.T) {
-	adopt := func(w *world) { w.f.BranchScheme, w.f.Branch = domain.BranchSchemeAdopted, "feat/rate-limit" }
+	adopt := func(w *world) { w.f.BranchScheme, w.f.Branch = domain.BranchSchemeAdopted, "ff/rate-limit" }
 	cases := []struct {
 		name string
 		mut  func(w *world)
@@ -102,7 +102,7 @@ func TestResolveRefusesAPushTargetItCannotStandBehind(t *testing.T) {
 		{"repo view garbled", func(w *world) { w.write("repo.json", `not json`) }, CodeFailed, "gh repo view"},
 		{"no such branch", func(w *world) { w.f.Slug = "gone" }, CodeNoBranch, "does not exist"},
 		{"branch name not a ref", func(w *world) { w.f.Slug = "a..b" }, CodeNoBranch, "not a valid branch"},
-		{"nothing ahead", func(w *world) { w.git("branch", "-f", "feat/rate-limit", "main") }, CodeNothingToPublish, "no commits ahead of main"},
+		{"nothing ahead", func(w *world) { w.git("branch", "-f", "ff/rate-limit", "main") }, CodeNothingToPublish, "no commits ahead of main"},
 		{"gh missing", func(w *world) { w.env.GH = filepath.Join(w.fake, "absent") }, CodeGHMissing, "not on the path"},
 		{"gh signed out", func(w *world) { w.write("fail-auth-status", "You are not logged into any GitHub hosts.") }, CodeGHNotSignedIn, "gh auth login"},
 		{"remote unreachable", func(w *world) {
@@ -131,7 +131,7 @@ func TestResolveRefusesAPushTargetItCannotStandBehind(t *testing.T) {
 func TestAnAdoptedBranchPublishesUnderItsUpstreamNameAndIsNeverForced(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
-	w.f.BranchScheme, w.f.Branch = domain.BranchSchemeAdopted, "feat/rate-limit"
+	w.f.BranchScheme, w.f.Branch = domain.BranchSchemeAdopted, "ff/rate-limit"
 	w.repo.target.Branch = "their-name"
 	fx, e := Resolve(ctx, w.env, w.repo, w.in())
 	if e != nil || fx.HeadRef() != "me:their-name" || fx.Push != PushNew || !fx.Adopted {
@@ -143,10 +143,10 @@ func TestAnAdoptedBranchPublishesUnderItsUpstreamNameAndIsNeverForced(t *testing
 	if got := w.run(w.dir, "git", "--git-dir", w.bare, "rev-parse", "their-name"); got != fx.Tip {
 		t.Fatalf("remote their-name = %s, want %s", got, fx.Tip)
 	}
-	w.git("checkout", "-q", "feat/rate-limit")
+	w.git("checkout", "-q", "ff/rate-limit")
 	w.git("commit", "-q", "--amend", "--allow-empty", "-m", "reworded")
 	w.git("checkout", "-q", "main")
-	w.f.VerifiedRev = w.git("rev-parse", "feat/rate-limit")
+	w.f.VerifiedRev = w.git("rev-parse", "ff/rate-limit")
 	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeRemoteAhead || !strings.Contains(e.Text, "never rewrites an adopted branch") {
 		t.Fatalf("a rewritten adopted branch: %v, want remote-ahead and no force", e)
 	}
@@ -253,7 +253,7 @@ func (w *world) viewPR(draft bool, head, owner string) {
 	if draft {
 		d = "true"
 	}
-	w.write("view.json", `{"number":7,"url":"https://github.com/acme/widget/pull/7","state":"OPEN","isDraft":`+d+`,"headRefOid":"`+head+`","headRefName":"feat/rate-limit","headRepositoryOwner":{"login":"`+owner+`"}}`)
+	w.write("view.json", `{"number":7,"url":"https://github.com/acme/widget/pull/7","state":"OPEN","isDraft":`+d+`,"headRefOid":"`+head+`","headRefName":"ff/rate-limit","headRepositoryOwner":{"login":"`+owner+`"}}`)
 }
 
 func (w *world) ghLog() string {
@@ -366,7 +366,7 @@ func TestAPushTheRemoteOrAHookRefusesIsNamed(t *testing.T) {
 	}
 	t.Run("protected branch", func(t *testing.T) {
 		w := newWorld(t)
-		hook(filepath.Join(w.bare, "hooks", "pre-receive"), `echo "error: GH006: Protected branch update failed for refs/heads/feat/rate-limit." >&2; exit 1`)
+		hook(filepath.Join(w.bare, "hooks", "pre-receive"), `echo "error: GH006: Protected branch update failed for refs/heads/ff/rate-limit." >&2; exit 1`)
 		fx, _ := Resolve(ctx, w.env, w.repo, w.in())
 		res, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActCreate, Title: "t", Fingerprint: fx.Fingerprint()}, w.link)
 		if e == nil || e.Code != CodeProtected || res.Partial() {
@@ -387,12 +387,15 @@ func TestAPushTheRemoteOrAHookRefusesIsNamed(t *testing.T) {
 	t.Run("returned to draft, then refused", func(t *testing.T) {
 		w := newWorld(t)
 		w.linkPR(false)
-		w.git("checkout", "-q", "feat/rate-limit")
+		w.git("checkout", "-q", "ff/rate-limit")
 		w.git("commit", "-q", "--allow-empty", "-m", "more")
 		w.git("checkout", "-q", "main")
 		hook(filepath.Join(w.bare, "hooks", "pre-receive"), `echo "declined" >&2; exit 1`)
-		fx, _ := Resolve(ctx, w.env, w.repo, w.in())
-		res, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Draft: true, Fingerprint: fx.Fingerprint()}, w.link)
+		// a review comment opened on the diff holds the ready PR
+		held := w.in()
+		held.OpenComments = 1
+		fx, _ := Resolve(ctx, w.env, w.repo, held)
+		res, e := Do(ctx, w.env, w.repo, held, Request{Act: ActPush, Draft: true, Fingerprint: fx.Fingerprint()}, w.link)
 		if e == nil || !res.Partial() || res.Pushed != "" || !strings.Contains(e.Text, "before that, PR #7 was returned to draft") {
 			t.Fatalf("a refused push after the PR went to draft = %+v %v", res, e)
 		}
@@ -406,13 +409,13 @@ func TestAPRThatOpenedIsNeverReportedAsNotOpened(t *testing.T) {
 		fx, _ := Resolve(ctx, w.env, w.repo, w.in())
 		res, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActCreate, Title: "t", Fingerprint: fx.Fingerprint()},
 			func(context.Context, domain.PullRequestRef) error { return errors.New("database is locked") })
-		if e != nil || res.PR.Number != 512 || !strings.Contains(res.LinkErr, "gummi pr link FD-208 512") {
+		if e != nil || res.PR.Number != 512 || !strings.Contains(res.LinkErr, "gummi pr link FF-208 512") {
 			t.Fatalf("create whose link failed = %+v %v", res, e)
 		}
 	})
 	t.Run("gh answers something else", func(t *testing.T) {
 		w := newWorld(t)
-		w.write("create-says", "Creating pull request for me:feat/rate-limit\n")
+		w.write("create-says", "Creating pull request for me:ff/rate-limit\n")
 		fx, _ := Resolve(ctx, w.env, w.repo, w.in())
 		res, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActCreate, Title: "t", Fingerprint: fx.Fingerprint()}, w.link)
 		if e == nil || e.Code != CodeLinkFailed || res.Pushed != fx.Tip || !strings.Contains(e.Text, "look for the PR on GitHub") {
@@ -422,7 +425,7 @@ func TestAPRThatOpenedIsNeverReportedAsNotOpened(t *testing.T) {
 	t.Run("the link's head cannot follow a push", func(t *testing.T) {
 		w := newWorld(t)
 		w.linkPR(true)
-		w.git("checkout", "-q", "feat/rate-limit")
+		w.git("checkout", "-q", "ff/rate-limit")
 		w.git("commit", "-q", "--allow-empty", "-m", "more")
 		w.git("checkout", "-q", "main")
 		fx, _ := Resolve(ctx, w.env, w.repo, w.in())
@@ -439,7 +442,7 @@ func TestTheLinkedPRMustBeTheOneThisCardPushesTo(t *testing.T) {
 	ctx := context.Background()
 	w.linkPR(true)
 	w.viewPR(true, "abc", "someone-else")
-	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeForkNotYours || !strings.Contains(e.Text, "someone-else:feat/rate-limit") {
+	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeForkNotYours || !strings.Contains(e.Text, "someone-else:ff/rate-limit") {
 		t.Fatalf("a PR whose head is another fork: %v", e)
 	}
 	w.write("view.json", "not json")
@@ -515,33 +518,33 @@ func (fakeTree) BaseBranch(context.Context) string                       { retur
 func TestInputForReadsTheCardTheSameForEveryFace(t *testing.T) {
 	ctx := context.Background()
 	anns := []domain.DiffAnnotation{{Resolved: true}, {}, {}}
-	in := InputFor(ctx, fakeTree{}, verified("x"), true, anns, 3)
-	if in.Base != "trunk" || in.OpenComments != 2 || in.OpenSpec != 3 || !in.Card.Busy || in.Card.Dirty || in.Card.Landed {
+	in := InputFor(ctx, fakeTree{}, session(), true, anns)
+	if in.Base != "trunk" || in.OpenComments != 2 || !in.Card.Busy || in.Card.Dirty || in.Card.Landed {
 		t.Fatalf("input = %+v", in)
 	}
 	// a tree that cannot be read is not known clean
-	in = InputFor(ctx, fakeTree{err: errors.New("no worktree")}, verified("x"), false, nil, 0)
+	in = InputFor(ctx, fakeTree{err: errors.New("no worktree")}, session(), false, nil)
 	if !in.Card.Dirty || !in.Card.Rebasing {
 		t.Fatalf("an unreadable tree = %+v, want it refused as dirty", in.Card)
 	}
-	f := verified("x")
+	f := session()
 	f.Base, f.LandedSHA = "release", "abc"
-	if in = InputFor(ctx, fakeTree{}, f, false, nil, 0); in.Base != "release" || !in.Card.Landed {
+	if in = InputFor(ctx, fakeTree{}, f, false, nil); in.Base != "release" || !in.Card.Landed {
 		t.Fatalf("a landed card on its own base = %+v", in)
 	}
-	done := verified("x")
+	done := session()
 	done.Stage = domain.StageDone
-	if in = InputFor(ctx, fakeTree{landed: true}, done, false, nil, 0); !in.Card.Landed {
+	if in = InputFor(ctx, fakeTree{landed: true}, done, false, nil); !in.Card.Landed {
 		t.Fatal("a done card whose branch is in the base is not seen as landed")
 	}
 	done.HandedOffAt = time.Unix(3, 0)
-	if in = InputFor(ctx, fakeTree{landed: true}, done, false, nil, 0); in.Card.Landed {
+	if in = InputFor(ctx, fakeTree{landed: true}, done, false, nil); in.Card.Landed {
 		t.Fatal("a handed-off card is read as landed before anyone merged it")
 	}
 }
 
 func TestDefaultTextStartsFromTheCommits(t *testing.T) {
-	f := verified("x")
+	f := session()
 	if title, body := DefaultText(f, nil); title != f.Title || body != "" {
 		t.Fatalf("no commits: %q %q", title, body)
 	}

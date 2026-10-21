@@ -1,209 +1,37 @@
 package ui
 
-import (
-	"strings"
-
-	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
-)
+import "github.com/morphis/gummi/internal/domain"
 
 // The narration is the short paragraph above the answer set: what a
-// reader needs to hold in their head at a stop, said once, so they do
-// not have to reconstruct it by sweeping the options.
-//
-// It answers three questions in order (PROPOSAL-card-surface §1):
-//
-//  1. why it stopped — the verdict, the failing check, the blocker
-//  2. what it did unattended — gates crossed and answers taken without you
-//  3. code vs plan — what the diff does against what the plan promised
-//
-// The first two are in this file and cost nothing: every fact they state
-// is already on nextInput or already folded out of the event log by
-// stretch.go. The third is the only claim in the paragraph that is not
-// derivable from the log, because nothing compares a diff to a plan's
-// steps — it is model-written, and it is a later phase's to add.
-//
-// THE SPLIT IS THE POINT. The model narrates; the workflow enumerates.
-// Nothing here may add an option, drop one, or change their order —
-// stageActions is a pure function of nextInput and stays one (DESIGN
-// §6.3). A sentence that disagrees with the rows below it is a bug in
+// reader needs to hold in their head at a stop, said once, so they do not
+// have to reconstruct it by sweeping the options. Every fact it states is
+// already on nextInput; nothing here may add an option, drop one, or
+// change their order — stageActions is a pure function of nextInput and
+// stays one. A sentence that disagrees with the rows below it is a bug in
 // this file, never a reason to re-rank them.
-//
-// CITATIONS. Every claim may carry one anchor naming something openable
-// — check:<name>, event:<seq>, diff:<path>:<line>, spec:<section> — and
-// a rendered narration may not contain an anchor that resolves to
-// nothing (citations.go, invariant 3). That is what makes the one
-// generated thing on the page the one thing with a machine-checkable
-// contract: hallucinated evidence is discarded by the code that admits
-// evidence, not by asking a model nicely.
-//
-// The mark is a lettered alt chord — [alt+a], [alt+b] — and each of
-// those three words is load-bearing. It is an ALT chord because the card
-// page's composer owns every printable key, which is why alt+s, alt+d
-// and alt+j/k are chords too. It is not a bare DIGIT because digits
-// select the picker's options, deliberately: a digit used to fire an
-// answer outright with no confirm and no undo, and digit-selects-option
-// was the fix (F14, threadinput.go). And it is not an alt+digit either,
-// because the alt+digits are the shell's own board/stats/inbox/agent
-// tabs, answered above the card's tier — a numbered chord would have
-// switched tab instead of opening the citation. Letters are the
-// footnote convention anyway.
-//
-// The mark carries its key rather than a bare number because the chord
-// is a status-bar hint, and a board-width bar has room for about three
-// of those.
-//
-// A claim without an anchor is still a claim. The deterministic
-// sentences name their evidence in words as well — the check by its own
-// name, the blocker verbatim — so they read correctly with the numbers
-// stripped, on the board line and on a page too short for the marks.
 
-// anchor names something a claim cites, in the design's four kinds. It
-// is a value rather than a string so a malformed one cannot be built by
-// accident — parseAnchor is the only way in from a model's reply.
-type anchor struct {
-	kind string // "check", "event", "diff", "spec"
-	ref  string // the check name, event seq, "<path>:<line>", or section
-}
-
-// anchorKinds is the closed set. A kind outside it is not an anchor
-// gummi can resolve, so it is not an anchor at all.
-var anchorKinds = map[string]bool{"check": true, "event": true, "diff": true, "spec": true}
-
-func (a anchor) empty() bool { return a.kind == "" }
-
-// String round-trips an anchor back to its wire spelling, for notices
-// and test failure output.
-func (a anchor) String() string {
-	if a.empty() {
-		return ""
-	}
-	return a.kind + ":" + a.ref
-}
-
-// parseAnchor reads a model's anchor string. Everything about it is
-// fail-closed: an unknown kind, a missing reference, or no colon at all
-// is (anchor{}, false), and a claim whose anchor did not parse is
-// discarded exactly like one whose anchor did not resolve.
-func parseAnchor(s string) (anchor, bool) {
-	s = strings.TrimSpace(strings.Trim(strings.TrimSpace(s), "`\"'"))
-	kind, ref, ok := strings.Cut(s, ":")
-	if !ok {
-		return anchor{}, false
-	}
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	ref = strings.TrimSpace(ref)
-	if !anchorKinds[kind] || ref == "" {
-		return anchor{}, false
-	}
-	return anchor{kind: kind, ref: ref}, true
-}
-
-// claim is one sentence of the narration, with the evidence that backs
-// it. Most claims are free and carry the anchor their own source
-// already knows; the code-vs-plan claim is model-written and carries
-// whichever anchor it cited, checked before it is admitted.
-type claim struct {
-	text string
-	a    anchor
-}
-
-// sentence builds a claim citing nothing — the ordinary case for a
-// sentence whose evidence is the card's own state.
-func sentence(text string) claim { return claim{text: text} }
-
-// cite builds a claim carrying an anchor.
-func cite(text, kind, ref string) claim {
-	if text == "" {
-		return claim{}
-	}
-	return claim{text: text, a: anchor{kind: kind, ref: ref}}
-}
-
-// narrationStop reports whether the card is genuinely parked for a
-// human — the only state a narration is generated in.
-//
-// This is invariant 4 ("free at rest") stated as a predicate: a running,
-// queued or done card has nothing to narrate and asks for nothing. It
-// gates BOTH halves of the invariant — the free sentences below are not
-// built for such a card, and citations.go refuses to spend a model turn
-// on one, since ensureNarration asks this first.
-func narrationStop(in nextInput) bool {
-	// A card that has ended is parked for a person in the most complete
-	// sense there is, and it has exactly one thing to say: how it ended.
-	// This used to return false here, which is why a finished card's page
-	// was blank — the half of invariant 4 that says a running card has
-	// nothing to narrate was being applied to a card that had stopped for
-	// good. Nothing below it is reachable for such a card anyway: it has
-	// no session, and no gate.
+// cardNarration builds the paragraph for a card: a closed card's receipt,
+// or why an open one stopped for a person. Empty is the ordinary answer
+// for a card with nothing to say.
+func (m *Shell) cardNarration(in nextInput) []string {
 	if in.closed() {
-		return true
+		return closingSentences(in)
 	}
-	switch in.sess {
-	case engine.StateRunning:
-		// mid-turn the agent owns the screen; a blocking question is the
-		// one thing that stops it and needs a person.
-		return in.hasAsk
-	}
-	return true
-}
-
-// cardNarration builds the paragraph for a stop. Empty is the ordinary
-// answer for a card with nothing to say — an idle card in todo has not
-// stopped for a reason, and has done nothing unattended.
-func (m *Shell) cardNarration(in nextInput, r featureRow) []claim {
-	if !narrationStop(in) {
-		return nil
-	}
-	// A finished card's paragraph is its receipt, and it is a different
-	// paragraph from a stop's: nothing is pending, nothing ran
-	// unattended since, and there is no plan left to weigh the code
-	// against. It returns here rather than falling through the three
-	// questions below, all of which are about a card that is going to
-	// carry on.
-	if in.closed() {
-		return closingClaims(in)
-	}
-	var out []claim
 	if s := whyItStopped(in); s != "" {
-		// The failing check is the claim's own evidence and the anchor is
-		// free: in.failedCheck comes from m.checksFor, so a check named
-		// here is by construction a check that ran.
-		if in.failedCheck != "" && in.stage == domain.StageVerify {
-			out = append(out, cite(s, "check", in.failedCheck))
-		} else {
-			out = append(out, sentence(s))
-		}
+		return []string{s}
 	}
-	// The third question, and the only one that costs anything. It is
-	// read from the cache and never generated here: rendering must stay
-	// free and side-effect-free, so the turn that fills the cache is
-	// dispatched from the Update loop (citations.go's ensureNarration).
-	if c, ok := m.cachedCodeVsPlan(in, r); ok {
-		out = append(out, c)
-	}
-	return out
+	return nil
 }
 
-// closingClaims is a finished card's receipt: how it ended, what it
-// became, and what it cost.
-//
-// Every fact here was already stored and none of it was on screen. The
-// landed commit in particular has been recorded at every merge since
-// SquashMerge first stamped it and was shown by no surface in the TUI —
-// the notice that named it lived one keypress.
-//
-// The sentences carry no citations. Each one is the card's own record
-// rather than evidence somewhere else, so there is nothing for a mark to
-// open — and citations.go refuses to spend a turn on a closed card
-// anyway (approveShaped).
-func closingClaims(in nextInput) []claim {
-	var out []claim
+// closingSentences is a finished card's receipt: how it ended, what it
+// became, and what it cost. Each one is the card's own record.
+func closingSentences(in nextInput) []string {
+	var out []string
 	if s := endingSentence(in); s != "" {
-		out = append(out, sentence(s))
+		out = append(out, s)
 	}
 	if s := costSentence(in); s != "" {
-		out = append(out, sentence(s))
+		out = append(out, s)
 	}
 	return out
 }
@@ -229,7 +57,7 @@ func endingSentence(in nextInput) string {
 		return s + ". Its branch and worktree are gone."
 	case domain.EndingHandedOff:
 		if in.continuedAs != "" {
-			return "Continued as the spec " + in.name(in.continuedAs) + when + " — its work lands from there, on a verified branch; " +
+			return "Continued as the spec " + in.name(in.continuedAs) + when + " — its work lands from there; " +
 				in.keptBranch() + " is kept as it was."
 		}
 		return "Handed off" + when + " — nothing landed, and " + in.keptBranch() +
@@ -253,8 +81,8 @@ func costSentence(in nextInput) string {
 }
 
 // shortSHA is the commit as a reader would quote it. Twelve characters,
-// matching what the merge notice and the goal report print, so the same
-// commit is not spelled two lengths on two screens.
+// matching what the merge notice prints, so the same commit is not
+// spelled two lengths on two screens.
 func shortSHA(sha string) string {
 	if len(sha) > 12 {
 		return sha[:12]
@@ -262,383 +90,28 @@ func shortSHA(sha string) string {
 	return sha
 }
 
-// approveShaped reports whether this stop is one where "what does the
-// code do against what the plan promised" is a question worth paying
-// for: implement finished, the verify gate, the landing gate.
-//
-// Everywhere else the sentence would be noise or worse. A failure, an
-// exhausted envelope and a blocked ask are stops about themselves, and
-// a reader answering one is not weighing a diff against a plan. Nothing
-// has been built at the design stage to compare. And a RESEARCH card
-// has no diff at all — it never gets a branch — so the claim is
-// undefined for it; its verify is the deterministic document floor
-// (DESIGN §13.4), which already reports shape and citations without a
-// model.
-func approveShaped(in nextInput) bool {
-	if !narrationStop(in) || in.kind == domain.KindResearch {
-		return false
-	}
-	// A finished card is never worth a model turn: the decision the
-	// sentence exists to inform has already been taken. narrationStop now
-	// says yes to such a card (its ending is worth a sentence), so the
-	// guard that used to come free from that predicate has to be stated.
-	if in.closed() {
-		return false
-	}
-	if in.hasAsk || in.attn == attnQuestion || in.attn == attnFailure || in.attn == attnBudget {
-		return false
-	}
-	if in.sess == engine.StatePaused {
-		return false
-	}
-	if in.stage != domain.StageImplement && in.stage != domain.StageVerify {
-		return false
-	}
-	return in.finished()
-}
-
-// whyItStopped is the first sentence. Its order of precedence is the
-// same one decisionQuestion and stageActions read the state in, so the
-// three can never describe different stops.
+// whyItStopped is the sentence for an open card stopped on a person. Its
+// order of precedence is the one decisionQuestion and stageActions read
+// the state in, so the three can never describe different stops.
 func whyItStopped(in nextInput) string {
-	art := artifactNoun(in.kind)
-	stage := string(in.stage)
-
-	switch {
-	case in.hasAsk || in.attn == attnQuestion:
+	switch in.attn {
+	case attnQuestion:
 		return "The agent asked a question and is blocked on your reply."
-	case in.attn == attnFailure:
-		if in.verdictFloorReason != "" {
-			return "The " + stage + " session stopped: " + sanitize(in.verdictFloorReason) + "."
-		}
-		if in.backendUnavailable != "" {
-			// Not a setup problem and not this card's fault: the backend
-			// is configured and working, and declined to serve this turn.
-			// Its own sentence is the useful part — it generally says
-			// when it will serve again — so it is quoted rather than
-			// summarized, and `gummi doctor` is not offered, because it
-			// will report a healthy workspace.
-			return "The " + stage + " session's backend could not serve the turn: " + sanitize(in.backendUnavailable) + ". Nothing is wrong with the card or the setup — pick it back up when the backend is available again."
-		}
+	case attnFailure:
 		if in.drifted {
 			// Not the backend and not the card's work: the branch its
-			// base was cut from is gone from under it, and every session
-			// is refused until the rebase replays the card onto it again.
-			// A profile or a retry cannot help, so neither is suggested.
-			return "The " + stage + " session never started: " + in.landBase() + " no longer carries the commit this card forked from, so every run is refused until the card's own commits are rebased onto it."
+			// base was cut from is gone from under it, and every turn is
+			// refused until the rebase replays the card onto it again.
+			return "The " + string(in.stage) + " session never started: " + in.landBase() + " no longer carries the commit this card forked from, so every turn is refused until the card's own commits are rebased onto it."
 		}
-		if in.backendNeverStarted {
-			// The failure a first-time user hits most and can act on
-			// least: the coding CLI died before producing a single turn,
-			// so nothing is wrong with this card and the only offered
-			// action — retry — runs the same broken command. `gummi
-			// doctor` is the one place in the product that explains a
-			// backend that will not start, so the sentence names it.
-			// It is said HERE and not as an action row because the answer
-			// set is a closed four (stageActions), and this is advice,
-			// not a fifth answer.
-			return "The " + stage + " session's backend never started — this is a setup problem, not a problem with the card. Run `gummi doctor` to check auth, the profile and model reachability."
-		}
-		return "The " + stage + " session errored before it finished."
-	case in.attn == attnBudget:
-		// "budget", the word every surface that SETS one uses. "envelope" was
-		// replaced across the creation surfaces in round 2 and left standing on
-		// every surface that reports RUNNING OUT — which is where a reader meets
-		// it for the first time, six lines under a transcript line that says
-		// "budget reached" about the same event (round 3 §5.1).
-		if in.kind == domain.KindFreeform {
-			// No stage to name, and nothing to pick back up: its turns were
-			// committed as they happened, so what a reader needs is the one
-			// thing that would let the conversation carry on.
-			return "This card has spent its budget — its work is committed to its branch. Top it up and carry on, or land what is there."
-		}
-		return "The " + stage + " stage ran out of budget and stopped."
-	case in.sess == engine.StatePaused:
-		return "The " + stage + " run is paused."
+		return "The " + string(in.stage) + " session errored before it finished."
+	case attnBudget:
+		// No stage to name, and nothing to pick back up: what a reader
+		// needs is the one thing that would let the conversation carry on.
+		return "This card has spent its budget — its work is committed to its branch. Top it up and carry on, or land what is there."
 	}
-
-	// Nothing below describes a stop until the stage has produced
-	// something to stop at, blockers included: they describe a GATE, and
-	// there is no gate before the first run. Telling someone their own
-	// comment is "holding the gate shut" before the agent has even read
-	// it is a complaint about a rule they have not reached — the same
-	// reason blockedGate's rows wait for this (nextsteps.go).
-	if !in.finished() {
-		return ""
-	}
-
-	// A blocked gate outranks any verdict: the crossing is held shut
-	// whatever verify thought, and saying "verify passed" above a row
-	// that reads "you cannot cross yet" would be two sentences about
-	// different cards.
-	//
-	// §1.3: this used to return on the first non-zero of the three
-	// counts below, so a reader who resolved the ONE blocker it named
-	// found a second, never-mentioned one waiting in its place the
-	// moment they came back — the page always understated what stood
-	// between them and the gate. blockerSentence names every kind that
-	// is actually blocking, in one sentence, whenever more than one of
-	// them applies at once; with only one kind present the sentence
-	// below it is unchanged; grammar and the artifact noun still come
-	// from the same plural/isAre/art this file already had.
-	if blockingKinds(in) > 1 {
-		return blockerSentence(in, art)
-	}
-	if in.openSpecQs > 0 {
-		return itoa(in.openSpecQs) + " open comment" + plural(in.openSpecQs) + " in the " + art + " " +
-			isAre(in.openSpecQs) + " holding the gate shut."
-	}
-	if in.openDiffComments > 0 {
-		return itoa(in.openDiffComments) + " unresolved diff comment" + plural(in.openDiffComments) + " " +
-			isAre(in.openDiffComments) + " holding the gate shut."
-	}
-	if len(in.undrafted) > 0 {
-		pronoun := "it"
-		if len(in.undrafted) > 1 {
-			pronoun = "they"
-		}
-		return "The " + art + " still has " + strings.Join(in.undrafted, " and ") + " blank, and " +
-			pronoun + " " + isAre(len(in.undrafted)) + " required before the gate opens."
-	}
-
-	if in.stage == domain.StageVerify {
-		if in.verifyStale {
-			return "Verify passed, but the branch has moved since — what would land now has not been checked."
-		}
-		return verifyStopped(in, art)
-	}
-	switch in.stage {
-	case domain.StagePlan:
-		// A gate the critique did not clear says what the critique said.
-		// Both sentences below describe a stop the reader is meeting
-		// because the loop was interrupted before its rework round, or
-		// because it ran out of them — and in both, the last thing that
-		// happened to the artifact is that it was judged and found
-		// wanting. Saying "the gate is waiting on you" over the top of a
-		// verdict still on screen three lines above is what sent a reader
-		// to approve a plan its own reviewer had just blocked.
-		if s := critiqueStopped(in, art); s != "" {
-			return s
-		}
-		return "The plan stage finished and wrote the " + art + " — the gate is waiting on you."
-	case domain.StageImplement:
-		if s := critiqueStopped(in, art); s != "" {
-			return s
-		}
-		return "Implement finished and its critique passed — the diff has not been read yet."
+	if !in.closed() && in.kind != domain.KindFreeform {
+		return "This is a retired workflow card: gummi no longer runs it. Hand it off to keep its branch, or land it on your read of its diff."
 	}
 	return ""
-}
-
-// critiqueStopped is the first sentence at a design or work gate whose
-// critique did not end on a clean pass, and "" at one that did — the
-// caller's own wording stands for a pass. It names the stage's output
-// (the artifact at plan, the diff at implement) so the second half says
-// what has not happened to it since the verdict landed.
-//
-// verifyStopped is this sentence's counterpart one gate later, and the
-// unclear case is worded to match it: the verdicts a critique can
-// submit are pass and changes, so fail and blocked have no case here.
-func critiqueStopped(in nextInput, art string) string {
-	if !critiqueUnsettled(in) {
-		return ""
-	}
-	produced := "the " + art
-	if in.stage == domain.StageImplement {
-		produced = "the diff"
-	}
-	lead := "The " + string(in.stage) + " " + critiqueVerdict(in)
-	if in.verdict == verdictChanges {
-		return lead + ", and " + produced + " has not been revised since — crossing this gate overrules it."
-	}
-	return lead + ", and the loop gave up rather than passing it."
-}
-
-// verifyStopped is the first sentence at a finished verify, where the
-// state actually has something to say: a verdict, a failing check, or an
-// environment gummi's own floor refused the run on.
-func verifyStopped(in nextInput, art string) string {
-	if in.failedCheck != "" {
-		return "Verify stopped on the '" + sanitize(in.failedCheck) + "' check." + loopBreaker(in)
-	}
-	if in.verdict == verdictBlocked {
-		// an overruled pass ran and passed: "could not run" is the one
-		// thing it did not do. Name the overrule, and for the promise
-		// floor the lever that clears it — meet or strike what the plan
-		// promised, and the overrule lifts at the next read.
-		if in.flooredPass && in.verdictFloorReason != "" {
-			s := "Verify was overruled: " + sanitize(in.verdictFloorReason)
-			if in.verdictFloorKind == engine.FloorPromise {
-				s += " Meet or strike the promise and the overrule clears without a re-run."
-			}
-			return s
-		}
-		if in.verdictFloorReason != "" {
-			return "Verify could not run: " + sanitize(in.verdictFloorReason) + "."
-		}
-		return "Verify is blocked on the environment — the missing prerequisites are in the " + art + "."
-	}
-	if in.kind == domain.KindResearch && in.verdict == verdictFail && in.verdictFloorReason != "" {
-		// the document floor overruled the verifier: say which floor, so
-		// the reader is not sent looking for a finding nobody wrote
-		return "Verify failed: " + sanitize(in.verdictFloorReason) + " — the report is on the thread; send it back to fix the document." + loopBreaker(in)
-	}
-	if in.verdict == verdictFail || in.verdict == verdictChanges {
-		return "Verify reported failure — the evidence is in the " + art + "." + loopBreaker(in)
-	}
-	if in.verdict == verdictUnclear && in.escalated {
-		return "Verify gave no clear verdict, and the loop gave up rather than passing it." + loopBreaker(in)
-	}
-	if in.verdict == verdictPass {
-		// "ready to land" named one of the three answers below it as
-		// though it were the state itself. The work being ready is the
-		// state; who lands it is the question the rows ask, and a reader
-		// who is going to hand the branch off should not be told the
-		// screen has already decided.
-		if in.noChecks {
-			// no gummi-checks ran: the pass is the reviewer's word on
-			// commands it chose, and a reader deciding to land is owed that
-			return "Verify passed on the reviewer's own commands — this card has no gummi-checks, so gummi ran none" +
-				". Decide how it leaves gummi."
-		}
-		return "Verify passed — the work is ready" + excusedClause(in.excusedChecks, in.excusedOn) +
-			". Decide how it leaves gummi."
-	}
-	return ""
-}
-
-// excusedClause names the checks a clean verify did not actually hold to,
-// as a clause on the pass rather than a warning of its own.
-//
-// A check already failing on the fresh branch is written off as "FAIL
-// (pre-existing)" and does not floor the verdict (internal/engine's
-// checkReport), which is right — only regressions are this card's fault.
-// But the sentence reporting the pass said nothing about it, so a repo
-// whose `lint` has been red for a month lost that gate on every card with
-// nothing on screen admitting it. It is a clause and not a banner because
-// the pass is still a pass: this narrows what it claims, it does not
-// contradict it.
-//
-// Empty for the ordinary case — a branch born clean — so the sentence is
-// unchanged wherever there is nothing to disclose.
-func excusedClause(names []string, on string) string {
-	if len(names) == 0 {
-		return ""
-	}
-	safe := make([]string, 0, len(names))
-	for _, n := range names {
-		// check names come out of the artifact's own gummi-checks block,
-		// which is agent-written text like any other on this page
-		safe = append(safe, sanitize(n))
-	}
-	// An excusal is a claim about the commit it was measured on, so the
-	// clause names it; verify re-measures on a new one when the base moves.
-	before := "before this card"
-	if on != "" {
-		before = "on " + shortSHA(on) + ", the commit this card forks from"
-	}
-	return ", with " + strings.Join(safe, " and ") + " excused (already failing " + before + ")"
-}
-
-// loopBreaker is the FD-004 guard, moved from the ordering into the
-// narration.
-//
-// It used to de-rank the bounce row after a repeated failed verify, with
-// its warning in the row's own why. That no longer works: "send it back"
-// carries the in-place re-run as well as the rewind, so demoting the row
-// would demote an answer the guard was never about. Said here it warns
-// without touching the answer set at all, which is the split this whole
-// change rests on — the narration may say anything, and may change
-// nothing.
-//
-// It leads with a space because it is appended to a finished sentence.
-func loopBreaker(in nextInput) string {
-	if in.verifyBounces < 1 {
-		return ""
-	}
-	n := itoa(in.verifyBounces + 1)
-	return " It has now failed " + n + " times, so sending it back has already bought a full rework round that changed nothing — check the environment and the verification plan before spending another."
-}
-
-// isAre agrees a verb with a count, so the sentences above read as
-// English at one and at many.
-func isAre(n int) string {
-	if n == 1 {
-		return "is"
-	}
-	return "are"
-}
-
-// blockingKinds counts how many DIFFERENT kinds of blocker are holding
-// the gate shut — spec comments, diff comments, undrafted sections —
-// not how many items there are within a kind. whyItStopped's ordinary
-// branches already agree a verb with a single kind's own count (two open
-// spec comments still reads as one sentence); this is what tells that
-// case apart from the one blockerSentence exists for, where more than
-// one KIND applies at once and the reader has never been told about all
-// of them in the same breath.
-func blockingKinds(in nextInput) int {
-	n := 0
-	if in.openSpecQs > 0 {
-		n++
-	}
-	if in.openDiffComments > 0 {
-		n++
-	}
-	if len(in.undrafted) > 0 {
-		n++
-	}
-	return n
-}
-
-// blockerSentence names every blocker holding the gate shut, in one
-// sentence, for the case whyItStopped's single-kind branches cannot say
-// on their own: two or three kinds of blocker at once.
-//
-// §1.3 found the old code returning on the first non-zero count it
-// checked — a user resolved the one spec comment the page named, and a
-// diff comment they were never told about immediately took its place.
-// Order still matches blockedGate's own priority (nextsteps.go) — spec,
-// then diff, then undrafted — since that is still which ACTION a reader
-// is offered first when more than one blocker applies; this sentence
-// only stops hiding the rest of them while that ordering still picks one
-// to act on.
-func blockerSentence(in nextInput, art string) string {
-	var parts []string
-	if in.openSpecQs > 0 {
-		parts = append(parts, itoa(in.openSpecQs)+" comment"+plural(in.openSpecQs)+" in the "+art)
-	}
-	if in.openDiffComments > 0 {
-		noun := " comment" + plural(in.openDiffComments)
-		if len(parts) > 0 {
-			// the noun already named itself in the spec clause above —
-			// repeating it here read as two sentences glued together
-			// rather than one about comments in two places
-			noun = ""
-		}
-		parts = append(parts, itoa(in.openDiffComments)+noun+" on the diff")
-	}
-	if len(in.undrafted) > 0 {
-		parts = append(parts, strings.Join(in.undrafted, " and ")+" left blank in the "+art)
-	}
-	total := in.openSpecQs + in.openDiffComments + len(in.undrafted)
-	return joinList(parts) + " " + isAre(total) + " holding the gate shut."
-}
-
-// joinList joins parts English-style: one part reads as itself, two as
-// "a and b", three or more as "a, b, and c". blockerSentence and
-// otherBlockersNote (nextsteps.go) both name a variable-length list of
-// blockers in one clause, so the join lives once here rather than at
-// each call site.
-func joinList(parts []string) string {
-	switch len(parts) {
-	case 0:
-		return ""
-	case 1:
-		return parts[0]
-	case 2:
-		return parts[0] + " and " + parts[1]
-	default:
-		return strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1]
-	}
 }

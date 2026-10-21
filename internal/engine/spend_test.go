@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 )
 
-func TestFeatureSpendMeteredAcrossStages(t *testing.T) {
+func TestFeatureSpendMeteredAcrossTurns(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{
 			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 2, OutputTokens: 40}},
@@ -21,17 +20,15 @@ func TestFeatureSpendMeteredAcrossStages(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	createFeature(t, store, f)
 	withWorktree(t, wt, f)
 
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
 	// the feature's persisted spend reflects the metered usage
-	got, err := store.GetFeature(ctx, "FD-001")
+	got, err := store.GetFeature(ctx, "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,22 +36,16 @@ func TestFeatureSpendMeteredAcrossStages(t *testing.T) {
 		t.Errorf("metered feature spend = %+v, want {2 _ 40}", got.Spend)
 	}
 
-	// a second stage adds to the same running total
-	f2 := got
-	f2.Stage = domain.StageVerify
-	e.Drop("FD-001")
-	if _, err := store.Transition(ctx, "FD-001", domain.StageVerify, "user"); err != nil {
+	// a second turn adds to the same running total
+	if err := e.Freeform("FF-001").Send(ctx, "and again"); err != nil {
 		t.Fatal(err)
 	}
-	rf, _ := store.GetFeature(ctx, "FD-001")
-	if err := e.Run(rf); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	waitFreeformIdle(t, e.Freeform("FF-001"))
+	waitFor(t, e, EventUpdated)
 
-	got, _ = store.GetFeature(ctx, "FD-001")
+	got, _ = store.GetFeature(ctx, "FF-001")
 	if got.Spend.Credits != 4 {
-		t.Errorf("cumulative spend after two stages = %v, want 4", got.Spend.Credits)
+		t.Errorf("cumulative spend after two turns = %v, want 4", got.Spend.Credits)
 	}
 	// every event carried provider credits, so nothing reads as estimated
 	if got.Spend.Estimated() {
@@ -78,24 +69,22 @@ func TestFeatureSpendTokenDerivedIsEstimated(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	createFeature(t, store, f)
 	withWorktree(t, wt, f)
 
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
 	// 4000 tokens at the default 0.5 credits/1K → 2 credits, all estimated
-	got, err := store.GetFeature(ctx, "FD-001")
+	got, err := store.GetFeature(ctx, "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Spend.Credits != 2 || got.Spend.EstimatedCredits != 2 {
 		t.Errorf("token-derived spend = %+v, want 2 credits all estimated", got.Spend)
 	}
-	bd, err := store.StageBreakdown(ctx, "FD-001")
+	bd, err := store.StageBreakdown(ctx, "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,15 +117,13 @@ func TestSettledUsageClearsEstimates(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	createFeature(t, store, f)
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
-	got, err := store.GetFeature(ctx, "FD-001")
+	got, err := store.GetFeature(ctx, "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +135,7 @@ func TestSettledUsageClearsEstimates(t *testing.T) {
 	if got.Spend.Estimated() {
 		t.Errorf("settled spend still flagged estimated: %+v", got.Spend)
 	}
-	rows, err := store.StageBreakdown(ctx, "FD-001")
+	rows, err := store.StageBreakdown(ctx, "FF-001")
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("breakdown rows = %+v (%v)", rows, err)
 	}
@@ -171,15 +158,13 @@ func TestUnsettledEstimatesStayLabeled(t *testing.T) {
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	createFeature(t, store, f)
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
-	got, err := store.GetFeature(context.Background(), "FD-001")
+	got, err := store.GetFeature(context.Background(), "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,15 +192,13 @@ func TestMeteredUsageNeverTokenPriced(t *testing.T) {
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	createFeature(t, store, f)
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
-	got, err := store.GetFeature(context.Background(), "FD-001")
+	got, err := store.GetFeature(context.Background(), "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,15 +231,13 @@ func TestHelperSpendAttributedToHelperRole(t *testing.T) {
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "sonnet", Persist: true})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "plan", domain.StagePlan)
+	f := freeformCard(1, "plan")
 	createFeature(t, store, f)
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
-	rows, err := store.StageBreakdown(context.Background(), "FD-001")
+	rows, err := store.StageBreakdown(context.Background(), "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,19 +246,19 @@ func TestHelperSpendAttributedToHelperRole(t *testing.T) {
 		switch rows[i].Role {
 		case "helper":
 			helperRole = &rows[i]
-		case string(agent.RoleArchitect):
+		case string(agent.RoleImplementer):
 			stageRole = &rows[i]
 		}
 	}
 	if stageRole == nil || stageRole.Model != "sonnet" {
-		t.Fatalf("stage work not attributed to the architect/sonnet row: %+v", rows)
+		t.Fatalf("session work not attributed to the implementer/sonnet row: %+v", rows)
 	}
 	if helperRole == nil || helperRole.Model != "haiku" {
 		t.Fatalf("helper call not attributed to the helper role: %+v", rows)
 	}
 	// the helper's cost still reaches the feature total
-	got, _ := store.GetFeature(context.Background(), "FD-001")
+	got, _ := store.GetFeature(context.Background(), "FF-001")
 	if got.Spend.Credits != 10.2 {
-		t.Errorf("feature total = %v, want 10.2 (stage + helper)", got.Spend.Credits)
+		t.Errorf("feature total = %v, want 10.2 (session + helper)", got.Spend.Credits)
 	}
 }

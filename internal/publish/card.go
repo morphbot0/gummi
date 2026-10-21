@@ -19,7 +19,7 @@ type Tree interface {
 // an agent session holds the card, which only the face knows.
 // openSpec counts the open spec threads holding its gate, which the face
 // reads the way its landing does.
-func InputFor(ctx context.Context, t Tree, f *domain.Feature, busy bool, anns []domain.DiffAnnotation, openSpec int) Input {
+func InputFor(ctx context.Context, t Tree, f *domain.Feature, busy bool, anns []domain.DiffAnnotation) Input {
 	c := Card{F: f, Busy: busy}
 	// a tree that cannot be read is not known clean: refuse rather than
 	// publish past a state nobody saw
@@ -45,5 +45,5 @@ func InputFor(ctx context.Context, t Tree, f *domain.Feature, busy bool, anns []
 			open++
 		}
 	}
-	return Input{Card: c, Base: base, OpenComments: open, OpenSpec: openSpec}
+	return Input{Card: c, Base: base, OpenComments: open}
 }

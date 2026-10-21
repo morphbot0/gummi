@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -46,15 +45,12 @@ func TestPermissionBecomesCardDecision(t *testing.T) {
 	})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
 
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, f)
 	waitFor(t, e, EventQuestion)
 
 	snap := s.Snapshot()
@@ -79,12 +75,12 @@ func TestPermissionBecomesCardDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := opens["FD-001"]
+	rows := opens["FF-001"]
 	if len(rows) != 1 || rows[0].Kind != state.DecisionKindAsk || !strings.Contains(rows[0].Question, "Allow bash") {
 		t.Fatalf("open decisions = %+v, want one ask row for the held call", rows)
 	}
 
-	if err := e.Answer(ctx, "FD-001", "Approve"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "Approve"); err != nil {
 		t.Fatal(err)
 	}
 	// the ruling landed: the held call went through, the turn runs on to
@@ -94,7 +90,7 @@ func TestPermissionBecomesCardDecision(t *testing.T) {
 	} else {
 		p.Push(agent.Event{Kind: agent.EventIdle})
 	}
-	waitFor(t, e, EventIdle)
+	waitTurn(t, e)
 	r, ok := s.agent().(permissionAnswers)
 	if !ok {
 		t.Fatal("the fake session does not resolve permissions")
@@ -133,12 +129,9 @@ func TestPermissionFreeFormAnswerDenies(t *testing.T) {
 	e.cfg.Permission = agent.PermissionGuarded
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, freeformCard(1, "Dark mode"))
 	waitFor(t, e, EventQuestion)
-	if err := e.Answer(ctx, "FD-001", "only if it stays in the worktree"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "only if it stays in the worktree"); err != nil {
 		t.Fatal(err)
 	}
 	if p, ok := s.agent().(interface{ Push(events ...agent.Event) }); !ok {
@@ -146,43 +139,10 @@ func TestPermissionFreeFormAnswerDenies(t *testing.T) {
 	} else {
 		p.Push(agent.Event{Kind: agent.EventIdle})
 	}
-	waitFor(t, e, EventIdle)
+	waitTurn(t, e)
 	r := s.agent().(permissionAnswers)
 	if approve, ok := r.PermissionAnswers()["perm-9"]; !ok || approve {
 		t.Errorf("permission answers = %v, want perm-9 denied by free-form words", r.PermissionAnswers())
-	}
-}
-
-// TestPermissionAuxiliaryLoopsStayAllowAll: a loop with no decision
-// surface spawns its sessions allow-all on a guarded board too, so
-// guarded asks would never hang one of them behind a decision nobody can
-// see.
-func TestPermissionAuxiliaryLoopsStayAllowAll(t *testing.T) {
-	ag := agent.NewFake("")
-	ag.Caps = agent.Capabilities{ClientTools: true, Interrupt: true}
-	var got []agent.SessionOpts
-	ag.OnNewSession = func(opts agent.SessionOpts) { got = append(got, opts) }
-	ws, store, wt := newRepo(t)
-	e := New(Config{
-		Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m",
-		Permission: agent.PermissionGuarded,
-	})
-	t.Cleanup(func() { e.Close() })
-	ctx := context.Background()
-
-	f := feature(1, "impl", domain.StageImplement)
-	withWorktree(t, wt, f)
-	if err := store.CreateFeature(ctx, &f); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := e.CodeVsPlan(ctx, f); err != nil {
-		t.Fatalf("one-shot pass on a guarded board: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("one-shot sessions spawned = %d, want one", len(got))
-	}
-	if got[0].Permission != agent.PermissionAllowAll {
-		t.Errorf("one-shot permission = %q, want allow-all on a guarded board", got[0].Permission)
 	}
 }
 
@@ -194,12 +154,8 @@ func TestPermissionOutlivesItsTurn(t *testing.T) {
 	ag := permissionFake()
 	e := newEngine(t, ag)
 	e.cfg.Permission = agent.PermissionGuarded
-	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, freeformCard(1, "Dark mode"))
 	waitFor(t, e, EventQuestion)
 
 	// the turn ends while the ruling is still open, the way a close
@@ -234,20 +190,17 @@ func TestPermissionExpiredRowStaysAnswerable(t *testing.T) {
 	e.cfg.Permission = agent.PermissionGuarded
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, freeformCard(1, "Dark mode"))
 	waitFor(t, e, EventQuestion)
 
-	// end the session's stream without a terminal turn (a pause does)
-	if err := e.Pause(ctx, "FD-001"); err != nil {
-		t.Fatal(err)
-	}
+	// end the session's stream without a terminal turn (its backend
+	// going away does)
+	s.agent().Close()
+	s.clearAgent()
 
 	// the durable row is still there, and answering it does not look for
 	// a live call: the answer rides a turn on the rerun path
-	if err := e.Answer(ctx, "FD-001", "Deny"); err != nil {
+	if err := e.Answer(ctx, "FF-001", "Deny"); err != nil {
 		t.Fatalf("answering a decision whose session ended: %v", err)
 	}
 	// the answer never reached the stopped session's resolver
@@ -261,7 +214,7 @@ func TestPermissionExpiredRowStaysAnswerable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows := opens["FD-001"]; len(rows) != 0 {
+	if rows := opens["FF-001"]; len(rows) != 0 {
 		t.Errorf("open decisions = %+v, want the answered row closed", rows)
 	}
 }

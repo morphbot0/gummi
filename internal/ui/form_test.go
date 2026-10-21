@@ -708,7 +708,7 @@ func TestBoardNOpensTheDoorAndRemembersTheRepo(t *testing.T) {
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m.lastRepo = ""
-	m = openFeatureForm(t, m)
+	m = openSessionForm(t, m)
 	m = typeString(t, m, "Dark mode")
 	m = press(t, m, keyEnter)
 	if m.Overlay.HasDialogs() || len(m.rows) != 1 {

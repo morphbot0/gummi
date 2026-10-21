@@ -186,11 +186,10 @@ func (f *readFixture) mkVerifyFeature(t *testing.T) domain.Feature {
 	return feat
 }
 
-// status derives `verified` from the persisted verify marker, not from a
-// naive "at verify with an ahead branch" guess: a feature mid-verify reads
-// verified:false even with an ahead branch (the false-positive guard), and
-// only a stamped VerifiedAt — what the engine sets at the stop-at-verified
-// gate — flips it true, while `done` stays false until an actual merge.
+// status derives `verified` from a legacy card's persisted verify marker,
+// not from a naive "at verify with an ahead branch" guess: a card left at
+// verify with no stamp reads verified:false even with an ahead branch (the
+// false-positive guard), and has no ending until an actual merge.
 func TestBuildStatusDone(t *testing.T) {
 	f := newReadFixture(t)
 	feat := f.mkVerifyFeature(t)
@@ -206,22 +205,6 @@ func TestBuildStatusDone(t *testing.T) {
 	}
 	if v.Ending != domain.EndingNone {
 		t.Fatalf("ending=%q before any merge", v.Ending)
-	}
-
-	// the engine stamps this marker when it reaches the stop-at-verified gate.
-	if err := f.store.SetVerifiedAt(f.ctx, feat.ID, time.Now(), ""); err != nil {
-		t.Fatal(err)
-	}
-	verified, err := f.store.GetFeature(f.ctx, feat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	v = buildStatus(f.ctx, f.store, f.wt, f.ws, &verified)
-	if !v.Verified {
-		t.Fatal("verified=false at the terminal verified-branch state")
-	}
-	if v.Ending != domain.EndingNone {
-		t.Fatalf("ending=%q without a merge — verified is not an ending", v.Ending)
 	}
 }
 

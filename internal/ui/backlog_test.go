@@ -288,9 +288,9 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	assertLabel(t, bs, "enter", "open card")
 
 	// a card opens with its composer holding the keyboard, so the bar
-	// teaches the line's keys first. FD-042 (implement, nothing running)
-	// has an open decision, so enter names the highlighted answer rather
-	// than plain send — the bar states what enter is about to do before
+	// teaches the line's keys first. FD-042 (a retired card with a
+	// worktree) has an open decision, so enter names the highlighted
+	// answer rather than plain send — the bar states what enter is about to do before
 	// it does it (DESIGN §6.3).
 	m.openCard()
 	name, bs = m.activeSurface()
@@ -299,7 +299,7 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	}
 	assertNoKey(t, bs, "→")
 	assertLabel(t, bs, "↑↓", "choose")
-	assertLabel(t, bs, "enter", "run implement")
+	assertLabel(t, bs, "enter", "read the diff")
 	// esc leaves the page from the line — there is no accelerator layer
 	// between the composer and the backlog any more
 	assertLabel(t, bs, "esc", "board")

@@ -14,7 +14,6 @@ import (
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/ui"
 	"golang.org/x/term"
 )
 
@@ -128,7 +127,7 @@ func runPublish(fl cliFlags, act publish.Act, args []string) error {
 	if err != nil {
 		return err
 	}
-	in := publish.InputFor(ctx, mgr, &f, false, anns, ui.OpenSpecThreads(pool.Root(), ws.DraftsDir(), f))
+	in := publish.InputFor(ctx, mgr, &f, false, anns)
 	in.BaseRepo = str("repo")
 	env := publish.Env{GH: pr.GHBinary()}
 	// what is being waited on goes to stderr as it starts, so a slow

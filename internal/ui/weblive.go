@@ -31,22 +31,6 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 		live.Busy = true
 		live.Verb = m.cardBusyWord(r)
 	}
-	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
-		snap := sess.Snapshot()
-		live.State = string(snap.State)
-		live.Spent = snap.SpentCredits
-		live.Stage, live.Role, live.Model = string(snap.Feature.Stage), string(snap.Role), runModel(snap)
-		live.Session = snap.StartedAt
-		if live.Busy {
-			live.Since = snap.StartedAt
-		}
-		if liveSessionActive(snap) {
-			live.Turns, live.Omitted, live.Streaming, live.Tool = webTranscript(snap)
-		}
-		if snap.Err != nil {
-			live.Err = threadfold.Sanitize(snap.Err.Error())
-		}
-	}
 	if r.DrivenAbroad {
 		fd := r.Foreign
 		live.Elsewhere = &webapi.Elsewhere{
@@ -78,8 +62,9 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 }
 
 // WebLiveEarlier is GET /api/cards/{id}/live/earlier: the turns before
-// turn before of one of the card's live conversations — conv "stage" (the
-// run its live block draws) or "freeform" — that the block left out. It
+// turn before of one of the card's live conversations — conv "stage" (a
+// session another gummi runs, which this board follows) or "freeform" —
+// that the block left out. It
 // reads the same snapshot WebLive does, so the numbers agree. ok is false
 // for a card the board does not have or a conversation it is not having.
 func (m *Shell) WebLiveEarlier(id, conv string, before int) (webapi.Earlier, bool) {
@@ -91,11 +76,6 @@ func (m *Shell) WebLiveEarlier(id, conv string, before int) (webapi.Earlier, boo
 	case "stage":
 		if m.follow != nil && m.follow.feature == r.F.ID {
 			return webEarlier(m.follow.Snapshot(), before), true
-		}
-		if sess := m.sessionFor(r.F.ID); sess != nil && !r.DrivenAbroad {
-			if snap := sess.Snapshot(); liveSessionActive(snap) {
-				return webEarlier(snap, before), true
-			}
 		}
 	case "freeform":
 		if !r.F.IsFreeform() || m.engine == nil {
@@ -111,18 +91,6 @@ func (m *Shell) WebLiveEarlier(id, conv string, before int) (webapi.Earlier, boo
 	return webapi.Earlier{}, false
 }
 
-// liveSessionActive reports whether a local session is still writing the
-// segment its card's log ends in: then the log does not hold its turns
-// yet, and the page draws them from the snapshot. A finished session
-// (the engine keeps it after its run) has handed everything to the log.
-//
-// A paused session has handed its turns over too: Pause saves it before
-// it stops, and nothing writes after. Holding its segment back would hide
-// what the log says since — the pause itself, the stop it parked at —
-// behind a transcript that has nothing more to add.
-func liveSessionActive(snap engine.Snapshot) bool {
-	return snap.State != engine.StateDone && snap.State != engine.StatePaused
-}
 
 // webConsult is the card's consult exchange, where the TUI thread draws
 // one (consultBlock): never on a freeform card, whose lines go to its

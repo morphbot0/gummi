@@ -18,8 +18,6 @@ type decisionKind string
 
 const (
 	decisionAsk     decisionKind = "ask"
-	decisionGate    decisionKind = "gate"
-	decisionVerify  decisionKind = "verify"
 	decisionBudget  decisionKind = "budget"
 	decisionFailure decisionKind = "failure"
 	decisionIdle    decisionKind = "idle"
@@ -48,26 +46,18 @@ type threadDecision struct {
 	crew *domain.CrewDecision
 }
 
-// liveSessionFor is sessionFor's counterpart for a freeform card: its own
-// session lives in the engine's freeform map, which Engine.Get (and so
-// m.sessionFor) never looks at (DESIGN §19 — no attention-pool slot,
-// nothing scheduled). Every place that answers an ask_user question
-// reaches whichever session the card actually has — a workflow stage's
-// or a freeform card's own — through this rather than sessionFor, and
-// takes eng rather than m so it can run unchanged inside a tea.Cmd
-// closure created before the answer, the same reason those closures
-// already capture eng instead of m.
+// liveSessionFor is the card's session, if one is open: every place that
+// answers an ask_user question reaches it through this, and it takes eng
+// rather than m so it can run unchanged inside a tea.Cmd closure created
+// before the answer.
 func liveSessionFor(eng *engine.Engine, r featureRow) *engine.Session {
-	if eng == nil {
+	if eng == nil || !r.F.IsFreeform() {
 		return nil
 	}
-	if r.F.IsFreeform() {
-		if ff := eng.Freeform(r.F.ID); ff != nil {
-			return ff.Session()
-		}
-		return nil
+	if ff := eng.Freeform(r.F.ID); ff != nil {
+		return ff.Session()
 	}
-	return eng.Get(r.F.ID)
+	return nil
 }
 
 func (m *Shell) openDecision(r featureRow) *threadDecision {
@@ -131,10 +121,6 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		kind = decisionFailure
 	case in.attn == attnBudget:
 		kind = decisionBudget
-	case in.stage == domain.StageVerify && in.finished():
-		kind = decisionVerify
-	case in.attn == attnGate:
-		kind = decisionGate
 	}
 	if kind == decisionIdle && r.F.IsFreeform() && r.F.Stage == domain.StageOpen {
 		// A session has nothing to decide in the composer, running or
@@ -219,23 +205,18 @@ func (m *Shell) cardThreadSize() (int, int) {
 }
 
 // wordConsumer is the index of the option that consumes the composer's
-// line, or -1 when none does: the first action in the decision's order
-// whose delivery takes prose — the run that opens (or re-runs) a stage,
-// which rides the line as its kickoff note or first turn, and the bounce
-// that sends findings back with it. Everything else — advance, read the
-// spec, open the inbox — has nowhere to spend words, so a typed line sends
-// as a turn instead (DESIGN §6.3: prose is always accepted and always
-// safe; it becomes a turn, never an action nobody offered).
+// line, or -1 when none does: the follow-up session, whose row IS the
+// composer's words — on a closed card the line someone types is what is
+// wrong with the work, and the follow-up card is where that sentence
+// belongs. Everything else has nowhere to spend words, so a typed line
+// sends as a turn instead (DESIGN §6.3: prose is always accepted and
+// always safe; it becomes a turn, never an action nobody offered).
 func (d *threadDecision) wordConsumer() int {
 	if d == nil || d.ask != nil {
 		return -1
 	}
 	for i, action := range d.actions {
-		// newbug joins the three for the same reason they are here: its
-		// row IS the composer's words. On a closed card the line someone
-		// types is what is wrong with the work, and the follow-up card is
-		// where that sentence belongs.
-		if action.id == "run" || action.id == "bounce" || action.id == "changes" || action.id == "newbug" {
+		if action.id == "newbug" {
 			return i
 		}
 	}
@@ -423,53 +404,6 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		return r.F.Name() + " is closed — " + endingWord(in.ending) + "."
 	case decisionBudget:
 		return string(r.F.Stage) + " ran out of budget."
-	case decisionVerify:
-		if in.verifyStale {
-			// not "verification passed": it did, on a revision that is no
-			// longer the branch, and the rows beneath offer the re-verify
-			// rather than the landing (stageActions)
-			return "the branch moved since verification passed — re-verify what would land, or send it back."
-		}
-		if in.verdict == verdictPass {
-			// A research card has no branch, so there is nothing to land
-			// and the picker this heads says "mark done" — the question
-			// and its only answer have to be about the same act
-			// (reviewloop's own gate wording is the third place this
-			// decision shows up).
-			if r.F.Kind == domain.KindResearch {
-				return "verification passed — decide whether the research is done."
-			}
-			// Not "ready to land": the picker beneath this offers three
-			// endings and landing is only one of them, so the question
-			// has to be the one the rows actually answer.
-			if in.noChecks {
-				// and not a bare "passed" when gummi ran nothing: the
-				// card has no gummi-checks, so the pass is the reviewer's
-				return "verification passed on the reviewer's own commands (no gummi-checks ran) — decide how this work leaves gummi."
-			}
-			return "verification passed — decide how this work leaves gummi."
-		}
-		// an overruled pass names the overrule: verify ran and passed,
-		// and the floor's reason is the thing to act on — "stopped here"
-		// would read as a verify that found something wrong.
-		if in.flooredPass && in.verdictFloorReason != "" {
-			return "verify was overruled: " + in.verdictFloorReason + " Choose what happens next."
-		}
-		return "verification stopped here — choose what happens next."
-	case decisionGate:
-		// "ready for your decision" is true of a gate the critique
-		// cleared. At one it did not — a stop the loop was interrupted
-		// before reworking, or ran out of rounds to rework — the same
-		// sentence reads as an invitation to approve, which is how a plan
-		// its reviewer had just blocked came back after a restart under
-		// the word "approve". The verify gate already asks the unsettled
-		// question in its own words; this is the same distinction one
-		// gate earlier, over the answer set stageActions reorders to
-		// match.
-		if critiqueUnsettled(in) {
-			return string(r.F.Stage) + " " + critiqueVerdict(in) + " — choose what happens next."
-		}
-		return string(r.F.Stage) + " is ready for your decision."
 	case decisionFailure:
 		// names what happened rather than reusing the idle sentence
 		// (F9): this prints directly under the failure block the thread
@@ -492,26 +426,6 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		}
 		return string(r.F.Stage) + " failed — choose what happens next."
 	default:
-		if in.live {
-			// a live conversation between turns. Something is very much
-			// running — it is just waiting on you — so the idle card's own
-			// sentence would be false here, printed as it is directly under
-			// the session's spend line.
-			return "the agent is waiting — keep talking, or choose what happens next."
-		}
-		if in.sess == engine.StateInteractive {
-			// state persisted as interactive, but no backend is attached: a
-			// rehydrated row, not a live wait. sendThreadMessage already
-			// routes this case to sendConsultMessage instead of a live turn.
-			//
-			// It names the state and stops there. Naming a key would be a
-			// promise the cursor can walk away from — the same rule the
-			// status bar follows when it refuses to claim enter for a
-			// choice the line is not aimed at — and the row that does
-			// reattach the conversation is in the picker just below
-			// (talkAction), where enter's own label already says so.
-			return "no agent attached — choose what happens next."
-		}
 		return "nothing is running — choose what happens next."
 	}
 }
@@ -685,32 +599,13 @@ func (m *Shell) narrationBlock(s *theme.Styles, d *threadDecision, r featureRow,
 	if d == nil || d.ask != nil {
 		return nil
 	}
-	claims := m.cardNarration(m.nextInputFor(r), r)
+	claims := m.cardNarration(m.nextInputFor(r))
 	if len(claims) == 0 {
 		return nil
 	}
 	var out []string
-	n := 0
 	for _, c := range claims {
-		text := sanitize(c.text)
-		// The bracketed number is the citation, and it is only printed
-		// for a claim that carries one: numbering every sentence would
-		// promise a key for evidence that does not exist. alt+<n> opens
-		// it (narration.go's own note on why not the bare digit).
-		if !c.a.empty() {
-			n++
-			// The mark names its own key rather than a bare number.
-			// "[1]" would be shorter and is what the design's mock drew,
-			// but the chord that opens it is a status-bar hint, and on a
-			// board-width terminal the bar has room for about three of
-			// those — so the number would routinely appear above nothing
-			// that says what to press. A footnote that carries its key is
-			// the same information with no dependency on the bar having
-			// spare columns. (The key is a letter, not a digit: cardtabs
-			// .go says why.)
-			text += " [" + citationMark(n) + "]"
-		}
-		for _, l := range strings.Split(wrapText(text, max(width-1, 8)), "\n") {
+		for _, l := range strings.Split(wrapText(sanitize(c), max(width-1, 8)), "\n") {
 			out = append(out, " "+s.Base.Render(l))
 		}
 	}

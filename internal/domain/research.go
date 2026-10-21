@@ -128,14 +128,6 @@ func ParseCardType(s string) (CardType, bool) {
 	return CardType{}, false
 }
 
-// CardTypeOf reads the type back off a card.
-func CardTypeOf(f *Feature) CardType {
-	if f.Kind == KindResearch {
-		return CardType{Kind: KindResearch, Mode: f.Mode}
-	}
-	return CardType{Kind: f.kind()}
-}
-
 // IsDiagnosis reports whether f is a research card running the diagnosis
 // contract. Every caller that only cares "is this read-only, branchless
 // research?" keeps asking about the Kind; this is for the ones that

@@ -81,7 +81,6 @@ func TestTheCardOffersItsOwnSlashWords(t *testing.T) {
 	m.now = func() time.Time { return fixedTime }
 	r := row(42, "dark mode", domain.StageImplement, "thrifty", true)
 	v := row(44, "search", domain.StageVerify, "thrifty", true)
-	v.F.VerifiedAt = fixedTime
 	m.rows = []featureRow{r, v}
 	m.sel = 0
 	m.cardOpen = true
@@ -106,15 +105,10 @@ func TestTheCardOffersItsOwnSlashWords(t *testing.T) {
 	if got := m.webComposer(r, "/re").Completions; !has(got, "/rebase ", "rebase branch onto") {
 		t.Errorf("/re offers %v, want /rebase with what it does", names(got))
 	}
-	// a verb's word is claimed by the action the verb fires: at verify,
-	// /land is the merge's word, never an advance row that also says
-	// "land" — and before the branch is verified there is no land to
-	// offer at all (the floor the menu reads)
-	if got := m.webComposer(r, "/la").Completions; len(got) != 0 {
-		t.Errorf("/la at implement offers %v, want none — nothing lands before verify", names(got))
-	}
+	// a verb's word is claimed by the action the verb fires: /land is the
+	// merge's word
 	if got := m.webComposer(v, "/la").Completions; !has(got, "/land ", "merge") {
-		t.Errorf("/la at verify offers %v, want /land named for the merge", names(got))
+		t.Errorf("/la offers %v, want /land named for the merge", names(got))
 	}
 	// the bare slash offers the vocabulary itself
 	if got := m.webComposer(r, "/").Completions; len(got) < 2 {

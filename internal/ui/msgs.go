@@ -16,8 +16,6 @@ import (
 	"github.com/morphis/gummi/internal/rmtree"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/verify"
-	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -32,14 +30,8 @@ type featureRow struct {
 	CrewNodes   []domain.CrewNodeRun
 	HasWorktree bool
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
-	// Head is the branch tip of a verified card waiting at verify, read at
-	// load beside the stamp, so the landing floor and the verify decision
-	// can tell a branch still at the revision verify passed on from one a
-	// commit has moved since (domain.Feature.VerifyStale) without doing IO
-	// per frame. Empty on every other row.
-	Head       string
-	History    []state.TransitionRecord
-	StageSpend []state.StageSpend // per-stage/model spend rollup (forward-only)
+	History     []state.TransitionRecord
+	StageSpend  []state.StageSpend // per-stage/model spend rollup (forward-only)
 	// BaseBranch is what f actually lands on, resolved once at load
 	// (loadRows) through Shell.baseBranch — the same map lookup shell.go
 	// resolves at attach — so a pure function holding only this row, not a
@@ -49,40 +41,8 @@ type featureRow struct {
 	// card); baseBranch() below is what every reader actually calls, and it
 	// carries the same worktree.DefaultBaseBranchName fallback Shell.baseBranch
 	// does, so a sentence built from it is never missing a word.
-	BaseBranch string
-	// gate blockers (DESIGN §6.1), snapshotted at load so the dashboard's
-	// next block can explain why g would bounce without doing IO per frame
-	OpenSpecQs       int // open user %% threads in the artifact
+	BaseBranch       string
 	OpenDiffComments int // unresolved diff annotations
-	// Undrafted names the required section(s) the departing stage left
-	// blank — the artifact half of the same gate, resolved through the
-	// engine's own predicate so the panel names the blocker the crossing
-	// would be refused for.
-	Undrafted     []string
-	BaselineFails int // gummi-checks already failing on the fresh branch
-	// NoChecks is a feature or bug past its design gate whose artifact
-	// carries no gummi-checks block: its verify runs no gummi checks and
-	// gates nothing but the reviewer's own commands. A load-time read of
-	// the artifact, so adding a block clears it on the next load.
-	NoChecks bool
-	// DepBlocked is whether the Advance gate would block this card on an
-	// unmet direct dependency at its coding-stage entry — a load-time
-	// snapshot resolved against the live dependency store (never a
-	// persisted flag, so it cannot go stale and diverge from the gate).
-	DepBlocked bool
-	// DepBlockers names the unmet dependencies behind DepBlocked, in the
-	// order the engine reports them — the "waits on" a row can print.
-	DepBlockers []domain.FeatureID
-	// Exited reports that the card's CURRENT stage has already finished a
-	// run — a stage_exit event for it sits in the log, newer than the
-	// transition that entered the stage — and ExitVerdict is what that
-	// run concluded. Both are read from the log at load, so they survive
-	// the process that ran the stage: a card whose verify finished an
-	// hour ago must still present as finished after a restart, or the
-	// stop offers "run verify" to a reader looking at two completed
-	// verify receipts (nextsteps.go's finished predicate).
-	Exited      bool
-	ExitVerdict reviewVerdict
 	// Foreign is the live session another gummi process is running on this
 	// card (a headless run/resume, a second board), resolved at load from
 	// the card's live file. The board cannot drive a card someone else
@@ -190,12 +150,6 @@ type noticeMsg struct {
 	// same sentence with the act named instead. Empty means text reads the
 	// same on both faces (webText).
 	web string
-	// aside marks a notice about work that followed an act rather than
-	// the act itself: the checks an approval baselines, a scribe pass it
-	// started. The act already happened, so a web intent that sees an
-	// aside passes it on as a notice and never reads it as the act being
-	// refused, even when it is an error.
-	aside bool
 }
 
 // webText is the notice in the words the web face shows.
@@ -206,38 +160,20 @@ func (n noticeMsg) webText() string {
 	return n.text
 }
 
-// blockersMsg carries one card's recomputed gate blockers back into its
-// row. See Shell.refreshBlockers.
+// blockersMsg carries one card's recounted open diff comments back into
+// its row. See Shell.refreshBlockers.
 type blockersMsg struct {
 	id               domain.FeatureID
-	openSpecQs       int
 	openDiffComments int
-	undrafted        []string
 }
 
-// refreshBlockers recomputes the three gate-blocker fields for one card
-// and folds them back into its row.
-//
-// These fields decide what the card page SAYS about the gate — the
-// narration's first sentence, the decision block's recommended action,
-// the chip — and until this existed they were only ever computed by
-// loadRows, which runs on a handful of engine events and on none of the
-// things that actually change them. The card page therefore lied in both
-// directions, from the same stale snapshot: it insisted "the spec still
-// has Chosen approach and Implementation notes blank, and the gate stays
-// shut" over two fully written sections, offering only to re-run the
-// stage that had just written them (an unbounded loop, since the re-run
-// changes nothing the page is reading); and, with a comment freshly
-// added, it still said "verify passed — the branch is ready to land" and
-// recommended landing, which the engine then refused. Advance() was
-// right every time — it re-reads the artifact itself — so the fix is to
-// stop the page's copy from drifting away from it.
-//
-// One card, not all of them: this runs on artifact loads and on every
-// turn end, where walking the whole board would be a file read and a
-// query per card for one card's change.
-// RefreshBlockers re-reads one card's gate blockers (open spec questions,
-// unresolved diff comments, undrafted sections) into its row. A web write
+// refreshBlockers recounts one card's open diff comments and folds the
+// count back into its row: they hold its landing, and the card page says
+// so. One card, not all of them: this runs on every turn end, where
+// walking the whole board would be a query per card for one card's
+// change.
+// RefreshBlockers re-reads one card's unresolved diff comments into its
+// row. A web write
 // to a card's documents is made off the loop, so nothing the loop sees
 // would recount them: without this a comment added from the page would
 // not reach the decision it rides on until something else reloaded the
@@ -267,12 +203,7 @@ func (m *Shell) refreshBlockers(id domain.FeatureID) tea.Cmd {
 			// wave a gate through.
 			return nil
 		}
-		return blockersMsg{
-			id:               id,
-			openSpecQs:       m.openQuestionsBlockingGate(f),
-			openDiffComments: m.openDiffCommentsBlockingGate(f),
-			undrafted:        m.undraftedGate(f),
-		}
+		return blockersMsg{id: id, openDiffComments: m.openDiffComments(f.ID)}
 	}
 }
 
@@ -340,30 +271,10 @@ func (m *Shell) loadRows() tea.Msg {
 			if ok {
 				row.Landed = m.canHaveLanded(ctx, &f)
 				row.Drift = m.stoppedDrift(ctx, &f, row.Landed)
-				if !f.VerifiedAt.IsZero() && f.Stage == domain.StageVerify {
-					row.Head, _ = m.wt.Head(ctx, &f)
-				}
 			}
 		}
-		row.OpenSpecQs = m.openQuestionsBlockingGate(f)
-		row.OpenDiffComments = m.openDiffCommentsBlockingGate(f)
-		row.Undrafted = m.undraftedGate(f)
-		if bl, err := m.store.CheckBaseline(ctx, f.ID); err == nil {
-			for _, r := range bl {
-				if !r.OK {
-					row.BaselineFails++
-				}
-			}
-		}
-		row.NoChecks = row.HasWorktree && m.checksBlockMissing(f)
-		for _, b := range m.dependencyBlockers(ctx, f.ID) {
-			row.DepBlockers = append(row.DepBlockers, b.ID)
-		}
-		row.DepBlocked = len(row.DepBlockers) > 0
+		row.OpenDiffComments = m.openDiffComments(f.ID)
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
-		if events, err := m.store.Events(ctx, f.ID); err == nil {
-			row.ExitVerdict, row.Exited = stageExited(events, row.History, f.Stage)
-		}
 		rows = append(rows, row)
 	}
 	// Stack annotations are derived here, on the command goroutine,
@@ -392,25 +303,6 @@ func (m *Shell) stoppedDrift(ctx context.Context, f *domain.Feature, landed bool
 		return nil
 	}
 	return d
-}
-
-// dependencyBlockers reports the direct dependencies that would block the
-// card at its coding-stage entry — the read-only gate the board badge
-// mirrors. It resolves the same engine handle advanceStage shares (reuse a
-// wired engine, else a transient agent-less one that closes here), so a
-// static board derives the badge against the live store. An empty result on
-// any error keeps a failed read from wedging the badge.
-func (m *Shell) dependencyBlockers(ctx context.Context, id domain.FeatureID) []engine.BlockingDep {
-	eng := m.engine
-	if eng == nil {
-		eng = engine.New(engine.Config{Store: m.store, Pool: m.wt, Workspace: m.ws})
-		defer func() { _ = eng.Close() }()
-	}
-	deps, err := eng.DependencyBlockers(ctx, id)
-	if err != nil {
-		return nil
-	}
-	return deps
 }
 
 // canHaveLanded reports whether a card's branch could plausibly have
@@ -478,10 +370,6 @@ type cardCreatedMsg struct {
 	// shell ticks it so the card's branch is cut on the right base.
 	stack domain.StackID
 	warn  string // a dependency edge that could not be written
-	// run starts the card's first stage once it is on the board: a spec
-	// written from a session plans at once, the way the session it
-	// continues was already working.
-	run bool
 	// opening is the text a freeform card was created with, verbatim: its
 	// session's first turn (FreeformSession.KickoffWith), which the card
 	// itself only keeps as a line-sized title and one-liner.
@@ -604,6 +492,9 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
+		if !src.IsFreeform() {
+			return noticeMsg{text: name + " is a retired workflow card — it is not copied", isErr: true}
+		}
 		num, err := m.store.MintFeatureNum(ctx, m.ws.SeqFile())
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
@@ -615,10 +506,7 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 		now := m.now()
 		f := domain.Feature{
 			ID: newID, Num: num, Kind: src.Kind, Title: src.Title, OneLiner: src.OneLiner,
-			// InitialFor: a duplicated freeform card starts where a
-			// freeform card starts, which is outside the graph. Initial()
-			// would put it in todo, a stage Validate refuses for its kind.
-			Slug: src.Slug, Stage: workflow.InitialFor(src.Kind),
+			Slug: src.Slug, Stage: domain.StageOpen,
 			Profile: src.Profile, Budget: domain.Budget{Envelope: src.Budget.Envelope},
 			Repo: src.Repo, Base: src.Base, Severity: src.Severity,
 			// an agent's copy is an agent, in a fresh home of its own
@@ -633,16 +521,6 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 	}
 }
 
-// advanceStage moves the feature along its primary forward edge as the
-// person acting — advanceStageAs(id, m.humanActor()), which is "user" at
-// the terminal and the named person on the web face. Every hand-driven
-// call site (the board's own g, the spec view's approve) goes through
-// this name unchanged; autopilot's own crossing (autopilot.go) calls
-// advanceStageAs directly with state.ActorAutopilot instead.
-func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
-	return m.advanceStageAs(id, m.humanActor())
-}
-
 // humanActor is who a hand-driven act is recorded as: the person a web
 // intent carries (state.PersonActor), or the terminal's "user". It is read
 // on the Update goroutine, when the act is set up — a command that runs
@@ -655,70 +533,6 @@ func (m *Shell) humanActor() string {
 		return m.webActor
 	}
 	return state.ActorUser
-}
-
-// unmetDependencyClause is the words a gate blocked on a dependency parks
-// with. resumeHeldGates (autopilot.go) finds such a park by them
-// once the dependency is done, so the phrase is written in one place.
-const unmetDependencyClause = "blocked by unmet dependency"
-
-// blockedMsg maps one blocked Advance outcome to the notice the person
-// who tried the crossing sees.
-func blockedMsg(_ string, id domain.FeatureID, text string) tea.Msg {
-	return blockedMsgWeb("", id, text, "")
-}
-
-// blockedMsgWeb is blockedMsg for a refusal whose terminal wording names
-// keys: web is the same sentence with the act named instead.
-func blockedMsgWeb(_ string, _ domain.FeatureID, text, web string) tea.Msg {
-	return noticeMsg{text: text, isErr: true, web: web}
-}
-
-// advanceStageAs is advanceStage's actor-parameterized form: it runs the
-// engine's shared advance floor (engine.Advance) — the same gate
-// mechanics the headless driver uses, so the quality floor can't fork
-// between the two — and maps the typed result back to the board's
-// notices and follow-on commands. The blocker checks, worktree creation,
-// artifact promotion, plan-time estimation, and the recorded transition
-// all live in the engine now (DESIGN §10.11, §6.1, §5.1); this wrapper's
-// only actor-specific behavior is where a blocked outcome goes
-// (blockedMsg above) — a successful crossing is identical either way,
-// including which actor Store.Transition records on the gate event.
-func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
-	// Leaving verify by hand is the landing, and engine.Advance takes a
-	// crossing out of verify as the verdict itself — it stamps VerifiedAt
-	// on its way to the merge. So the landing floor is read here, before
-	// that stamp: a card that never finished a verify pass is not landed
-	// by "next stage" any more than by the land entry (landingRefusal).
-	// A research card lands nothing (its floor is the document's), and a
-	// branch already on main has nothing left to land.
-	if r, ok := m.rowByID(id); ok && actor != state.ActorAutopilot && advanceLands(r.F, r.Landed) {
-		if why := m.landingRefusal(r.F); why != "" {
-			return func() tea.Msg { return noticeMsg{text: why, isErr: true, id: id} }
-		}
-	}
-	// A person's crossing while the stage's agent still has the card would
-	// drop the run it is in the middle of. The menu does not offer it
-	// (cardActionsFor), and g says why rather than doing it.
-	if r, ok := m.rowByID(id); ok && actor != state.ActorAutopilot && !r.F.IsFreeform() && m.nextInputFor(r).agentAtWork() {
-		why := m.cardName(id) + ": its " + string(r.F.Stage) + " agent is still at work — let it finish, or pause it, before moving the card on"
-		return func() tea.Msg { return noticeMsg{text: why, isErr: true, id: id} }
-	}
-	return func() tea.Msg {
-		return m.withEngine(func(eng *engine.Engine) tea.Msg {
-			res, err := eng.Advance(context.Background(), id, actor)
-			return m.advanceOutcome(id, actor, res, err)
-		})
-	}
-}
-
-// advanceLands reports whether crossing f out of its stage by hand is a
-// landing: leaving verify on a workflow card whose branch has not reached
-// its base yet. A research card lands nothing (its floor is the
-// document's), a handed-off card has already ended, and a freeform card
-// has no stage to leave.
-func advanceLands(f domain.Feature, landed bool) bool {
-	return f.Stage == domain.StageVerify && f.Kind != domain.KindResearch && !f.IsFreeform() && !f.HandedOff() && !landed
 }
 
 // withEngine runs fn against the board's engine, standing a transient
@@ -738,207 +552,6 @@ func (m *Shell) withEngine(fn func(*engine.Engine) tea.Msg) tea.Msg {
 	return fn(eng)
 }
 
-// advanceOutcome maps one engine.Advance result to the board's notices
-// and follow-on commands. It is a function rather than the closure body
-// it grew up as because a hand-off crosses the SAME gate by another door
-// (engine.HandOff, which stamps and then advances): the floor is shared
-// at the engine, and this is the other half — one place deciding what a
-// blocked gate, an entered worktree, or an owed landing looks like on
-// screen, whichever verb asked for the crossing.
-func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.AdvanceResult, err error) tea.Msg {
-	if err != nil {
-		// actor-aware like the blocked statuses below, and for the same
-		// reason: the caller that tried this crossing skipped its own
-		// raiseAttention on the strength of the attempt, so an error
-		// that only became a notice would leave the card with an open
-		// decision row, nothing in the needs-you queue, and no sign
-		// anything had gone wrong until the next restart re-seeded it.
-		return blockedMsg(actor, id, sanitize(err.Error()))
-	}
-	switch res.Status {
-	case engine.StatusNoop:
-		return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", m.cardName(id)), clearInbox: id}
-	case engine.StatusBlockedQuestions:
-		// unresolved user %% annotations block every human gate — g
-		// re-gates only once they resolve (DESIGN §6.1).
-		surface := "spec"
-		if res.Feature.Kind == domain.KindBug {
-			surface = "report"
-		}
-		head := fmt.Sprintf("%s: %d open comment%s %s approval", m.cardName(id), res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
-		return blockedMsgWeb(actor, id,
-			head+" — x resolves one, R sends them back to the agent (in the "+surface+" view)",
-			head+" — resolve each one in the "+surface+", or send them back to the agent")
-	case engine.StatusBlockedDiff:
-		head := fmt.Sprintf("%s: %d open diff comment%s %s approval", m.cardName(id), res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
-		return blockedMsgWeb(actor, id,
-			head+" — x resolves one, R sends them back to the agent",
-			head+" — resolve each one on the diff, or send them back to the agent")
-	case engine.StatusBlockedOmission:
-		return blockedMsg(actor, id, res.Reason)
-	case engine.StatusBlockedUndrafted:
-		text := fmt.Sprintf("%s: %s wrote nothing in %s — the gate stays shut until the section is drafted", m.cardName(id), res.From, strings.Join(res.Undrafted, ", "))
-		return blockedMsg(actor, id, text)
-	case engine.StatusBlockedDependency:
-		names := make([]string, 0, len(res.BlockingDeps))
-		for _, d := range res.BlockingDeps {
-			names = append(names, d.String())
-		}
-		text := fmt.Sprintf("%s: %s %s — land it before this card can start coding", m.cardName(id), unmetDependencyClause, strings.Join(names, ", "))
-		return blockedMsg(actor, id, text)
-	case engine.StatusNeedsMerge:
-		// verify→done is the user's "this feature is done" decision: the
-		// merge flow (user-written message → squash merge) finishes the
-		// transition to Done itself. Autopilot never reaches this branch
-		// — autopilotForward excludes verify, because landing on main
-		// stays a keypress (DESIGN §10.17) — so it is never worth a
-		// blockedMsg-style fork; a mergeThenDoneMsg is the right answer
-		// for whichever actor somehow got here.
-		return mergeThenDoneMsg{f: res.Feature}
-	}
-	// StatusAdvanced: show the transition notice, then kick off the
-	// background one-shot passes — check discovery whenever a fresh
-	// worktree was created (both kinds).
-	note := fmt.Sprintf("%s → %s", m.cardName(id), res.To) + res.EstimateNotice()
-	discover := res.EnteredWorktree
-	if discover {
-		// the crossing entered a worktree, so the background one-shot
-		// passes go first
-		return worktreeEnteredMsg{id: id, note: note, discover: discover}
-	}
-	return noticeMsg{text: note, reload: true, clearInbox: id}
-}
-
-// worktreeEnteredMsg is emitted when an approval gate moves a feature
-// into its first worktree stage, so the shell can kick off the
-// background passes over the now-committed artifact.
-type worktreeEnteredMsg struct {
-	id       domain.FeatureID
-	note     string
-	discover bool // run check auto-discovery
-}
-
-// checksDiscoveredMsg follows the check auto-discovery pass, whether or
-// not it wrote anything: the shell chains the baseline run off it, and
-// a hand-authored block (discovery no-ops) deserves a baseline too.
-type checksDiscoveredMsg struct {
-	id domain.FeatureID
-	n  int // checks discovered; 0 when the block pre-existed or discovery failed
-	// err is why discovery failed, nil when it ran (whatever it found)
-	err error
-	// missing: the card's artifact carries no gummi-checks block after
-	// discovery — its verify would gate nothing but the reviewer's own
-	// commands, which the board says rather than swallows
-	missing bool
-}
-
-// baselineDoneMsg carries the baseline run's outcome back to the shell.
-type baselineDoneMsg struct {
-	id      domain.FeatureID
-	results []verify.Result
-	err     error // malformed block or run/persist failure
-}
-
-// discoverChecks runs a one-shot scribe pass that surveys the fresh
-// worktree and records the repo's build/test/lint commands in the
-// artifact's Verification section as a gummi-checks block (skipped when
-// a block is already there). Best-effort: on failure the block stays
-// absent and the Verify agent discovers the commands itself — but the
-// board is told (checksDiscoveredMsg.missing/err), so a card left with no
-// checks is never a silent one. Always resolves to checksDiscoveredMsg so
-// the baseline run chains behind it.
-func (m *Shell) discoverChecks(id domain.FeatureID) tea.Cmd {
-	if m.engine == nil {
-		return nil
-	}
-	m.scribing[id]++
-	return func() tea.Msg {
-		ctx := context.Background()
-		f, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return checksDiscoveredMsg{id: id}
-		}
-		checks, err := m.engine.DiscoverChecks(ctx, f)
-		missing := len(checks) == 0 && m.engine.ChecksBlockMissing(ctx, f)
-		return checksDiscoveredMsg{id: id, n: len(checks), err: err, missing: missing}
-	}
-}
-
-// checksBlockMissing is featureRow.NoChecks: a feature or bug card past
-// its design gate whose artifact holds no gummi-checks block. A block that
-// does not parse is not "missing" — verify reports that as a plan defect.
-func (m *Shell) checksBlockMissing(f domain.Feature) bool {
-	switch {
-	case f.Kind == domain.KindResearch, f.Kind == domain.KindGoal, f.IsFreeform():
-		return false
-	case f.Stage != domain.StageImplement && f.Stage != domain.StageVerify:
-		return false
-	}
-	path := m.artifactFile(&f)
-	if path == "" {
-		return false
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	_, found, perr := spec.ParseChecks(string(raw))
-	return perr == nil && !found
-}
-
-// noChecksNotice is what the board says when discovery left a card with
-// no gummi-checks block: why, and what it costs the card.
-func noChecksNotice(id domain.FeatureID, err error) string {
-	why := "check discovery found no commands"
-	var sf *engine.ScribeFailure
-	switch {
-	case errors.As(err, &sf):
-		why = "check discovery failed: the scribe (" + sf.Model + ") — " + sf.Short()
-	case err != nil:
-		why = "check discovery failed: " + err.Error()
-	}
-	return sanitize(fmt.Sprintf("%s: %s — %s, so %s; add a gummi-checks block to the %s's Verification section",
-		id, engine.NoChecksRow, why, engine.NoChecksConsequence, artifactNoun(id.Kind())))
-}
-
-// warnScribeFailure puts a failed scribe pass on screen once per card. A
-// scribe the backend refuses fails every pass it runs — discovery and
-// the landing draft — and they used to fail in silence; the
-// card's thread carries the durable note (engine.ScribeFailure), and this
-// is the notice for whoever is looking now. Anything that is not a
-// backend failure (an unusable reply, a cancelled pass) says nothing.
-func (m *Shell) warnScribeFailure(id domain.FeatureID, err error) {
-	var sf *engine.ScribeFailure
-	if !errors.As(err, &sf) || m.scribeWarned[id] {
-		return
-	}
-	m.scribeWarned[id] = true
-	// not isErr, for the reason the no-checks notice is not: the pass
-	// that failed rides in the wake of a crossing that succeeded
-	m.notice = noticeMsg{id: id, aside: true, text: sanitize(m.cardName(id) + ": " + sf.Error() +
-		" — check discovery and landing drafts are skipped until it works; fix the scribe's model in .gummi/profiles.yaml")}
-}
-
-// baselineChecks runs the artifact's gummi-checks once on the fresh
-// worktree and persists the outcomes as the feature's baseline, so a
-// malformed or already-failing command surfaces now — at approval,
-// while the architect can still fix the block — instead of reading as
-// the feature's fault at verify.
-func (m *Shell) baselineChecks(id domain.FeatureID) tea.Cmd {
-	if m.engine == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		ctx := context.Background()
-		f, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return baselineDoneMsg{id: id, err: err}
-		}
-		results, err := m.engine.BaselineChecks(ctx, f)
-		return baselineDoneMsg{id: id, results: results, err: err}
-	}
-}
-
 // rebaseFeature rebases a feature's branch onto main from the TUI
 // (DESIGN §9 M4). It refuses a dirty worktree (so nothing uncommitted is
 // risked), and when the rebase can't apply cleanly (it self-aborts,
@@ -946,47 +559,18 @@ func (m *Shell) baselineChecks(id domain.FeatureID) tea.Cmd {
 // with no engine, reports the conflicted files to resolve by hand.
 func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 	// the rebase is the answer to a landing's conflicts: once it is under
-	// way the decision stops leading with it (an agent rebase that
-	// resolves nothing puts it back — rebase.go's rebaseSettled)
+	// way the decision stops leading with it
 	delete(m.landConflicts, f.ID)
 	return m.rebaseFeatureLocked(f)
 }
 
-// rebasedMsg is a rebase that went through: its notice, and — because a
-// rebase moves the card's base, and what its baseline excused was
-// measured on the old one — the re-measure behind it (rebaselineCmd).
+// rebasedMsg is a rebase that went through: its notice, and whether it
+// cleared the card's fork drift.
 type rebasedMsg struct {
 	id     domain.FeatureID
 	notice noticeMsg
 	// cleared: the card was drifted before this rebase and is not now
 	cleared bool
-}
-
-// rebaselineCmd re-measures a card's excused checks when its base moved
-// (engine.RebaselineIfBaseMoved) and says what that found. Nothing when
-// there is no engine, nothing excused, or the base did not move.
-func (m *Shell) rebaselineCmd(id domain.FeatureID) tea.Cmd {
-	if m.engine == nil {
-		return nil
-	}
-	eng := m.engine
-	name := m.cardName(id)
-	return func() tea.Msg {
-		ctx := context.Background()
-		f, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return nil
-		}
-		before, _ := m.store.CheckBaseline(ctx, id)
-		res, err := eng.RebaselineIfBaseMoved(ctx, f)
-		if err != nil {
-			return noticeMsg{text: sanitize(name + ": the excused checks could not be re-measured on the new base — " + err.Error())}
-		}
-		if !res.Moved {
-			return nil
-		}
-		return noticeMsg{text: sanitize(name + ": " + engine.RebaselineSentence(res, before)), reload: true}
-	}
 }
 
 func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
@@ -1250,58 +834,7 @@ func artifactFileIn(root, drafts string, f *domain.Feature) string {
 	return ""
 }
 
-// undraftedGate names the required section(s) the departing stage left
-// blank — the same predicate engine.Advance applies when the gate refuses
-// (engine.UndraftedGateSections), read live from the artifact so the
-// decision panel can name the blocker before the crossing is attempted
-// and the critique loop can send the stage's writer back instead of
-// re-raising a gate approving cannot cross. Nil for an edge that owes no
-// sections — a research card's stages among them.
-func (m *Shell) undraftedGate(f domain.Feature) []string {
-	return engine.UndraftedAt(f, m.artifactFile(&f), forwardEdge(f))
-}
-
-// bounceStage sends a legacy workflow card back along its rerun edge:
-// verify rewinds the work stage, implement the plan that produced it.
-//
-// note is the prose the composer aimed at the bounce: it rides the reborn
-// stage's kickoff when that run starts (shell.go's bounceNotes). Empty
-// for the plain b key.
-func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
-	ctx := context.Background()
-	f, err := m.store.GetFeature(ctx, id)
-	if err != nil {
-		return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
-	}
-	back, ok := workflow.RerunTarget(f.Stage)
-	if !ok {
-		text := fmt.Sprintf("%s is in %s — only implement/verify can bounce back", m.cardName(id), f.Stage)
-		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
-	}
-	if note != "" {
-		if m.bounceNotes == nil {
-			m.bounceNotes = map[domain.FeatureID]string{}
-		}
-		m.bounceNotes[id] = note
-	}
-	m.dropSession(id)
-	actor := m.humanActor()
-	name := m.cardName(id)
-	return func() tea.Msg {
-		if _, err := m.store.Transition(ctx, id, back, actor); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		text := fmt.Sprintf("%s bounced back to %s", name, back)
-		if note != "" {
-			text += " — your line rides the next run's kickoff"
-		}
-		return noticeMsg{text: text, reload: true, clearInbox: id}
-	}
-}
-
-// deleteFeature removes worktree, branch, and record. Nothing is touched
-// when a card outside the delete depends on this one: the edge is the
-// outsider's, and the delete refuses rather than drop it.
+// deleteFeature removes worktree, branch, and record.
 func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 	return m.cardLocked(id, func() tea.Msg {
 		ctx := context.Background()
@@ -1309,51 +842,11 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		if notice := m.dependentsOutside(ctx, f, nil); notice != nil {
-			return *notice
-		}
-		// the card's own edges go with it; after this every remaining
-		// dependent is outside, and there are none (dependentsOutside).
-		deps, derr := m.store.ListDependents(ctx, f.ID)
-		if derr != nil {
-			return noticeMsg{text: sanitize(derr.Error()), isErr: true}
-		}
-		for _, d := range deps {
-			if err := m.store.RemoveDependency(ctx, d, f.ID); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-		}
 		if err := m.deleteCard(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s deleted", f.Name()), reload: true}
 	})
-}
-
-// dependentsOutside refuses the delete when a card outside the set being
-// deleted depends on one inside it. The edge is the outsider's, not the
-// goal's, so the reader is told which pair to break rather than having a
-// dependency silently dropped under a card still counting on it.
-func (m *Shell) dependentsOutside(ctx context.Context, f domain.Feature, cards []domain.Feature) *noticeMsg {
-	inSet := map[domain.FeatureID]bool{f.ID: true}
-	for _, c := range cards {
-		inSet[c.ID] = true
-	}
-	// the card first, then the rest in the order they were minted, so
-	// two runs of the same board report the same pair.
-	for _, c := range append([]domain.Feature{f}, cards...) {
-		id := c.ID
-		deps, err := m.store.ListDependents(ctx, id)
-		if err != nil {
-			return &noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		for _, d := range deps {
-			if !inSet[d] {
-				return &noticeMsg{text: fmt.Sprintf("%s depends on %s — remove that dependency first", m.cardName(d), m.cardName(id)), isErr: true}
-			}
-		}
-	}
-	return nil
 }
 
 // deleteCardTrees removes what a deleted card held on disk in its

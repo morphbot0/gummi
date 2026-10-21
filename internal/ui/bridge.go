@@ -291,20 +291,8 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 		}
 	case engineClosedMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-	case pausedMsg:
-		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(msg.id)})
-		m.emitChanges(msg.inner)
 	case todaySpentMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-	case verifyResultMsg:
-		// a menu verify's result lives in the status bar and the Shell's
-		// own check table, neither of which a page reads: say it, and
-		// have the card (and its spec's checks) read again
-		if m.notice.text != "" {
-			m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(msg.feature), Text: m.notice.webText(), Err: m.notice.isErr})
-		}
-		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(msg.feature)})
 	case blockersMsg:
 		// the decision's answers read the counts (a send-back carrying
 		// the diff comments), and so does the board's needs line
@@ -378,16 +366,12 @@ func (m *Shell) webCardWatching(id domain.FeatureID) bool {
 	return ff != nil && ff.Watching()
 }
 
-// webCardBusy is whether card id has an agent mid-turn: its freeform
-// session, or its stage session.
+// webCardBusy is whether card id has an agent mid-turn in its session.
 func (m *Shell) webCardBusy(id domain.FeatureID) bool {
 	if m.engine != nil {
 		if ff := m.engine.Freeform(id); ff != nil {
 			return ff.Busy()
 		}
-	}
-	if sess := m.sessionFor(id); sess != nil {
-		return sess.Busy()
 	}
 	return false
 }

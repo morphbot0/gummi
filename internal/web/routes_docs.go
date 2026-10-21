@@ -35,7 +35,6 @@ func (s *Server) docsRoutes() {
 	s.api("GET /api/cards/{id}/memory", s.handleMemory)
 	s.api("POST /api/cards/{id}/spec/notes", s.handleSpecNote)
 	s.api("POST /api/cards/{id}/spec/notes/resolve", s.handleSpecResolve)
-	s.api("POST /api/cards/{id}/spec/changes", s.handleSpecChanges)
 	s.api("GET /api/cards/{id}/diff", s.handleDiff)
 	s.api("POST /api/cards/{id}/diff/annotations", s.handleAnnotate)
 	s.api("DELETE /api/cards/{id}/diff/annotations/{aid}", s.handleAnnotationDelete)
@@ -242,18 +241,6 @@ func (s *Server) handleSpecResolve(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sp)
 }
 
-// handleSpecChanges is POST /api/cards/{id}/spec/changes: the spec
-// surface's "request changes", answered with what the board said — or,
-// when it would send the card back, with the question to confirm first.
-func (s *Server) handleSpecChanges(w http.ResponseWriter, r *http.Request) {
-	var req webapi.ChangesRequest
-	if !readBody(w, r, &req) {
-		return
-	}
-	id, by := r.PathValue("id"), person(r)
-	s.intent(w, r, func(m *ui.Shell) (tea.Cmd, error) { return m.WebRequestSpecChanges(id, by, req.Confirm) })
-}
-
 // handleDiff is GET /api/cards/{id}/diff[?since=<commit>].
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	d, ok := s.docs(w, r)
@@ -288,14 +275,15 @@ func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDiffChanges is POST /api/cards/{id}/diff/changes: the diff
-// surface's "request changes", answered as handleSpecChanges is.
+// surface's "request changes" — the open comments go to the card's
+// session as its next turn — answered with what the board said.
 func (s *Server) handleDiffChanges(w http.ResponseWriter, r *http.Request) {
 	var req webapi.ChangesRequest
 	if !readBody(w, r, &req) {
 		return
 	}
-	id, by := r.PathValue("id"), person(r)
-	s.intent(w, r, func(m *ui.Shell) (tea.Cmd, error) { return m.WebRequestDiffChanges(id, by, req.Confirm) })
+	id := r.PathValue("id")
+	s.intent(w, r, func(m *ui.Shell) (tea.Cmd, error) { return m.WebRequestDiffChanges(id) })
 }
 
 func annotationID(w http.ResponseWriter, r *http.Request) (int64, bool) {

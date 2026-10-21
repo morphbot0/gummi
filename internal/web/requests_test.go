@@ -18,7 +18,6 @@ func TestRequestsAreCheckedBeforeTheBoardSeesThem(t *testing.T) {
 		body               any
 		want               string
 	}{
-		{"resume, wrong shape", http.MethodPost, "/api/board/resume", map[string]any{"cards": "FD-001"}, "expected"},
 		// a budget is whole credits: a fraction, or a number past an int,
 		// is the person's typing and is answered in the field's words
 		{"new card, fractional budget", http.MethodPost, "/api/cards", map[string]any{"kind": "feature", "title": "x", "envelope": 2.5}, "Budget must be a whole, non-negative number of credits"},
@@ -33,9 +32,5 @@ func TestRequestsAreCheckedBeforeTheBoardSeesThem(t *testing.T) {
 		if !strings.Contains(e.Error, c.want) {
 			t.Errorf("%s: error = %q, want it to say %q", c.name, e.Error, c.want)
 		}
-	}
-	// a board with nothing parked has no question to answer
-	if got := b.call(http.MethodPost, "/api/board/resume", webapi.ResumeRequest{None: true}, nil); got < 400 || got >= 500 {
-		t.Errorf("answering a resume question nobody asked = %d, want a 4xx", got)
 	}
 }

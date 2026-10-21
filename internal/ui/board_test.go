@@ -9,9 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -246,99 +244,28 @@ func TestNeedsAttention(t *testing.T) {
 }
 
 // TestCardLineAttentionOutranksBusy is the precedence rule's own repro: a
-// card whose gate is raised while its baseline check is still going must
-// show the needs-you icon, not the busy spinner/word — the user can act
-// on the gate, not on a check run.
+// card with a question waiting while another process still drives it
+// mid-turn must show the needs-you icon, not the busy spinner/word — the
+// user can act on the question, not on the turn.
 func TestCardLineAttentionOutranksBusy(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	r := row(1, "gated card", domain.StageImplement, "", false)
-	m.inbox.add(r.F.ID, attnGate, "implement finished — review & advance")
-	m.baselining[r.F.ID] = true
+	r := freeformRow(1, "asking card", true)
+	r.DrivenAbroad, r.Foreign = true, state.ForeignDrive{Busy: true}
+	m.inbox.add(r.F.ID, attnQuestion, "the agent asked a question")
 	if !m.cardBusy(r) {
-		t.Fatal("setup: want cardBusy true (baseline running)")
+		t.Fatal("setup: want cardBusy true (driven mid-turn)")
 	}
 
 	line := m.cardLine(r, 1, false, true, 100)
-	want := attnIcon(m.styles, attnGate)
+	want := attnIcon(m.styles, attnQuestion)
 	if !strings.Contains(line, want) {
 		t.Errorf("card line = %q, want it to contain the attention icon %q", line, want)
 	}
-	if strings.Contains(line, "checking") {
+	if strings.Contains(line, "running") {
 		t.Errorf("card line = %q, want no busy word once attention wins the loop slot", line)
 	}
 	if strings.Contains(line, m.spinner()) {
 		t.Errorf("card line = %q, want no spinner frame once attention wins the loop slot", line)
-	}
-}
-
-// TestCardLinePausedMarker: a card whose live session the user explicitly
-// paused (StatePaused) carries the ⏸ mark; a same-stage card that was
-// simply never started (no session at all) renders none — the concrete
-// "paused reads distinct from parked" symptom this card fixes.
-func TestCardLinePausedMarker(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleScribe {
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
-			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
-		}
-	}}
-	m, eng := agentWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageImplement)
-	m = openAndAttach(t, m)
-	waitForActivity(t, eng)
-
-	pausedRow := m.rows[0]
-	if pausedRow.F.ID != "FD-001" || pausedRow.F.Stage != domain.StageImplement {
-		t.Fatalf("setup: rows[0] = %+v, want FD-001 at implement", pausedRow.F)
-	}
-	m = pump(t, m, m.fireVerb("park", ""))
-	if got := eng.Get("FD-001"); got == nil || got.State() != engine.StatePaused {
-		t.Fatalf("setup: want FD-001 paused, got %+v", got)
-	}
-
-	line := m.cardLine(pausedRow, 1, false, true, 100)
-	if !strings.Contains(line, "⏸") {
-		t.Errorf("paused card line = %q, want the ⏸ mark", line)
-	}
-	if !strings.Contains(line, stageGlyph(pausedRow.F.Stage)) {
-		t.Errorf("paused card line dropped the stage glyph: %q", line)
-	}
-
-	parked := row(2, "parked card", domain.StageImplement, "", false)
-	parkedLine := m.cardLine(parked, 2, false, true, 100)
-	if strings.Contains(parkedLine, "⏸") {
-		t.Errorf("parked (no-session) card line = %q, must not show the paused mark", parkedLine)
-	}
-}
-
-// TestCardLineBaselineBusyWithNoSession is FD-029's other core repro: a
-// card running its gummi-checks baseline has no engine session at all —
-// m.baselining is the only signal — but the board row must still spin
-// with a "checking" word, and the stage glyph must survive rather than
-// being overwritten by the spinner.
-func TestCardLineBaselineBusyWithNoSession(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	idle := row(1, "idle card", domain.StagePlan, "", false)
-	baselining := row(2, "checking card", domain.StagePlan, "", false)
-	m.baselining[baselining.F.ID] = true
-
-	idleLine := m.cardLine(idle, 1, false, true, 80)
-	if strings.Contains(idleLine, "checking") {
-		t.Errorf("idle card line should not show a busy word: %q", idleLine)
-	}
-
-	line := m.cardLine(baselining, 2, false, true, 80)
-	if !strings.Contains(line, stageGlyph(baselining.F.Stage)) {
-		t.Errorf("baselining card line dropped the stage glyph: %q", line)
-	}
-	if strings.Contains(line, "◔") {
-		t.Errorf("baselining card must not show the queued marker: %q", line)
-	}
-	if !strings.Contains(line, "checking") {
-		t.Errorf("baselining card line missing the checking word: %q", line)
 	}
 }
 
@@ -492,28 +419,6 @@ func (r featureRow) withCreated(t time.Time) featureRow {
 	return r
 }
 
-// TestBoardBlockedBadgeGolden: a card at its coding gate with an unmet
-// dependency renders the blocked badge; the same card with all deps done,
-// and a brainstorm card whose next step isn't the coding stage, render none.
-func TestBoardBlockedBadgeGolden(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	blocked := row(1, "blocked card", domain.StagePlan, "", true)
-	blocked.DepBlocked = true
-	met := row(2, "deps met", domain.StagePlan, "", true)
-	met.DepBlocked = false
-	design := row(3, "design card", domain.StagePlan, "", false)
-	design.DepBlocked = false
-	m.rows = []featureRow{blocked, met, design}
-	var b strings.Builder
-	b.WriteString("blocked@plan\n")
-	b.WriteString(m.cardLine(blocked, 1, false, true, 80) + "\n\n")
-	b.WriteString("met@plan\n")
-	b.WriteString(m.cardLine(met, 2, false, true, 80) + "\n\n")
-	b.WriteString("design@brainstorm\n")
-	b.WriteString(m.cardLine(design, 3, false, true, 80) + "\n")
-	golden.RequireEqual(t, []byte(b.String()))
-}
-
 // TestBoardCardLineSeverity golden-captures the severity badge rendering
 // for each canonical level plus the unclassified (empty) case.
 func TestBoardCardLineSeverity(t *testing.T) {
@@ -540,60 +445,19 @@ func TestBoardCardLineSeverity(t *testing.T) {
 // TestBoardBusyMarkersGolden golden-captures cardLine's busy rendering:
 // the stage glyph is kept (never swapped for the spinner) and the busy
 // word trails it in the loop slot. A live engine session is exercised as
-// a plain assertion test (run_test.go's TestCardBusyStateRunning /
-// TestCardBusyStateInteractive) rather than here — an in-flight fake
+// a plain assertion test (run_test.go's TestCardBusyStateSession) rather than here — an in-flight fake
 // agent turn is inherently async and would make a byte-diffed golden
-// flaky. This golden instead pins the deterministic busy source
-// (m.baselining) and the two non-busy cases (idle, queued) side by side.
+// flaky. This golden instead pins a deterministic busy source (a card
+// another process drives mid-turn) beside an idle card.
 func TestBoardBusyMarkersGolden(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	idle := row(1, "idle card", domain.StagePlan, "", false)
-	checking := row(2, "checking card", domain.StagePlan, "", false)
-	m.baselining[checking.F.ID] = true
+	idle := freeformRow(1, "idle card", true)
+	driven := freeformRow(2, "driven card", true)
+	driven.DrivenAbroad, driven.Foreign = true, state.ForeignDrive{Busy: true}
 
 	var b strings.Builder
 	b.WriteString("idle\n" + m.cardLine(idle, 1, false, true, 80) + "\n\n")
-	b.WriteString("checking (baseline, no session)\n" + m.cardLine(checking, 2, false, true, 80) + "\n\n")
-	golden.RequireEqual(t, []byte(b.String()))
-}
-
-// TestBoardAttentionAndPausedGolden golden-captures the three scenarios
-// this card adds to the card line: a pending attention item winning the
-// loop slot over a busy baseline, an explicitly paused session's own
-// trailing mark, and a card with neither signal.
-func TestBoardAttentionAndPausedGolden(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleScribe {
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
-			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
-		}
-	}}
-	m, eng := agentWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageImplement)
-	m = openAndAttach(t, m)
-	waitForActivity(t, eng)
-	pausedRow := m.rows[0]
-	m = pump(t, m, m.fireVerb("park", ""))
-	if got := eng.Get("FD-001"); got == nil || got.State() != engine.StatePaused {
-		t.Fatalf("setup: want FD-001 paused, got %+v", got)
-	}
-
-	attnBusy := row(2, "gated and busy", domain.StageImplement, "", false)
-	m.inbox.add(attnBusy.F.ID, attnGate, "implement finished — review & advance")
-	m.baselining[attnBusy.F.ID] = true
-
-	neither := row(3, "quiet card", domain.StageImplement, "", false)
-
-	var b strings.Builder
-	b.WriteString("attention-plus-busy\n")
-	b.WriteString(m.cardLine(attnBusy, 1, false, true, 80) + "\n\n")
-	b.WriteString("paused\n")
-	b.WriteString(m.cardLine(pausedRow, 2, false, true, 80) + "\n\n")
-	b.WriteString("neither\n")
-	b.WriteString(m.cardLine(neither, 3, false, true, 80) + "\n")
+	b.WriteString("driven elsewhere, mid-turn\n" + m.cardLine(driven, 2, false, true, 80) + "\n\n")
 	golden.RequireEqual(t, []byte(b.String()))
 }
 
@@ -715,43 +579,6 @@ func TestBG038ClearTransientNoticeScopesErrorToFeature(t *testing.T) {
 	m.clearTransientNotice()
 	if m.notice.text != "" {
 		t.Errorf("error notice about %s must not survive moving selection to %s, got %q", selected, m.rows[0].F.ID, m.notice.text)
-	}
-}
-
-// TestBG038QueuedNoticeNotLeftBehind: dispatching a run must not leave a
-// free-text "queued" notice on the status bar — the ◔ queued / ⬤ running
-// pills already say it live from engine state, so a stale copy of the same
-// fact can't survive the run leaving the queue the way the free text did.
-// The fake agent settles instantly, so by the time the engine's events are
-// drained the session has reached done, not merely running — the notice
-// must already be clear well before that.
-func TestBG038QueuedNoticeNotLeftBehind(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleScribe {
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	m, eng := agentWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageImplement)
-	if m.rows[0].F.Stage != domain.StageImplement {
-		t.Fatalf("setup: want FD-001 at implement, got %s", m.rows[0].F.Stage)
-	}
-
-	m = openAndAttach(t, m) // opens the card, then answers its pinned decision: start the run
-	if strings.Contains(m.notice.text, "queued") {
-		t.Errorf("BUG BG-038(2): notice %q still names the queue right after dispatch", m.notice.text)
-	}
-
-	m = drainEngineLoop(t, m)
-	if s := eng.Get("FD-001"); s == nil || s.State() != engine.StateDone {
-		t.Fatalf("setup: want FD-001 done, got %+v", s)
-	}
-	if strings.Contains(m.notice.text, "queued") {
-		t.Errorf("BUG BG-038(2): notice still says %q while the session state is done (left Queued)", m.notice.text)
 	}
 }
 

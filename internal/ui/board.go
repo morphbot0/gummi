@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 )
 
 // stageGlyph is the card marker: readable by shape as well as color.
@@ -37,44 +36,26 @@ func stageGlyph(s domain.Stage) string {
 	return "?"
 }
 
-// cardBusy reports whether a card has a real busy source: its
-// gummi-checks baseline is running, a one-shot scribe pass (check
-// discovery or the envelope estimate) is in flight, its live engine
-// session is mid-turn, or another gummi process is driving it mid-turn.
-// Busy() alone decides the local-session side, regardless of scheduling
-// state — a StateInteractive chat session mid-reply is just as busy as a
-// StateRunning autonomous one, matching thread.go's own gate (snap.Busy,
-// no state filter) so a card's board row and its own thread view never
-// disagree about whether it's working.
+// cardBusy reports whether a card has a real busy source: a consult line
+// is being sent, its session is mid-turn, or another gummi process is
+// driving it mid-turn.
 //
-// A row driven abroad is, by ForeignDriver's own pid exclusion, never
-// also backed by a local session, and baselining and scribing are local,
-// in-process actions.
-//
-// It is a pure function of (m.rows, m.sessionFor(row.F.ID), m.baselining,
-// m.scribing, m.consultSending) — no other mutable state feeds it — so it
-// renders identically whenever called twice within one frame.
+// It is a pure function of (m.rows, the card's session,
+// m.consultSending) — no other mutable state feeds it — so it renders
+// identically whenever called twice within one frame.
 func (m *Shell) cardBusy(r featureRow) bool {
-	if m.baselining[r.F.ID] {
-		return true
-	}
-	if m.scribing[r.F.ID] > 0 {
-		return true
-	}
 	if m.consultSending[r.F.ID] != "" {
 		return true
 	}
 	if m.freeformTurnBusy(r) {
 		return true
 	}
-	sess := m.sessionFor(r.F.ID)
-	return (sess != nil && sess.Busy()) || (r.DrivenAbroad && r.Foreign.Busy)
+	return r.DrivenAbroad && r.Foreign.Busy
 }
 
-// freeformTurnBusy reports a freeform card whose turn is in flight. Its
-// session is the engine's freeform one, not a stage session, so sessionFor
-// does not see it — and a card whose agent is writing is not idle, on the
-// board row, the header's running count or the page.
+// freeformTurnBusy reports a freeform card whose turn is in flight: a
+// card whose agent is writing is not idle, on the board row, the header's
+// running count or the page.
 func (m *Shell) freeformTurnBusy(r featureRow) bool {
 	if !r.F.IsFreeform() || m.engine == nil {
 		return false
@@ -107,17 +88,6 @@ func (m *Shell) freeformWatching(r featureRow) bool {
 	}
 	ff := m.engine.Freeform(r.F.ID)
 	return ff != nil && ff.Watching()
-}
-
-// scribeSettled decrements a card's in-flight scribe-pass count by one,
-// removing the entry entirely once it reaches zero so "in flight" stays
-// testable as key-presence (m.baselining's own idiom).
-func (m *Shell) scribeSettled(id domain.FeatureID) {
-	if m.scribing[id] <= 1 {
-		delete(m.scribing, id)
-		return
-	}
-	m.scribing[id]--
 }
 
 // needsAttention reports whether a card has a pending item in the
@@ -229,12 +199,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	}
 	id := tint.Render(cardLead(r.F))
 	badge := ""
-	// a card the Advance gate would block on an unmet direct dependency
-	// shows a blocked badge alongside the severity badge — read-only
-	// feedback on the gate, never a state it owns.
-	if r.DepBlocked {
-		badge = " " + s.Warning.Render("⛔")
-	}
 	// a card another gummi process is driving: this board can watch it
 	// (enter / t) but must not touch it, and says so rather than
 	// presenting an actively-changing card as idle.
@@ -265,14 +229,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		badge += " " + st.Render("⛁"+stackTag(sr))
 	}
 	title := s.CardTitle.Render(r.F.Title)
-	// the user's own explicit "stop for now" — independent of needsAttention
-	// and cardBusy, since a paused card can still sit on an unresolved gate
-	// from before it was paused. A parked card (never started) has no
-	// session at all and renders no mark, so the two read distinctly.
-	paused := ""
-	if sess := m.sessionFor(r.F.ID); sess != nil && sess.State() == engine.StatePaused {
-		paused = " " + s.Warning.Render("⏸")
-	}
 	tag := ""
 	if r.F.Profile != "" {
 		profile := s.ProfileTag
@@ -336,7 +292,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		repo = " " + s.Repo(r.F.Repo).Render(r.F.Repo)
 	}
 	prefix := cursor + num + " " + glyph + " " + id + repo + badge + " "
-	tail := func() string { return loop + paused + tag + wtMark + landed + pr + cost }
+	tail := func() string { return loop + tag + wtMark + landed + pr + cost }
 	dropOrder := []*string{&cost, &tag, &wtMark, &pr, &landed}
 	for i := 0; i < len(dropOrder) && ansi.StringWidth(prefix+tail()) > w-8; i++ {
 		*dropOrder[i] = ""
@@ -352,7 +308,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 // boardGlyphLegend explains the board row's glyph vocabulary: the four
 // stage shapes (stageGlyph), the queued marker, and the badges cardLine
 // appends after the id. It exists because the round 2 UX drive found no
-// legend anywhere — a row can carry any of ○ ● ◐ ✔ ⚡ ⎇ ✗ ⏸ ✉ ⟲ ~ and the
+// legend anywhere — a row can carry any of ○ ● ◐ ✔ ⎇ ✗ ✉ ⟲ ~ and the
 // ? help overlay documents keys only, never what the marks mean.
 //
 // Shaped as [][2]string, the same pair helpRows (keymap.go) produces, so
@@ -370,9 +326,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 func boardGlyphLegend() [][2]string {
 	return [][2]string{
 		{"○ ● ◐ ✔", "stage: todo · in progress · review/verify · done"},
-		{"⚡", "autopilot gate-approval (gates cross unattended)"},
 		{"⎇", "worktree present"},
-		{"⏸", "paused — a run the user stopped"},
 		{"✉ ✗ ? $", "needs you: gate · run failure · question · budget"},
 		{"landed", "the branch was squash-merged onto the base branch"},
 		{"handed off", "the card was closed with its branch deliberately kept — nothing landed"},

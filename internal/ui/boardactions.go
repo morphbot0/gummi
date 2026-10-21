@@ -24,41 +24,12 @@ func (m *Shell) cardActions() *cardActionList {
 	if !ok {
 		return newCardActionList(nil)
 	}
-	actions := cardActionsFor(m.nextInputFor(r), r)
-	if !r.F.IsFreeform() {
-		// a session's menu switches the model instead of the profile
-		// (DESIGN §19.8) — the web face's inventory already withholds
-		// the profile row from one, so the terminal cannot offer what
-		// the page will not
-		actions = append(actions, m.cardProfileActions(r.F.Stage)...)
-	}
-	l := newCardActionList(actions)
+	l := newCardActionList(cardActionsFor(m.nextInputFor(r), r))
 	l.expanded = m.actionsExpanded
 	if n := l.Len(); n > 0 {
 		l.cursor = clamp(m.actionCursor, 0, n-1)
 	}
 	return l
-}
-
-// cardProfileActions returns the profile-switch entry for the selected
-// card — one keyless cardAction when there is a profile picker to open,
-// nil otherwise. Kept at the Shell layer, not inside the pure
-// cardActionsFor, because it needs m.engine to know whether there is
-// anything to pick from and cardActionsFor takes no engine at all (see
-// TestCardActionsDialogWideGolden/NarrowGolden, which call it directly
-// and would need no regeneration only if this row is appended here
-// instead). It applies uniformly to whichever card is selected — the
-// stage only feeds the availability check, never the row itself — so it
-// takes a stage rather than a featureRow.
-func (m *Shell) cardProfileActions(stage domain.Stage) []cardAction {
-	if m.engine == nil || len(m.engine.CardProfiles(stage)) == 0 {
-		return nil
-	}
-	return []cardAction{{
-		id:    "profile",
-		label: "profile",
-		why:   "switch this card's profile — a live session restarts under it",
-	}}
 }
 
 // blurActions hands the arrow keys back to the cards and refolds the
@@ -194,11 +165,7 @@ func (m *Shell) cardCommands(existing []command) []command {
 			taken[c.key] = true
 		}
 	}
-	var all []cardAction
-	if !r.F.IsFreeform() {
-		all = append(all, m.cardProfileActions(r.F.Stage)...)
-	}
-	all = append(all, cardActionsFor(m.nextInputFor(r), r)...)
+	all := cardActionsFor(m.nextInputFor(r), r)
 	var out []command
 	for _, a := range all {
 		id := a.id
@@ -250,16 +217,6 @@ func helpKeyFor(cardOpen bool) string {
 // functions runCardAction calls for them, rather than a second copy of
 // that dispatch. Everything else is a board key.
 func (m *Shell) runCommand(id string) tea.Cmd {
-	// the card profile picker's value tier, mirroring runBoardCompletion's
-	// own "agent-cli:"-prefix split (boardcomplete.go) — no new parsing
-	// convention introduced for it.
-	if name, ok := strings.CutPrefix(id, "profile-value:"); ok {
-		r, ok := m.selected()
-		if !ok {
-			return nil
-		}
-		return m.confirmCardProfileChange(r.F.ID, name)
-	}
 	if name, ok := strings.CutPrefix(id, "project-command:"); ok {
 		m.threadInput.SetValue("/" + name + " ")
 		m.threadInput.CursorEnd()
@@ -274,19 +231,6 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 	case "settings":
 		m.openSettings()
 		return nil
-	case "run":
-		// The keyless run is the implement stage's "send it back": it
-		// re-runs the stage in place with the composer's line riding as
-		// the note (decision.go's deliverDecisionWords, which is what
-		// handles it when there IS a line). The ordinary run action wears
-		// enter and never reaches this switch at all.
-		//
-		// Reached with nothing typed, there is nothing to send back — so
-		// it says what it wants rather than answering with silence. The
-		// bar named the row, so enter owes a response; this is the same
-		// answer "changes" gives one row away, for the same reason.
-		m.notice = noticeMsg{text: "type what should change — your line rides the re-run"}
-		return nil
 	case "topup":
 		// the same act the inbox's u performs, reached from the stop
 		// itself: raise the budget and let the stage pick up where it
@@ -296,21 +240,11 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		}
 	case "duplicate":
 		return m.confirmDuplicate()
-	case "deps":
-		// the keyless dependency entry (cardactions.go): p pauses while a
-		// stage session exists, so the menu is how the picker is reached
-		if r, ok := m.selected(); ok {
-			m.clearTransientNotice()
-			return m.openDeps(r.F)
-		}
-		return nil
 	case "newbug":
 		if r, ok := m.selected(); ok {
 			return m.openBugFromCard(r)
 		}
 		return nil
-	case "profile":
-		return m.openCardProfilePicker()
 	case "model":
 		return m.openCardModelPicker()
 	case "new-freeform":
@@ -337,7 +271,7 @@ func (m *Shell) confirmDuplicate() tea.Cmd {
 		cancelLabel:  "Cancel",
 		confirmLabel: "Duplicate",
 		question:     "duplicate " + f.Name() + "?",
-		detail:       f.Title + " — fresh copy in todo (same skips, profile, budget); this card stays",
+		detail:       f.Title + " — a fresh session with the same title, repository and budget; this card stays",
 		onConfirm:    func() tea.Cmd { return m.duplicateFeature(f.ID) },
 	})
 	return nil
@@ -372,13 +306,6 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		}
 	case "duplicate":
 		return m.confirmDuplicate()
-	case "reverify":
-		// the verify stop on a branch that moved since its pass
-		// (nextsteps.go's verifyStale arm)
-		if r, ok := m.selected(); ok {
-			return m.reverify(r.F.ID)
-		}
-		return nil
 	case "wait":
 		// the row a held gate leads with (nextsteps.go's waitOnDeps, the
 		// stack's "lands after"): nothing to do but wait, and it says what
@@ -392,29 +319,20 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		}
 		return nil
 	case "settle":
-		// "stop here" on a failed stage (nextsteps.go's failure arm): the
-		// run already stopped, so what stops is the card asking for you.
-		// The failure stays on record; the next run of the stage closes it.
+		// "stop here" on a failed session (nextsteps.go's failure arm):
+		// the turn already stopped, so what stops is the card asking for
+		// you. The failure stays on record.
 		if r, ok := m.selected(); ok {
 			m.inbox.remove(r.F.ID)
-			m.notice = noticeMsg{text: r.F.Name() + ": left at " + string(r.F.Stage) + " — nothing runs until you start it again", id: r.F.ID}
+			m.notice = noticeMsg{text: r.F.Name() + ": left as it is — your next line starts a fresh turn", id: r.F.ID}
 		}
 		return nil
-	case "deps":
-		// the dependency picker, reached from the list while a stage
-		// session exists — where p pauses instead (cardactions.go)
-		if r, ok := m.selected(); ok {
-			m.clearTransientNotice()
-			return m.openDeps(r.F)
-		}
 	case "newbug":
 		// keyless by construction (closedActions), so the a.key shortcut
 		// above cannot catch it — the same shape topup has.
 		if r, ok := m.selected(); ok {
 			return m.openBugFromCard(r)
 		}
-	case "profile":
-		return m.openCardProfilePicker()
 	case "model":
 		// the freeform card's model row (cardactions.go): the two-tier
 		// picker, the same offer the web face's picker makes
@@ -440,15 +358,6 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// word.
 		m.threadAsk = true
 		m.focusThreadInput()
-		return nil
-	case "changes":
-		// this option IS the composer's words: typing aims at it and enter
-		// delivers the line as the turn asking for the changes
-		// (decision.go's deliverDecisionWords). Reached with nothing typed
-		// there is nothing to send, so it says what it wants rather than
-		// answering with silence — the bar named it, so enter owes a
-		// response.
-		m.notice = noticeMsg{text: "type what should change — your line goes back with it"}
 		return nil
 	case "prlink":
 		if r, ok := m.selected(); ok {

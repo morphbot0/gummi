@@ -13,7 +13,6 @@ import (
 	_ "modernc.org/sqlite" // pure-Go sqlite driver
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // ErrNotFound is returned when a feature ID has no row.
@@ -1105,41 +1104,6 @@ func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits, esti
 	return nil
 }
 
-// SetVerifiedAt stamps when a feature's verify gate passed and its branch
-// became ready to land — the marker behind status's `verified` field and the
-// headless driver's stop-at-verified terminal state. Like AddSpend it is a
-// side-channel (it neither touches updated_at nor moves the stage, which
-// stays "verify" through and after the run), so the engine can record
-// "verified" the moment the gate is reached without a full-feature write.
-//
-// This is also where the verified landing is reported to the observer:
-// the stamp is the moment the branch became ready, and a card can sit
-// stamped at verify forever without anyone merging it. Only a card that
-// was not already stamped reports — a re-verify after the stamp was
-// cleared reports again, because the branch became ready again.
-//
-// rev is the branch tip the pass ran on (domain.Feature.VerifiedRev) —
-// the half of the stamp a landing checks — or "" where there is no single
-// branch to name (a goal).
-func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.Time, rev string) error {
-	var prev, stage string
-	// Read before the write so the report is "became verified", not "is
-	// verified". A missing row leaves both empty and the update below
-	// reports nothing of its own.
-	_ = s.db.QueryRowContext(ctx,
-		`SELECT verified_at, stage FROM features WHERE id = ?`, string(id)).Scan(&prev, &stage)
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE features SET verified_at = ?, verified_rev = ? WHERE id = ?`,
-		t.UTC().Format(timeFmt), rev, string(id))
-	if err != nil {
-		return fmt.Errorf("marking %s verified: %w", id, err)
-	}
-	if n, err := res.RowsAffected(); err == nil && n > 0 && prev == "" {
-		s.observe(CardEvent{Feature: id, Stage: domain.Stage(stage), Kind: EventVerified, At: t.UTC()})
-	}
-	return nil
-}
-
 // SetHandedOffAt stamps when a card was ended by hand-off: closed with its
 // branch deliberately left unlanded. Like SetVerifiedAt it is a side-channel
 // write and does not move the stage — the caller crosses the verify→done
@@ -1717,8 +1681,8 @@ func (s *Store) ListFeatures(ctx context.Context) ([]domain.Feature, error) {
 }
 
 // UpdateFeature rewrites a feature's mutable fields (everything except
-// ID/Num/CreatedAt). The workflow stage must be changed via Transition,
-// which records history; UpdateFeature refuses stage changes.
+// ID/Num/CreatedAt). A card's stage changes only through CloseCard, which
+// records history; UpdateFeature refuses stage changes.
 func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	if err := f.Validate(); err != nil {
 		return err
@@ -1814,9 +1778,15 @@ func (s *Store) BranchTaken(ctx context.Context, repo, branch string, excluding 
 	return "", false, rows.Err()
 }
 
-// Transition moves a feature to a new stage, enforcing the workflow's
-// legal-transition table and appending to the audit trail, atomically.
-func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.Stage, actor string) (domain.Feature, error) {
+// CloseCard closes a card: it writes domain.StageDone and records the
+// crossing in the card's history, in the same transaction as the stage
+// write, so a card's ending is as auditable as any other change. It
+// closes a session (a freeform card) and a legacy workflow card alike —
+// the latter is never run again, and closing it is how a person puts it
+// away. What it deliberately does NOT do is append a gate event: nothing
+// gated this, and recording one would claim a checkpoint was answered
+// that never existed.
+func (s *Store) CloseCard(ctx context.Context, id domain.FeatureID, actor string) (domain.Feature, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Feature{}, err
@@ -1831,86 +1801,6 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	}
 	if err != nil {
 		return f, err
-	}
-	if err := workflow.CanTransition(f.Stage, to); err != nil {
-		return f, fmt.Errorf("%s: %w", id, err)
-	}
-	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE features SET stage=?, updated_at=? WHERE id=?`,
-		string(to), now.Format(timeFmt), string(id)); err != nil {
-		return f, fmt.Errorf("transitioning %s: %w", id, err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO transitions (feature_id, from_stage, to_stage, actor, at) VALUES (?,?,?,?,?)`,
-		string(id), string(f.Stage), string(to), actor, now.Format(timeFmt)); err != nil {
-		return f, fmt.Errorf("recording transition for %s: %w", id, err)
-	}
-	// The gate event goes in the same transaction as the transition it
-	// describes, so a card's history cannot record a crossing the features
-	// table never made, or miss one it did. Every caller reaches a
-	// crossing through here — the engine's own Advance, the review loop's
-	// automatic steps, the headless driver — so this is the one place that
-	// sees all of them. The crossing answers the newest still-open gate
-	// decision, looked up in this same transaction so the crossing and its
-	// answer commit together.
-	answerID := s.newestOpenGateDecisionTx(ctx, tx, id)
-	gateInserted, err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now, answerID)
-	if err != nil {
-		return f, err
-	}
-	if err := tx.Commit(); err != nil {
-		return f, err
-	}
-	// Post-commit reporting to hooks: the crossing, when its log row was
-	// actually inserted. The verified landing is not reported here —
-	// SetVerifiedAt reported it at the gate, where the branch became
-	// ready to land, rather than at a merge that may never happen.
-	if gateInserted {
-		s.observeTransition(id, f.Stage, to, actor, now, answerID)
-	}
-	f.Stage = to
-	f.UpdatedAt = now
-	return f, nil
-}
-
-// CloseFreeform closes a freeform card: it writes domain.StageDone and
-// records the transition, without asking internal/workflow whether the
-// move is legal — because for this one card it is not a move through the
-// graph at all. A freeform card holds domain.StageOpen, which has no
-// outgoing edge on purpose (DESIGN §19), so every ordinary crossing of
-// its ending would be refused by CanTransition.
-//
-// The safety of bypassing that check is this method's refusal: it closes a
-// KindFreeform card and nothing else. A store method that could write
-// "done" onto any card would be a way to land a feature without verifying
-// it — the exact hole the quality floor exists to prevent — so the check
-// that makes it safe lives here, beside the bypass, rather than in each
-// caller.
-//
-// The card's own history still records the crossing, in the same
-// transaction as the stage write, so a freeform card's ending is as
-// auditable as any other's. What it deliberately does NOT do is append a
-// gate event: nothing gated this, and recording one would claim a
-// checkpoint was answered that never existed.
-func (s *Store) CloseFreeform(ctx context.Context, id domain.FeatureID, actor string) (domain.Feature, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.Feature{}, err
-	}
-	defer tx.Rollback() //nolint:errcheck // no-op after commit
-
-	row := tx.QueryRowContext(ctx,
-		`SELECT `+featureCols+` FROM features WHERE id = ?`, string(id))
-	f, err := scanFeature(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return f, fmt.Errorf("%s: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return f, err
-	}
-	if !f.IsFreeform() {
-		return f, fmt.Errorf("%s is a %s card: close it through its workflow, not as a freeform card", id, f.Kind)
 	}
 	if f.Stage == domain.StageDone {
 		return f, nil

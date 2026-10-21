@@ -12,32 +12,25 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-// Hand-off is the third ending a verified card has, beside gummi's own
-// squash merge and a landing on GitHub: the card closes and its branch
-// stays exactly where it is, to be pushed, PR'd, cherry-picked or simply
-// kept. Until it existed the only way to say "I'll take it from here" was
-// `D`, which destroys the branch — so the honest answer cost the work,
-// and the usual outcome was a finished card parked at verify forever,
-// counted by the status bar as work still in review.
+// Hand-off is the second ending a card has, beside gummi's own landing:
+// the card closes and its branch stays exactly where it is, to be pushed,
+// PR'd, cherry-picked or simply kept. Until it existed the only way to say
+// "I'll take it from here" was `D`, which destroys the branch — so the
+// honest answer cost the work.
 //
 // The flow mirrors the merge's deliberately: a preflight command off the
-// render loop (preconditions plus the one thing the reader cannot see for
-// themselves — which other cards this unblocks), then a confirm naming
-// what changes, then the act under the card's lock.
+// render loop (its preconditions), then a confirm naming what changes,
+// then the act under the card's lock.
 
 // handOffReadyMsg carries a hand-off that passed its preconditions and
 // awaits the user's confirmation, or the guard error that stops it.
-// dependents are the cards that depend on this one and will become free
-// to start coding from a base branch that does not contain this work —
-// the consequence the confirm has to say out loud, because nothing else
-// on the board will. drift is set when the base no longer carries the
+// drift is set when the base no longer carries the
 // commit this branch forked from: not a refusal (the branch is leaving
 // as it is), but the reader is about to push it somewhere and should
 // hear that the base moved before they do.
 type handOffReadyMsg struct {
-	f          domain.Feature
-	dependents []domain.FeatureID
-	drift      *worktree.ForkDriftError
+	f     domain.Feature
+	drift *worktree.ForkDriftError
 	// goes: closing this card will take its branch and worktree with it,
 	// because the branch's work is held somewhere else too. The confirm
 	// says so and offers to keep them.
@@ -45,10 +38,9 @@ type handOffReadyMsg struct {
 	err  error
 }
 
-// prepareHandOff checks the hand-off preconditions off the render loop
-// and collects the dependents the confirm names. It mutates nothing: the
-// checkpoint commit, the stamp and the transition all happen after the
-// user confirms (engine.HandOff).
+// prepareHandOff checks the hand-off preconditions off the render loop.
+// It mutates nothing: the stamp and the closing happen after the user
+// confirms (engine.HandOff).
 func (m *Shell) prepareHandOff(f domain.Feature) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -76,27 +68,23 @@ func (m *Shell) prepareHandOff(f domain.Feature) tea.Cmd {
 				return handOffReadyMsg{err: errors.New(f.Name() + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
 			}
 		}
-		deps, err := m.store.ListDependents(ctx, f.ID)
-		if err != nil {
-			return handOffReadyMsg{err: err}
-		}
 		// read as the card will stand once closed: the rule is about a
 		// closed card, and this one is a confirm away from being one
 		closed := f
 		closed.Stage = domain.StageDone
-		return handOffReadyMsg{f: f, dependents: deps, drift: drift, goes: m.wt.GoesWithClose(ctx, &closed)}
+		return handOffReadyMsg{f: f, drift: drift, goes: m.wt.GoesWithClose(ctx, &closed)}
 	}
 }
 
 // handOffDetail is the confirm's body: what changes, what does not, and
-// the consequences that are invisible from the board — the dependents
-// this frees, and a base that moved out from under the branch.
+// the consequence that is invisible from the board — a base that moved
+// out from under the branch.
 //
 // The branch and worktree lines say what becomes of the two things a
 // reader is about to go and use, so they are stated rather than implied
 // by the absence of a warning: kept where the branch is the only copy of
 // its work, removed (goes) where a remote already holds it.
-func handOffDetail(f domain.Feature, base string, dependents []domain.FeatureID, drift *worktree.ForkDriftError, goes bool) string {
+func handOffDetail(f domain.Feature, base string, drift *worktree.ForkDriftError, goes bool) string {
 	// leading blank line: confirmDialog sets its question and detail on
 	// consecutive lines, which is right for the one-liners every other
 	// caller passes and runs a three-row table straight into the title.
@@ -120,18 +108,6 @@ func handOffDetail(f domain.Feature, base string, dependents []domain.FeatureID,
 		b.WriteString("  " + pad("branch") + f.BranchName() + " — kept\n")
 		b.WriteString("  " + pad("worktree") + f.WorktreePath() + " — kept\n")
 		b.WriteString("  " + pad(base) + "unchanged")
-	}
-	if len(dependents) > 0 {
-		names := make([]string, 0, len(dependents))
-		for _, d := range dependents {
-			names = append(names, string(d))
-		}
-		verb := " depends on this and will start from "
-		if len(names) > 1 {
-			verb = " depend on this and will start from "
-		}
-		b.WriteString("\n\n" + strings.Join(names, ", ") + verb + base +
-			", which does not have this work.")
 	}
 	if drift != nil {
 		// The branch leaves as it is; nothing here rebases it. What the
@@ -163,14 +139,11 @@ func pad(label string) string {
 
 // handOffFeature ends the card without landing it, under the card's lock.
 //
-// engine.HandOff owns the three steps (final checkpoint commit, the
-// hand-off stamp, then the ordinary verify→done crossing) and the result
-// goes through advanceOutcome, the same mapping the g key's crossing
-// uses: a gate blocker is reported here exactly as it is there, because
-// waiving the landing never waived the floor. Only the success sentence
-// differs, and it differs because the outcome does — nothing reached the
-// base branch, and a reader who is about to go push something needs the
-// branch name in front of them. A branch whose work is held elsewhere goes
+// engine.HandOff owns the act (the hand-off stamp, then the closing); an
+// open diff comment is reported as the refusal it is, because waiving the
+// landing never waived the person's read of the diff. The success
+// sentence names the branch: nothing reached the base branch, and a
+// reader who is about to go push something needs it in front of them. A branch whose work is held elsewhere goes
 // with the card, and its worktree too, unless keep says to leave them
 // (closeOut).
 func (m *Shell) handOffFeature(f domain.Feature, keep bool) tea.Cmd {
@@ -179,8 +152,15 @@ func (m *Shell) handOffFeature(f domain.Feature, keep bool) tea.Cmd {
 		return m.withEngine(func(eng *engine.Engine) tea.Msg {
 			ctx := context.Background()
 			res, err := eng.HandOff(ctx, f.ID, actor)
-			if err != nil || res.Status != engine.StatusAdvanced {
-				return m.advanceOutcome(f.ID, actor, res, err)
+			if err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
+			}
+			switch res.Status {
+			case engine.HandOffBlockedDiff:
+				return noticeMsg{text: f.Name() + ": " + itoa(res.Blockers) + " open diff comment" + plural(res.Blockers) +
+					" — resolve them before handing it off", isErr: true, id: f.ID}
+			case engine.HandOffNoop:
+				return noticeMsg{text: f.Name() + " is already done", isErr: true, id: f.ID}
 			}
 			m.dropSession(f.ID)
 			done := f.Name() + " → done · " + f.BranchName() + " is yours — nothing landed on " + m.baseBranch(f)

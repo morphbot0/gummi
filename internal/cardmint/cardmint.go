@@ -38,7 +38,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // Input describes one card to mint. It is deliberately shaped around what
@@ -289,9 +288,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	now := time.Now()
 	f := domain.Feature{
 		ID: id, Num: num, Kind: in.Kind, Title: title, OneLiner: oneLiner,
-		// InitialFor, not Initial: a freeform card starts outside the
-		// graph, at domain.StageOpen, and never enters it.
-		Slug: slug, Stage: workflow.InitialFor(in.Kind),
+		Slug: slug, Stage: initialStage(in.Kind),
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		SessionBackend: in.SessionBackend, SessionModel: in.SessionModel,
 		MainCheckout: in.MainCheckout, Home: in.Home,
@@ -371,4 +368,13 @@ func requireRepo(check func(string) error, repo string) error {
 		return fmt.Errorf("repository %q cannot be validated: no repository checker was wired", repo)
 	}
 	return nil
+}
+
+// initialStage is where a minted card starts: a session at
+// domain.StageOpen, where it stays; a legacy workflow card at todo.
+func initialStage(k domain.Kind) domain.Stage {
+	if k == domain.KindFreeform {
+		return domain.StageOpen
+	}
+	return domain.StageTodo
 }

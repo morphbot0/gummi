@@ -33,23 +33,17 @@ func rowOf(b webapi.Board, id string) (webapi.Row, bool) {
 	return b.Rows[i], true
 }
 
-// The rail carries what the TUI's rows carry: the cards a card waits on,
-// its place in its stack, and what the board spent today.
-func TestBoardRowsCarryWaitsStackAndToday(t *testing.T) {
+// The rail carries what the TUI's rows carry: a card's place in its
+// stack, and what the board spent today.
+func TestBoardRowsCarryStackAndToday(t *testing.T) {
 	h := newCardBoard(t, agent.NewFake("ok"))
-	below := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Row loader"})
-	above := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Row cache", DependsOn: []string{below.ID}, StackOn: below.ID})
-	// a dependency waits the card at its coding stage's door, the badge
-	// the TUI's row wears: from the design stage on
-	h.action(above.ID, "advance", webapi.ActionRequest{})
+	below := h.create(webapi.CreateCardRequest{Kind: "freeform", Title: "Row loader"})
+	above := h.create(webapi.CreateCardRequest{Kind: "freeform", Title: "Row cache", StackOn: below.ID})
 	b := h.waitBoard("the stack", func(b webapi.Board) bool {
 		r, ok := rowOf(b, above.ID)
 		return ok && r.Stack != nil
 	})
 	r, _ := rowOf(b, above.ID)
-	if !slices.Equal(r.Waits, []string{below.ID}) {
-		t.Errorf("%s waits on %v, want %s", above.ID, r.Waits, below.ID)
-	}
 	if r.Stack.Pos != 1 || r.Stack.Of != 2 {
 		t.Errorf("%s stack = %+v", above.ID, r.Stack)
 	}
@@ -58,9 +52,5 @@ func TestBoardRowsCarryWaitsStackAndToday(t *testing.T) {
 	}
 
 	// a turn costs credits, and the header counts them
-	c := h.planCard("Dark mode")
-	if st, raw := h.answer(c.ID, webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "run", Against: c.Decision.Against.Token}); st != http.StatusOK {
-		t.Fatalf("start the architect: %d %s", st, raw)
-	}
 	h.waitBoard("today's spend", func(b webapi.Board) bool { return b.Today.Spent > 0 })
 }

@@ -112,8 +112,8 @@ func TestAMainCheckoutCardIsNotCommittedFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandOff: %v", err)
 	}
-	if out.Status != StatusAdvanced {
-		t.Errorf("status = %v, want advanced", out.Status)
+	if out.Status != HandOffClosed {
+		t.Errorf("status = %v, want closed", out.Status)
 	}
 	stored, err := store.GetFeature(ctx, f.ID)
 	if err != nil {
