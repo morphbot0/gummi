@@ -13,7 +13,7 @@ import (
 const (
 	SessionSectionProblem  = "Problem"
 	SessionSectionApproach = "Approach"
-	SessionSectionDoneWhen = GoalSectionDoneWhen
+	SessionSectionDoneWhen = CrewSectionDoneWhen
 	SessionSectionLimits   = "Limits"
 	SessionSectionNotes    = "Notes"
 )
