@@ -341,7 +341,13 @@ function drawDecision (box) {
   clear(box)
   box.append(noteEl(false) || '')
   const d = openDecision()
-  if (!d) return
+  // a card that pins no decision (a session between turns) can still stop
+  // on the board's own question — a composer command's yes — and that
+  // question has to be drawn somewhere
+  if (!d) {
+    box.append(confirmEl(false) || '')
+    return
+  }
   const stage = state.card.stage
   const offline = state.conn !== 'live'
   const jump = jumpFor(d, state.card)
@@ -435,14 +441,14 @@ function drawMdec (box) {
   // the dock sits with the composer, out of sight from a document tab —
   // and, with no decision left, what the answer left to say
   const nx = state.view !== 'panel' ? null : nextRow()
-  const show = isMobile() && (!!d || !!state.decNote || !!nx) && state.view === 'panel'
+  const show = isMobile() && (!!d || !!state.decNote || !!state.decConfirm || !!nx) && state.view === 'panel'
   box.hidden = !show
   clear(box)
   if (!show) return
   if (!d) {
     if (nx) box.style.setProperty('--dc', needsColor(nx.needs, nx.stage))
     box.classList.remove('open', 'lead')
-    box.append(noteEl(true) || '', nx ? h('div', { class: 'mnext' }, nextChip(nx)) : '')
+    box.append(noteEl(true) || '', confirmEl(true) || '', nx ? h('div', { class: 'mnext' }, nextChip(nx)) : '')
     return
   }
   box.style.setProperty('--dc', decisionColor(d, state.card.stage))
