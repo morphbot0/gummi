@@ -21,7 +21,7 @@ import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { openModal, openView } from './views.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { state, set, rows } from './store.js?v=__ASSET_V__'
-import { openModelPicker, openWriteSpec } from './session.js?v=__ASSET_V__'
+import { openModelPicker } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
 import { pushAfterControl, openBasePush } from './pushbase.js?v=__ASSET_V__'
 
@@ -48,7 +48,6 @@ export async function runAction (card, a) {
   // the generic one-field dialog cannot carry an agent and a model, or a
   // profile and a budget
   if (a.needs === 'model') { openModelPicker(); return }
-  if (a.needs === 'spec') { openWriteSpec(card, a); return }
   // a heartbeat is a schedule: the Schedules view's form, aimed at this card
   if (a.needs === 'schedule') { openView('schedules', { heartbeat: card.id }); return }
   // publishing confirms resolved facts, not a yes: its own dialog (publish.js)

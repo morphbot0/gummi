@@ -1718,12 +1718,9 @@ func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
 	if sending != "" && !delivered(snap, sending) {
 		lines = append(lines, m.askingLines(s, sending, w)...)
 	}
-	// the brief turn is not the card's own session working — it is gummi
-	// asking that session to write its handoff brief — so the busy word
-	// names it rather than the bare "working" (engine.BriefDrafting).
-	if snap.Briefing {
-		lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+engine.BriefDrafting+"…"))
-	} else if snap.Auditing && !snap.Busy {
+	// an objective's audit is not the card's own session working, so the
+	// busy word names it rather than the bare "working"
+	if snap.Auditing && !snap.Busy {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+engine.ObjectiveAuditing+"…"))
 	} else if snap.Busy {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" working…"))

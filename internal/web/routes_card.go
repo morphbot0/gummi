@@ -9,8 +9,6 @@ import (
 
 func (s *Server) cardRoutes() {
 	s.api("GET /api/cards/{id}", s.handleCard)
-	s.api("GET /api/cards/{id}/writespec-draft", s.handleWritespecDraft(false))
-	s.api("POST /api/cards/{id}/writespec-draft", s.handleWritespecDraft(true))
 	s.api("POST /api/cards/{id}/composer", s.handleComposer)
 	s.api("POST /api/cards/{id}/answer", s.handleAnswer)
 	s.api("POST /api/cards/{id}/send", s.handleSend)
@@ -38,23 +36,6 @@ func (s *Server) handleCard(w http.ResponseWriter, r *http.Request) {
 		c.Terminal = s.terms != nil
 	}
 	writeJSON(w, http.StatusOK, c)
-}
-
-// handleWritespecDraft serves the handoff brief a writespec dialog opens
-// on. start is the POST: it starts the session's own brief turn, in the
-// background, and answers at once — drafting, or the brief if one is
-// already on the record. The GET is a pure read and starts nothing: it
-// answers the brief as it stands, pending while it drafts. Either way the
-// answer never waits on the turn, so leaving the page cannot cancel it.
-func (s *Server) handleWritespecDraft(start bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		draft, err := s.opt.Board.WritespecDraft(r.Context(), r.PathValue("id"), start)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, draft)
-	}
 }
 
 // handleComposer is POST /api/cards/{id}/composer: what sending text

@@ -181,12 +181,10 @@ func (m *Shell) webFreeform(r featureRow) *webapi.Conversation {
 	if len(snap.Transcript) == 0 && sending == "" {
 		return nil
 	}
-	// the busy verb names what is running: gummi's own handoff-brief turn
-	// says so, not the bare "working"
+	// the busy verb names what is running: an objective's audit says so,
+	// not the bare "working"
 	verb := "working"
-	if snap.Briefing {
-		verb = engine.BriefDrafting
-	} else if snap.Auditing && !snap.Busy {
+	if snap.Auditing && !snap.Busy {
 		verb = engine.ObjectiveAuditing
 	}
 	c := webConversation(snap, sending, verb)
@@ -200,10 +198,10 @@ func (m *Shell) webFreeform(r featureRow) *webapi.Conversation {
 }
 
 func webConversation(snap engine.Snapshot, sending, verb string) *webapi.Conversation {
-	// a handoff brief in flight is activity the page should spin on, the
-	// same way it spins on a turn — the brief turn runs on a session of
-	// its own, so Busy alone would miss it
-	busy := snap.Busy || snap.Briefing || snap.Auditing
+	// an objective's audit is activity the page should spin on, the same
+	// way it spins on a turn — the audit runs on a session of its own, so
+	// Busy alone would miss it
+	busy := snap.Busy || snap.Auditing
 	c := &webapi.Conversation{Busy: busy, Role: string(snap.Role), Spent: snap.SpentCredits, Model: runModel(snap)}
 	c.Turns, c.Omitted, c.Streaming, c.Tool = webTranscript(snap)
 	if ctx := snap.Context; ctx.Tokens > 0 {

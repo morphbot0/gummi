@@ -341,9 +341,10 @@ type Engine struct {
 	// turn to run on, so the brief path is for engines from New alone.
 	ctx    context.Context
 	cancel context.CancelFunc
-	// briefs joins the detached brief turns (goBrief) and the queued sends
-	// they make, so Close waits for every one before the freeform teardown
-	// saves the conversation and drops the card lock.
+	// briefs joins the detached one-shot turns (goBrief: an objective's
+	// audit, a crew's planner, node and review turns), so Close waits for
+	// every one before the freeform teardown saves the conversation and
+	// drops the card lock.
 	briefs sync.WaitGroup
 
 	// mcpSeq is the atomic source of engine-side MCP call ids, so a

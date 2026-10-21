@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,15 +68,7 @@ func TestAnAgentRunsInItsHome(t *testing.T) {
 		t.Errorf("a main-checkout hint reached an agent:\n%s", joined)
 	}
 
-	// what an agent may not do is refused by the engine, in its own words,
-	// and before anything is spent
-	turns := fmt.Sprint(ag.SessionSendCounts())
-	if err := e.StartHandoffBrief(ctx, f.ID); err == nil || !strings.Contains(err.Error(), "is an agent") {
-		t.Errorf("StartHandoffBrief = %v, want the agent refusal", err)
-	}
-	if got := fmt.Sprint(ag.SessionSendCounts()); got != turns {
-		t.Errorf("the refused brief spent a turn (%s -> %s)", turns, got)
-	}
+	// what an agent may not do is refused by the engine, in its own words
 	if _, err := e.SetRepo(ctx, f.ID, ""); err == nil || !strings.Contains(err.Error(), "is an agent") {
 		t.Errorf("SetRepo = %v, want the agent refusal", err)
 	}

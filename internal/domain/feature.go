@@ -406,8 +406,9 @@ type Feature struct {
 	// branch is cut from this card's, so it carries every commit here and
 	// lands them on a verified branch; this card landing them too would
 	// put the same work on main a second way, past the floor the person
-	// just sent it to. MayLandAfterAll refuses it. Freeform-only, and set
-	// once, on the hand-off that continued it.
+	// just sent it to. MayLandAfterAll refuses it. Freeform-only. Legacy:
+	// "write a spec" is retired, so only a session continued before then
+	// carries one.
 	ContinuedAs FeatureID
 	// ParentID is the session (a freeform card) whose crew this card
 	// belongs to, empty for every other card. A crew's card forks from the
@@ -683,7 +684,6 @@ func (f *Feature) kind() Kind {
 		return KindFeature
 	}
 }
-
 
 // IsFreeform reports whether the card is a freeform card: one that is not
 // in the workflow at all (KindFreeform). It is the question every graph

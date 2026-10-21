@@ -37,10 +37,6 @@ const (
 	// EventQuestion fires when the agent asks the user a question via the
 	// ask_user client tool (Snapshot.PendingAsk populated).
 	EventQuestion EventKind = "question"
-	// EventBriefReady fires when a freeform card's handoff brief turn has
-	// ended, answered or not: a dialog waiting on it reads the brief in, and
-	// a person who has walked away is told it is ready.
-	EventBriefReady EventKind = "brief_ready"
 	// EventAnnotations fires when the agent resolves a diff review comment
 	// via the resolve_annotation client tool — an open diff surface should
 	// re-read its annotations so the open-count burns down live.
@@ -265,10 +261,6 @@ type Snapshot struct {
 	Queued         []string      // a freeform card's lines waiting for the turn in flight
 	Watches        []string      // a freeform card's running gummi watches, "w1 · command"
 	Busy           bool          // agent is mid-turn
-	// Briefing is true while gummi's own handoff-brief turn is in flight
-	// on a freeform card (freeformhandoff.go): the busy word names what is
-	// happening rather than the bare "working".
-	Briefing bool
 	// Objective is a freeform card's objective (DESIGN §19.11), nil when
 	// it has none; Auditing is true while its audit runs between turns.
 	Objective          *domain.Objective

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"os"
 	"slices"
 	"strconv"
@@ -13,7 +12,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -422,93 +420,6 @@ func (m *Shell) webClosePush(ctx context.Context, f domain.Feature, c *webapi.Ca
 	}
 }
 
-// writespecDraftable is the guard the writespec-draft fetch and the
-// writespec action share: the card is a session this board can drive, at
-// the one stage such a card ever holds, on a board that could run the
-// handoff brief's turn at all — the same gate the writespec menu row
-// applies. It returns the sentence each refusal says.
-func writespecDraftable(f domain.Feature, agentWired bool) string {
-	switch {
-	case !f.IsFreeform():
-		return f.Name() + " is a " + string(f.Kind) + " card: it runs through its stages"
-	case f.Stage != domain.StageOpen:
-		return f.Name() + " is closed"
-	case f.Home:
-		return f.Name() + " is an agent: it is in no repository, so there is no branch for a spec to continue on"
-	case !agentWired:
-		return f.Name() + " cannot continue as a spec: this board has no agent to run the handoff brief's turn"
-	}
-	return ""
-}
-
-// WritespecDraft is GET /api/cards/{id}/writespec-draft: the handoff brief
-// the writespec dialog opens on, fetched once at open. The loop's part is
-// only the guard — the draft itself is an agent turn (envelope spend,
-// seconds, an appended transcript exchange), so it runs off the loop, and
-// it is never filled into an action's Default: webActionDefaults runs on
-// every card read, and a brief turn fired as a side effect of GET
-// /api/cards/{id} would spend the session's envelope every time a page
-// refetched it. The refusals any send rides (mid-turn, an unanswered
-// question) come back from the engine and map to the busy conflict the
-// writespec action has always answered with.
-func (b *Bridge) WritespecDraft(ctx context.Context, id string, start bool) (webapi.WritespecDraft, error) {
-	var (
-		f      domain.Feature
-		reason string
-		ok     bool
-		m      *Shell
-	)
-	if err := b.Do(ctx, func(s *Shell) tea.Cmd {
-		r, found := s.rowByID(webID(id))
-		if !found {
-			return nil
-		}
-		if reason = writespecDraftable(r.F, s.engine != nil); reason != "" {
-			return nil
-		}
-		f, ok, m = r.F, true, s
-		return nil
-	}); err != nil {
-		return webapi.WritespecDraft{}, err
-	}
-	if !ok {
-		if reason != "" {
-			return webapi.WritespecDraft{}, refuse(WebBadRequest, reason)
-		}
-		return webapi.WritespecDraft{}, refuse(WebNotFound, "no card "+id+" on this board")
-	}
-	// The start runs on the engine's own lifetime, never the request's: a
-	// page that leaves while the brief drafts must not cancel the turn.
-	if start {
-		if err := m.engine.StartHandoffBrief(context.Background(), f.ID); err != nil {
-			return webapi.WritespecDraft{}, writespecDraftError(err)
-		}
-	}
-	brief, source, err := m.engine.HandoffBrief(f.ID)
-	if err != nil {
-		return webapi.WritespecDraft{}, writespecDraftError(err)
-	}
-	if source == engine.BriefPending {
-		return webapi.WritespecDraft{Drafting: true}, nil
-	}
-	return webapi.WritespecDraft{Brief: brief, Source: string(source)}, nil
-}
-
-// writespecDraftError maps the brief's refusals to the wire: a dirty
-// worktree is a bad request, a busy session a conflict.
-func writespecDraftError(err error) error {
-	if errors.Is(err, engine.ErrSessionDirty) {
-		return refuse(WebBadRequest, sanitize(err.Error()))
-	}
-	if errors.Is(err, agent.ErrBusy) {
-		return &WebError{
-			Code: WebConflict, Reason: webapi.ConflictBusy,
-			Text: sanitize(err.Error()),
-		}
-	}
-	return err
-}
-
 // webDropCleanCommit leaves a session's "commit" out of its menu while the
 // worktree holds nothing to commit. Asking git is IO, so it is decided here,
 // off the loop, rather than when the menu is built.
@@ -649,8 +560,8 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 	in := m.nextInputFor(r)
 	list := cardActionsFor(in, r)
 	if r.F.IsFreeform() {
-		// the writespec row is cardActionsFor's own (one inventory for
-		// both faces, the model switch included); the commit is the one
+		// the rows are cardActionsFor's own (one inventory for both
+		// faces, the model switch included); the commit is the one
 		// web-only append here, listed only while the worktree holds
 		// something to commit, which Bridge.Card drops off the loop when
 		// it does not. A main-checkout session has no branch to commit
@@ -756,20 +667,6 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		a.Default = r.F.Repo
 		for _, n := range m.repoNames {
 			a.Choices = append(a.Choices, webapi.Choice{Value: n, Label: n})
-		}
-	case "writespec":
-		a.Needs = webapi.ActionNeedsSpec
-		// the title's suggestion is the page's to fall back on (session.js
-		// prefills card.title); the brief is not an input Default can
-		// carry — it is multiline, and it is fetched per dialog open from
-		// the writespec-draft route, never derived here
-		if m.engine != nil {
-			// named by what runs first: the spec's plan stage, whose
-			// architect reads the session's conversation
-			for _, p := range m.engine.CardProfiles(domain.StagePlan) {
-				backend, model := labelBackendModel(p.Backend, p.Model)
-				a.Choices = append(a.Choices, webapi.Choice{Value: p.Name, Label: p.Name, Detail: backend + " · " + model})
-			}
 		}
 	case "objective":
 		// the text, or one of the verbs the page's strip sends as it

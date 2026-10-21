@@ -73,11 +73,6 @@ type FreeformSession struct {
 
 	mu   sync.Mutex
 	sess *Session
-	// briefing is true while gummi's own handoff-brief turn is in flight
-	// on this card (freeformhandoff.go) — the one flag both faces' busy
-	// word reads, since the card's own session is not the session running
-	// that turn.
-	briefing bool
 	// workDir is the card's worktree, known once a backend has spawned;
 	// Commands reads the project's command files from it.
 	workDir string
@@ -109,10 +104,7 @@ type FreeformSession struct {
 	// first, guarded by mu. They go to the agent together as the next
 	// turn once this one ends (drainQueue) — including a turn that ended
 	// because it was interrupted, which is how "stop, and do this
-	// instead" is said — and until then each can be taken back. A line
-	// sent while the handoff brief drafts waits the same way, and the
-	// brief's own goroutine sends it once the brief has landed (sendQueued),
-	// so it never interleaves with the brief turn.
+	// instead" is said — and until then each can be taken back.
 	queue []queuedTurn
 
 	// objective is the card's objective (objective.go), read from the
@@ -203,21 +195,6 @@ func (e *Engine) OpenFreeform(ctx context.Context, f domain.Feature) (*FreeformS
 	e.mu.Unlock()
 	e.send(Event{Feature: f.ID, Stage: domain.StageOpen, Kind: EventStarted})
 	return ff, nil
-}
-
-// NoteClosedFreeform adds a line from gummi to a closed freeform card's
-// conversation — what became of its work, once that is known — so a reader
-// of the closed card sees it beneath the last turn. The row is updated
-// too, so the line is there after a restart.
-func (e *Engine) NoteClosedFreeform(id domain.FeatureID, text string) {
-	e.mu.Lock()
-	sess := e.freeformClosed[id]
-	e.mu.Unlock()
-	if sess == nil {
-		return
-	}
-	sess.appendSystem(text)
-	e.persistClosed(sess)
 }
 
 // FreeformHistory is the conversation of a freeform card whose session has
@@ -614,13 +591,6 @@ func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
 // A turn sent while the agent is still on the last one is queued rather
 // than refused: the person said it, and the agent should hear it next.
 func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []AttachmentRef) error {
-	return ff.sendTurn(ctx, msg, images, false)
-}
-
-// sendTurn is SendTurn. queued marks the batch sendQueued delivers after the
-// handoff brief: it passes the brief's own flag, which it is the one thing
-// that clears, and so is never queued behind itself.
-func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []AttachmentRef, queued bool) error {
 	cmds := ff.Commands()
 	// the session's own commands that are not a turn for the agent are
 	// answered here, before a backend is woken for them
@@ -653,7 +623,7 @@ func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []At
 			return err
 		}
 	}
-	if sess.Busy() || (!queued && ff.busyBriefing()) {
+	if sess.Busy() {
 		ff.enqueue(ctx, msg, images)
 		return nil
 	}
@@ -908,62 +878,6 @@ func (ff *FreeformSession) drainQueue(sess *Session) {
 	}()
 }
 
-// nextQueued takes the next batch of lines queued while the brief drafted,
-// or, once none is left, lowers the brief flag. Both happen in one locked
-// step: a line sent before the flag drops is queued behind the batch, and a
-// line sent after it finds the queue empty and goes direct, so no line
-// overtakes one said before it. It takes nothing while a question is open,
-// as takeQueue does; the lines wait for the turn that follows.
-func (ff *FreeformSession) nextQueued(sess *Session) (queuedBatch, bool) {
-	asking := sess.Snapshot().PendingAsk != nil
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	if asking || len(ff.queue) == 0 {
-		ff.briefing = false
-		return queuedBatch{}, false
-	}
-	q := ff.queue
-	ff.queue = nil
-	return joinQueue(q)
-}
-
-// sendQueued sends the lines queued while the brief drafted, in the
-// caller's goroutine on the caller's context, which the engine joins, and
-// lowers the brief flag once none is left. Once ctx is done the lines are
-// not sent, and the record says so instead, so they are not dropped without
-// a trace.
-func (ff *FreeformSession) sendQueued(ctx context.Context, sess *Session) {
-	for {
-		b, ok := ff.nextQueued(sess)
-		if !ok {
-			return
-		}
-		if ctx.Err() != nil {
-			ff.noteUnsent(b.text, "gummi closed first")
-			continue
-		}
-		// A refusal that comes before the line is recorded (the envelope is
-		// spent, a question is open, the image is unsupported) would drop
-		// it without a trace, so the record names it. A backend failure
-		// after the line is on the record is already on the session too;
-		// the note then says why the turn did not go.
-		if err := ff.sendTurn(WithActor(ctx, actorOf(b.ctx)), b.text, b.images, true); err != nil {
-			ff.noteUnsent(b.text, "it could not be sent ("+err.Error()+")")
-		}
-		if sess.Busy() {
-			// the batch's turn is in flight: the lines queued since wait
-			// for it, and the pump sends them when it ends. The flag drops
-			// first, so a turn that ends in this window is drained here
-			// rather than leaving its lines to wait for a turn never to come.
-			ff.setBriefing(false)
-			if !sess.Busy() {
-				ff.drainQueue(sess)
-			}
-			return
-		}
-	}
-}
-
 // Kickoff sends the card's brief as the session's first turn, and does
 // nothing at all if the conversation has already started.
 //
@@ -1140,14 +1054,12 @@ func (ff *FreeformSession) CardSpent() float64 {
 func (ff *FreeformSession) Snapshot() Snapshot {
 	ff.mu.Lock()
 	sess := ff.sess
-	briefing := ff.briefing
 	ff.mu.Unlock()
 	obj, auditing := ff.objectiveView()
 	if sess == nil {
-		return Snapshot{Briefing: briefing, Objective: obj, Auditing: auditing}
+		return Snapshot{Objective: obj, Auditing: auditing}
 	}
 	snap := sess.Snapshot()
-	snap.Briefing = briefing
 	snap.Objective, snap.Auditing = obj, auditing
 	snap.Queued = ff.Queued()
 	for _, w := range ff.Watches() {

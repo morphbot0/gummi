@@ -863,15 +863,6 @@ func appendLinkPRSuggestion(acts []nextAction, in nextInput) []nextAction {
 		"land it on GitHub instead — gummi follows the PR and waits for "+in.landBase()))
 }
 
-// writespecStep is the freeform card's "write a spec" answer: the ending
-// that continues the work as a feature instead of landing or closing it.
-// It is gated on the board being able to run the handoff brief's turn at
-// all, so a detached board offers no row that only refuses.
-func writespecStep() nextAction {
-	return nextStep("writespec", "w", "write a spec",
-		"continue this work as a feature — the profile's architect plans it from this conversation and the branch, and it lands on a verified branch")
-}
-
 // hasAction reports whether an answer set contains the row with this id.
 func hasAction(acts []nextAction, id string) bool {
 	for _, a := range acts {
@@ -1120,9 +1111,6 @@ func stageAnswers(in nextInput) []nextAction {
 				nextStep("handoff", "h", "hand off",
 					"close the card — its work stays loose in the main checkout, yours to commit"),
 			}
-			if in.agentWired {
-				acts = append(acts, writespecStep())
-			}
 			return acts
 		}
 		if !in.hasWorktree {
@@ -1138,11 +1126,6 @@ func stageAnswers(in nextInput) []nextAction {
 				landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — uncommitted work has to be committed first, with your own message; "+msgNote),
 			nextStep("handoff", "h", "hand off",
 				"close the card without landing — a branch nothing else holds is kept"),
-		}
-		if in.agentWired {
-			// the third ending, beside the two the branch already has: the
-			// work continues as a feature, planned from this conversation
-			acts = append(acts, writespecStep())
 		}
 		return acts
 

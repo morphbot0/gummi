@@ -3,15 +3,12 @@ package ui
 import (
 	"context"
 	"strconv"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -153,67 +150,5 @@ func TestABusyWordThatEndsIsPushed(t *testing.T) {
 			t.Fatal("the check ended and no page was told: its spinner stays up")
 		}
 		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// TestTheWebConversationNamesTheDraftingBrief: while gummi's handoff-brief
-// turn runs on a freeform card, the web conversation's busy verb names the
-// drafting — the same in-flight flag the TUI thread's busy line reads —
-// and goes back to the ordinary working word once it has ended.
-func TestTheWebConversationNamesTheDraftingBrief(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	once := &sync.Once{}
-	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
-		if strings.Contains(msg, "handoff brief") {
-			once.Do(func() { close(started) })
-			<-release
-			return []agent.Event{{Kind: agent.EventMessage, Text: "the brief"}, {Kind: agent.EventIdle}}
-		}
-		return []agent.Event{{Kind: agent.EventMessage, Text: "on it"}, {Kind: agent.EventIdle}}
-	}}
-	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
-	m, eng, _ := freeformAgentWorkspace(t, ag)
-	ctx := context.Background()
-
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
-	m = typeString(t, m, "Drop the leaked pty fd")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	fs, err := m.store.ListFeatures(ctx)
-	if err != nil || len(fs) != 1 {
-		t.Fatalf("features = %v, err = %v", fs, err)
-	}
-	f := fs[0]
-	ff, err := eng.OpenFreeform(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ff.Send(ctx, "drop the leaked pty fd"); err != nil {
-		t.Fatal(err)
-	}
-	waitFreeformIdle(t, eng, f.ID)
-	m = pump(t, m, m.loadRows)
-
-	if err := eng.StartHandoffBrief(ctx, f.ID); err != nil {
-		t.Fatalf("StartHandoffBrief: %v", err)
-	}
-	<-started
-	r, ok := m.rowByID(f.ID)
-	if !ok {
-		t.Fatal("the board lost the card")
-	}
-	conv := m.webFreeform(r)
-	if conv == nil || conv.Verb != engine.BriefDrafting {
-		t.Fatalf("the conversation's busy verb = %+v, want %q", conv, engine.BriefDrafting)
-	}
-	close(release)
-	for deadline := time.Now().Add(testWaitTimeout); eng.Freeform(f.ID).Briefing(); {
-		if time.Now().After(deadline) {
-			t.Fatal("the brief turn never ended")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if conv := m.webFreeform(r); conv == nil || conv.Busy || conv.Verb != "" {
-		t.Fatalf("after the brief turn the conversation still reads busy: %+v", conv)
 	}
 }

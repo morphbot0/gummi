@@ -66,19 +66,6 @@ func (e *Engine) persist(s *Session) {
 	e.saveLocked(s)
 }
 
-// persistClosed saves a closed freeform session's row, which persist will
-// not: the session has stopped, but its row is the closed card's record
-// and is never dropped, so a line added to it afterwards (what became of
-// the work) has to reach it.
-func (e *Engine) persistClosed(s *Session) {
-	if !e.cfg.Persist || e.cfg.Store == nil || !s.Feature.IsFreeform() {
-		return
-	}
-	e.persistMu.Lock()
-	defer e.persistMu.Unlock()
-	e.saveLocked(s)
-}
-
 // saveLocked writes a session's row. The caller holds persistMu and has
 // decided the session may write.
 func (e *Engine) saveLocked(s *Session) {

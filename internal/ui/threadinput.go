@@ -809,10 +809,6 @@ var verbActionIDs = map[string]string{
 	// that is the session's own command (engine's freeformbuiltins.go),
 	// and a verb is parsed first, so it would shadow it.
 	"close": "handoff",
-	// writespec is the freeform card's third ending, in the answer set
-	// wherever it is legal, so the word fires the same dialog the row and
-	// its key open.
-	"writespec": "writespec",
 	"changes":   "changes",
 	"bounce":    "bounce",
 	"park":      "pause",
@@ -958,7 +954,6 @@ var verbKeys = map[string]string{
 	"verify":    "v",
 	"land":      "m",
 	"close":     "h",
-	"writespec": "w",
 	"rebase":    "r",
 	"clean":     "c",
 	"squash":    "z",

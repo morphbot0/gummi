@@ -1157,8 +1157,9 @@ func (s *Store) SetHandedOffAt(ctx context.Context, id domain.FeatureID, t time.
 }
 
 // SetContinuedAs records that freeform card id's work went on as the
-// feature spec (domain.Feature.ContinuedAs) — written by the hand-off that
-// continued it, once the spec exists. It refuses any card that is not a
+// feature spec (domain.Feature.ContinuedAs). Nothing writes it any more —
+// "write a spec" is retired — but legacy rows carry it, and the tests of
+// the landing refusal it still earns seed it here. It refuses any card that is not a
 // freeform one, the same refusal Validate makes of a row that carries it.
 func (s *Store) SetContinuedAs(ctx context.Context, id, spec domain.FeatureID) error {
 	res, err := s.db.ExecContext(ctx,

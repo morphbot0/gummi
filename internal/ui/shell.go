@@ -1656,17 +1656,6 @@ func (m *Shell) crossCardOpen(id domain.FeatureID) bool {
 // command for any automatic follow-up (review→fix→review), or nil.
 func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	switch ev.Kind {
-	case engine.EventBriefReady:
-		// a freeform card's handoff brief has landed. An open writespec
-		// dialog for it reads the brief in, wherever it sits on the stack
-		// (help or a confirm pushed over it does not hide the brief);
-		// otherwise the person is told it is ready to review, since the
-		// dialog that asked for it is gone.
-		if m.writespecFor(ev.Feature) != nil {
-			return m.refetchWritespec(ev.Feature)
-		}
-		m.alert(ev.Feature, "handoff brief finished — write a spec to review it")
-		return nil
 	case engine.EventObjective:
 		// a session's objective settled: the one notification it gives
 		// (DESIGN §19.11), with the auditor's last word on it
@@ -2274,12 +2263,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionModelsMsg:
 		m.handleSessionModelsMsg(msg)
-		return m, nil
-
-	case writespecDraftMsg:
-		// the dialog asked for the handoff brief; a late reply after it
-		// was dismissed is dropped (the card check inside answers for it)
-		m.handleWritespecDraftMsg(msg)
 		return m, nil
 
 	case prChecksReadyMsg:
@@ -3488,32 +3471,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			return m.rebaseFeature(r.F)
-		}
-	case "w":
-		if r, ok := m.selected(); ok {
-			// the freeform card's third ending: continue its work as a
-			// feature. The key is filtered off every other card's table
-			// (keymap.go), so the handler answers it only where the row is
-			// offered — and names the card that has no use for it
-			// elsewhere, the way every other withheld key here does.
-			if !r.F.IsFreeform() {
-				m.notice = noticeMsg{text: r.F.Name() + ": only a session continues as a spec — this card runs through its stages", isErr: true, id: r.F.ID}
-				return nil
-			}
-			if r.F.Stage != domain.StageOpen {
-				m.notice = noticeMsg{text: r.F.Name() + " is closed: a session continues as a spec only while it is open", isErr: true, id: r.F.ID}
-				return nil
-			}
-			if r.F.Home {
-				m.notice = noticeMsg{text: r.F.Name() + " is an agent: it is in no repository, so there is no branch for a spec to continue on", isErr: true, id: r.F.ID}
-				return nil
-			}
-			if m.engine == nil {
-				m.notice = noticeMsg{text: m.noAgent(" (writing a spec asks the session for a handoff brief)"), isErr: true, id: r.F.ID}
-				return nil
-			}
-			m.clearTransientNotice()
-			return m.openWritespec(r.F)
 		}
 	case "h":
 		if r, ok := m.selected(); ok {

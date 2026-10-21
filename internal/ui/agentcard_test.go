@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -65,7 +64,7 @@ func TestDeletingAnAgentThatNeverRanMakesNoHome(t *testing.T) {
 }
 
 // TestAnAgentIsOfferedNoRepository: its repository cannot move, so the
-// action is not offered, and writing a spec is refused in its own words.
+// action is not offered.
 func TestAnAgentIsOfferedNoRepository(t *testing.T) {
 	m := agentShell(t)
 	f, err := m.store.GetFeature(context.Background(), "FF-001")
@@ -74,8 +73,5 @@ func TestAnAgentIsOfferedNoRepository(t *testing.T) {
 	}
 	if m.repoMovable(featureRow{F: f}) {
 		t.Error("an agent's repository is offered as movable")
-	}
-	if got := writespecDraftable(f, true); !strings.Contains(got, "is an agent") {
-		t.Errorf("writespecDraftable = %q, want the agent refusal", got)
 	}
 }

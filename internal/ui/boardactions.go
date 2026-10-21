@@ -173,7 +173,6 @@ var cardCommandNames = map[string]string{
 	"verify":    "verify",
 	"rebase":    "rebase",
 	"handoff":   "handoff close keep hand off",
-	"writespec": "writespec write a spec",
 	"merge":     "land merge",
 	"squash":    "squash",
 	"clean":     "clean",
@@ -426,15 +425,6 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// the freeform card's model row (cardactions.go): the two-tier
 		// picker, the same offer the web face's picker makes
 		return m.openCardModelPicker()
-	case "writespec":
-		// the freeform card's third ending (cardactions.go): the writespec
-		// dialog, the same offer the web face's menu row makes. Keyless
-		// here only because this switch is the keyless path; the row
-		// itself wears `w` and routes through boardVerb.
-		if r, ok := m.selected(); ok {
-			return m.openWritespec(r.F)
-		}
-		return nil
 	case "objective":
 		// the composer is where an objective is written: it is the
 		// session's own /objective command, with its completions

@@ -138,8 +138,7 @@ type Input struct {
 	GateApproval string
 	// Workflow lets a caller that still runs cards through the stage graph
 	// mint a workflow kind (feature, bug, research): the headless driver's
-	// `gummi run`, a session's "write a spec", the
-	// bug import and the web API's explicit kind. Without it only a
+	// `gummi run` and the web API's explicit kind. Without it only a
 	// freeform card — a session, or an agent — is minted; every person-
 	// facing creation surface leaves it unset.
 	Workflow bool

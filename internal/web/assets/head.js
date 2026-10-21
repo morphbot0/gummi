@@ -7,7 +7,7 @@ import { $, h, icon, clear, append, kindTag, typeName, STAGES, cr, ctxMeter, isM
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
-import { draftHead, writeSpecButton } from './session.js?v=__ASSET_V__'
+import { draftHead } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
 import { crewMarkEl, landCrewButton, crewWord } from './crew.js?v=__ASSET_V__'
 
@@ -74,7 +74,6 @@ function render () {
         // a crew waiting to land is the head's point: it folds last
         foldAt(9, landCrewButton(state.card)),
         foldAt(3, landButton(c, actions)),
-        foldAt(0, writeSpecButton(state.card)),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, data: { fold: '2' }, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
         menuBtn)),
     h('div', { class: 'subline' },

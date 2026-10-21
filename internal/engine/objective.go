@@ -241,7 +241,7 @@ func (ff *FreeformSession) setObjective(ctx context.Context, text, check string)
 	ff.engine.persist(sess)
 	// a session at rest starts on it now; a busy one is audited when its
 	// turn ends, as is one holding a question (which the person answers)
-	if sess.Busy() || sess.Snapshot().PendingAsk != nil || ff.busyBriefing() || len(ff.Queued()) > 0 {
+	if sess.Busy() || sess.Snapshot().PendingAsk != nil || len(ff.Queued()) > 0 {
 		return nil
 	}
 	return ff.SendTurn(WithActor(ctx, state.ActorObjective), objectiveOpening(o), nil)
@@ -340,7 +340,7 @@ func (ff *FreeformSession) objectiveDue(sess *Session) bool {
 	if o == nil || o.State != domain.ObjectiveActive {
 		return false
 	}
-	return !sess.Busy() && sess.Snapshot().PendingAsk == nil && !ff.busyBriefing()
+	return !sess.Busy() && sess.Snapshot().PendingAsk == nil
 }
 
 // runAudit is one round of the loop: audit, check, decide, and send the
@@ -582,4 +582,40 @@ func objectiveContinuation(o domain.Objective) string {
 	return fmt.Sprintf("Keep working toward the objective: %s\n\nThe auditor's note on your last turn: %s\n\n"+
 		"(gummi sent this turn for the objective — turn %d of %d. If something only the person can decide "+
 		"blocks you, ask them with ask_user.)", o.Text, o.Note, o.Turns, domain.ObjectiveTurnCap)
+}
+
+// collectOneShot drains a one-shot session's event stream (an objective's
+// audit) to the turn's end and returns the reply,
+// booking its usage against the card as the session's own turns are
+// booked. what names the turn in its errors.
+func collectOneShot(ctx context.Context, e *Engine, ff *FreeformSession, s agent.Session, what string) (string, error) {
+	var text assistantText
+	for {
+		select {
+		case ev, ok := <-s.Events():
+			if !ok {
+				if strings.TrimSpace(text.String()) == "" {
+					return "", errors.New("the backend stopped before the " + what + " was written")
+				}
+				return text.String(), nil
+			}
+			switch ev.Kind {
+			case agent.EventTextDelta:
+				text.delta(ev.Text)
+			case agent.EventMessage:
+				text.message(ev.Text)
+			case agent.EventUsage:
+				e.recordOneShotUsage(ff.id, domain.StageOpen, ev.Usage)
+			case agent.EventIdle, agent.EventBudgetExhausted:
+				if strings.TrimSpace(text.String()) == "" {
+					return "", errors.New("the backend answered the " + what + " turn with nothing")
+				}
+				return text.String(), nil
+			case agent.EventError:
+				return "", ev.Err
+			}
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
 }

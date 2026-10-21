@@ -514,11 +514,6 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	if answered != "" {
 		b.noteAnswer(id, webAnswerRecord{ref: refOf(req.Against), against: req.Against, by: person, label: answered})
 	}
-	if action == "writespec" && out.created != "" {
-		// the spec is the card the page moves onto; the session it came
-		// from is closed
-		id = string(out.created)
-	}
 	card, werr := b.Card(ctx, id)
 	if werr != nil {
 		if we, ok := IsWebError(werr); ok && we.Code == WebNotFound && action == "delete" {
@@ -624,27 +619,6 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			want = append(want, domain.FeatureID(strings.TrimSpace(c)))
 		}
 		return m.setDependencies(r.F, want), nil
-	case "writespec":
-		profile := strings.TrimSpace(req.Profile)
-		if profile == "" && len(entry.Choices) > 0 {
-			profile = entry.Choices[0].Value
-		}
-		if profile != "" && !slices.ContainsFunc(entry.Choices, func(c webapi.Choice) bool { return c.Value == profile }) {
-			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(profile)+" is not one a spec can run under")
-		}
-		envelope := m.envelopePrefill()
-		if req.Number != nil {
-			if *req.Number < 0 {
-				return nil, refuse(WebBadRequest, "a budget cannot be negative")
-			}
-			envelope = *req.Number
-		}
-		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() {
-			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; write the spec once this turn ends"}
-		}
-		// the brief rides the request: the person's edited text, prefilled
-		// by the draft the dialog fetched when it opened
-		return m.specFromSession(r.F, msg, req.Brief, profile, envelope), nil
 	case "model":
 		if m.engine == nil {
 			return nil, webErr(WebUnavailable, "%s", m.noAgent(" (set a model/provider to enable agents)"))
