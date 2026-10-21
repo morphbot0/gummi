@@ -130,6 +130,8 @@ type Row struct {
 	// pull request's compact badge ("#123 open").
 	Landed bool   `json:"landed,omitempty"`
 	PR     string `json:"pr,omitempty"`
+	// Crew is a session's latest crew (DESIGN §24): the rail's squares.
+	Crew *RowCrew `json:"crew,omitempty"`
 }
 
 // NeedsKind is why a card is waiting on a person.

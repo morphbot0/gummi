@@ -25,6 +25,15 @@ type Spec struct {
 	// OpenComments counts the notes that hold the gate — the unresolved
 	// threads a person started: what "request changes" sends.
 	OpenComments int `json:"openComments,omitempty"`
+	// Session marks a session's spec (DESIGN §24.2): it lives with the
+	// workspace, a person edits it whole (PUT), and each write is a
+	// numbered revision, newest first in Revisions. A session with no spec
+	// yet answers None with Session set, so the page can offer to start
+	// one. DoneWhen is its gummi-done-when list: what a crew is judged
+	// against.
+	Session   bool           `json:"session,omitempty"`
+	Revisions []SpecRevision `json:"revisions,omitempty"`
+	DoneWhen  []CrewItem     `json:"doneWhen,omitempty"`
 }
 
 // SpecSection is one heading and the line it starts on (1-based).

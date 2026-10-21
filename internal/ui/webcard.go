@@ -68,7 +68,11 @@ func (m *Shell) webOpenDecision(r featureRow) *webOpenDecision {
 		return nil
 	}
 	if d.ask != nil {
-		return m.worded(m.webAskDecision(r, d), r)
+		od := m.worded(m.webAskDecision(r, d), r)
+		if d.crew != nil {
+			od.api.Word, od.api.Tone = crewDecisionWord(d.crew), "info"
+		}
+		return od
 	}
 	return m.worded(m.webWorkflowDecision(r, d), r)
 }
@@ -105,6 +109,13 @@ func (m *Shell) webAskDecision(r featureRow, d *threadDecision) *webOpenDecision
 			Options: []webapi.Option{},
 			Multi:   ask.MultiPick,
 		},
+	}
+	if d.crew != nil {
+		// a crew's decision is the crew's, about its plan: the thread is
+		// where it stands, and the plan is drawn with it (§24.9)
+		od.api.Anchor = webapi.AnchorThread
+		od.api.Against.Label = "the crew's " + map[bool]string{true: "plan", false: "question"}[d.crew.Plan != nil]
+		od.api.Crew = webCrewDecision(r.Crew, d.crew)
 	}
 	for i, o := range decisions.AskOptions(ask) {
 		oid := strconv.Itoa(i)
@@ -389,6 +400,7 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 	m.webActionDefaults(ctx, st.f, c.Actions)
 	m.webClosePush(ctx, st.f, &c)
 	c.Actions = m.webDropCleanCommit(ctx, st.f, c.Actions)
+	c.CrewMark = webCrewMark(ctx, m.engine, st.f)
 	if dir, ok := filesDir(ctx, m.wt, st.f); ok {
 		// the server, which holds the key, fills in the URL
 		c.Files = &webapi.Files{Dir: dir}

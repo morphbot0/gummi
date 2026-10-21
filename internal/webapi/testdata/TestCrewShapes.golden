@@ -1,0 +1,324 @@
+{
+  "row": {
+    "seq": 1,
+    "state": "running",
+    "nodes": [
+      "landed",
+      "running"
+    ],
+    "asks": 1
+  },
+  "mark": {
+    "seq": 1,
+    "sha": "c71e0d4aa",
+    "since": 2
+  },
+  "plan": {
+    "kind": "plan",
+    "seq": 1,
+    "lanes": 2,
+    "budget": 400,
+    "planned": 180,
+    "waves": [
+      {
+        "n": 1,
+        "nodes": [
+          {
+            "id": "t1",
+            "role": "implementer",
+            "title": "write crew.txt",
+            "brief": "Write it.",
+            "owns": [
+              "crew.txt"
+            ],
+            "serves": [
+              "DW-1"
+            ],
+            "checks": [
+              "test -f crew.txt"
+            ],
+            "tier": "standard",
+            "envelope": 100
+          }
+        ]
+      },
+      {
+        "n": 2,
+        "nodes": [
+          {
+            "id": "t2",
+            "role": "tester",
+            "title": "test it",
+            "needs": [
+              "t1"
+            ],
+            "envelope": 80
+          }
+        ]
+      }
+    ],
+    "ticks": [
+      {
+        "text": "every done-when item is served",
+        "ok": true
+      }
+    ],
+    "items": [
+      {
+        "id": "DW-1",
+        "says": "crew.txt exists",
+        "check": "test -f crew.txt"
+      }
+    ]
+  },
+  "widen": {
+    "kind": "widen",
+    "seq": 1,
+    "lanes": 2,
+    "budget": 500,
+    "planned": 260,
+    "reasons": [
+      "t3 owns migrate.go, outside what was approved"
+    ],
+    "changes": [
+      {
+        "op": "+",
+        "node": {
+          "id": "t3",
+          "role": "implementer",
+          "title": "migrate",
+          "owns": [
+            "migrate.go"
+          ],
+          "envelope": 80
+        }
+      },
+      {
+        "op": "~",
+        "node": {
+          "id": "t2",
+          "role": "tester",
+          "title": "test it",
+          "needs": [
+            "t1"
+          ],
+          "owns": [
+            "crew_test.sh"
+          ],
+          "envelope": 80,
+          "state": "running",
+          "asks": "Which shell?"
+        },
+        "what": "needs t3"
+      }
+    ],
+    "itemChanges": [
+      {
+        "op": "+",
+        "item": {
+          "id": "DW-2",
+          "says": "old sessions resume",
+          "judge": true
+        }
+      }
+    ],
+    "wasPlanned": 180,
+    "wasBudget": 400
+  },
+  "question": {
+    "kind": "question",
+    "seq": 1,
+    "node": "t2"
+  },
+  "crew": {
+    "acts": [
+      "pause",
+      "stop",
+      "steer"
+    ],
+    "preauth": 300,
+    "crews": [
+      {
+        "seq": 1,
+        "state": "running"
+      }
+    ],
+    "seq": 1,
+    "state": "running",
+    "brief": "make the crew file",
+    "specRev": 3,
+    "branch": "crew/make-the-crew-file/1",
+    "onto": "ff/make-the-crew-file",
+    "budget": {
+      "spent": 20.5,
+      "own": 8,
+      "planned": 180,
+      "budget": 400,
+      "envelope": 2000,
+      "lanes": 2,
+      "live": 1,
+      "rework": 1
+    },
+    "waves": [
+      {
+        "n": 1,
+        "nodes": [
+          {
+            "id": "t1",
+            "role": "implementer",
+            "title": "write crew.txt",
+            "brief": "Write it.",
+            "owns": [
+              "crew.txt"
+            ],
+            "serves": [
+              "DW-1"
+            ],
+            "checks": [
+              "test -f crew.txt"
+            ],
+            "tier": "standard",
+            "envelope": 100,
+            "state": "landed",
+            "reworks": 1,
+            "spent": 12.5,
+            "branch": "crew/make-the-crew-file/1.t1",
+            "handoff": {
+              "done": [
+                "wrote crew.txt"
+              ],
+              "decisions": [
+                "plain text"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "n": 2,
+        "nodes": [
+          {
+            "id": "t2",
+            "role": "tester",
+            "title": "test it",
+            "needs": [
+              "t1"
+            ],
+            "owns": [
+              "crew_test.sh"
+            ],
+            "envelope": 80,
+            "state": "running",
+            "asks": "Which shell?"
+          }
+        ]
+      }
+    ],
+    "landed": [
+      {
+        "node": "t1",
+        "title": "write crew.txt"
+      }
+    ],
+    "planner": {
+      "last": "t2 (tester) started",
+      "at": "09:12",
+      "waiting": [
+        "t1 handed off"
+      ]
+    },
+    "items": [
+      {
+        "id": "DW-1",
+        "says": "crew.txt exists",
+        "check": "test -f crew.txt"
+      }
+    ],
+    "asks": "Which shell?",
+    "log": [
+      "09:10 the person approved the plan",
+      "09:12 t2 (tester) started"
+    ],
+    "started": "2026-09-27T09:12:00Z",
+    "updated": "2026-09-27T09:12:00Z"
+  },
+  "none": {
+    "none": true,
+    "why": "this session has not called a crew",
+    "acts": [
+      "start"
+    ],
+    "budget": {
+      "spent": 0,
+      "own": 0,
+      "planned": 0,
+      "budget": 0,
+      "lanes": 0,
+      "live": 0,
+      "rework": 0
+    },
+    "planner": {}
+  },
+  "request": {
+    "brief": "make the crew file",
+    "budget": 400
+  },
+  "result": {
+    "text": "crew 1 landed on the session as c71e0d4",
+    "crew": {
+      "acts": [
+        "recheck",
+        "start"
+      ],
+      "seq": 1,
+      "state": "landed",
+      "budget": {
+        "spent": 0,
+        "own": 0,
+        "planned": 0,
+        "budget": 0,
+        "lanes": 0,
+        "live": 0,
+        "rework": 0
+      },
+      "planner": {},
+      "verified": "c71e0d4aa"
+    }
+  },
+  "spec": {
+    "path": ".gummi/specs/FF-007-make-the-crew-file.md",
+    "rev": "3f2a1bc",
+    "title": "Make the crew file",
+    "markdown": "# Make the crew file\n",
+    "session": true,
+    "revisions": [
+      {
+        "rev": 2,
+        "by": "Simon",
+        "at": "2026-09-27T09:12:00Z",
+        "crews": [
+          1
+        ]
+      },
+      {
+        "rev": 1,
+        "by": "agent",
+        "at": "2026-09-27T09:12:00Z"
+      }
+    ],
+    "doneWhen": [
+      {
+        "id": "DW-1",
+        "says": "crew.txt exists",
+        "check": "test -f crew.txt"
+      }
+    ]
+  },
+  "write": {
+    "markdown": "# Make the crew file\n",
+    "rev": "3f2a1bc"
+  },
+  "start": {
+    "title": "Make the crew file"
+  }
+}

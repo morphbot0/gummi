@@ -97,6 +97,7 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 	if o := m.freeformObjective(r); o != nil {
 		row.Objective = string(o.State)
 	}
+	row.Crew = webRowCrew(r)
 	sess := m.sessionFor(f.ID)
 	it, needs := m.inbox.get(f.ID)
 	switch {
@@ -112,6 +113,10 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		row.Status = webapi.StatusWatching
 	case sess != nil && sess.State() == engine.StatePaused:
 		row.Status = webapi.StatusPaused
+	case r.Crew != nil && r.Crew.Pending != nil:
+		// a crew's decision is the session's, whether or not the inbox
+		// heard of it (a restart re-reads the crew, not the queue)
+		row.Status = webapi.StatusNeeds
 	default:
 		switch f.Stage.SuperState() {
 		case domain.SuperTodo:
@@ -121,6 +126,9 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		default:
 			row.Status = webapi.StatusIdle
 		}
+	}
+	if r.Crew != nil && r.Crew.Pending != nil && row.Status == webapi.StatusNeeds {
+		row.Needs = webCrewNeeds(r.Crew.Pending)
 	}
 	return row
 }

@@ -84,6 +84,9 @@ type WebDocs struct {
 	// checksFor), which writes nothing to the log the thread folds; the
 	// spec's checks read it beside the log's rows.
 	manual stagedChecks
+	// eng is the board's engine, for a session spec's writes (each one a
+	// revision, DESIGN §24.2); nil on a board with none.
+	eng *engine.Engine
 }
 
 // WebDocs captures card id's documents for reading off the loop. It
@@ -108,6 +111,7 @@ func (m *Shell) WebDocs(id string) (*WebDocs, error) {
 	}
 	if m.engine != nil {
 		d.attachments = m.engine.Attachments()
+		d.eng = m.engine
 	}
 	return d, nil
 }
@@ -274,7 +278,14 @@ func webItem(it threadfold.Item, cmds map[string]string) webapi.Item {
 // created by looking).
 func (d *WebDocs) artifact() string {
 	if d.f.IsFreeform() {
-		return ""
+		if !hasSessionSpec(d.f) {
+			return ""
+		}
+		path := d.sessionSpecPath()
+		if _, err := os.Stat(path); err != nil {
+			return ""
+		}
+		return path
 	}
 	return artifactFileIn(d.pool.Root(), d.ws.DraftsDir(), &d.f)
 }
@@ -286,10 +297,13 @@ func (d *WebDocs) artifact() string {
 // exists (openSpec). A read over HTTP does neither: it reports what is
 // on disk, marks a draft as one, and says so when there is nothing yet.
 func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
-	if d.f.IsFreeform() {
+	if d.f.IsFreeform() && !hasSessionSpec(d.f) {
 		return webapi.Spec{None: true, Why: "a freeform card has no document: its record is its thread and its branch"}, nil
 	}
 	path := d.artifact()
+	if d.f.IsFreeform() && path == "" {
+		return webapi.Spec{None: true, Session: true, Why: "This session has no spec. Most never need one; a crew does, because it is judged against the spec's done-when items."}, nil
+	}
 	if path == "" {
 		return webapi.Spec{None: true, Why: "no " + artifactNoun(d.f.Kind) + " yet: it is written when the card's first stage runs"}, nil
 	}
@@ -315,7 +329,12 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 	// counted as the gate counts them, so the button's number is the one
 	// holding it
 	f := d.fresh(ctx)
-	out.OpenComments = len(engine.SpecCommentsHolding(domain.CardTypeOf(&f), f.Stage, doc))
+	if d.f.IsFreeform() {
+		// no gate reads a session's spec: its notes hold nothing back
+		d.sessionSpec(ctx, content, &out)
+	} else {
+		out.OpenComments = len(engine.SpecCommentsHolding(domain.CardTypeOf(&f), f.Stage, doc))
+	}
 	var notes []spec.Marker
 	for _, t := range doc.Threads() {
 		notes = append(notes, t.Markers...)
@@ -405,6 +424,9 @@ func (d *WebDocs) AddSpecNote(ctx context.Context, line int, text, person string
 	if err := writeSpecNote(path, line, spec.Stamp(d.now().Format("2006-01-02"), person), text); err != nil {
 		return webapi.Spec{}, invalid("%s", err.Error())
 	}
+	if err := d.noteSessionRevision(ctx, path, person); err != nil {
+		return webapi.Spec{}, err
+	}
 	return d.Spec(ctx)
 }
 
@@ -429,6 +451,9 @@ func (d *WebDocs) ResolveSpecNote(ctx context.Context, req webapi.SpecResolveReq
 		return webapi.Spec{}, err
 	case err != nil:
 		return webapi.Spec{}, invalid("%s", err.Error())
+	}
+	if err := d.noteSessionRevision(ctx, path, person); err != nil {
+		return webapi.Spec{}, err
 	}
 	return d.Spec(ctx)
 }
