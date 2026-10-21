@@ -258,7 +258,7 @@ func TestASessionIsAskedOnceWhetherASkillHeldUp(t *testing.T) {
 	}
 
 	e.countSkillUse("FF-9", "make-test", false)
-	if note, _ := e.takeSkillAsk("FF-9", "codex"); note != "" {
+	if note, _ := e.takeSkillAsk("FF-9", "headless"); note != "" {
 		t.Errorf("a backend without the staging tools is asked: %s", note)
 	}
 	note, asked := e.takeSkillAsk("FF-9", "fake")

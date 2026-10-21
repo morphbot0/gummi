@@ -47,7 +47,7 @@ const skillName = "gummi"
 
 // skillAgentList is the --agent value list, shared by the flag's help text
 // and its parser so the two cannot disagree about which agents exist.
-const skillAgentList = "claude|codex|opencode|copilot|pi"
+const skillAgentList = "claude|opencode|copilot"
 
 const skillDescription = "Ship one PR-sized feature or bug to a verified branch via gummi's headless, spec-driven workflow (spec, review, verify; gummi never merges). Use when the work warrants a spec, an independent code review, and an isolated branch — not for trivial one-line edits."
 
@@ -432,10 +432,8 @@ type skillAgent string
 
 const (
 	agentClaude   skillAgent = "claude"
-	agentCodex    skillAgent = "codex"
 	agentOpencode skillAgent = "opencode"
 	agentCopilot  skillAgent = "copilot"
-	agentPi       skillAgent = "pi"
 )
 
 // installTarget is one skill-bundle destination — the `gummi` skill
@@ -595,10 +593,8 @@ func skillList() error {
 	curHash := skillBodyHash()
 	rows := []installTarget{
 		{dir: projectSkillDir(ws), label: "project (claude/copilot/opencode)"},
-		{dir: codexProjectSkillDir(ws), label: "project (codex, pi)"},
 		{dir: userSkillDir(agentClaude), label: "user (claude/opencode)"},
 		{dir: userSkillDir(agentCopilot), label: "user (copilot)"},
-		{dir: userSkillDir(agentCodex), label: "user (codex, pi)"},
 	}
 	for _, r := range rows {
 		fmt.Printf("  %-32s %-12s %s\n", r.label, describeInstall(r.dir, curHash), r.dir)
@@ -639,14 +635,8 @@ func detectAgents() []skillAgent {
 	if hasEnvPrefix("OPENCODE") || onPath("opencode") {
 		out = append(out, agentOpencode)
 	}
-	if os.Getenv("CODEX_HOME") != "" || hasEnvPrefix("CODEX_") || onPath("codex") {
-		out = append(out, agentCodex)
-	}
 	if onPath("copilot") || onPath("gh") {
 		out = append(out, agentCopilot)
-	}
-	if onPath("pi") || os.Getenv("PI_CODING_AGENT_DIR") != "" {
-		out = append(out, agentPi)
 	}
 	return out
 }
@@ -667,7 +657,7 @@ func hasEnvPrefix(prefix string) bool {
 
 func parseAgent(s string) (skillAgent, error) {
 	switch skillAgent(s) {
-	case agentClaude, agentCodex, agentOpencode, agentCopilot, agentPi:
+	case agentClaude, agentOpencode, agentCopilot:
 		return skillAgent(s), nil
 	default:
 		return "", fmt.Errorf("--agent must be one of %s, got %q", skillAgentList, s)
@@ -686,7 +676,7 @@ func resolveScope(flagVal string) (string, error) {
 			return promptScope(), nil
 		}
 		fmt.Fprintln(os.Stderr, "gummi: no --scope given and stdin is not interactive; defaulting to project scope "+
-			"(project scope installs the shared skill for claude/copilot/opencode and the Codex skill under .agents/skills).")
+			"(project scope installs the shared skill for claude/copilot/opencode).")
 		return "project", nil
 	default:
 		return "", fmt.Errorf("--scope must be project or user, got %q", flagVal)
@@ -694,28 +684,22 @@ func resolveScope(flagVal string) (string, error) {
 }
 
 // resolveTargets maps a scope (+ optional --agent) to concrete SKILL.md
-// paths. Project scope uses the shared .claude path plus Codex's .agents
-// path, both rooted at the gummi workspace (beside .gummi) rather than
-// whatever repo the caller happens to be standing in; user scope diverges
-// per agent (claude+opencode share the claude home).
+// paths. Project scope uses the shared .claude path, rooted at the gummi
+// workspace (beside .gummi) rather than whatever repo the caller happens
+// to be standing in; user scope diverges per agent (claude+opencode share
+// the claude home).
 func resolveTargets(scope, agentFlag, ws string) ([]installTarget, error) {
 	if scope == "project" {
 		shared := installTarget{
 			dir:   projectSkillDir(ws),
 			label: "project (read by claude, copilot, opencode)",
 		}
-		codex := installTarget{dir: codexProjectSkillDir(ws), label: "project (read by codex)"}
-		switch agentFlag {
-		case "":
-			return []installTarget{shared, codex}, nil
-		case string(agentCodex):
-			return []installTarget{codex}, nil
-		default:
+		if agentFlag != "" {
 			if _, err := parseAgent(agentFlag); err != nil {
 				return nil, err
 			}
-			return []installTarget{shared}, nil
 		}
+		return []installTarget{shared}, nil
 	}
 	var agents []skillAgent
 	if agentFlag != "" {
@@ -746,25 +730,12 @@ func projectSkillDir(ws string) string {
 	return filepath.Join(ws, ".claude", "skills", "gummi")
 }
 
-// codexProjectSkillDir is Codex's workspace-scoped skill location, rooted
-// the same way as projectSkillDir.
-func codexProjectSkillDir(ws string) string {
-	return filepath.Join(ws, ".agents", "skills", "gummi")
-}
-
 // userSkillDir is an agent's user-scope home. Claude and opencode share the
-// Claude home ($CLAUDE_CONFIG_DIR, else ~/.claude); Copilot and Codex
-// each have their own native homes.
+// Claude home ($CLAUDE_CONFIG_DIR, else ~/.claude); Copilot has its own
+// native home.
 func userSkillDir(a skillAgent) string {
 	if a == agentCopilot {
 		return filepath.Join(homeDir(), ".copilot", "skills", "gummi")
-	}
-	// pi reads the shared agents-skills locations natively (~/.agents/skills
-	// and project .agents/skills), alongside its own ~/.pi/agent/skills —
-	// the codex install is what a pi user wants, so the two share a target
-	// rather than seeding pi a duplicate of the same skill.
-	if a == agentCodex || a == agentPi {
-		return filepath.Join(homeDir(), ".agents", "skills", "gummi")
 	}
 	base := os.Getenv("CLAUDE_CONFIG_DIR")
 	if base == "" {

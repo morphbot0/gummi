@@ -1670,17 +1670,6 @@ func (e *Engine) scratchFilesDirFor(id domain.FeatureID) string {
 	return dir
 }
 
-// agentHomeDirFor returns the card's backend-home directory
-// (state.Workspace.AgentHomeDir) — not created here: only a backend that
-// keeps a per-card home makes it, so a card that never runs on one
-// leaves nothing behind. Empty when the workspace has no root.
-func (e *Engine) agentHomeDirFor(id domain.FeatureID) string {
-	if e.cfg.Workspace.Root == "" {
-		return ""
-	}
-	return e.cfg.Workspace.AgentHomeDir(id)
-}
-
 // newAgentSession builds an agent session for a feature's stage, with
 // the backend/model chosen by the feature's profile for this role. It
 // also returns the resolved spec path so the caller can record it on the
@@ -1720,7 +1709,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// An autonomous research session runs in the main checkout with the
 	// artifact at its workspace home — no worktree, so a read-write agent
 	// could mutate the operator's repo. Fail closed: a backend that cannot
-	// structurally strip its write tools (copilot, headless, codex) is
+	// structurally strip its write tools (copilot, headless) is
 	// refused here, before any session, so "documented no-op" can never
 	// silently downgrade the read-only guarantee to nothing at all.
 	readOnly := researchReadOnly(f)
@@ -1885,9 +1874,6 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		// The scratch directory the boundary hint names: a caged backend
 		// must let the session use the place it was told to use.
 		ScratchDir: scratch,
-		// Where a backend keeps its per-card home: never named to the
-		// session, so following the hint above cannot reach it.
-		AgentHomeDir: e.agentHomeDirFor(f.ID),
 		// The workspace skill pack at its published revision (§23.2).
 		SkillDirs: e.skillDirsFor(ctx, ag, &f, string(f.ID)+"/"+string(role)+"/"+flavorString(flavor), resumeID != ""),
 	})
@@ -3087,7 +3073,7 @@ func (e *Engine) checkpoint(s *Session) error {
 
 // stageReceipt appends a muted one-line spend receipt to the session's
 // activity feed as an autonomous stage completes — "review · $0.42 ·
-// gpt-5-codex" — read from the stage_spend rollup so it reports the same
+// gpt-5" — read from the stage_spend rollup so it reports the same
 // realized cost the dashboard shows. Best-effort: with no store, a read
 // error, or a stage that recorded no spend, it simply adds nothing.
 func (e *Engine) stageReceipt(s *Session) {

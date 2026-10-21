@@ -42,27 +42,3 @@ func TestResolveAttachCommandNotFound(t *testing.T) {
 		t.Errorf("problem = %q, want a not-found message", problem)
 	}
 }
-
-func TestDefaultAttachUsesSelectedCodexBinary(t *testing.T) {
-	t.Setenv("GUMMI_ATTACH_CMD", "")
-	t.Setenv("GUMMI_AGENT", "codex")
-	t.Setenv("GUMMI_CODEX_BIN", "/opt/codex-custom")
-	if got := defaultAttachCommand(); got != "/opt/codex-custom" {
-		t.Fatalf("default attach = %q", got)
-	}
-}
-
-// TestDefaultAttachUsesSelectedAntigravityBinary: the raw attach runs the
-// backend's own CLI, honoring its bin override.
-func TestDefaultAttachUsesSelectedAntigravityBinary(t *testing.T) {
-	t.Setenv("GUMMI_ATTACH_CMD", "")
-	t.Setenv("GUMMI_AGENT", "antigravity")
-	t.Setenv("GUMMI_ANTIGRAVITY_BIN", "/opt/agy-custom")
-	if got := defaultAttachCommand(); got != "/opt/agy-custom" {
-		t.Fatalf("default attach = %q", got)
-	}
-	t.Setenv("GUMMI_ANTIGRAVITY_BIN", "")
-	if got := defaultAttachCommand(); got != "agy" {
-		t.Fatalf("default attach without override = %q, want agy", got)
-	}
-}

@@ -126,8 +126,8 @@ func TestTheSessionModelPickerOffersTheAgentsCatalog(t *testing.T) {
 		if c.id == "session-backend:claude" && !strings.Contains(c.label, "current") {
 			t.Errorf("the running agent is not marked: %q", c.label)
 		}
-		if c.id == "session-backend:pi" && c.available {
-			t.Errorf("pi, absent from this host, is offered as available")
+		if c.id == "session-backend:opencode" && c.available {
+			t.Errorf("opencode, absent from this host, is offered as available")
 		}
 	}
 
@@ -202,7 +202,7 @@ func TestTheSessionModelPickerRefusesAnAbsentAgent(t *testing.T) {
 	m.openCardModelPicker()
 	menu := m.Overlay.Top().(*commandMenu)
 	for i, c := range menu.cmds {
-		if c.id != "session-backend:pi" {
+		if c.id != "session-backend:opencode" {
 			continue
 		}
 		menu.setCursor(i)

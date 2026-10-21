@@ -105,7 +105,7 @@ func TestASessionKeepsTheModelItWasGiven(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
 	f := freeformFeat(1, "tidy the cli help text")
-	f.SessionBackend, f.SessionModel = "codex", "gpt-5"
+	f.SessionBackend, f.SessionModel = "opencode", "openai/gpt-5"
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
@@ -113,8 +113,8 @@ func TestASessionKeepsTheModelItWasGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SessionBackend != "codex" || got.SessionModel != "gpt-5" {
-		t.Fatalf("read back %q/%q, want codex/gpt-5", got.SessionBackend, got.SessionModel)
+	if got.SessionBackend != "opencode" || got.SessionModel != "openai/gpt-5" {
+		t.Fatalf("read back %q/%q, want opencode/openai/gpt-5", got.SessionBackend, got.SessionModel)
 	}
 	got.SessionBackend, got.SessionModel = "claude", "claude-sonnet-5-5"
 	if err := s.UpdateFeature(ctx, &got); err != nil {

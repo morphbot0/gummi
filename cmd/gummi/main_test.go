@@ -93,50 +93,6 @@ func TestVersionNonEmpty(t *testing.T) {
 	}
 }
 
-func TestDefaultBackendCodex(t *testing.T) {
-	t.Setenv("GUMMI_AGENT", "codex")
-	t.Setenv("GUMMI_AGENT_CMD", "")
-	if got := defaultBackendName(); got != "codex" {
-		t.Fatalf("default backend = %q", got)
-	}
-}
-
-func TestDefaultBackendPi(t *testing.T) {
-	t.Setenv("GUMMI_AGENT", "pi")
-	t.Setenv("GUMMI_AGENT_CMD", "")
-	if got := defaultBackendName(); got != "pi" {
-		t.Fatalf("default backend = %q", got)
-	}
-}
-
-func TestDefaultBackendAntigravity(t *testing.T) {
-	t.Setenv("GUMMI_AGENT", "antigravity")
-	t.Setenv("GUMMI_AGENT_CMD", "")
-	if got := defaultBackendName(); got != "antigravity" {
-		t.Fatalf("default backend = %q", got)
-	}
-}
-
-// TestStartAdapterAntigravity: GUMMI_AGENT=antigravity builds the
-// adapter through the same startAdapter seam the board uses, and the
-// adapter it builds is the antigravity one — a fake agy via
-// GUMMI_ANTIGRAVITY_BIN keeps the case hermetic.
-func TestStartAdapterAntigravity(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "agy")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GUMMI_ANTIGRAVITY_BIN", bin)
-	ag, err := startAdapter("antigravity")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ag.Close() })
-	if ag.Name() != "antigravity" {
-		t.Fatalf("startAdapter(antigravity) = %T (%q), want the antigravity adapter", ag, ag.Name())
-	}
-}
-
 // writeFakeAgentBin drops an executable file named name into dir, so
 // agentcli.Detect's exec.LookPath finds it on a fake PATH without
 // needing the real CLI installed in this environment.
@@ -176,7 +132,7 @@ func TestFallbackBackendNameOneInstalled(t *testing.T) {
 
 // TestFallbackBackendNamePrefersDocumentedOrder proves several installed
 // CLIs resolve through the fixed order documented on
-// fallbackBackendName (copilot, claude, codex, opencode) rather than
+// fallbackBackendName (copilot, claude, opencode) rather than
 // Go's randomized map iteration, which would make the answer differ
 // from run to run for the exact same machine.
 func TestFallbackBackendNamePrefersDocumentedOrder(t *testing.T) {
@@ -185,14 +141,13 @@ func TestFallbackBackendNamePrefersDocumentedOrder(t *testing.T) {
 	t.Setenv("PATH", fake)
 
 	writeFakeAgentBin(t, fake, "opencode")
-	writeFakeAgentBin(t, fake, "codex")
-	if got := defaultBackendName(); got != "codex" {
-		t.Fatalf("defaultBackendName() = %q, want codex (first of codex/opencode in the documented order)", got)
+	if got := defaultBackendName(); got != "opencode" {
+		t.Fatalf("defaultBackendName() = %q, want opencode (the only installed CLI)", got)
 	}
 
 	writeFakeAgentBin(t, fake, "claude")
 	if got := defaultBackendName(); got != "claude" {
-		t.Fatalf("defaultBackendName() = %q, want claude (ahead of codex/opencode once it's installed too)", got)
+		t.Fatalf("defaultBackendName() = %q, want claude (ahead of opencode once it's installed too)", got)
 	}
 
 	writeFakeAgentBin(t, fake, "copilot")
@@ -209,7 +164,7 @@ func TestFallbackBackendNameGummiAgentWinsRegardlessOfPath(t *testing.T) {
 	clearDoctorEnv(t)
 	fake := t.TempDir()
 	writeFakeAgentBin(t, fake, "copilot")
-	writeFakeAgentBin(t, fake, "codex")
+	writeFakeAgentBin(t, fake, "claude")
 	t.Setenv("PATH", fake)
 	t.Setenv("GUMMI_AGENT", "opencode")
 	if got := defaultBackendName(); got != "opencode" {
@@ -298,7 +253,7 @@ func TestRequiredBackendsSkipsUnneededDefault(t *testing.T) {
 // start copilot first and returned its error.
 //
 // PATH is pinned to an empty directory for the precondition check: this
-// container has claude/codex/opencode on the real PATH (dev tooling),
+// container has claude/opencode on the real PATH (dev tooling),
 // and fallbackBackendName now looks at PATH, so leaving it alone would
 // make the precondition assert "claude" here instead of "copilot" and
 // the test would be asserting on the host's toolchain rather than the

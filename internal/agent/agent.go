@@ -173,12 +173,6 @@ type SessionOpts struct {
 	// markdown that shows them (empty when it could not). Nil means the
 	// session has nowhere to keep them, and an image block is dropped.
 	ImageSink func(data []byte, name string) string
-	// AgentHomeDir is the card's gummi-owned directory for backend state
-	// the agent must never touch — antigravity anchors its per-card HOME
-	// here. Unlike ScratchDir it is never named to the session. Empty
-	// means no per-card anchor: a backend that wants one falls back to a
-	// throwaway home of its own.
-	AgentHomeDir string
 	// SkillDirs are the workspace skill pack's skill directories that
 	// reach this session (DESIGN §23.2): absolute, one per skill, from a
 	// revision materialized for the session's life. Adapters without
@@ -285,8 +279,8 @@ type Capabilities struct {
 	// Images reports that the backend can take images natively with a
 	// turn — the session implements ImageSender and SendTurn actually
 	// reaches the model as multimodal input, not just a path the agent
-	// might choose to open. True for claude, copilot, codex, opencode and
-	// pi; false for headless (its line protocol has no image input).
+	// might choose to open. True for claude, copilot and opencode; false
+	// for headless (its line protocol has no image input).
 	Images bool
 	// NativeWatch reports that the backend has a tool of its own for
 	// watching a command run on outside its turns — Claude Code's Monitor.
@@ -379,7 +373,7 @@ var ErrBusy = errors.New("a turn is already in progress")
 // rather than parsing them back out of a string. A caller that only
 // wants the traditional one-line summary can still call Error().
 type RunFailure struct {
-	// Backend names the adapter ("opencode", "codex", "claude",
+	// Backend names the adapter ("opencode", "claude",
 	// "copilot", the headless command's basename) for Error()'s prefix.
 	Backend string
 	// Diagnostic is the bounded, sanitized detail captured from the

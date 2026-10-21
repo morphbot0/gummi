@@ -25,11 +25,11 @@ func TestDetectRespectsPathAndBinOverrides(t *testing.T) {
 	fakePath := t.TempDir()
 	writeFakeBin(t, fakePath, "claude")
 	elsewhere := t.TempDir()
-	codexOverride := writeFakeBin(t, elsewhere, "my-codex")
+	opencodeOverride := writeFakeBin(t, elsewhere, "my-opencode")
 
 	t.Setenv("PATH", fakePath)
-	t.Setenv("GUMMI_CODEX_BIN", codexOverride)
-	t.Setenv("GUMMI_OPENCODE_BIN", "")
+	t.Setenv("GUMMI_OPENCODE_BIN", opencodeOverride)
+	t.Setenv("GUMMI_CLAUDE_BIN", "")
 
 	got := map[string]bool{}
 	for _, a := range Detect() {
@@ -38,10 +38,10 @@ func TestDetectRespectsPathAndBinOverrides(t *testing.T) {
 	if !got["claude"] {
 		t.Error("claude should be detected on the fake PATH")
 	}
-	if !got["codex"] {
-		t.Error("codex should be detected via GUMMI_CODEX_BIN, which bypasses PATH entirely")
+	if !got["opencode"] {
+		t.Error("opencode should be detected via GUMMI_OPENCODE_BIN, which bypasses PATH entirely")
 	}
-	for _, name := range []string{"copilot", "opencode"} {
+	for _, name := range []string{"copilot"} {
 		if got[name] {
 			t.Errorf("%s should not be detected (not on the fake PATH, no override)", name)
 		}
@@ -52,7 +52,7 @@ func TestDetectRespectsPathAndBinOverrides(t *testing.T) {
 // happens to be installed — a regression here silently drops a backend
 // from the picker.
 func TestDetectKnownSet(t *testing.T) {
-	want := map[string]bool{"copilot": true, "claude": true, "codex": true, "opencode": true, "pi": true, "antigravity": true}
+	want := map[string]bool{"copilot": true, "claude": true, "opencode": true}
 	agents := Known()
 	if len(agents) != len(want) {
 		t.Fatalf("Known has %d entries, want %d", len(agents), len(want))

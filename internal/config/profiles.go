@@ -14,13 +14,10 @@ import (
 // buildAgents — anything else in a profile is a typo, so parsing fails
 // fast rather than silently falling through to the default backend.
 var knownBackends = map[string]struct{}{
-	"copilot":     {},
-	"claude":      {},
-	"opencode":    {},
-	"codex":       {},
-	"antigravity": {},
-	"headless":    {},
-	"pi":          {},
+	"copilot":  {},
+	"claude":   {},
+	"opencode": {},
+	"headless": {},
 }
 
 // knownBackendNames lists knownBackends sorted, so the rejection message
@@ -220,28 +217,6 @@ var thriftyFor = map[string]string{
     reviewer: { model: anthropic/claude-sonnet-4-5 }
     scribe: { model: anthropic/claude-haiku-4-5 }
 `,
-	// pi resolves provider/id itself, so the ids carry their provider
-	// rather than depend on GUMMI_PI_PROVIDER being set.
-	"pi": `  thrifty: # everyday features — backend omitted → engine default
-    architect: { model: anthropic/claude-sonnet-4-5 }
-    implementer: { model: anthropic/claude-haiku-4-5 }
-    reviewer: { model: anthropic/claude-sonnet-4-5 }
-    scribe: { model: anthropic/claude-haiku-4-5 }
-`,
-	// codex runs OpenAI's models only and needs one named.
-	"codex": `  thrifty: # everyday features — backend omitted → engine default
-    architect: { model: gpt-5 }
-    implementer: { model: gpt-5-codex }
-    reviewer: { model: gpt-5 }
-    scribe: { model: gpt-5-mini }
-`,
-	// agy's ids carry their effort dial; `agy models` lists them.
-	"antigravity": `  thrifty: # everyday features — backend omitted → engine default
-    architect: { model: gemini-3.1-pro-high }
-    implementer: { model: gemini-3.8-flash-high }
-    reviewer: { model: gemini-3.1-pro-high }
-    scribe: { model: gemini-3.8-flash-low }
-`,
 }
 
 // ProfilesTemplateFor is the starter profiles.yaml seeded for a workspace
@@ -263,11 +238,10 @@ const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. 
 # so the same process can run cheap or premium, or mix providers. See
 # docs/DESIGN.md §5.
 #
-# backend: (optional) copilot | claude | codex | opencode | pi | antigravity | headless. Omit to use
-# the engine's default (whatever GUMMI_AGENT selects; copilot otherwise).
-# The backend owns provider config natively — Claude Code login, Codex login, opencode
-# auth, pi auth (GUMMI_PI_PROVIDER for model ids that don't name a provider), GUMMI_AGENT_CMD
-# for headless — so no keys or endpoints live here.
+# backend: (optional) copilot | claude | opencode. Omit to use the engine's
+# default (whatever GUMMI_AGENT selects; copilot otherwise).
+# The backend owns provider config natively — Copilot login, Claude Code
+# login, opencode auth — so no keys or endpoints live here.
 
 default: thrifty
 
@@ -280,15 +254,4 @@ profiles:
     # sandbox: warn  # enforce refuses a backend without tool coverage;
     #                # warn and off let such a run start anyway.
 
-` + thriftyDefault + `
-  # local-heavy: mix a local llama.cpp endpoint (via the headless adapter)
-  # with cloud models. Point GUMMI_AGENT_CMD at a wrapper that speaks
-  # OpenAI to your local runner; set GUMMI_HEADLESS_CREDITS_PER_1K to a
-  # small rate so local spend meters cheaply against the same budget.
-  #
-  # local-heavy:
-  #   architect: { backend: claude, model: sonnet }
-  #   implementer: { backend: headless, model: qwen2.5-coder-32b }
-  #   reviewer: { backend: headless, model: qwen2.5-coder-32b }
-  #   scribe: { backend: copilot, model: gpt-5-mini }
-`
+` + thriftyDefault

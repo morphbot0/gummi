@@ -25,7 +25,7 @@ import (
 func clearDoctorEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"GUMMI_AGENT", "GUMMI_AGENT_CMD", "GUMMI_CLAUDE_BIN", "GUMMI_CODEX_BIN", "GUMMI_OPENCODE_BIN",
+		"GUMMI_AGENT", "GUMMI_AGENT_CMD", "GUMMI_CLAUDE_BIN", "GUMMI_OPENCODE_BIN",
 		"GUMMI_ENVELOPE",
 	} {
 		t.Setenv(k, "")
@@ -107,19 +107,6 @@ func TestDoctorConfigLoadErrorProducesFailingCheck(t *testing.T) {
 	}
 	if c := checkByName(r, "config:permissions"); c.Status != statusOK {
 		t.Errorf("config:permissions should still render, got %+v", c)
-	}
-}
-
-func TestDoctorCodexUsesNativeLoginRemediation(t *testing.T) {
-	clearDoctorEnv(t)
-	fakeAgentOnPath(t, "codex")
-	t.Setenv("GUMMI_AGENT", "codex")
-	r := buildDoctorReport(gitRepo(t), doctorOpts{})
-	if c := checkByName(r, "backend:codex"); c.Status != statusOK || !strings.Contains(c.Detail, "codex") {
-		t.Fatalf("backend = %+v", c)
-	}
-	if c := checkByName(r, "auth:codex"); !strings.Contains(c.Remediation, "codex login") {
-		t.Fatalf("auth = %+v", c)
 	}
 }
 
@@ -531,7 +518,7 @@ func TestGuardedIncompatibilitiesCleanCompatible(t *testing.T) {
 		"safe": {
 			"architect":   {Backend: "copilot", Model: "m"},
 			"implementer": {Backend: "opencode", Model: "m"},
-			"reviewer":    {Backend: "codex", Model: "m"},
+			"reviewer":    {Backend: "opencode", Model: "m"},
 		},
 	}}
 	if issues := guardedIncompatibilities("copilot", profiles); len(issues) != 0 {
@@ -986,48 +973,6 @@ func TestProbeModelUnknownOnMissingBackend(t *testing.T) {
 	}
 }
 
-// TestBackendInfoForAntigravity: doctor knows the backend's binary
-// (honoring GUMMI_ANTIGRAVITY_BIN) and names the re-login path — the
-// hint an operator with a dead token is shown.
-func TestBackendInfoForAntigravity(t *testing.T) {
-	clearDoctorEnv(t)
-	bi := backendInfoFor("antigravity")
-	if bi.name != "antigravity" || bi.bin != "agy" {
-		t.Fatalf("backendInfoFor(antigravity) = %+v, want bin agy", bi)
-	}
-	if !strings.Contains(bi.login, "agy") {
-		t.Errorf("login hint = %q, want it to name the agy re-login path", bi.login)
-	}
-	t.Setenv("GUMMI_ANTIGRAVITY_BIN", "/opt/agy")
-	bi = backendInfoFor("antigravity")
-	if bi.bin != "/opt/agy" {
-		t.Errorf("bin with override = %q, want the override", bi.bin)
-	}
-}
-
-// TestPricingCheckWarnsWithoutAnAntigravityRate: agy reports tokens only,
-// so doctor warns when nothing prices them, names a bad value as bad, and
-// reports a set rate — and says nothing for a backend that reports money.
-func TestPricingCheckWarnsWithoutAnAntigravityRate(t *testing.T) {
-	clearDoctorEnv(t)
-	t.Setenv("GUMMI_ANTIGRAVITY_CREDITS_PER_1K", "")
-	c, ok := pricingCheck("antigravity")
-	if !ok || c.Status != statusWarn || !strings.Contains(c.Detail, "unset") || c.Remediation == "" {
-		t.Fatalf("unset rate: %+v ok=%v, want a warn naming it unset with a remediation", c, ok)
-	}
-	t.Setenv("GUMMI_ANTIGRAVITY_CREDITS_PER_1K", "abc")
-	if c, _ := pricingCheck("antigravity"); c.Status != statusWarn || !strings.Contains(c.Detail, "not a positive number") {
-		t.Fatalf("bad rate: %+v, want a warn naming the value bad", c)
-	}
-	t.Setenv("GUMMI_ANTIGRAVITY_CREDITS_PER_1K", "0.08")
-	if c, _ := pricingCheck("antigravity"); c.Status != statusOK || !strings.Contains(c.Detail, "0.08") {
-		t.Fatalf("set rate: %+v, want ok reporting 0.08", c)
-	}
-	if _, ok := pricingCheck("claude"); ok {
-		t.Fatal("pricing check emitted for claude, which reports its own cost")
-	}
-}
-
 // TestConsultChecksReportConfinementPerBackend: doctor names, per backend
 // that answers a consult, whether the consult runs read-only there — the
 // consult role first, the architect when a profile has none, the default
@@ -1036,7 +981,7 @@ func TestPricingCheckWarnsWithoutAnAntigravityRate(t *testing.T) {
 func TestConsultChecksReportConfinementPerBackend(t *testing.T) {
 	profiles := config.Profiles{Profiles: map[string]config.Profile{
 		"thrifty": {"architect": {Backend: "claude"}, "implementer": {Backend: "copilot"}},
-		"premium": {"consult": {Backend: "codex"}, "architect": {Backend: "claude"}},
+		"premium": {"consult": {Backend: "headless"}, "architect": {Backend: "claude"}},
 		"plain":   {"implementer": {Backend: "opencode"}},
 	}}
 	got := map[string]doctorCheck{}
@@ -1044,13 +989,13 @@ func TestConsultChecksReportConfinementPerBackend(t *testing.T) {
 		got[c.Name] = c
 	}
 	if len(got) != 3 {
-		t.Fatalf("checks = %+v, want one each for claude, codex and copilot", got)
+		t.Fatalf("checks = %+v, want one each for claude, headless and copilot", got)
 	}
 	if c := got["consult:claude"]; c.Status != statusOK || !strings.Contains(c.Detail, "read-only") {
 		t.Errorf("claude: %+v, want ok and read-only", c)
 	}
-	if c := got["consult:codex"]; c.Status != statusWarn || !strings.Contains(c.Detail, engine.ConsultNotice("codex")) || !strings.Contains(c.Detail, "premium") || c.Remediation == "" {
-		t.Errorf("codex: %+v, want a warn carrying the notice and naming premium", c)
+	if c := got["consult:headless"]; c.Status != statusWarn || !strings.Contains(c.Detail, engine.ConsultNotice("headless")) || !strings.Contains(c.Detail, "premium") || c.Remediation == "" {
+		t.Errorf("headless: %+v, want a warn carrying the notice and naming premium", c)
 	}
 	if c := got["consult:copilot"]; c.Status != statusWarn || !strings.Contains(c.Detail, "plain") {
 		t.Errorf("copilot (the default, for a profile naming neither role): %+v, want a warn naming plain", c)

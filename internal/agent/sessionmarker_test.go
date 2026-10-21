@@ -22,8 +22,6 @@ func TestEveryBackendEnvironmentCarriesTheSessionMarker(t *testing.T) {
 	want := sessionMarker + "=1"
 	for name, env := range map[string][]string{
 		"claude":           scrubClaudeSessionEnv(os.Environ()),
-		"antigravity home": envWithAntigravityHome(os.Environ(), t.TempDir()),
-		"antigravity tool": antigravityToolEnv(envWithAntigravityHome(os.Environ(), t.TempDir()), t.TempDir()),
 		"opencode session": childEnvFor(0, "sock", "config"),
 		"opencode probe":   envWithout("OPENCODE_CONFIG"),
 	} {
@@ -40,9 +38,8 @@ func TestEveryBackendEnvironmentCarriesTheSessionMarker(t *testing.T) {
 	}
 	assign := regexp.MustCompile(`\bEnv(\s*=|,.*=|:)\s`)
 	passed := map[string]bool{
-		"opencode_client.go: cmd.Env = env":                                        true, // serveOpencode's callers: childEnvFor, envWithout
-		"copilot.go: Env:        opts.Env,":                                        true, // empty inherits; see below
-		"pi_extension.go: Env:   map[string]string{\"GUMMI_MCP_SOCK\": sockPath},": true, // an MCP server's extra variables, added to the agent's own
+		"opencode_client.go: cmd.Env = env": true, // serveOpencode's callers: childEnvFor, envWithout
+		"copilot.go: Env:        opts.Env,": true, // empty inherits; see below
 	}
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {

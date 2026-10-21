@@ -170,9 +170,8 @@ func TestDeletingACardWhoseRepoIsNoLongerConfigured(t *testing.T) {
 	}
 }
 
-// TestDeletingACardRemovesItsScratchFiles: a card's scratch-files dir —
-// where a backend that keeps a per-card config home (antigravity) derives
-// it — goes with the card, while a co-resident card's is untouched.
+// TestDeletingACardRemovesItsScratchFiles: a card's scratch-files dir goes
+// with the card, while a co-resident card's is untouched.
 func TestDeletingACardRemovesItsScratchFiles(t *testing.T) {
 	m := repoWorkspace(t)
 	ctx := context.Background()
@@ -181,13 +180,9 @@ func TestDeletingACardRemovesItsScratchFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// the card home where it lives now, and where an older gummi left it
-	homes := []string{
-		filepath.Join(m.ws.AgentHomeDir(f.ID), "agy"),
-		filepath.Join(m.ws.ScratchFilesDir(f.ID), "agy-home"),
-	}
+	homes := []string{m.ws.ScratchFilesDir(f.ID)}
 	for _, home := range homes {
-		if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o700); err != nil {
+		if err := os.MkdirAll(home, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		// what an agent's `go build` leaves under that home: a module cache of
@@ -204,11 +199,7 @@ func TestDeletingACardRemovesItsScratchFiles(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(mod, 0o700) })
 	}
-	other := filepath.Join(m.ws.ScratchFilesDir("FD-999"), "agy-home", ".gemini")
-	otherHome := filepath.Join(m.ws.AgentHomeDir("FD-999"), "agy", ".gemini")
-	if err := os.MkdirAll(otherHome, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	other := filepath.Join(m.ws.ScratchFilesDir("FD-999"), "notes")
 	if err := os.MkdirAll(other, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -219,13 +210,10 @@ func TestDeletingACardRemovesItsScratchFiles(t *testing.T) {
 	}
 	for _, home := range homes {
 		if _, err := os.Stat(home); !os.IsNotExist(err) {
-			t.Fatalf("deleted card's card home %s still present: stat err = %v", home, err)
+			t.Fatalf("deleted card's scratch files %s still present: stat err = %v", home, err)
 		}
 	}
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("co-resident card's scratch files removed: %v", err)
-	}
-	if _, err := os.Stat(otherHome); err != nil {
-		t.Fatalf("co-resident card's backend home removed: %v", err)
 	}
 }

@@ -44,8 +44,7 @@ a **verified branch** — landing it on main is always your keypress.
   agent, with NDJSON output and typed exit statuses.
 - **In the browser** — `gummi web` serves the same board to a browser,
   over loopback or your tailnet.
-- **Many backends** — Copilot CLI (default), Claude Code, Codex, opencode,
-  pi, Antigravity, or any binary speaking a small stdio protocol.
+- **Three backends** — Copilot CLI (default), Claude Code and opencode.
 
 ## Install
 

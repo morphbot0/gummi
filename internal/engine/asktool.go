@@ -1114,7 +1114,7 @@ const askOutlivedReply = "the question is still open with the user — their ans
 //
 // ask_user blocks the agent's turn on a person, and a person may take an
 // hour. The backends between gummi and the model do not wait an hour: an
-// MCP client bounds every tool call (a minute, on opencode and codex), and
+// MCP client bounds every tool call (a minute, on opencode), and
 // the engine's side of the bridge is never told the client gave up. The
 // model reads "timed out", asks again, is bounced because the first
 // question is still up, says the question is with the user and ends its

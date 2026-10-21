@@ -17,7 +17,7 @@ Repair each item that isn't `ok`:
 
 - **backend** — set gummi's backend to the **same agent that is driving it**:
   give every role a `backend:` in `.gummi/profiles.yaml` (e.g. `backend:
-  claude` if you are Claude Code, `backend: codex` if you are Codex); export
+  claude` if you are Claude Code, `backend: opencode` if you are opencode); export
   `GUMMI_AGENT` only to set the fallback default for roles that omit it.
   Matching the backend to yourself keeps the whole pipeline on one vendor's
   auth, and it sidesteps the cross-model trap where the claude backend

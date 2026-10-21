@@ -25,7 +25,7 @@ func TestLoadProfiles(t *testing.T) {
 profiles:
   premium:
     architect: { backend: claude, model: claude-opus-4.8, output_token_max: 128000 }
-    reviewer: { model: gpt-5-codex }
+    reviewer: { model: gpt-5 }
   thrifty:
     implementer: { backend: headless, model: qwen2.5-coder-32b }
     scribe: { model: gpt-5-mini }
@@ -79,23 +79,6 @@ func TestLoadProfilesRejectsNegativeOutputTokenMax(t *testing.T) {
 	}
 }
 
-func TestLoadProfilesAcceptsCodex(t *testing.T) {
-	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: codex, model: gpt-5 }\n")
-	if got := p.Profiles["x"]["implementer"].Backend; got != "codex" {
-		t.Fatalf("backend = %q", got)
-	}
-}
-
-// TestLoadProfilesAcceptsAntigravity: the antigravity backend is a valid
-// profile target — the exact failure a `backend: antigravity` role once
-// hit (rejected at parse, so no profile could route any role at it).
-func TestLoadProfilesAcceptsAntigravity(t *testing.T) {
-	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: antigravity, model: gemini-3.1-pro-high }\n")
-	if got := p.Profiles["x"]["implementer"].Backend; got != "antigravity" {
-		t.Fatalf("backend = %q", got)
-	}
-}
-
 // TestKnownBackendsCoverThePicker is the drift guard for the backend
 // validation map: every backend the picker/detect layer names must be one
 // a profile role may route at. A backend the adapters serve but
@@ -137,13 +120,12 @@ func TestLoadProfilesRejectsMissingModel(t *testing.T) {
 // The seeded thrifty profile omits `backend:`, so the default backend
 // drives it and its ids must be ones that backend takes: dashed or alias
 // ids for claude (never a dotted or foreign one), provider/model for
-// opencode and pi, OpenAI ids for codex, and agy's effort-dialled ids for
-// antigravity. Every variant still parses, and only thrifty changes.
+// opencode. Every variant still parses, and only thrifty changes.
 func TestProfilesTemplateForBackend(t *testing.T) {
 	if ProfilesTemplateFor("copilot") != ProfilesTemplate || ProfilesTemplateFor("") != ProfilesTemplate {
 		t.Error("the default backends should get the template unchanged")
 	}
-	for _, backend := range []string{"claude", "opencode", "pi", "codex", "antigravity"} {
+	for _, backend := range []string{"claude", "opencode"} {
 		tmpl := ProfilesTemplateFor(backend)
 		if tmpl == ProfilesTemplate {
 			t.Fatalf("%s: thrifty was not rewritten", backend)
@@ -158,18 +140,9 @@ func TestProfilesTemplateForBackend(t *testing.T) {
 				if strings.Contains(rc.Model, ".") || strings.HasPrefix(rc.Model, "gpt") {
 					t.Errorf("claude thrifty %s = %q, an id the claude CLI refuses", role, rc.Model)
 				}
-			case "opencode", "pi":
+			case "opencode":
 				if !strings.Contains(rc.Model, "/") {
 					t.Errorf("%s thrifty %s = %q, want provider/model", backend, role, rc.Model)
-				}
-			case "codex":
-				if !strings.HasPrefix(rc.Model, "gpt-") {
-					t.Errorf("codex thrifty %s = %q, want an OpenAI id", role, rc.Model)
-				}
-			case "antigravity":
-				dial := rc.Model[strings.LastIndex(rc.Model, "-")+1:]
-				if dial != "low" && dial != "medium" && dial != "high" {
-					t.Errorf("antigravity thrifty %s = %q, want an agy id with its effort dial", role, rc.Model)
 				}
 			}
 		}

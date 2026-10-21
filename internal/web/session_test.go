@@ -21,7 +21,7 @@ import (
 )
 
 // namedFake is the fake agent under a real backend's name, so a session
-// can name it the way a person names codex in the picker.
+// can name it the way a person names opencode in the picker.
 type namedFake struct {
 	*agent.Fake
 	name string
@@ -35,25 +35,26 @@ func (n namedFake) Name() string { return n.name }
 // run — and it is filled off the loop, so the board did not block on the
 // ask.
 func TestTheFormOffersTheModelsTheAgentSaysItProvides(t *testing.T) {
+	t.Setenv("GUMMI_CLAUDE_BIN", "claude-not-in-this-test")
 	fake := agent.NewFake("on it")
-	fake.Models = []string{"z-codex-model", "a-codex-model"}
-	h := newCardBoard(t, namedFake{Fake: fake, name: "codex"})
+	fake.Models = []string{"openai/z-model", "openai/a-model"}
+	h := newCardBoard(t, namedFake{Fake: fake, name: "opencode"})
 
 	var form webapi.Form
 	if st := h.call(http.MethodGet, "/api/form", nil, &form); st != http.StatusOK {
 		t.Fatalf("form = %d", st)
 	}
-	i := slices.IndexFunc(form.Sessions.Agents, func(a webapi.SessionAgent) bool { return a.Name == "codex" })
+	i := slices.IndexFunc(form.Sessions.Agents, func(a webapi.SessionAgent) bool { return a.Name == "opencode" })
 	if i < 0 {
-		t.Fatal("the picker has no codex row")
+		t.Fatal("the picker has no opencode row")
 	}
-	if got := form.Sessions.Agents[i].Models; !slices.Equal(got, []string{"a-codex-model", "z-codex-model"}) {
-		t.Errorf("codex's models = %v, want the agent's own catalog", got)
+	if got := form.Sessions.Agents[i].Models; !slices.Equal(got, []string{"openai/a-model", "openai/z-model"}) {
+		t.Errorf("opencode's models = %v, want the agent's own catalog", got)
 	}
 	// an agent this host cannot start is not probed: its row keeps
 	// whatever the workspace's profiles run there, and nothing more
-	if j := slices.IndexFunc(form.Sessions.Agents, func(a webapi.SessionAgent) bool { return a.Name == "opencode" }); j < 0 || form.Sessions.Agents[j].Installed || len(form.Sessions.Agents[j].Models) != 0 {
-		t.Errorf("opencode = %+v, want not installed and no catalog", form.Sessions.Agents)
+	if j := slices.IndexFunc(form.Sessions.Agents, func(a webapi.SessionAgent) bool { return a.Name == "claude" }); j < 0 || form.Sessions.Agents[j].Installed || len(form.Sessions.Agents[j].Models) != 0 {
+		t.Errorf("claude = %+v, want not installed and no catalog", form.Sessions.Agents)
 	}
 }
 
@@ -80,7 +81,7 @@ func waitTranscript(t *testing.T, h *cardBoard, id, want string) {
 // composer, and the first message verbatim as its first turn. The card
 // says what it runs on, and the picker offers that pair back as recent.
 func TestASessionStartsOnTheModelItsDraftPicked(t *testing.T) {
-	h := newCardBoard(t, namedFake{Fake: agent.NewFake("on it"), name: "codex"})
+	h := newCardBoard(t, namedFake{Fake: agent.NewFake("on it"), name: "opencode"})
 
 	var form webapi.Form
 	if st := h.call(http.MethodGet, "/api/form", nil, &form); st != http.StatusOK {
@@ -93,14 +94,14 @@ func TestASessionStartsOnTheModelItsDraftPicked(t *testing.T) {
 	if !slices.Equal(names, engine.SessionBackends) {
 		t.Errorf("the picker offers %v, want every session backend %v", names, engine.SessionBackends)
 	}
-	if i := slices.IndexFunc(form.Sessions.Agents, func(a webapi.SessionAgent) bool { return a.Name == "codex" }); i < 0 || !form.Sessions.Agents[i].Installed || !form.Sessions.Agents[i].NeedsModel {
-		t.Errorf("codex, which this board runs, is not offered as installed and needing a model: %+v", form.Sessions.Agents)
+	if i := slices.IndexFunc(form.Sessions.Agents, func(a webapi.SessionAgent) bool { return a.Name == "opencode" }); i < 0 || !form.Sessions.Agents[i].Installed || !form.Sessions.Agents[i].NeedsModel {
+		t.Errorf("opencode, which this board runs, is not offered as installed and needing a model: %+v", form.Sessions.Agents)
 	}
 
 	opening := "The retry test flakes on CI.\n\nFind out why, and keep the fix small."
-	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: opening, Backend: "codex", Model: "gpt-5"})
-	if c.Session == nil || c.Session.Backend != "codex" || c.Session.Model != "gpt-5" {
-		t.Fatalf("the session runs on %+v, want codex/gpt-5", c.Session)
+	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: opening, Backend: "opencode", Model: "openai/gpt-5"})
+	if c.Session == nil || c.Session.Backend != "opencode" || c.Session.Model != "openai/gpt-5" {
+		t.Fatalf("the session runs on %+v, want opencode/openai/gpt-5", c.Session)
 	}
 	if c.Title != "The retry test flakes on CI." {
 		t.Errorf("title = %q, want the opening's first line", c.Title)
@@ -110,7 +111,7 @@ func TestASessionStartsOnTheModelItsDraftPicked(t *testing.T) {
 	if st := h.call(http.MethodGet, "/api/form", nil, &form); st != http.StatusOK {
 		t.Fatalf("form = %d", st)
 	}
-	if !slices.Contains(form.Sessions.Recent, webapi.SessionModel{Backend: "codex", Model: "gpt-5"}) {
+	if !slices.Contains(form.Sessions.Recent, webapi.SessionModel{Backend: "opencode", Model: "openai/gpt-5"}) {
 		t.Errorf("the pair a session runs on is not offered as recent: %+v", form.Sessions.Recent)
 	}
 }
@@ -119,9 +120,9 @@ func TestASessionStartsOnTheModelItsDraftPicked(t *testing.T) {
 // minted: a model on a card in the workflow, a pair no agent could run,
 // and an agent this host does not have.
 func TestASessionDraftRefusesWhatCannotRun(t *testing.T) {
-	h := newCardBoard(t, namedFake{Fake: agent.NewFake("ok"), name: "codex"})
+	h := newCardBoard(t, namedFake{Fake: agent.NewFake("ok"), name: "opencode"})
 	for _, req := range []webapi.CreateCardRequest{
-		{Kind: "feature", Title: "Configurable retries", Backend: "codex", Model: "gpt-5"},
+		{Kind: "feature", Title: "Configurable retries", Backend: "opencode", Model: "openai/gpt-5"},
 		{Kind: "freeform", Description: "anything", Backend: "claude", Model: "gpt-5"},
 		{Kind: "freeform", Description: "anything", Backend: "opencode"},
 		{Kind: "freeform", Description: "anything", Model: "gpt-5"},
@@ -143,8 +144,8 @@ func TestASessionDraftRefusesWhatCannotRun(t *testing.T) {
 // A session's menu switches its model; the next turn runs on the new one,
 // and a card in the workflow is offered no such switch.
 func TestASessionSwitchesItsModelFromItsMenu(t *testing.T) {
-	h := newCardBoard(t, namedFake{Fake: agent.NewFake("done"), name: "codex"})
-	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "tidy the help text", Backend: "codex", Model: "gpt-5"})
+	h := newCardBoard(t, namedFake{Fake: agent.NewFake("done"), name: "opencode"})
+	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "tidy the help text", Backend: "opencode", Model: "openai/gpt-5"})
 	waitTranscript(t, h, c.ID, "done")
 	for deadline := time.Now().Add(10 * time.Second); h.eng.Freeform(domain.FeatureID(c.ID)).Busy(); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
@@ -163,16 +164,16 @@ func TestASessionSwitchesItsModelFromItsMenu(t *testing.T) {
 	if st, _ := h.actionRaw(c.ID, "model", webapi.ActionRequest{Backend: "claude", Model: "gpt-5"}); st != http.StatusBadRequest {
 		t.Errorf("switching claude to a gpt model = %d, want a refusal", st)
 	}
-	h.action(c.ID, "model", webapi.ActionRequest{Backend: "codex", Model: "gpt-5-codex"})
-	got := h.waitCard(c.ID, "the new model", func(c webapi.Card) bool { return c.Session != nil && c.Session.Model == "gpt-5-codex" })
-	if got.Session.Backend != "codex" {
+	h.action(c.ID, "model", webapi.ActionRequest{Backend: "opencode", Model: "openai/gpt-5-mini"})
+	got := h.waitCard(c.ID, "the new model", func(c webapi.Card) bool { return c.Session != nil && c.Session.Model == "openai/gpt-5-mini" })
+	if got.Session.Backend != "opencode" {
 		t.Errorf("after the switch the session runs on %+v", got.Session)
 	}
 	row, err := h.store.GetFeature(t.Context(), domain.FeatureID(c.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.SessionModel != "gpt-5-codex" {
+	if row.SessionModel != "openai/gpt-5-mini" {
 		t.Errorf("the card holds model %q after the switch", row.SessionModel)
 	}
 
@@ -205,10 +206,10 @@ func TestWritespecDraftStartsOnlyOnThePost(t *testing.T) {
 		}
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}
-	h := newCardBoard(t, namedFake{Fake: fake, name: "codex"})
+	h := newCardBoard(t, namedFake{Fake: fake, name: "opencode"})
 	// a held turn must be let go before the board shuts down, or Close waits on it
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Find why the retry test flakes", Backend: "codex", Model: "gpt-5"})
+	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Find why the retry test flakes", Backend: "opencode", Model: "openai/gpt-5"})
 	waitTranscript(t, h, s.ID, "done")
 	for deadline := time.Now().Add(10 * time.Second); h.eng.Freeform(domain.FeatureID(s.ID)).Busy(); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
@@ -290,8 +291,8 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 		}
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}
-	h := newCardBoard(t, namedFake{Fake: fake, name: "codex"})
-	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Find why the retry test flakes", Backend: "codex", Model: "gpt-5"})
+	h := newCardBoard(t, namedFake{Fake: fake, name: "opencode"})
+	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Find why the retry test flakes", Backend: "opencode", Model: "openai/gpt-5"})
 	waitTranscript(t, h, s.ID, "done")
 	for deadline := time.Now().Add(10 * time.Second); h.eng.Freeform(domain.FeatureID(s.ID)).Busy(); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
@@ -451,8 +452,8 @@ func TestASessionIsCommittedFromItsMenu(t *testing.T) {
 		}
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}
-	h := newCardBoard(t, namedFake{Fake: fake, name: "codex"})
-	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Retry the sync", Backend: "codex", Model: "gpt-5"})
+	h := newCardBoard(t, namedFake{Fake: fake, name: "opencode"})
+	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Retry the sync", Backend: "opencode", Model: "openai/gpt-5"})
 	waitTranscript(t, h, s.ID, "done")
 	for deadline := time.Now().Add(10 * time.Second); h.eng.Freeform(domain.FeatureID(s.ID)).Busy(); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
