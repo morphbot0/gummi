@@ -211,6 +211,15 @@ func Items(events []state.CardEvent, opt Options) []Item {
 		}
 		k, inSeg := segOf[i]
 		if !inSeg {
+			// A session runs in no stage segment: what a person did to its
+			// branch (published it, rebased it) is still the thread's to
+			// say. Everything else outside a segment belongs to the
+			// session's own transcript, which the page draws live.
+			if ev.Kind == state.EventPublish || ev.Kind == state.EventRebase {
+				if it, ok := eventItem(ev); ok {
+					emit(it)
+				}
+			}
 			continue
 		}
 		seg := segs[k]

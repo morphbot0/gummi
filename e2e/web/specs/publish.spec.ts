@@ -109,6 +109,11 @@ test.describe('a session on a repository with a github.com remote', () => {
     await expect(page.getByTestId('pr-publish')).not.toContainText('not on GitHub', { timeout: 15_000 });
     await shot(page, info, 'publish-7-updated');
 
+    // the card's thread says what was published, and who did it
+    const thread = JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json.items);
+    expect(thread).toContain('Tester');
+    expect(thread).toMatch(/#12/);
+
     if (phone(info)) await page.getByTestId('tab-thread').click();
     await shot(page, info, 'publish-8-thread');
   });
