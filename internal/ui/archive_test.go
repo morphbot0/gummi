@@ -39,13 +39,13 @@ func TestArchiveFoldsWhatSettledEarlier(t *testing.T) {
 	}
 	// folded: the two old ones are not in the order at all, which is what
 	// keeps the jump numbers contiguous
-	order := m.displayOrder(SortCreation)
+	order := m.displayOrder()
 	if len(order) != 2 {
 		t.Fatalf("folded order = %v, want the live card and today's", order)
 	}
 	// and opening it brings them back
 	m.toggleArchive()
-	if order := m.displayOrder(SortCreation); len(order) != 4 {
+	if order := m.displayOrder(); len(order) != 4 {
 		t.Fatalf("open order = %v, want every row", order)
 	}
 }

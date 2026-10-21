@@ -95,11 +95,10 @@ func (m *Shell) globalCommands() []command {
 		// No accelerator: `n` already reaches this. The entry exists so the
 		// word itself is in the vocabulary — a reader who knows what they
 		// want types "/freeform".
-		{id: "new-freeform", name: "freeform", label: "New freeform card — no workflow, its own branch", key: "", available: attached},
+		{id: "new-freeform", name: "freeform", label: "New session — a coding agent on a branch of its own", key: "", available: attached},
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "L", name: "schedules", label: "Schedules and heartbeats", key: "L", available: attached},
 		{id: "E", name: "skills", label: "Skill pack and its curator", key: "E", available: attached},
-		{id: "S", name: "sort", label: "Sort todo by severity", key: "S", available: attached},
 		{id: "settings", name: "settings", label: "Settings — name this gummi instance", key: "", available: true},
 		{id: "?", name: "keys", label: "Show the keys for this surface", key: helpKeyFor(m.cardOpen), available: true},
 		{id: "q", name: "quit", label: "Quit gummi", key: "q", available: true},

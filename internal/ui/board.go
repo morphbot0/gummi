@@ -325,9 +325,9 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 // fold them into this same legend or its own.
 func boardGlyphLegend() [][2]string {
 	return [][2]string{
-		{"○ ● ◐ ✔", "stage: todo · in progress · review/verify · done"},
+		{"● ✔", "a session open · done (○ ◐ mark a retired workflow card's stage)"},
 		{"⎇", "worktree present"},
-		{"✉ ✗ ? $", "needs you: gate · run failure · question · budget"},
+		{"✉ ✗ ? $", "needs you: a decision · run failure · question · budget"},
 		{"landed", "the branch was squash-merged onto the base branch"},
 		{"handed off", "the card was closed with its branch deliberately kept — nothing landed"},
 	}

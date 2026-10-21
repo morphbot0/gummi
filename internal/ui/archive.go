@@ -152,7 +152,7 @@ func (m *Shell) toggleArchive() {
 		return
 	}
 	if r, ok := m.selected(); ok && m.archived(r) {
-		if order := m.displayOrder(m.sortMode); len(order) > 0 {
+		if order := m.displayOrder(); len(order) > 0 {
 			m.sel = order[len(order)-1]
 		}
 	}

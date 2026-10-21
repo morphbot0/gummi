@@ -110,7 +110,7 @@ const repoUnsetLabel = "choose one"
 const repoUnchosenErr = "select a repository — a workspace with `repos:` has no default"
 
 // repoPicker is the repo-selector field shared by every managed-repo
-// creation dialog (feature, bug, research, ingest). It offers exactly one
+// creation dialog (a session, a stack card). It offers exactly one
 // of two things, never a mix:
 //
 //   - the configured `repos:` names, when there are any. Such a workspace

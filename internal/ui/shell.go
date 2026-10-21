@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image/color"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,16 +30,6 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/webapi"
 	"github.com/morphis/gummi/internal/worktree"
-)
-
-// SortMode selects how the board's todo column is ordered. It is an
-// ephemeral, in-memory toggle (never persisted): SortCreation shows
-// cards in creation order, SortSeverity ranks bugs by severity.
-type SortMode int
-
-const (
-	SortCreation SortMode = iota
-	SortSeverity
 )
 
 // Shell is gummi's top-level Bubble Tea model. It owns the screen
@@ -122,7 +111,6 @@ type Shell struct {
 	landConflicts map[domain.FeatureID][]string
 
 	inboxSel int      // cursor into m.inbox.list(), the inbox tab's own selection
-	sortMode SortMode // todo-column ordering toggle (ephemeral, not persisted)
 	notice   noticeMsg
 	spec     *specView // non-nil while the spec surface is open
 	diff     *diffView // non-nil while the diff surface is open
@@ -2427,12 +2415,12 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 	case "k", "up":
 		m.moveSel(-1)
 	case "pgup":
-		if order := m.displayOrder(m.sortMode); len(order) > 0 {
+		if order := m.displayOrder(); len(order) > 0 {
 			m.sel = order[0]
 			m.syncActionFocus()
 		}
 	case "pgdown":
-		if order := m.displayOrder(m.sortMode); len(order) > 0 {
+		if order := m.displayOrder(); len(order) > 0 {
 			m.sel = order[len(order)-1]
 			m.syncActionFocus()
 		}
@@ -2443,20 +2431,8 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		// of setting a stack up: the stack is created by the act of
 		// stacking a second card onto a first, so there is no "new
 		// stack" dialog to find and the common case costs one key.
-		//
-		// T and not S — S is the severity sort, and one key wearing two
-		// meanings on the same surface is the defect the keymap's own
-		// comments keep recording.
 		if cmd := m.openStackForm(); cmd != nil {
 			return cmd
-		}
-	case "S":
-		if m.sortMode == SortSeverity {
-			m.sortMode = SortCreation
-			m.notice = noticeMsg{text: "todo: creation order"}
-		} else {
-			m.sortMode = SortSeverity
-			m.notice = noticeMsg{text: "todo: by severity"}
 		}
 	case "W":
 		// The one screen that answers "was running this worth it". It
@@ -2652,7 +2628,7 @@ func (m *Shell) mainPage() int {
 
 // moveSel moves the selection through the board's display order.
 func (m *Shell) moveSel(delta int) {
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	if len(order) == 0 {
 		return
 	}
@@ -2677,18 +2653,16 @@ func (m *Shell) moveSel(delta int) {
 // jumpSel selects the nth visible card (1-based), matching the numbers
 // shown on the board.
 func (m *Shell) jumpSel(n int) {
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	if n >= 1 && n <= len(order) {
 		m.sel = order[n-1]
 		m.syncActionFocus()
 	}
 }
 
-// displayOrder lists row indices in board display order (grouped by
-// super-state). With sort == SortSeverity the todo column is ordered by
-// severity (critical first) with creation time as a stable tiebreaker;
-// every other column keeps chronological order regardless.
-func (m *Shell) displayOrder(mode SortMode) []int {
+// displayOrder lists row indices in board display order: grouped by
+// super-state, chronological within each.
+func (m *Shell) displayOrder() []int {
 	var order []int
 	for _, super := range domain.SuperStates {
 		var idxs []int
@@ -2705,35 +2679,9 @@ func (m *Shell) displayOrder(mode SortMode) []int {
 				idxs = append(idxs, i)
 			}
 		}
-		if super == domain.SuperTodo && mode == SortSeverity {
-			sort.SliceStable(idxs, func(a, b int) bool {
-				ra, rb := severityRank(m.rows[idxs[a]].F.Severity), severityRank(m.rows[idxs[b]].F.Severity)
-				if ra != rb {
-					return ra > rb
-				}
-				return m.rows[idxs[a]].F.CreatedAt.Before(m.rows[idxs[b]].F.CreatedAt)
-			})
-		}
 		order = append(order, idxs...)
 	}
 	return order
-}
-
-// severityRank maps a severity to its sort rank: critical ranks highest
-// (4), an unclassified (empty) severity ranks lowest (0).
-func severityRank(sev domain.Severity) int {
-	switch sev {
-	case domain.SeverityCritical:
-		return 4
-	case domain.SeverityHigh:
-		return 3
-	case domain.SeverityMedium:
-		return 2
-	case domain.SeverityLow:
-		return 1
-	default:
-		return 0
-	}
 }
 
 // selectedID names the card the cursor is on, or "" when the board has
@@ -2778,7 +2726,7 @@ func (m *Shell) restoreSel(id domain.FeatureID) {
 // So the board opened with the cursor parked on done work, at the bottom
 // of a list it had scrolled past everything to reach.
 func (m *Shell) selectFirstDisplayed() {
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	if len(order) == 0 {
 		m.sel = 0
 		return

@@ -62,7 +62,7 @@ func TestBoardView120(t *testing.T) {
 
 func TestBoardGroupsAndOrder(t *testing.T) {
 	m := populatedShell(120, 34)
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	// grouped: todo(51), in-progress(42,47,49,46), review(44), done(39)
 	want := []int{0, 1, 2, 3, 6, 4, 5}
 	if len(order) != len(want) {
@@ -81,7 +81,7 @@ func TestBoardGroupsAndOrder(t *testing.T) {
 
 func TestBoardNavigation(t *testing.T) {
 	m := populatedShell(120, 34)
-	m.sel = m.displayOrder(m.sortMode)[0]
+	m.sel = m.displayOrder()[0]
 	m.moveSel(1)
 	if m.rows[m.sel].F.ID != "FD-042" {
 		t.Errorf("j from first should reach FD-042, got %s", m.rows[m.sel].F.ID)
@@ -412,12 +412,6 @@ func bugRow(num int, title string, sev domain.Severity) featureRow {
 	return r
 }
 
-// withCreated returns a copy of the row with a specific creation time
-// (used to exercise the severity sort's creation-time tiebreaker).
-func (r featureRow) withCreated(t time.Time) featureRow {
-	r.F.CreatedAt = t
-	return r
-}
 
 // TestBoardCardLineSeverity golden-captures the severity badge rendering
 // for each canonical level plus the unclassified (empty) case.
@@ -459,72 +453,6 @@ func TestBoardBusyMarkersGolden(t *testing.T) {
 	b.WriteString("idle\n" + m.cardLine(idle, 1, false, true, 80) + "\n\n")
 	b.WriteString("driven elsewhere, mid-turn\n" + m.cardLine(driven, 2, false, true, 80) + "\n\n")
 	golden.RequireEqual(t, []byte(b.String()))
-}
-
-// TestDisplayOrderSortsTodoBySeverity: with SortSeverity active the todo
-// column ranks bugs critical→high→medium→low→empty while other columns
-// (in-progress, done) keep creation order.
-func TestDisplayOrderSortsTodoBySeverity(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	m.rows = []featureRow{
-		bugRow(1, "low bug", domain.SeverityLow),
-		bugRow(2, "critical bug", domain.SeverityCritical),
-		bugRow(3, "unclassified", ""),
-		bugRow(4, "high bug", domain.SeverityHigh),
-		bugRow(5, "medium bug", domain.SeverityMedium),
-	}
-	order := m.displayOrder(SortSeverity)
-	var got []domain.Severity
-	for _, i := range order {
-		got = append(got, m.rows[i].F.Severity)
-	}
-	want := []domain.Severity{
-		domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium,
-		domain.SeverityLow, "",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("order len = %d, want %d", len(got), len(want))
-	}
-	for i, sev := range want {
-		if got[i] != sev {
-			t.Errorf("position %d: severity %q, want %q", i, got[i], sev)
-		}
-	}
-	// creation order is restored with SortCreation, preserving the
-	// original row order within the todo column.
-	creation := m.displayOrder(SortCreation)
-	for i, wantNum := range []int{1, 2, 3, 4, 5} {
-		if got := m.rows[creation[i]].F.Num; got != wantNum {
-			t.Errorf("creation position %d: num %d, want %d", i, got, wantNum)
-		}
-	}
-}
-
-// TestDisplayOrderStable: rows sharing a severity keep creation time as a
-// stable tiebreaker across repeated sorts.
-func TestDisplayOrderStable(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	early := fixedTime
-	late := fixedTime.Add(2 * time.Hour)
-	mid := fixedTime.Add(time.Hour)
-	m.rows = []featureRow{
-		bugRow(3, "newest high", domain.SeverityHigh).withCreated(late),
-		bugRow(1, "oldest high", domain.SeverityHigh).withCreated(early),
-		bugRow(2, "middle high", domain.SeverityHigh).withCreated(mid),
-	}
-	first := m.displayOrder(SortSeverity)
-	second := m.displayOrder(SortSeverity)
-	for i := range first {
-		if first[i] != second[i] {
-			t.Fatalf("sort not stable across calls: %v vs %v", first, second)
-		}
-	}
-	want := []int{1, 2, 3} // creation time ascending: oldest, middle, newest
-	for i, idx := range first {
-		if want[i] != m.rows[idx].F.Num {
-			t.Errorf("position %d: num %d, want %d", i, m.rows[idx].F.Num, want[i])
-		}
-	}
 }
 
 // TestLongErrorNoticeUsesBand: a long error/remedy renders wrapped in the

@@ -247,7 +247,7 @@ func (m *Shell) backlogEntries() []backlogEntry {
 	var out []backlogEntry
 	var last boardGroup
 	splitDone := m.archiveCount() > 0
-	for i, idx := range m.displayOrder(m.sortMode) {
+	for i, idx := range m.displayOrder() {
 		if group := m.groupOf(m.rows[idx], splitDone); i == 0 || group != last {
 			if i > 0 {
 				out = append(out, backlogEntry{})
@@ -353,17 +353,13 @@ func (m *Shell) backlogView(w, h int) string {
 	var b strings.Builder
 	line := func(str string) { b.WriteString(ansi.Truncate(str, w, "…") + "\n") }
 
-	sortLabel := "creation order"
-	if m.sortMode == SortSeverity {
-		sortLabel = "severity (todo)"
-	}
 	// "1 cards" was never plural-agreed (BACKLOG was renamed above; this
 	// count had the same live-drive report). plural() (reviewloop.go) is the
 	// package's existing singular/plural switch, reused here rather than
 	// hand-rolling a second one.
 	n := len(m.rows)
 	line(" " + s.PaneTitleActive.Render("BOARD") + "  " +
-		s.Faint.Render(strconv.Itoa(n)+" card"+plural(n)+"  ·  sort: "+sortLabel))
+		s.Faint.Render(strconv.Itoa(n)+" card"+plural(n)))
 	line("")
 
 	if scrolls {
@@ -428,7 +424,7 @@ func (m *Shell) cardPageView(w, h int) string {
 	if _, ok := m.selected(); !ok {
 		return m.backlogView(w, h)
 	}
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	pos := 0
 	for i, idx := range order {
 		if idx == m.sel {

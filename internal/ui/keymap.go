@@ -224,7 +224,6 @@ func boardHelpRows(bs []binding) [][2]string {
 	heading("glyphs")
 	rows = append(rows, boardGlyphLegend()...)
 	rows = append(rows,
-		[2]string{"⟲", "rounds burned so far — the badge names which loop it counts (plan, review, or corrective)"},
 		[2]string{"~", "estimated — not yet the metered spend"},
 	)
 	return rows
@@ -280,7 +279,6 @@ func (m *Shell) boardBindings() []binding {
 		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
 		{key: "f", label: "fold archive", help: "fold or unfold the archive of cards that settled a while ago"},
 		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},
-		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},
 		{key: "D", label: "delete", help: "delete card (uppercase: it destroys work)"},
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},

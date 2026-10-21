@@ -234,10 +234,6 @@ func TestBacklogListMovesSelection(t *testing.T) {
 // so muscle memory survives whichever tab it's read from.
 func TestBacklogKeepsTheCardVerbs(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
-	m = press(t, m, key('S'))
-	if m.sortMode != SortSeverity {
-		t.Error("S should still toggle the sort from the backlog list")
-	}
 	m = press(t, m, key('n'))
 	if m.Overlay.Top() == nil {
 		t.Error("n should still raise the new-feature form from the backlog list")
