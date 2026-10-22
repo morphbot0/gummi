@@ -1,0 +1,36 @@
+== one step at work at 140
+⠹ deliver · run 2  design ✓ › build ↺ 2/3 › validate  · implement Edit internal/state/migrate_turns.go · $3.10 · 14m              alt+w jump
+== one step at work at 90
+⠹ deliver · run 2  implement Edit internal/state/migrate_turns.go               alt+w jump
+== one step at work at 60
+⠹ deliver · run 2  implement Edit internal/stat…  alt+w jump
+== two side by side at 140
+⠹ deliver · run 2  design ✓ › build ↺ 1/3 › validate  · review-a ∥ review-b Read internal/state/migrate_turns.go · $1.41 · 14m    alt+w jump
+== two side by side at 90
+⠹ deliver · run 2  review-a ∥ review-b Read internal/state/migrate_turns.go     alt+w jump
+== two side by side at 60
+⠹ deliver · run 2  review-a ∥ review-b Read int…  alt+w jump
+== a step asks at 140
+? deliver · run 2  implement asks: Resume a pruned v40 session, or refuse it?                                                     alt+w jump
+== a step asks at 90
+? deliver · run 2  implement asks: Resume a pruned v40 session, or refuse it?   alt+w jump
+== a step asks at 60
+? deliver · run 2  implement asks: Resume a pru…  alt+w jump
+== the run's own decision at 140
+? deliver · run 2  waits on you · Run 2: build reached its max without APPROVED.                                                  alt+w jump
+== the run's own decision at 90
+? deliver · run 2  waits on you · Run 2: build reached its max without APPROV…  alt+w jump
+== the run's own decision at 60
+? deliver · run 2  waits on you · Run 2: build …  alt+w jump
+== a spent pool at 140
+‖ deliver · run 2  paused · the session's $25.00 is spent · top up to carry on · $3.10                                            alt+w jump
+== a spent pool at 90
+‖ deliver · run 2  paused · the session's $25.00 is spent · top up to carry on  alt+w jump
+== a spent pool at 60
+‖ deliver · run 2  paused · the session's $25.0…  alt+w jump
+== a person's pause at 140
+‖ deliver · run 2  paused · paused by the person · resume to carry on · $3.10                                                     alt+w jump
+== a person's pause at 90
+‖ deliver · run 2  paused · paused by the person · resume to carry on · $3.10   alt+w jump
+== a person's pause at 60
+‖ deliver · run 2  paused · paused by the perso…  alt+w jump

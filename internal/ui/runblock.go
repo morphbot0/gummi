@@ -8,10 +8,13 @@ package ui
 // render path (loadRuns) and a block's lines are drawn again only when
 // its Rev, or what the terminal shows of it, moved.
 //
-// alt+w steps into the blocks: ↑↓ walk a run's head and its step rows,
-// enter opens a step (stepview.go) or unfolds an ended run's steps, p
-// pauses or resumes the run, x stops it and v reverts it, behind a
-// confirm that lists every path it puts back.
+// While a run is open a live strip stands above the composer
+// (liveStripRows): the run, where it stands, its step at work and that
+// step's action. alt+w jumps to the open run's block with the cursor on
+// its active step, and steps into the blocks: ↑↓ walk a run's head and
+// its step rows, enter opens a step (stepview.go) or unfolds an ended
+// run's steps, p pauses or resumes the run, x stops it and v reverts it,
+// behind a confirm that lists every path it puts back.
 
 import (
 	"context"
@@ -44,6 +47,9 @@ type runState struct {
 	// focus says the keyboard is on the blocks (alt+w), at cursor.
 	focus  bool
 	cursor runTarget
+	// jump asks the next frame to bring the cursor's block into view
+	// from its head (alt+w).
+	jump bool
 	// unfolded holds the ended runs whose steps a person unfolded, by
 	// card and run.
 	unfolded map[string]bool
@@ -409,6 +415,11 @@ func spread(left, right string, w int) string {
 // runStrip is the recipe's top-level entries, each in its state; one at
 // work wears the spinner.
 func runStrip(s *theme.Styles, strip []threadfold.StripEntry, spin string) string {
+	return stripEntries(s, strip, spin, " → ")
+}
+
+// stripEntries is runStrip with its entries joined by sep.
+func stripEntries(s *theme.Styles, strip []threadfold.StripEntry, spin, sep string) string {
 	var parts []string
 	for _, e := range strip {
 		word := e.ID
@@ -434,7 +445,92 @@ func runStrip(s *theme.Styles, strip []threadfold.StripEntry, spin string) strin
 		}
 		parts = append(parts, style.Render(word))
 	}
-	return strings.Join(parts, s.Faint.Render(" → "))
+	return strings.Join(parts, s.Faint.Render(sep))
+}
+
+// liveRun is the card's open run, the one its live strip is about.
+func (m *Shell) liveRun(id domain.FeatureID) (threadfold.Run, bool) {
+	runs := m.wf.byCard[id]
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].Live != nil {
+			return runs[i].Run, true
+		}
+	}
+	return threadfold.Run{}, false
+}
+
+// liveStripRows is the thread's live strip (§25.9): the open run's one
+// line above the composer, none while no run is open.
+func (m *Shell) liveStripRows(s *theme.Styles, r featureRow, w int) []string {
+	run, ok := m.liveRun(r.F.ID)
+	if !ok {
+		return nil
+	}
+	spin := ""
+	if run.Live.Mood == threadfold.StripRunning && len(run.Live.Steps) > 0 {
+		spin = m.spinnerGlyph(m.motionEnabled)
+	}
+	return []string{runStripLine(s, run, spin, runElapsed(run, m.now()), w)}
+}
+
+// runStripLine draws an open run's live strip as one line w wide: the run
+// and where it stands, its step at work and that step's action, its money
+// and time, and the key that jumps to its block. A narrow line gives up
+// the recipe's entries first, then the money and the time; the run's name,
+// the step's action and the key stay.
+func runStripLine(s *theme.Styles, r threadfold.Run, spin, el string, w int) string {
+	l := r.Live
+	lead, name := s.Info.Render("●"), s.Info.Bold(true).Render(l.Name)
+	if spin != "" {
+		lead = s.Info.Render(spin)
+	}
+	var now string
+	switch l.Mood {
+	case threadfold.StripRunning:
+		now = s.Base.Bold(true).Render(l.Who)
+		if l.Who != "" {
+			now += " "
+		}
+		now += s.Subtle.Render(l.Action)
+	case threadfold.StripAsking:
+		lead, name = s.Warning.Render("?"), s.Warning.Bold(true).Render(l.Name)
+		now = s.Warning.Bold(true).Render(l.Who+" asks: ") + s.Base.Render(l.Question)
+	case threadfold.StripDeciding:
+		lead, name = s.Warning.Render("?"), s.Warning.Bold(true).Render(l.Name)
+		now = s.Warning.Render(l.Line)
+	default:
+		lead, name = s.Faint.Render("‖"), s.Muted.Bold(true).Render(l.Name)
+		now = s.Subtle.Render(l.Line)
+	}
+	var facts []string
+	if l.Mood != threadfold.StripAsking && l.Mood != threadfold.StripDeciding {
+		facts = append(facts, s.Muted.Render(domain.FormatDollars(r.Spent)))
+		if el != "" && l.Mood == threadfold.StripRunning {
+			facts = append(facts, s.Faint.Render(el))
+		}
+	}
+	dot := s.Faint.Render(" · ")
+	compose := func(withStrip, withFacts bool) string {
+		left := lead + " " + name + "  "
+		if withStrip {
+			left += stripEntries(s, r.Strip, "", " › ") + s.Faint.Render("  · ")
+		}
+		left += now
+		if withFacts && len(facts) > 0 {
+			left += dot + strings.Join(facts, dot)
+		}
+		return left
+	}
+	hint := s.KeyHint.Render("alt+w") + s.Faint.Render(" jump")
+	room := w - ansi.StringWidth(hint) - 2
+	left := compose(l.Mood == threadfold.StripRunning && len(r.Strip) > 0, true)
+	if ansi.StringWidth(left) > room {
+		left = compose(false, true)
+	}
+	if ansi.StringWidth(left) > room {
+		left = compose(false, false)
+	}
+	return spread(left, hint, w)
 }
 
 // stepRowLines is one step row, and its question beneath it while it

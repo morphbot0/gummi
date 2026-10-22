@@ -552,8 +552,8 @@ func (m *Shell) stepThread(w, h int) string {
 	case stepTabDiff:
 		// the diff view scrolls itself: it is given every row the body has,
 		// which no scroll marker needs
-		rows := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, h, h)
-		if all := rows + 2; bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, all, h) == all {
+		rows := bodyWindowBudget(head, headMin, decision, decisionMin, nil, foot, footMin, h, h)
+		if all := rows + 2; bodyWindowBudget(head, headMin, decision, decisionMin, nil, foot, footMin, all, h) == all {
 			rows = all
 		}
 		switch {
@@ -566,7 +566,7 @@ func (m *Shell) stepThread(w, h int) string {
 		}
 	case stepTabBrief:
 		body = m.stepBriefLines(inner)
-		rows := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, len(body), h)
+		rows := bodyWindowBudget(head, headMin, decision, decisionMin, nil, foot, footMin, len(body), h)
 		sv.scroll = clamp(sv.scroll, 0, max(len(body)-rows, 0))
 		up = max(len(body)-rows, 0) - sv.scroll
 	default:
@@ -577,14 +577,14 @@ func (m *Shell) stepThread(w, h int) string {
 			sv.scroll += len(body) - sv.bodyLen
 		}
 		sv.bodyLen = len(body)
-		rows := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, len(body), h)
+		rows := bodyWindowBudget(head, headMin, decision, decisionMin, nil, foot, footMin, len(body), h)
 		sv.scroll = clamp(sv.scroll, 0, max(len(body)-rows, 0))
 		up = sv.scroll
 	}
 	for i := range body {
 		body[i] = clip(body[i])
 	}
-	return strings.Join(composeThread(s, head, headMin, body, decision, decisionMin, foot, footMin, h, up, inner), "\n")
+	return strings.Join(composeThread(s, head, headMin, body, decision, decisionMin, nil, foot, footMin, h, up, inner), "\n")
 }
 
 // stepQuestionBlock is the step's open question as the thread's picker

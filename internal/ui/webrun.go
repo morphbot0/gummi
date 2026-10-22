@@ -62,7 +62,7 @@ func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 	out := make([]threadfold.RunInput, 0, len(runs))
 	for _, r := range runs {
 		steps, _ := d.store.RunSteps(ctx, d.f.ID, r.N)
-		in := threadfold.RunInput{Run: r, Steps: steps, SpecTitle: titles[r.Spec], Live: map[string]threadfold.StepLive{}}
+		in := threadfold.RunInput{Run: r, Steps: steps, SpecTitle: titles[r.Spec], Live: map[string]threadfold.StepLive{}, Envelope: float64(d.f.Budget.Envelope)}
 		if d.eng != nil {
 			in.Files = d.eng.RunFiles(ctx, r, steps)
 			for _, s := range steps {

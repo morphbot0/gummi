@@ -59,12 +59,19 @@ func (m *Shell) clampRunCursor() {
 	m.wf.cursor = m.newestRunTarget(ts)
 }
 
-// newestRunTarget is where alt+w lands: the newest run's row that waits on
-// the person or runs, else its last row, else its head.
+// newestRunTarget is where alt+w lands: on the open run — the one the live
+// strip is about — its active step's row (the one that asks, or the one
+// at work); otherwise the newest run's row that waits on the person or
+// runs, else its last row, else its head.
 func (m *Shell) newestRunTarget(ts []runTarget) runTarget {
 	runs := m.openRuns()
 	if len(runs) == 0 {
 		return runTarget{}
+	}
+	if open, ok := m.liveRun(m.selectedID()); ok {
+		if t, ok := m.activeRunTarget(open, ts); ok {
+			return t
+		}
 	}
 	last := runs[len(runs)-1]
 	pick := runTarget{n: last.N}
@@ -78,6 +85,37 @@ func (m *Shell) newestRunTarget(ts []runTarget) runTarget {
 		}
 	}
 	return pick
+}
+
+// activeRunTarget is the row of the open run's active step: the step its
+// live strip names (one asking, or the one at work), else the first row at
+// work, else none.
+func (m *Shell) activeRunTarget(run threadfold.Run, ts []runTarget) (runTarget, bool) {
+	var working *runTarget
+	for _, t := range ts {
+		if t.n != run.N || t.row == "" {
+			continue
+		}
+		row, ok := m.runRow(t)
+		if !ok {
+			continue
+		}
+		if run.Live.Card != "" && row.Card == run.Live.Card && !row.Folded {
+			return t, true
+		}
+		if working == nil && (row.State == "running" || row.State == "asking" || row.Waiting) {
+			working = &t
+		}
+	}
+	if working != nil {
+		return *working, true
+	}
+	for _, t := range ts {
+		if t.n == run.N && t.row == "" {
+			return t, true
+		}
+	}
+	return runTarget{}, false
 }
 
 // runAt is the run a target stands in.
@@ -104,7 +142,9 @@ func (m *Shell) runRow(t runTarget) (threadfold.StepRow, bool) {
 	return threadfold.StepRow{}, false
 }
 
-// focusRuns is alt+w: the keyboard goes to the blocks, or comes back.
+// focusRuns is alt+w: the keyboard goes to the blocks, or comes back. It
+// jumps to them too: the thread scrolls so the block the cursor lands in
+// is in view (scrollToRunCursor), its head too when it fits.
 func (m *Shell) focusRuns(r featureRow) {
 	if m.wf.focus {
 		m.wf.focus = false
@@ -117,6 +157,7 @@ func (m *Shell) focusRuns(r featureRow) {
 	}
 	m.wf.focus = true
 	m.wf.cursor = m.newestRunTarget(ts)
+	m.wf.jump = true
 	m.threadScroll = 0
 }
 
@@ -235,6 +276,22 @@ func (m *Shell) scrollToRunCursor(body []string, budget int) {
 	maxUp := max(len(body)-budget, 0)
 	up := clamp(m.threadScroll, 0, maxUp)
 	start, end := len(body)-up-budget, len(body)-up
+	if m.wf.jump {
+		// alt+w's jump brings the cursor's block into view from its head,
+		// when the head and the cursor fit the window together
+		m.wf.jump = false
+		head := at
+		for i := at; i >= 0; i-- {
+			if strings.HasPrefix(ansi.Strip(body[i]), "┌ workflow") {
+				head = i
+				break
+			}
+		}
+		if (head < start || at >= end) && at-head < budget {
+			m.threadScroll = clamp(len(body)-budget-head, 0, maxUp)
+			return
+		}
+	}
 	switch {
 	case at < start+1:
 		// a row of context above it, when there is one
@@ -264,7 +321,10 @@ func (m *Shell) runBindings() []binding {
 // any.
 func (m *Shell) runKeyBindings(r featureRow) []binding {
 	var bs []binding
-	if len(m.wf.byCard[r.F.ID]) > 0 {
+	switch _, open := m.liveRun(r.F.ID); {
+	case open:
+		bs = append(bs, binding{key: "alt+w", label: "jump to run", help: "jump to the open run's block, the cursor on its active step: enter opens it, esc comes back; pause, stop or revert a run from there"})
+	case len(m.wf.byCard[r.F.ID]) > 0:
 		bs = append(bs, binding{key: "alt+w", label: "runs", help: "step into the workflow runs' blocks: open a step, pause, stop or revert a run"})
 	}
 	return bs

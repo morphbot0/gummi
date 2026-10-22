@@ -343,6 +343,12 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		foot = append(make([]string, sep), footMin...)
 	}
 
+	// --- the live strip: an open run's one line, directly above the
+	// composer (§25.9). It is the first of the pinned rows to yield: it
+	// takes its row from the body, and composeThread drops it before the
+	// head, the decision or the composer give up a row of theirs.
+	strip := m.liveStripRows(s, r, inner)
+
 	// --- decision: pinned directly above the composer while open ---
 	// its row budget is everything the foot leaves: the decision may not
 	// be squeezed out by the body (the body yields first), and within the
@@ -400,7 +406,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// unwindowed (composeH below) and would only report the newest event
 	// as "at the top", which is never what a scrolled-back reader sees.
 	if !measure {
-		bodyBudget := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, len(body), h)
+		bodyBudget := bodyWindowBudget(head, headMin, decision, decisionMin, strip, foot, footMin, len(body), h)
 		if m.wf.focus {
 			m.scrollToRunCursor(body, bodyBudget)
 		}
@@ -434,7 +440,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	if measure {
 		composeH = 0
 	}
-	return strings.Join(composeThread(s, head, headMin, body, decision, decisionMin, foot, footMin, composeH, m.threadScroll, inner), "\n")
+	return strings.Join(composeThread(s, head, headMin, body, decision, decisionMin, strip, foot, footMin, composeH, m.threadScroll, inner), "\n")
 }
 
 // bodyWindowBudget reports how many body rows composeThread has room to
@@ -446,14 +452,14 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 // clamps) up to but not including the two rows composeThread spends on
 // scroll markers once it actually clips the body, which the anchor math
 // accounts for on its own.
-func bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin []string, bodyLen, h int) int {
+func bodyWindowBudget(head, headMin, decision, decisionMin, strip, foot, footMin []string, bodyLen, h int) int {
 	if h <= 0 {
 		return bodyLen
 	}
 	if len(foot) >= h {
 		return 0
 	}
-	if len(foot)+len(decision)+len(head) > h {
+	if len(foot)+len(decision)+len(head)+len(strip) > h {
 		head, decision, foot = headMin, decisionMin, footMin
 	}
 	remaining := h - len(foot)
@@ -465,6 +471,9 @@ func bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin []stri
 		return 0
 	}
 	remaining -= len(head)
+	if len(strip) <= remaining {
+		remaining -= len(strip)
+	}
 	if bodyLen > remaining && remaining >= 2 {
 		return remaining - 2
 	}
@@ -500,15 +509,15 @@ func bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin []stri
 // this would flip sep back to 0 and give the strip back, which is
 // BG-050: the shed was not monotone. The trim beneath this only runs
 // when even the separator-free layout does not fit.
-func composeThread(s *theme.Styles, head, headMin, body, decision, decisionMin, foot, footMin []string, h, up, w int) []string {
+func composeThread(s *theme.Styles, head, headMin, body, decision, decisionMin, strip, foot, footMin []string, h, up, w int) []string {
 	if h <= 0 {
 		out := append(append(append([]string{}, head...), body...), decision...)
-		return append(out, foot...)
+		return append(append(out, strip...), foot...)
 	}
 	if len(foot) >= h {
 		return foot[len(foot)-h:]
 	}
-	if len(foot)+len(decision)+len(head) > h {
+	if len(foot)+len(decision)+len(head)+len(strip) > h {
 		head, decision, foot = headMin, decisionMin, footMin
 	}
 	remaining := h - len(foot)
@@ -530,6 +539,13 @@ func composeThread(s *theme.Styles, head, headMin, body, decision, decisionMin, 
 		remaining = 0
 	} else {
 		remaining -= len(head)
+	}
+	// the live strip comes out of what the body would have had, and goes
+	// when there is not a row left for it
+	if len(strip) > remaining {
+		strip = nil
+	} else {
+		remaining -= len(strip)
 	}
 
 	window := body
@@ -577,11 +593,16 @@ func composeThread(s *theme.Styles, head, headMin, body, decision, decisionMin, 
 	out = append(out, window...)
 	// pad so the foot sits on the last row rather than floating up under
 	// a short conversation
-	for len(out)+len(decision)+len(foot) < h {
+	for len(out)+len(decision)+len(strip)+len(foot) < h {
 		out = append(out, "")
 	}
 	out = append(out, decision...)
-	return append(out, foot...)
+	// the strip sits directly on the composer: under the foot's own
+	// lead-in blank, when it kept one
+	lead := len(foot) - len(footMin)
+	out = append(out, foot[:lead]...)
+	out = append(out, strip...)
+	return append(out, foot[lead:]...)
 }
 
 // maxThreadScroll is how far back the body can be scrolled for a given
