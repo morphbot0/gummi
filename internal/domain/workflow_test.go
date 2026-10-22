@@ -156,3 +156,38 @@ func TestQualifiedItem(t *testing.T) {
 		}
 	}
 }
+
+func TestStepCardLink(t *testing.T) {
+	for p, want := range map[string]bool{
+		"design": true, "build/2/implement": true, "build/1/reviews/review-a": true,
+		"": false, "build//x": false, "/design": false, "has space": false, "tab\there": false,
+	} {
+		if got := ValidStepPath(p); got != want {
+			t.Errorf("ValidStepPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+	sess, _ := NewID(KindFreeform, 1)
+	card, _ := NewID(KindFreeform, 2)
+	f := Feature{ID: card, Num: 2, Kind: KindFreeform, Title: "x", Slug: "x", Stage: StageOpen, ParentID: sess}
+	f.Crew = StepLink{Session: sess, Run: 3, Path: "build/2/implement"}.Link()
+	if err := f.Validate(); err != nil {
+		t.Fatalf("a step's card does not validate: %v", err)
+	}
+	if l := f.Step(); l.Session != sess || l.Run != 3 || l.Path != "build/2/implement" || !f.InRun() || !f.InCrew() {
+		t.Errorf("step link = %+v", l)
+	}
+	f.Crew.Node = "has space"
+	if err := f.Validate(); err == nil {
+		t.Error("a step path with a space validated")
+	}
+}
+
+func TestSessionSpecPath(t *testing.T) {
+	id, _ := NewID(KindFreeform, 7)
+	if got := SessionSpecPath(id, 2, "Import CSV"); got != ".gummi/specs/FF-007/2-import-csv.md" {
+		t.Errorf("path = %q", got)
+	}
+	if got := SessionSpecPath(id, 1, "!!!"); got != ".gummi/specs/FF-007/1-spec.md" {
+		t.Errorf("path for a slugless title = %q", got)
+	}
+}

@@ -246,8 +246,9 @@ func (m *Shell) loadRows() tea.Msg {
 	}
 	rows := make([]featureRow, 0, len(feats))
 	for _, f := range feats {
-		// a crew's own card and its nodes' are never on the board: the
-		// session's Crew tab is their face (DESIGN §24)
+		// a crew's own card and its nodes', and a workflow step's, are
+		// never on the board: their session is their face (DESIGN §24,
+		// §25.6)
 		if f.InCrew() {
 			continue
 		}
@@ -298,8 +299,10 @@ func (m *Shell) loadRows() tea.Msg {
 		row.OpenDiffComments = m.openDiffComments(f.ID)
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
 		if hasSessionSpec(f) {
-			if _, err := os.Stat(filepath.Join(m.wt.Root(), filepath.FromSlash(f.SpecPath()))); err == nil {
-				row.HasSessionSpec = true
+			if path, ok := m.store.SessionSpecFile(ctx, m.wt.Root(), f.ID, 1); ok {
+				if _, err := os.Stat(path); err == nil {
+					row.HasSessionSpec = true
+				}
 			}
 		}
 		rows = append(rows, row)

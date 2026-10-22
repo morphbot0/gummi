@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/webapi"
 )
 
 // An agent and a crew's card keep a session spec of their own out of
@@ -122,8 +123,8 @@ func mountSessionSpec(t *testing.T, b *Bridge) *specView {
 func TestASessionsSpecOpensInTheTerminal(t *testing.T) {
 	b, eng, f := sessionSpecBoard(t, domain.StageOpen)
 	sv := mountSessionSpec(t, b)
-	if sv.path != eng.SessionSpecPath(f) {
-		t.Errorf("mounted %s, want the session's spec %s", sv.path, eng.SessionSpecPath(f))
+	if sv.path != eng.SessionSpecPath(f, 1) {
+		t.Errorf("mounted %s, want the session's spec %s", sv.path, eng.SessionSpecPath(f, 1))
 	}
 	if !strings.Contains(sv.content, "# Dark mode") || !strings.Contains(sv.content, "## Done when") {
 		t.Errorf("the mounted spec is not the session's:\n%s", sv.content)
@@ -141,7 +142,7 @@ func TestTerminalWritesToASessionSpecAreRevisions(t *testing.T) {
 		var out []domain.SpecRevision
 		if err := b.Do(ctx, func(m *Shell) tea.Cmd {
 			var err error
-			out, err = m.store.SpecRevisions(ctx, f.ID)
+			out, err = m.store.SpecRevisions(ctx, f.ID, 1)
 			if err != nil {
 				t.Error(err)
 			}
@@ -178,7 +179,7 @@ func TestTerminalWritesToASessionSpecAreRevisions(t *testing.T) {
 		t.Fatalf("after a comment: %+v, want a second revision by the person", got)
 	}
 
-	path := eng.SessionSpecPath(f)
+	path := eng.SessionSpecPath(f, 1)
 	raw, _ := os.ReadFile(path)
 	marker := 0
 	for i, l := range strings.Split(string(raw), "\n") {
@@ -234,10 +235,83 @@ func TestAClosedSessionsSpecRefusesTerminalWrites(t *testing.T) {
 		t.Fatalf("a comment on a closed session's spec answered %+v", n)
 	}
 	var revs []domain.SpecRevision
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { revs, _ = m.store.SpecRevisions(ctx, f.ID); return nil }); err != nil {
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { revs, _ = m.store.SpecRevisions(ctx, f.ID, 1); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if len(revs) != 1 {
 		t.Errorf("a refused comment still made a revision: %d", len(revs))
+	}
+}
+
+// A workflow step's card (DESIGN §25.6) is a hidden child of its session,
+// as a crew's card is: the board's rows never hold it.
+func TestAStepCardIsNeverOnTheBoard(t *testing.T) {
+	b, _, sess := sessionSpecBoard(t, domain.StageOpen)
+	ctx := context.Background()
+	step := domain.Feature{
+		ID: "FF-002", Num: 2, Kind: domain.KindFreeform, Title: "Dark mode", Slug: sess.Slug,
+		Stage: domain.StageOpen, ParentID: sess.ID, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		Crew: domain.StepLink{Session: sess.ID, Run: 1, Path: "build/1/implement"}.Link(),
+	}
+	var ids []domain.FeatureID
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		if err := m.store.CreateFeature(ctx, &step); err != nil {
+			t.Error(err)
+			return nil
+		}
+		msg, ok := m.loadRows().(rowsMsg)
+		if !ok {
+			t.Error("loadRows answered no rows")
+			return nil
+		}
+		for _, r := range msg.rows {
+			ids = append(ids, r.F.ID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != sess.ID {
+		t.Errorf("board rows = %v, want the session alone", ids)
+	}
+}
+
+// The web face reads and writes the spec it is told (UseSpec), spec 1
+// when it is told none; starting a spec answers with the new one.
+func TestWebDocsActOnTheSpecTheyAreTold(t *testing.T) {
+	now := time.Now()
+	f := domain.Feature{
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Two pieces", Slug: "two-pieces",
+		Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind, CreatedAt: now, UpdatedAt: now,
+	}
+	b, _, _, _ := headlessBoardWith(t, agent.NewFake("ok"), []domain.Feature{f}, nil)
+	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
+	ctx := context.Background()
+
+	d := webDocsFor(t, b, string(f.ID))
+	if sp, err := d.StartSessionSpec(ctx, "Export as JSON", "Simon"); err != nil || sp.Title != "Export as JSON" {
+		t.Fatalf("spec 1: %+v %v", sp.Title, err)
+	}
+	d = webDocsFor(t, b, string(f.ID))
+	sp, err := d.StartSessionSpec(ctx, "Import CSV", "Simon")
+	if err != nil || sp.Title != "Import CSV" || len(sp.Revisions) != 1 {
+		t.Fatalf("spec 2 answers %+v %v", sp.Title, err)
+	}
+	sp, err = d.WriteSessionSpec(ctx, webapi.SpecWriteRequest{Markdown: "# Import CSV\n\nrewritten\n", Rev: sp.Rev}, "Simon")
+	if err != nil || len(sp.Revisions) != 2 || !strings.Contains(sp.Markdown, "rewritten") {
+		t.Fatalf("write to spec 2: %+v %v", sp.Revisions, err)
+	}
+
+	untold := webDocsFor(t, b, string(f.ID))
+	if one, err := untold.Spec(ctx); err != nil || one.Title != "Export as JSON" || strings.Contains(one.Markdown, "rewritten") {
+		t.Fatalf("an untold reader reads %q (%v)", one.Title, err)
+	}
+	untold.UseSpec(2)
+	if two, err := untold.Spec(ctx); err != nil || two.Title != "Import CSV" || len(two.Revisions) != 2 {
+		t.Fatalf("a reader told spec 2 reads %q %+v (%v)", two.Title, two.Revisions, err)
+	}
+	untold.UseSpec(3)
+	if three, err := untold.Spec(ctx); err != nil || !three.None {
+		t.Fatalf("a reader told a spec the session lacks reads %+v (%v)", three, err)
 	}
 }

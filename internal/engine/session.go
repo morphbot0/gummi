@@ -277,7 +277,7 @@ type Session struct {
 	agentName      string        // backend identity, for display
 	agentSessionID string        // backend session id (agent.Identified), "" if none
 	model          string        // model resolved at spawn
-	specPath       string        // resolved spec/draft path (for ask_user capture)
+	specPath       string        // a retired stage's spec path; a session's specs resolve per call (specTarget)
 	state          SessionState
 	transcript     []Message
 	// streamOpen and streamIdx name the transcript entry that is
@@ -832,12 +832,6 @@ func (s *Session) creditEquivalent(u agent.Usage) float64 {
 	s.mu.Unlock()
 	return domain.Spend{Credits: u.Credits, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}.
 		CreditEquivalentAt(rate)
-}
-
-func (s *Session) setSpecPath(p string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.specPath = p
 }
 
 // SpecPath returns the session's resolved spec/draft path.

@@ -283,9 +283,8 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		startedAt:   time.Now(),
 	}
 	sess.setSpawnInfo(ag.Name(), rc.Model, ag.Capabilities().ClientTools)
-	if !f.InCrew() {
-		sess.setSpecPath(e.SessionSpecPath(f))
-	}
+	// a session's spec tools resolve the spec per call (specTarget): it
+	// may keep several, so no one path is the session's
 	sess.setByokRate(ag.CreditRate(rc.Model))
 	if len(seed) > 0 {
 		sess.transcript = append(sess.transcript, seed...)

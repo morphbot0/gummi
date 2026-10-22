@@ -173,7 +173,7 @@ func (e *Engine) nodeBrief(ctx context.Context, c *domain.Crew, n domain.CrewNod
 			fmt.Fprintf(&b, "\n%s, which you build on, handed off:\n%s\n", need, r.Handoff)
 		}
 	}
-	if rev, ok, _ := e.crewStore().SpecRevision(ctx, c.Session, c.SpecRev); ok {
+	if rev, ok, _ := e.crewStore().SpecRevision(ctx, c.Session, crewSpec, c.SpecRev); ok {
 		b.WriteString("\nThe spec the crew is judged against:\n\n" + rev.Content + "\n")
 	}
 	b.WriteString("\nCommit your work as you go. If something the brief and spec do not settle blocks you, ask with ask_user. " +

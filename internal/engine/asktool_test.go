@@ -615,7 +615,15 @@ A.
 
 func seedDraft(t *testing.T, e *Engine, f domain.Feature) {
 	t.Helper()
-	path := e.SessionSpecPath(f)
+	ctx := context.Background()
+	if _, err := e.cfg.Store.GetFeature(ctx, f.ID); err != nil {
+		createFeature(t, e.cfg.Store, f)
+	}
+	sp, err := e.cfg.Store.AddSessionSpec(ctx, f.ID, f.Title, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(e.pool.Root(), sp.Path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +633,7 @@ func seedDraft(t *testing.T, e *Engine, f domain.Feature) {
 }
 
 // specDraftPath is where a session's spec lives.
-func specDraftPath(e *Engine, f domain.Feature) string { return e.SessionSpecPath(f) }
+func specDraftPath(e *Engine, f domain.Feature) string { return e.SessionSpecPath(f, 1) }
 
 type toolResolver interface {
 	Resolved(string) (string, bool)

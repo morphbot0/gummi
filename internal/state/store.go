@@ -147,16 +147,90 @@ CREATE TABLE IF NOT EXISTS crew_preauth (
 	feature_id TEXT PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
 	credits    INTEGER NOT NULL DEFAULT 0
 );
--- Every saved state of a session's spec (DESIGN §24.2): a crew freezes
--- one, and the Spec tab lists them.
+-- A session's specs (DESIGN §25.3), one per piece of work: n counts from
+-- 1 per session, and path is the spec's file relative to the workspace
+-- root. A session's spec from before is spec 1, at its old path.
+CREATE TABLE IF NOT EXISTS session_specs (
+	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	n          INTEGER NOT NULL,
+	title      TEXT NOT NULL DEFAULT '',
+	path       TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (feature_id, n)
+);
+-- Every saved state of a session's spec, numbered per spec (spec_n): a
+-- run freezes one, and the Specs tab lists them. A database from before
+-- many specs is rebuilt into this shape with every row on spec 1
+-- (rebuildSpecRevisions).
 CREATE TABLE IF NOT EXISTS spec_revisions (
 	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	spec_n     INTEGER NOT NULL DEFAULT 1,
 	rev        INTEGER NOT NULL,
 	content    TEXT NOT NULL,
 	by         TEXT NOT NULL DEFAULT '',
 	at         TEXT NOT NULL,
-	PRIMARY KEY (feature_id, rev)
+	PRIMARY KEY (feature_id, spec_n, rev)
 );
+-- A session's workflow runs (DESIGN §25) and their step instances. The
+-- recipe is the copy the person allowed, kept both as its text and as the
+-- parsed recipe (JSON) a planner's revision splices into; the inputs,
+-- results, steers and the open decision are JSON, read back whole. A
+-- step's card is a hidden child of the session (features.crew_of, with
+-- crew_seq the run and crew_node the step's path).
+CREATE TABLE IF NOT EXISTS workflow_runs (
+	session_id     TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	n              INTEGER NOT NULL,
+	recipe_name    TEXT NOT NULL DEFAULT '',
+	recipe_yaml    TEXT NOT NULL DEFAULT '',
+	recipe         TEXT NOT NULL DEFAULT '{}',
+	inputs         TEXT NOT NULL DEFAULT '{}',
+	spec_n         INTEGER NOT NULL DEFAULT 0,
+	spec_rev       INTEGER NOT NULL DEFAULT 0,
+	state          TEXT NOT NULL,
+	estimate       INTEGER NOT NULL DEFAULT 0,
+	spent          REAL NOT NULL DEFAULT 0,
+	start_tree     TEXT NOT NULL DEFAULT '',
+	end_tree       TEXT NOT NULL DEFAULT '',
+	validated_tree TEXT NOT NULL DEFAULT '',
+	results        TEXT NOT NULL DEFAULT '[]',
+	report         TEXT NOT NULL DEFAULT '',
+	reason         TEXT NOT NULL DEFAULT '',
+	stopping       INTEGER NOT NULL DEFAULT 0,
+	warned         INTEGER NOT NULL DEFAULT 0,
+	out_of_budget  INTEGER NOT NULL DEFAULT 0,
+	steers         TEXT NOT NULL DEFAULT '[]',
+	pending        TEXT NOT NULL DEFAULT '',
+	feedback       TEXT NOT NULL DEFAULT '',
+	revision       INTEGER NOT NULL DEFAULT 0,
+	created_at     TEXT NOT NULL,
+	started_at     TEXT NOT NULL DEFAULT '',
+	ended_at       TEXT NOT NULL DEFAULT '',
+	updated_at     TEXT NOT NULL,
+	PRIMARY KEY (session_id, n)
+);
+CREATE TABLE IF NOT EXISTS workflow_steps (
+	session_id TEXT NOT NULL,
+	run_n      INTEGER NOT NULL,
+	path       TEXT NOT NULL,
+	step_id    TEXT NOT NULL DEFAULT '',
+	card_id    TEXT NOT NULL DEFAULT '',
+	role       TEXT NOT NULL DEFAULT '',
+	tier       TEXT NOT NULL DEFAULT '',
+	state      TEXT NOT NULL,
+	estimate   INTEGER NOT NULL DEFAULT 0,
+	allowance  INTEGER NOT NULL DEFAULT 0,
+	spent      REAL NOT NULL DEFAULT 0,
+	start_tree TEXT NOT NULL DEFAULT '',
+	end_tree   TEXT NOT NULL DEFAULT '',
+	prompt     TEXT NOT NULL DEFAULT '',
+	output     TEXT NOT NULL DEFAULT '',
+	reason     TEXT NOT NULL DEFAULT '',
+	started_at TEXT NOT NULL DEFAULT '',
+	ended_at   TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, run_n, path),
+	FOREIGN KEY (session_id, run_n) REFERENCES workflow_runs(session_id, n) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS workflow_steps_card ON workflow_steps(card_id);
 -- features_stack is created by the column migrations, not here: this
 -- block runs against pre-existing databases too, where stack_id does
 -- not exist until the ALTER TABLE below has run. features_goal is
@@ -452,6 +526,14 @@ func OpenStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}
 	if err := migrateMergedStages(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
+	if err := rebuildSpecRevisions(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
+	if err := migrateToWorkflows(db, workspaceRootOf(dbPath)); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}

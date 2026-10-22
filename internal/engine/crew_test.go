@@ -122,7 +122,7 @@ func crewEngine(t *testing.T, ag agent.Agent) (*Engine, *state.Store, domain.Fea
 	if _, _, err := e.StartSessionSpec(ctx, f, "Crew test", "user"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.WriteSessionSpec(ctx, f, crewTestSpec, "user"); err != nil {
+	if _, err := e.WriteSessionSpec(ctx, f, 1, crewTestSpec, "user"); err != nil {
 		t.Fatal(err)
 	}
 	return e, store, f, ff
@@ -207,7 +207,7 @@ func TestACrewRunsFromPlanToLanding(t *testing.T) {
 	}
 	waitFreeformIdle(t, ff)
 	// the spec's Notes took the decision
-	if text, _ := e.SessionSpec(f); !strings.Contains(text, "decided: t1: plain text") {
+	if text, _ := e.SessionSpec(f, 1); !strings.Contains(text, "decided: t1: plain text") {
 		t.Fatalf("spec notes:\n%s", text)
 	}
 
@@ -302,7 +302,7 @@ nodes:
 	ctx := context.Background()
 	judged := strings.Replace(crewTestSpec, "  check: test -f crew.txt\n",
 		"  check: test -f crew.txt\n- id: DW-2\n  says: crew.txt reads well\n  judge: true\n", 1)
-	if _, err := e.WriteSessionSpec(ctx, f, judged, "user"); err != nil {
+	if _, err := e.WriteSessionSpec(ctx, f, 1, judged, "user"); err != nil {
 		t.Fatal(err)
 	}
 	// the session already has the file the node will write, word for word

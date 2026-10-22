@@ -287,7 +287,7 @@ func (sf *sessionFake) respond(opts agent.SessionOpts, msg string) []agent.Event
 		if _, _, err := sf.h.eng.StartSessionSpec(ctx, sess, "Crew test", "agent"); err != nil {
 			return say("spec_start failed: " + err.Error())
 		}
-		if _, err := sf.h.eng.WriteSessionSpec(ctx, sess, crewSpec, "agent"); err != nil {
+		if _, err := sf.h.eng.WriteSessionSpec(ctx, sess, 1, crewSpec, "agent"); err != nil {
 			return say("spec write failed: " + err.Error())
 		}
 		return []agent.Event{

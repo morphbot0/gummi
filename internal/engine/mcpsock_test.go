@@ -176,15 +176,22 @@ func TestMCPSockCallToolNoSession(t *testing.T) {
 func TestMCPSockCallToolInterleave(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 
-	specPath := filepath.Join(t.TempDir(), "spec.md")
+	f := freeformCard(1, "interleave")
+	createFeature(t, e.cfg.Store, f)
+	sp, err := e.cfg.Store.AddSessionSpec(context.Background(), f.ID, "interleave", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(e.pool.Root(), sp.Path)
 	specBody := "# FD-001\n\n## Problem\n\nsome problem\n"
+	if err := os.MkdirAll(filepath.Dir(specPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(specPath, []byte(specBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f := freeformCard(1, "interleave")
 	s := attach(t, e, f)
 	waitIdle(t, e, f.ID)
-	s.setSpecPath(specPath)
 
 	path, teardown, err := e.startMCPEndpoint(context.Background(), f)
 	if err != nil {

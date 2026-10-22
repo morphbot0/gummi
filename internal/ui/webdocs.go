@@ -58,7 +58,9 @@ func invalid(format string, a ...any) error { return &InvalidError{Msg: fmt.Spri
 
 // WebDocs is one card's documents, as captured from the model.
 type WebDocs struct {
-	f       domain.Feature
+	f domain.Feature
+	// specN is the session spec the reader acts on (UseSpec); 0 reads 1.
+	specN   int
 	base    string
 	store   *state.Store
 	pool    *worktree.Pool

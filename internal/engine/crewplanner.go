@@ -176,7 +176,7 @@ func (e *Engine) plannerPrompt(ctx context.Context, c *domain.Crew, reasons []st
 	if len(reasons) == 0 {
 		b.WriteString("- (no reason recorded)\n")
 	}
-	if rev, ok, _ := e.crewStore().SpecRevision(ctx, c.Session, c.SpecRev); ok {
+	if rev, ok, _ := e.crewStore().SpecRevision(ctx, c.Session, crewSpec, c.SpecRev); ok {
 		fmt.Fprintf(&b, "\nThe session's spec, revision %d (frozen for this crew):\n\n%s\n", c.SpecRev, rev.Content)
 	}
 	if c.Brief != "" {

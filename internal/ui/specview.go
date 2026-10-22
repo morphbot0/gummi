@@ -82,15 +82,26 @@ func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
 	}
 }
 
-// sessionSpecFilePath is where f's own spec lives on disk — the engine's
-// own SessionSpecPath when an engine is wired, or the same formula
-// (workspace root + Feature.SpecPath) when the board is static (a
-// session's spec still reads and writes without an agent, AGENTS.md).
+// sessionSpecFilePath is where f's spec 1 lives on disk, as the store
+// records it, "" when f has none — read the same with or without an
+// engine (a session's spec still reads and writes without an agent,
+// AGENTS.md). The view opens spec 1; a session's other specs are the
+// Specs list's.
 func (m *Shell) sessionSpecFilePath(f domain.Feature) string {
-	if m.engine != nil {
-		return m.engine.SessionSpecPath(f)
+	path, _ := m.store.SessionSpecFile(context.Background(), m.wt.Root(), f.ID, 1)
+	return path
+}
+
+// sessionSpecAt is which of f's specs lives at path, 1 when none is
+// found: the view is mounted on one spec's file.
+func (m *Shell) sessionSpecAt(f domain.Feature, path string) int {
+	specs, _ := m.store.SessionSpecs(context.Background(), f.ID)
+	for _, sp := range specs {
+		if filepath.Join(m.wt.Root(), filepath.FromSlash(sp.Path)) == path {
+			return sp.N
+		}
 	}
-	return filepath.Join(m.wt.Root(), filepath.FromSlash(f.SpecPath()))
+	return 1
 }
 
 // openSessionSpec mounts a session's own spec directly — no draft, no
@@ -162,13 +173,14 @@ func (m *Shell) noteSessionSpecRevision(f domain.Feature, path string) error {
 		return err
 	}
 	ctx := context.Background()
+	n := m.sessionSpecAt(f, path)
 	fresh := f
 	if got, ferr := m.store.GetFeature(ctx, f.ID); ferr == nil {
 		fresh = got
 	}
 	var writeErr error
 	m.withEngine(func(eng *engine.Engine) tea.Msg {
-		_, writeErr = eng.WriteSessionSpec(ctx, fresh, string(raw), m.humanActor())
+		_, writeErr = eng.WriteSessionSpec(ctx, fresh, n, string(raw), m.humanActor())
 		return nil
 	})
 	return writeErr

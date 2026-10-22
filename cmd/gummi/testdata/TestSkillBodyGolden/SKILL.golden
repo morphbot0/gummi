@@ -90,6 +90,8 @@ gummi watch <id|ref>
     --wait  block until the card has a live stream instead of failing when none exists
 
 gummi spec <id|ref>
+    --list      list a session's specs, one per line: number, state, revision and title
+    --spec int  which of a session's specs to dump, by its number (default: its only spec)
 
 gummi diff <id|ref>
 

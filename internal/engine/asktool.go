@@ -349,6 +349,8 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleMemoryTool(s, tc)
 	case specStartToolName:
 		e.handleSpecStart(s, tc)
+	case specListToolName:
+		e.handleSpecList(s, tc)
 	case crewStartToolName, crewStatusToolName, crewSteerToolName, crewStopToolName, crewLandToolName:
 		e.handleCrewTool(s, tc)
 	case skillReadTool, skillManageTool:
@@ -579,7 +581,11 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 		e.resolveNow(s, tc.ID, "spec_annotate needs an anchor and a note")
 		return
 	}
-	path := s.SpecPath()
+	n, path, err := e.specToolPath(s, tc.Args)
+	if err != nil {
+		e.resolveNow(s, tc.ID, err.Error())
+		return
+	}
 	// Serialize the full read → annotate → write against the UI comment path
 	// and the answer-capture path, which touch the same file; and write
 	// atomically so a crash can't tear the artifact.
@@ -606,7 +612,7 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 	}
 	s.appendActivity("annotated spec: " + a.Note)
 	e.persist(s)
-	e.noteSessionSpecWrite(s)
+	e.noteSessionSpecWrite(s, n, path)
 	e.resolveNow(s, tc.ID, "annotation added to the spec")
 }
 
@@ -620,12 +626,13 @@ func (e *Engine) handleSpecView(s *Session, tc *agent.ToolCall) {
 		Section string `json:"section"`
 	}
 	_ = json.Unmarshal(tc.Args, &a)
-	raw, err := os.ReadFile(s.SpecPath())
+	_, path, err := e.specToolPath(s, tc.Args)
 	if err != nil {
-		if s.Feature.IsFreeform() && !s.Feature.InCrew() {
-			e.resolveNow(s, tc.ID, "this session has no spec yet; spec_start creates one")
-			return
-		}
+		e.resolveNow(s, tc.ID, err.Error())
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
 		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
 		return
 	}
@@ -650,7 +657,11 @@ func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 		e.resolveNow(s, tc.ID, "spec_replace_section needs a section name")
 		return
 	}
-	path := s.SpecPath()
+	n, path, err := e.specToolPath(s, tc.Args)
+	if err != nil {
+		e.resolveNow(s, tc.ID, err.Error())
+		return
+	}
 	unlock := spec.LockFile(path)
 	defer unlock()
 	raw, err := os.ReadFile(path)
@@ -672,9 +683,12 @@ func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 		return
 	}
 	note := "updated " + matchedTitle + " section"
+	if specs, _ := e.SessionSpecs(context.Background(), s.Feature); len(specs) > 1 {
+		note = fmt.Sprintf("updated spec %d's %s section", n, matchedTitle)
+	}
 	s.appendActivity(note)
 	e.persist(s)
-	e.noteSessionSpecWrite(s)
+	e.noteSessionSpecWrite(s, n, path)
 	e.resolveNow(s, tc.ID, note)
 }
 
@@ -1348,6 +1362,13 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer, by string) string {
 		return ""
 	}
 	path := s.SpecPath()
+	if isSession(s.Feature) {
+		// a session's answer goes into its spec when it keeps exactly one;
+		// with several, an anchor alone does not say which
+		if _, p, err := e.specTarget(s.Feature, nil); err == nil {
+			path = p
+		}
+	}
 	if path == "" {
 		return ""
 	}

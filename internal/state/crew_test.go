@@ -80,16 +80,16 @@ func TestSpecRevisionsNumberThemselves(t *testing.T) {
 	}
 	at := time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
 	for i, body := range []string{"a", "b"} {
-		rev, err := s.AddSpecRevision(ctx, f.ID, body, "claude", at)
+		rev, err := s.AddSpecRevision(ctx, f.ID, 1, body, "claude", at)
 		if err != nil || rev != i+1 {
 			t.Fatalf("rev %d %v", rev, err)
 		}
 	}
-	revs, _ := s.SpecRevisions(ctx, f.ID)
+	revs, _ := s.SpecRevisions(ctx, f.ID, 1)
 	if len(revs) != 2 || revs[0].Rev != 2 {
 		t.Fatalf("%+v", revs)
 	}
-	r, ok, err := s.SpecRevision(ctx, f.ID, 1)
+	r, ok, err := s.SpecRevision(ctx, f.ID, 1, 1)
 	if err != nil || !ok || r.Content != "a" {
 		t.Fatalf("%+v %v %v", r, ok, err)
 	}

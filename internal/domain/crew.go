@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // A crew (DESIGN §24) is a planned piece of a session's work: a planner's
@@ -230,9 +231,50 @@ type CrewLink struct {
 	Node string
 }
 
-// InCrew reports whether the card is a crew's own or one of its nodes'.
-// Such a card is never on the board: its session's Crew tab is its face.
+// InCrew reports whether the card is a hidden child of a session: a
+// crew's own or one of its nodes', or a workflow step's (InRun). Such a
+// card is never on the board: its session is its face.
 func (f *Feature) InCrew() bool { return f.Crew.Seq > 0 }
+
+// StepLink is a workflow step's card (DESIGN §25.6) read under its own
+// names. A step's card rides the same three columns a crew's card does:
+// Of is the session, Seq the run's number and Node the step's path, as in
+// build/2/implement.
+type StepLink struct {
+	Session FeatureID
+	Run     int
+	Path    string
+}
+
+// Link is the step link as the card stores it.
+func (l StepLink) Link() CrewLink { return CrewLink{Of: l.Session, Seq: l.Run, Node: l.Path} }
+
+// Step reads the card's link under the workflow's names. Whether a hidden
+// child is a step's card or an old crew's is the store's to say
+// (Store.RunStepByCard): the link alone cannot tell a step named t1 from
+// a crew's node.
+func (f *Feature) Step() StepLink {
+	return StepLink{Session: f.Crew.Of, Run: f.Crew.Seq, Path: f.Crew.Node}
+}
+
+// InRun reports whether the card is a hidden child of a session — under
+// the workflow's name, the same test as InCrew.
+func (f *Feature) InRun() bool { return f.InCrew() }
+
+// ValidStepPath reports whether p is a step path a card may carry: one or
+// more non-empty segments joined by '/', with no space or control
+// character in any.
+func ValidStepPath(p string) bool {
+	if p == "" || len(p) > 200 {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "" || strings.ContainsFunc(seg, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+			return false
+		}
+	}
+	return true
+}
 
 // validateParent checks a card's ParentID. Only a crew's own card and its
 // nodes' carry one now: a hidden freeform child of a session, routed on its
@@ -248,8 +290,8 @@ func (f *Feature) validateParent() error {
 	}
 	switch {
 	case f.InCrew():
-		if f.kind() != KindFreeform || f.Crew.Of == "" || (f.Crew.Node != "" && !ValidNodeID(f.Crew.Node)) {
-			return fmt.Errorf("feature %s: a crew's card is a freeform child of a session, with a node id of the form t<k>", f.ID)
+		if f.kind() != KindFreeform || f.Crew.Of == "" || (f.Crew.Node != "" && !ValidNodeID(f.Crew.Node) && !ValidStepPath(f.Crew.Node)) {
+			return fmt.Errorf("feature %s: a crew's or a step's card is a freeform child of a session, with a node id of the form t<k> or a step path", f.ID)
 		}
 		return nil
 	case f.kind() == KindFreeform || f.kind() == KindGoal:
@@ -359,6 +401,9 @@ type CrewNodeRun struct {
 
 // SpecRevision is one saved state of a session's spec.
 type SpecRevision struct {
+	// Spec is the spec's number on its session (DESIGN §25.3); revisions
+	// count from 1 per spec.
+	Spec    int
 	Rev     int
 	Content string
 	By      string

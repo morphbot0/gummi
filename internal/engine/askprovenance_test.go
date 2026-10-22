@@ -47,14 +47,14 @@ func TestCapturedAnswerNamesItsAnswerer(t *testing.T) {
 		f := freeformCard(1, "Dark mode")
 		createFeature(t, store, f)
 		seedDraft(t, e, f)
-		s := attach(t, e, f)
+		attach(t, e, f)
 		waitFor(t, e, EventQuestion)
 
 		if err := e.AnswerAs(context.Background(), f.ID, "per-device", c.by); err != nil {
 			e.Close()
 			t.Fatalf("by %q: AnswerAs: %v", c.by, err)
 		}
-		raw, err := os.ReadFile(s.SpecPath())
+		raw, err := os.ReadFile(specDraftPath(e, f))
 		e.Close()
 		if err != nil {
 			t.Fatalf("by %q: read spec: %v", c.by, err)

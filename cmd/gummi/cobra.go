@@ -92,11 +92,13 @@ var watchCmd = &cobra.Command{
 	},
 }
 
-// specCmd implements `gummi spec <id|ref>`.
+// specCmd implements `gummi spec <id|ref> [--spec <n>] [--list]`.
 var specCmd = &cobra.Command{
-	Use:   "spec <id|ref>",
-	Short: "Dump a card's current design artifact",
-	RunE:  func(_ *cobra.Command, args []string) error { return runSpec(args) },
+	Use:   "spec <id|ref> [--spec <n>] [--list]",
+	Short: "Dump a card's current design artifact, or one of a session's specs",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSpec(cmdFlags(cmd), args)
+	},
 }
 
 // diffCmd implements `gummi diff <id|ref>`.
@@ -449,6 +451,7 @@ func init() {
 	bindRewriteFlags(rewriteCmd.Flags())
 	bindStatusFlags(statusCmd.Flags())
 	bindWatchFlags(watchCmd.Flags())
+	bindSpecFlags(specCmd.Flags())
 	bindDoctorFlags(doctorCmd.Flags())
 	bindStackNewFlags(stackNewCmd.Flags())
 	bindStackAddFlags(stackAddCmd.Flags())
@@ -548,6 +551,13 @@ func bindWatchFlags(fs *pflag.FlagSet) {
 	jsonFlag(fs, "emit the raw record stream as NDJSON instead of the rendered transcript")
 	fs.Bool("wait", false, "block until the card has a live stream instead of failing when none exists")
 	fs.Bool("once", false, "exit when the current session ends instead of following the card's next one")
+}
+
+// bindSpecFlags declares `gummi spec`'s flags: which of a session's specs
+// to dump (DESIGN §25.3), or the list of them.
+func bindSpecFlags(fs *pflag.FlagSet) {
+	fs.Int("spec", 0, "which of a session's specs to dump, by its number (default: its only spec)")
+	fs.Bool("list", false, "list a session's specs, one per line: number, state, revision and title")
 }
 
 func bindDoctorFlags(fs *pflag.FlagSet) {

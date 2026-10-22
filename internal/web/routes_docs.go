@@ -58,8 +58,16 @@ func (s *Server) docsRoutes() {
 
 // docs captures the card's documents from the model, answering the
 // request itself when it cannot.
+// A session's spec routes act on the spec ?spec=<n> names, spec 1 when
+// the query leaves it out (DESIGN §25.3).
 func (s *Server) docs(w http.ResponseWriter, r *http.Request) (*ui.WebDocs, bool) {
-	return s.capture(w, r, (*ui.Shell).WebDocs)
+	d, ok := s.capture(w, r, (*ui.Shell).WebDocs)
+	if ok {
+		if n, err := strconv.Atoi(r.URL.Query().Get("spec")); err == nil {
+			d.UseSpec(n)
+		}
+	}
+	return d, ok
 }
 
 func (s *Server) capture(w http.ResponseWriter, r *http.Request, from func(*ui.Shell, string) (*ui.WebDocs, error)) (*ui.WebDocs, bool) {

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -332,12 +333,55 @@ type Run struct {
 	OutOfBudget bool
 	// Steers holds workflow_steer notes, in order, for steps not yet started.
 	Steers []string
+	// Pending is the run's one open question to its person, nil when none.
+	Pending *RunDecision
+	// Feedback is the person's typed answer to the proposal, delivered to
+	// the session agent as a turn; empty when there was none.
+	Feedback string
 	// Revision counts changes to the run, so a face redraws only on one.
 	Revision  int
 	CreatedAt time.Time
 	StartedAt time.Time
 	EndedAt   time.Time
 	UpdatedAt time.Time
+}
+
+// RunDecisionKind is what a run asks its person (§25.5, §25.7).
+type RunDecisionKind string
+
+const (
+	// RunDecideProposal: allow this run? Allow, always allow up to an
+	// amount, deny, or typed feedback.
+	RunDecideProposal RunDecisionKind = "proposal"
+	// RunDecidePlan: a planner step's revised plan, to allow or deny.
+	RunDecidePlan RunDecisionKind = "plan"
+	// RunDecideMax: a repeat reached its max without its condition and its
+	// onMax is pause — one more iteration, continue, or stop.
+	RunDecideMax RunDecisionKind = "max"
+	// RunDecideRunaway: a step ran past three times its estimate — let it
+	// run three estimates more, or drop it.
+	RunDecideRunaway RunDecisionKind = "runaway"
+	// RunDecideBudget: the session's pool is spent and the run paused, or
+	// the forecast says it will be. Amount is the top-up suggested.
+	RunDecideBudget RunDecisionKind = "budget"
+)
+
+// RunDecision is a run's one open question to its person. A step's own
+// ask_user is not one: it is a question on the step's card.
+type RunDecision struct {
+	ID       string          `json:"id"`
+	Kind     RunDecisionKind `json:"kind"`
+	Question string          `json:"question"`
+	Options  []string        `json:"options,omitempty"`
+	// Step is the path of the step or repeat the decision is about.
+	Step string `json:"step,omitempty"`
+	// RecipeYAML is a revised plan's replacement steps, as the planner
+	// wrote them; Warnings are Check's on the proposal or the revision.
+	RecipeYAML string   `json:"recipe_yaml,omitempty"`
+	Warnings   []string `json:"warnings,omitempty"`
+	// Amount is a budget decision's top-up or a runaway's further
+	// allowance, in credits.
+	Amount int `json:"amount,omitempty"`
 }
 
 // RunStep is one step instance: a step of the recipe at a path, as in
@@ -406,6 +450,18 @@ const (
 	// SpecPartial is anything else.
 	SpecPartial SpecState = "partial"
 )
+
+// SessionSpecPath is where a new spec's file goes, relative to the
+// workspace root: .gummi/specs/<ID>/<n>-<slug>.md, the slug from its title
+// (spec when the title yields none). A session's spec from before
+// keeps its old path (Feature.SpecPath) as spec 1.
+func SessionSpecPath(id FeatureID, n int, title string) string {
+	slug, err := Slugify(title)
+	if err != nil {
+		slug = "spec"
+	}
+	return path.Join(".gummi", "specs", string(id), strconv.Itoa(n)+"-"+slug+".md")
+}
 
 // SessionSpec is one of a session's specs: one per piece of work.
 type SessionSpec struct {

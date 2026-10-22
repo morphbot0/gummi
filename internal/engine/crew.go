@@ -228,9 +228,9 @@ func (e *Engine) CrewStart(ctx context.Context, session domain.FeatureID, brief 
 	if left, bounded := e.sessionPoolLeft(ctx, sess); bounded && float64(budget) > left {
 		return nil, fmt.Errorf("the session has %.0f credits left; a crew estimated at %d does not fit — raise the session's envelope first", max(0, left), budget)
 	}
-	text, ok := e.SessionSpec(sess)
+	text, ok := e.SessionSpec(sess, crewSpec)
 	if !ok {
-		return nil, errors.New("this session has no spec: start one with spec_start, and give it at least one done-when item")
+		return nil, errors.New("this session has no spec: start one with spec_start, and give it at least one done-when item (a crew is judged against spec 1)")
 	}
 	items, _, err := spec.ParseDoneWhen(text)
 	if err != nil {
@@ -240,14 +240,14 @@ func (e *Engine) CrewStart(ctx context.Context, session domain.FeatureID, brief 
 		return nil, errors.New("the spec has no done-when items; a crew is judged against them")
 	}
 	rev := 0
-	if revs, _ := st.SpecRevisions(ctx, session); len(revs) > 0 {
+	if revs, _ := st.SpecRevisions(ctx, session, crewSpec); len(revs) > 0 {
 		rev = revs[0].Rev
-		if last, ok, _ := st.SpecRevision(ctx, session, rev); ok && last.Content != text {
+		if last, ok, _ := st.SpecRevision(ctx, session, crewSpec, rev); ok && last.Content != text {
 			rev = 0
 		}
 	}
 	if rev == 0 {
-		if rev, err = e.recordSpecRevision(ctx, session, text, by); err != nil {
+		if rev, err = e.recordSpecRevision(ctx, session, crewSpec, text, by); err != nil {
 			return nil, err
 		}
 	}

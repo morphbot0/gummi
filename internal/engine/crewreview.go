@@ -47,7 +47,7 @@ func (e *Engine) reviewNode(ctx context.Context, c *domain.Crew, n domain.CrewNo
 	}
 	b.WriteString("It may change: " + ownsText(n.Owns) + "\n\n")
 	b.WriteString("Its handoff:\n" + handoff + "\n\n")
-	if rev, ok, _ := e.crewStore().SpecRevision(ctx, c.Session, c.SpecRev); ok {
+	if rev, ok, _ := e.crewStore().SpecRevision(ctx, c.Session, crewSpec, c.SpecRev); ok {
 		b.WriteString("The spec:\n\n" + rev.Content + "\n\n")
 	}
 	b.WriteString("The change:\n```diff\n" + tail(diff, maxReviewDiff) + "\n```\n")
@@ -158,7 +158,7 @@ func (e *Engine) finalReview(ctx context.Context, id domain.FeatureID) {
 	if strings.TrimSpace(diff) != "" && !c.Stopping {
 		var b strings.Builder
 		fmt.Fprintf(&b, "Review the whole of crew %d's work against the spec it was judged by.\n\n", c.Seq)
-		if rev, ok, _ := st.SpecRevision(ctx, c.Session, c.SpecRev); ok {
+		if rev, ok, _ := st.SpecRevision(ctx, c.Session, crewSpec, c.SpecRev); ok {
 			b.WriteString("The spec:\n\n" + rev.Content + "\n\n")
 		}
 		for _, it := range c.Items {
@@ -268,8 +268,8 @@ func (e *Engine) writeBackToSpec(ctx context.Context, c *domain.Crew, decisions,
 	if err != nil {
 		return
 	}
-	path := e.SessionSpecPath(sess)
-	text, ok := e.SessionSpec(sess)
+	path := e.SessionSpecPath(sess, crewSpec)
+	text, ok := e.SessionSpec(sess, crewSpec)
 	if !ok {
 		return
 	}
@@ -291,7 +291,7 @@ func (e *Engine) writeBackToSpec(ctx context.Context, c *domain.Crew, decisions,
 	err = writeFile(path, out)
 	unlock()
 	if err == nil {
-		_, _ = e.recordSpecRevision(ctx, sess.ID, out, state.ActorCrew)
+		_, _ = e.recordSpecRevision(ctx, sess.ID, crewSpec, out, state.ActorCrew)
 	}
 }
 

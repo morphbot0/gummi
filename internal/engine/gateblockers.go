@@ -51,7 +51,7 @@ func (e *Engine) OpenDiffComments(ctx context.Context, id domain.FeatureID) (int
 // legacy workflow card's artifact at its workspace home. "" when it has
 // none on disk.
 func (e *Engine) cardSpecFile(f *domain.Feature) string {
-	path := e.SessionSpecPath(*f)
+	path := e.SessionSpecPath(*f, 1)
 	if !f.IsFreeform() {
 		p, ok := f.ArtifactFile(e.pool.Root())
 		if !ok {

@@ -11,9 +11,10 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// The crew tables (DESIGN §24): a crew's record, its nodes' progress, a
-// session's spec revisions, and what a person pre-authorised a session's
-// crews to spend without asking.
+// The crew tables (DESIGN §24): a crew's record, its nodes' progress, and
+// what a person pre-authorised a session's crews to spend without asking.
+// The pre-authorisation outlives crews: a session's workflow runs read the
+// same amount (WorkflowPreauth, DESIGN §25.5).
 
 const crewCols = `id, session_id, seq, state, brief, spec_rev, budget,
 	approved, approved_items, plan, items, pending, wake, own_spent, stopping,
@@ -206,63 +207,6 @@ func (s *Store) PutCrewNode(ctx context.Context, n domain.CrewNodeRun) error {
 	return err
 }
 
-// AddSpecRevision saves content as the session spec's next revision and
-// returns its number.
-func (s *Store) AddSpecRevision(ctx context.Context, id domain.FeatureID, content, by string, at time.Time) (int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback() //nolint:errcheck // no-op after Commit
-	var last sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(rev) FROM spec_revisions WHERE feature_id=?`, string(id)).Scan(&last); err != nil {
-		return 0, err
-	}
-	rev := int(last.Int64) + 1
-	if _, err := tx.ExecContext(ctx, `INSERT INTO spec_revisions (feature_id, rev, content, by, at) VALUES (?,?,?,?,?)`,
-		string(id), rev, content, by, at.UTC().Format(timeFmt)); err != nil {
-		return 0, err
-	}
-	return rev, tx.Commit()
-}
-
-// SpecRevisions lists a session spec's revisions, newest first, without
-// their content.
-func (s *Store) SpecRevisions(ctx context.Context, id domain.FeatureID) ([]domain.SpecRevision, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT rev, by, at FROM spec_revisions WHERE feature_id=? ORDER BY rev DESC`, string(id))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []domain.SpecRevision
-	for rows.Next() {
-		var r domain.SpecRevision
-		var at string
-		if err := rows.Scan(&r.Rev, &r.By, &at); err != nil {
-			return nil, err
-		}
-		r.At, _ = time.Parse(timeFmt, at)
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-// SpecRevision reads one revision whole; ok is false when there is none.
-func (s *Store) SpecRevision(ctx context.Context, id domain.FeatureID, rev int) (domain.SpecRevision, bool, error) {
-	r := domain.SpecRevision{Rev: rev}
-	var at string
-	err := s.db.QueryRowContext(ctx, `SELECT content, by, at FROM spec_revisions WHERE feature_id=? AND rev=?`,
-		string(id), rev).Scan(&r.Content, &r.By, &at)
-	if errors.Is(err, sql.ErrNoRows) {
-		return r, false, nil
-	}
-	if err != nil {
-		return r, false, err
-	}
-	r.At, _ = time.Parse(timeFmt, at)
-	return r, true, nil
-}
-
 // SetCrewPreauth records what a session's crews may plan without asking
 // (0 withdraws it).
 func (s *Store) SetCrewPreauth(ctx context.Context, id domain.FeatureID, credits int) error {
@@ -279,4 +223,17 @@ func (s *Store) CrewPreauth(ctx context.Context, id domain.FeatureID) (int, erro
 		return 0, nil
 	}
 	return n, err
+}
+
+// SetWorkflowPreauth records what a session's workflow runs may be
+// estimated at and still start without asking (0 withdraws it): the
+// "Always allow up to" answer to a proposal (DESIGN §25.5). It is the
+// amount crews read, kept in the one table.
+func (s *Store) SetWorkflowPreauth(ctx context.Context, id domain.FeatureID, credits int) error {
+	return s.SetCrewPreauth(ctx, id, credits)
+}
+
+// WorkflowPreauth reads it; 0 means every run is asked.
+func (s *Store) WorkflowPreauth(ctx context.Context, id domain.FeatureID) (int, error) {
+	return s.CrewPreauth(ctx, id)
 }
