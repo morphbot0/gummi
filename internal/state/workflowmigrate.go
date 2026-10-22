@@ -84,7 +84,13 @@ func workspaceRootOf(dbPath string) string {
 //
 // A session has a spec when its file is on disk under root; with no root
 // to look under, when it has a revision in the store. A session with
-// neither gets no row.
+// neither gets no row, and revisions it has (its file is gone) move to
+// spec 0, which no spec is: they are kept, and a spec it starts later
+// begins at revision 1 with none of them under it.
+//
+// Two gummis may open an old database at once. The version is read again
+// inside the transaction, which takes the write lock at BEGIN
+// (_txlock=immediate), so the second finds the first's work done.
 func migrateToWorkflows(db *sql.DB, root string) error {
 	ctx := context.Background()
 	var version int
@@ -94,9 +100,8 @@ func migrateToWorkflows(db *sql.DB, root string) error {
 	if version >= workflowsVersion {
 		return nil
 	}
-	sessions, err := unregisteredSessions(ctx, db)
-	if err != nil {
-		return err
+	if beforeWorkflowsMigration != nil {
+		beforeWorkflowsMigration()
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -104,6 +109,16 @@ func migrateToWorkflows(db *sql.DB, root string) error {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version >= workflowsVersion {
+		return nil // another gummi migrated it while this one waited
+	}
+	sessions, err := unregisteredSessions(ctx, tx)
+	if err != nil {
+		return err
+	}
 	for _, s := range sessions {
 		rel := path.Join(".gummi", "specs", s.id+"-"+s.slug+".md")
 		title, created := s.title, s.created
@@ -114,6 +129,9 @@ func migrateToWorkflows(db *sql.DB, root string) error {
 		if root != "" {
 			heading, ok := specHeading(filepath.Join(root, filepath.FromSlash(rel)))
 			if !ok {
+				if _, err := tx.ExecContext(ctx, `UPDATE spec_revisions SET spec_n = 0 WHERE feature_id = ? AND spec_n = 1`, s.id); err != nil {
+					return err
+				}
 				continue
 			}
 			if heading != "" {
@@ -145,12 +163,20 @@ func migrateToWorkflows(db *sql.DB, root string) error {
 	return tx.Commit()
 }
 
+// beforeWorkflowsMigration, when a test sets it, runs between the first
+// read of the version and the migration's transaction: the moment another
+// gummi may migrate the same database.
+var beforeWorkflowsMigration func()
+
 // legacySession is a session the upgrade may register a spec 1 for.
 type legacySession struct{ id, slug, title, created string }
 
 // unregisteredSessions lists the sessions — freeform cards no crew owns —
 // with no spec registered yet.
-func unregisteredSessions(ctx context.Context, db *sql.DB) ([]legacySession, error) {
+func unregisteredSessions(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+},
+) ([]legacySession, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, slug, title, created_at FROM features
 		WHERE kind = ? AND crew_seq = 0
 		AND NOT EXISTS (SELECT 1 FROM session_specs WHERE session_specs.feature_id = features.id)`,

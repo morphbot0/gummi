@@ -312,6 +312,17 @@ func TestUpgradeRegistersTheSpecAndStopsOpenCrews(t *testing.T) {
 	if none, _ := s.SessionSpecs(ctx, without.ID); len(none) != 0 {
 		t.Errorf("a session with no spec file got a row: %+v", none)
 	}
+	// its revisions are kept off spec 1, so a spec it starts later does
+	// not open on another file's history
+	if revs, _ := s.SpecRevisions(ctx, without.ID, 1); len(revs) != 0 {
+		t.Errorf("a session with no spec file kept revisions under spec 1: %+v", revs)
+	}
+	if kept, _ := s.SpecRevisions(ctx, without.ID, 0); len(kept) != 1 {
+		t.Errorf("the orphan revision was not kept: %+v", kept)
+	}
+	if next, err := s.AddSpecRevision(ctx, without.ID, 1, "fresh", "agent", time.Now()); err != nil || next != 1 {
+		t.Errorf("a new spec 1 of the session without a file starts at %d %v, want 1", next, err)
+	}
 	if none, _ := s.SessionSpecs(ctx, crewCard.ID); len(none) != 0 {
 		t.Errorf("a crew's card got a spec: %+v", none)
 	}
@@ -396,5 +407,58 @@ func TestFreshSchemaHoldsWorkflows(t *testing.T) {
 	var version int
 	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != workflowsVersion {
 		t.Errorf("user_version = %d %v", version, err)
+	}
+}
+
+// Two gummis opening an old database at once: the one that waited finds
+// the other's migration done. It neither registers a spec twice nor stops
+// a crew the other started once its own migration had run.
+func TestUpgradeByTwoProcessesAtOnceRunsOnce(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.db")
+	s, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	f := freeformFeat(1, "has revisions")
+	crewCard := freeformFeat(2, "has revisions")
+	crewCard.Slug, crewCard.ParentID = f.Slug, f.ID
+	crewCard.Child = domain.ChildLink{Of: f.ID, Seq: 1}
+	for _, x := range []*domain.Feature{f, crewCard} {
+		if err := s.CreateFeature(ctx, x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.AddSpecRevision(ctx, f.ID, 1, "one", "agent", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{`DELETE FROM session_specs`, `PRAGMA user_version = 0`} {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+	// the other gummi migrates between this one's first look and its own
+	beforeWorkflowsMigration = func() {
+		beforeWorkflowsMigration = nil
+		other, err := OpenStore(dbPath)
+		if err != nil {
+			t.Errorf("the other process's open: %v", err)
+			return
+		}
+		insertLegacyCrew(t, other, crewCard.ID, f.ID, 1, "running", "", "")
+		other.Close()
+	}
+	t.Cleanup(func() { beforeWorkflowsMigration = nil })
+	s, err = OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("the open that lost the race: %v", err)
+	}
+	defer s.Close()
+	if specs, _ := s.SessionSpecs(ctx, f.ID); len(specs) != 1 {
+		t.Errorf("specs after two migrations at once: %+v", specs)
+	}
+	if st, _, _ := legacyCrew(t, s, crewCard.ID); st != legacyCrewRunning {
+		t.Errorf("the migration ran a second time, over a crew started after the first: %s", st)
 	}
 }
