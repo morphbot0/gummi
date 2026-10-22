@@ -90,12 +90,64 @@ type workflowRuntime struct {
 	busy      map[string]bool
 	locks     map[domain.FeatureID]*sync.Mutex
 	planTries map[string]int
+	// held is this process's hold on the card lock of each session whose
+	// run it conducts: kept while the session has a run open or queued,
+	// so no other gummi conducts the same run meanwhile
+	held map[domain.FeatureID]func()
 }
 
 func newWorkflowRuntime() *workflowRuntime {
 	return &workflowRuntime{
 		boot: time.Now(), busy: map[string]bool{},
 		locks: map[domain.FeatureID]*sync.Mutex{}, planTries: map[string]int{},
+		held: map[domain.FeatureID]func(){},
+	}
+}
+
+// holdRuns takes (or keeps) this process's hold on session's card lock,
+// and reports whether this process may conduct the session's runs: false
+// while another gummi holds the card — a headless run or resume of it, or
+// a board — which conducts them instead.
+func (e *Engine) holdRuns(session domain.FeatureID) bool {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	_, ok := rt.held[session]
+	rt.mu.Unlock()
+	if ok {
+		return true
+	}
+	release, err := e.lockCard(session)
+	if err != nil {
+		return false
+	}
+	rt.mu.Lock()
+	rt.held[session] = release
+	rt.mu.Unlock()
+	return true
+}
+
+// letGoRuns drops this process's hold on session's card lock, taken by
+// holdRuns, once the session has no run left to conduct.
+func (e *Engine) letGoRuns(session domain.FeatureID) {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	release := rt.held[session]
+	delete(rt.held, session)
+	rt.mu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+// letGoAllRuns drops every hold holdRuns took: the engine is closing.
+func (e *Engine) letGoAllRuns() {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	held := rt.held
+	rt.held = map[domain.FeatureID]func(){}
+	rt.mu.Unlock()
+	for _, release := range held {
+		release()
 	}
 }
 
@@ -1101,11 +1153,14 @@ type WorkflowTickResult struct {
 	Actions []string
 }
 
-// WorkflowTick advances every session's live run one step (§25.7): it
-// starts a queued run whose session has none open, parks a run that was
-// running when gummi quit, and executes workflowpolicy.Decide's actions on
-// a running one. Every long action runs in the background and sends
-// EventWorkflow when it settles, so the driving loop ticks again.
+// WorkflowTick advances the live run of every session this process may
+// conduct one step (§25.7): it starts a queued run whose session has none
+// open, parks a run that was running when gummi quit, and executes
+// workflowpolicy.Decide's actions on a running one. A process conducts
+// only the runs of the sessions whose card lock it holds (holdRuns): a
+// session another gummi drives is that gummi's to tick. Every long action
+// runs in the background and sends EventWorkflow when it settles, so the
+// driving loop ticks again.
 func (e *Engine) WorkflowTick(ctx context.Context) (WorkflowTickResult, error) {
 	var res WorkflowTickResult
 	if e.cfg.Store == nil {
@@ -1121,13 +1176,60 @@ func (e *Engine) WorkflowTick(ctx context.Context) (WorkflowTickResult, error) {
 			continue
 		}
 		seen[r.Session] = true
-		acts, err := e.tickSession(ctx, r.Session)
+		acts, err := e.tickHeld(ctx, r.Session)
 		res.Actions = append(res.Actions, acts...)
 		if err != nil {
 			return res, err
 		}
 	}
+	// a hold on a session whose runs have all ended goes
+	rt := e.wfRT()
+	rt.mu.Lock()
+	var gone []domain.FeatureID
+	for s := range rt.held {
+		if !seen[s] {
+			gone = append(gone, s)
+		}
+	}
+	rt.mu.Unlock()
+	for _, s := range gone {
+		e.letGoRuns(s)
+	}
 	return res, nil
+}
+
+// WorkflowTickSession advances session's live run alone: the headless
+// driver's tick, which conducts its own session's run and no other.
+func (e *Engine) WorkflowTickSession(ctx context.Context, session domain.FeatureID) (WorkflowTickResult, error) {
+	var res WorkflowTickResult
+	if e.cfg.Store == nil {
+		return res, nil
+	}
+	acts, err := e.tickHeld(ctx, session)
+	res.Actions = acts
+	return res, err
+}
+
+// tickHeld ticks session's runs when this process holds its card, and
+// lets the hold go once the session has nothing open or queued.
+func (e *Engine) tickHeld(ctx context.Context, session domain.FeatureID) ([]string, error) {
+	st := e.cfg.Store
+	open, err := st.OpenRun(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	queued, err := st.QueuedRun(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	if open == nil && queued == nil {
+		e.letGoRuns(session)
+		return nil, nil
+	}
+	if !e.holdRuns(session) {
+		return nil, nil
+	}
+	return e.tickSession(ctx, session)
 }
 
 func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]string, error) {

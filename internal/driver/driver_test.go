@@ -337,3 +337,38 @@ func TestErrorEventsSayWhetherTheSessionIsResumable(t *testing.T) {
 		t.Fatalf("session error %v", ev)
 	}
 }
+
+// The driver conducts its own session's run and no other: a resume of one
+// session leaves alone the run of another, which a board or another
+// driver is conducting — it neither parks it nor starts its steps.
+func TestADriverTicksOnlyItsOwnSession(t *testing.T) {
+	h := newHarness(t, newSessionFake("reply"))
+	_, f := h.run(Options{Envelope: 500}, "tidy the README")
+	ctx := context.Background()
+	other := domain.Feature{
+		ID: "FF-090", Num: 90, Kind: domain.KindFreeform, Title: "driven elsewhere", Slug: "driven-elsewhere",
+		Stage: domain.StageOpen, Budget: domain.Budget{Envelope: 500},
+	}
+	if err := h.store.CreateFeature(ctx, &other); err != nil {
+		t.Fatal(err)
+	}
+	run := &domain.Run{
+		Session: other.ID, RecipeName: "x", State: domain.RunRunning, Spec: 1, SpecRev: 1,
+		Recipe: domain.Recipe{Name: "x", Steps: []domain.Entry{{Step: &domain.Step{ID: "one", Role: domain.RoleScout, Prompt: "look"}}}},
+	}
+	if err := h.store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	h.reopen()
+	out, err := h.driver(Options{}).Resume(ctx, f.ID, ResumeInput{Message: "now the CHANGELOG"})
+	if err != nil || out.Status != StatusDone {
+		t.Fatalf("resume = %+v, %v; stream %v", out, err, h.eventKinds())
+	}
+	r, _ := h.store.Run(ctx, other.ID, run.N)
+	if r.State != domain.RunRunning {
+		t.Fatalf("the other session's run was conducted by this driver: %s (%s)", r.State, r.Reason)
+	}
+	if steps, _ := h.store.RunSteps(ctx, other.ID, run.N); len(steps) != 0 {
+		t.Fatalf("the other session's run started steps: %+v", steps)
+	}
+}

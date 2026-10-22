@@ -1013,6 +1013,9 @@ func (e *Engine) Close() error {
 		ff.settle()
 		ff.stopBackend()
 	}
+	// and the holds this engine kept on the sessions whose runs it
+	// conducted (holdRuns)
+	e.letGoAllRuns()
 	// Join the pump and kickoff goroutines so no git subprocess or persist
 	// write is still in flight against the workspace when Close returns.
 	e.wg.Wait()

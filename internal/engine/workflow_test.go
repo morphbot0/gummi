@@ -976,3 +976,66 @@ func TestAProposalReadsAsItsCard(t *testing.T) {
 		t.Fatal("an allowed run still reads as a proposal")
 	}
 }
+
+// TestAProcessConductsOnlyTheRunsItHolds: a tick conducts a session's run
+// only while this process holds the session's card lock. A run another
+// gummi drives — whose lock it holds — is neither parked nor ticked here;
+// a run this process conducts keeps its session's lock held until it ends.
+func TestAProcessConductsOnlyTheRunsItHolds(t *testing.T) {
+	wf := newWFFake()
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	other := freeformCard(2, "driven elsewhere")
+	createFeature(t, store, other)
+	ws := e.cfg.Workspace
+	e.UseCardLocks(state.NewCardLocks(ws))
+	recipe := domain.Recipe{Name: "x", Steps: []domain.Entry{{Step: &domain.Step{ID: "one", Role: domain.RoleScout, Prompt: "look"}}}}
+	for _, s := range []domain.FeatureID{f.ID, other.ID} {
+		if err := store.CreateRun(ctx, &domain.Run{Session: s, RecipeName: "x", State: domain.RunRunning, Spec: 1, SpecRev: 1, Recipe: recipe}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// another gummi drives the other session
+	release, err := state.AcquireLock(ws.CardLockFile(other.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wfRT().boot = time.Now().Add(time.Hour)
+	if _, err := e.WorkflowTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := store.Run(ctx, other.ID, 1); r.State != domain.RunRunning {
+		t.Fatalf("a run another gummi drives was conducted here: %s (%s)", r.State, r.Reason)
+	}
+	if r, _ := store.Run(ctx, f.ID, 1); r.State != domain.RunPaused {
+		t.Fatalf("the run this process holds was not conducted: %s", r.State)
+	}
+	// the open run keeps its session's lock held here
+	if rel, err := state.AcquireLock(ws.CardLockFile(f.ID)); err == nil {
+		rel()
+		t.Fatal("another gummi could take the card whose run this process conducts")
+	}
+	release()
+	if _, err := e.WorkflowTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := store.Run(ctx, other.ID, 1); r.State != domain.RunPaused {
+		t.Fatalf("once the other gummi let go, the run was not taken up: %s", r.State)
+	}
+	// a run that ends lets its session's lock go
+	if err := e.WorkflowStop(ctx, f.ID, "done with it"); err != nil {
+		t.Fatal(err)
+	}
+	tickRuns(t, e, f.ID, 1, "ended", ended)
+	waitUntil(t, "the ended run's session lock let go", func() bool {
+		if _, err := e.WorkflowTick(ctx); err != nil {
+			t.Fatal(err)
+		}
+		rel, err := state.AcquireLock(ws.CardLockFile(f.ID))
+		if err != nil {
+			return false
+		}
+		rel()
+		return true
+	})
+}

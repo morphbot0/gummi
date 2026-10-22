@@ -174,7 +174,7 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	// A run left running by a process that is gone is parked by its first
 	// tick (§25.7: nothing resumes itself) — and a person running `resume`
 	// is the one who may run it again.
-	if _, err := d.eng.WorkflowTick(ctx); err != nil {
+	if _, err := d.eng.WorkflowTickSession(ctx, id); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
 	// one paused because the money ran out waits for a raise instead, and
@@ -212,7 +212,7 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	return d.loop(ctx, id)
 }
 
-// loop drives the session until it stops: it ticks the workflow runs,
+// loop drives the session until it stops: it ticks the session's run,
 // streams what happened, and checks for a terminal state after every
 // event.
 func (d *Driver) loop(ctx context.Context, id domain.FeatureID) (Outcome, error) {
@@ -231,7 +231,9 @@ func (d *Driver) loop(ctx context.Context, id domain.FeatureID) (Outcome, error)
 			return out, err
 		}
 		if tick {
-			if _, err := d.eng.WorkflowTick(ctx); err != nil {
+			// this session's run alone: another session's is the business
+			// of the gummi that drives it
+			if _, err := d.eng.WorkflowTickSession(ctx, id); err != nil {
 				d.out.Activity(string(id), "workflow", "workflow tick failed: "+err.Error())
 			}
 			tick = false
