@@ -218,3 +218,29 @@ test('the Specs tab switches between a session’s specs', async ({ pairedPage: 
   const list = (await api('GET', `/api/cards/${id}/specs`)).json;
   expect(list.specs.map((s: any) => s.title)).toEqual(['Two pieces of work', 'Import CSV', 'Export JSON']);
 });
+
+// A step opened beside the thread reads as the thread does (DESIGN
+// §25.10): its transcript is spaced as the session's conversation is.
+test('a step’s transcript reads as the thread does', async ({ pairedPage: page, server, api, workspace }) => {
+  test.setTimeout(150_000);
+  fs.mkdirSync(path.join(workspace.repo, '.gummi', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(workspace.repo, '.gummi', 'workflows', 'make-and-read.yaml'), RECIPE);
+  const id = await openSession(page, server, api, 'Follow the step');
+  const input = page.getByTestId('composer-input');
+  await input.click();
+  await input.fill('[workflow=make-and-read] make the workflow file');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('decision-option-0')).toContainText('Allow', { timeout: 45_000 });
+  await page.getByTestId('decision-option-0').click();
+  const block = page.getByTestId('run-1');
+  await expect(block).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
+  await block.getByTestId('run-steps').locator('summary').click();
+  await block.getByTestId('run-row-make').getByTestId('run-open').click();
+  const panel = page.getByTestId('step-panel');
+  const transcript = panel.getByTestId('step-transcript');
+  await expect(transcript).toContainText('Wrote made.txt', { timeout: 15_000 });
+
+  // spaced as the session's conversation
+  const gap = (el: Element) => getComputedStyle(el).rowGap;
+  expect(await transcript.evaluate(gap)).toBe(await page.locator('#thread-live').evaluate(gap));
+});

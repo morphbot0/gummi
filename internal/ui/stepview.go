@@ -13,13 +13,13 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/webapi"
@@ -50,9 +50,9 @@ type stepView struct {
 	// scroll is how far the transcript is paged back from its end, or the
 	// brief down from its top.
 	scroll int
-	// input is the line to the step's agent; composing says it holds the
-	// keyboard.
-	input     textinput.Model
+	// input is the line to the step's agent, the thread's own composer;
+	// composing says it holds the keyboard.
+	input     textarea.Model
 	composing bool
 	// qCursor is the option highlighted in the step's open question.
 	qCursor int
@@ -73,8 +73,7 @@ type stepDiffMsg struct {
 
 // openStep pushes the step whose card is card over the session's thread.
 func (m *Shell) openStep(r featureRow, card domain.FeatureID) tea.Cmd {
-	in := textinput.New()
-	in.Prompt = ""
+	in := newThreadInput(m.styles)
 	in.CharLimit = 4000
 	m.stepv = &stepView{session: r.F.ID, card: card, input: in}
 	return m.loadStep(card)
@@ -385,13 +384,49 @@ func (m *Shell) stepBindings() []binding {
 	return bs
 }
 
-// stepViewRender draws the open step.
+// stepViewRender draws the open step as the card page draws a thread
+// (cardPageView, threadRender): the page's chrome row on top — the step's
+// tabs and its crumb back — then its head, its body, its open question
+// pinned above the composer and the composer, laid out by composeThread
+// under the thread's own blank-row rules. A step's transcript is a
+// conversation like the session's, and reads the same.
 func (m *Shell) stepViewRender(w, h int) string {
+	crumbRows, blank := cardPageChrome(h)
+	out := m.stepThread(w, max(h-crumbRows-blank, 1))
+	if blank > 0 {
+		out += "\n"
+	}
+	if crumbRows == 0 {
+		return out
+	}
+	line := ansi.Truncate(m.stepChrome(), w, "…")
+	if crumbRows > 1 {
+		line = "\n" + line
+	}
+	return line + "\n" + out
+}
+
+// stepChrome is the step's chrome row, in the card page's: its tabs where
+// the card's are, then the way back — the crumb to the session.
+func (m *Shell) stepChrome() string {
 	sv := m.stepv
 	s := m.styles
-	inner := max(w-threadGutter, 8)
-	clip := func(l string) string { return ansi.Truncate(l, inner, "…") }
-	var head []string
+	tabs := []struct {
+		t    stepTab
+		key  string
+		name string
+	}{{stepTabTranscript, "t", "transcript"}, {stepTabDiff, "d", "diff"}, {stepTabBrief, "b", "brief"}}
+	out := " "
+	for i, t := range tabs {
+		if i > 0 {
+			out += s.Faint.Render("  ·  ")
+		}
+		if t.t == sv.tab {
+			out += s.PaneTitleActive.Render(t.name)
+			continue
+		}
+		out += s.Muted.Render(t.name) + " " + s.KeyHint.Render(t.key)
+	}
 	crumb := sv.face.Crumb
 	if len(crumb) == 0 {
 		crumb = []string{"Session", "step"}
@@ -404,16 +439,37 @@ func (m *Shell) stepViewRender(w, h int) string {
 		}
 		parts = append(parts, s.Subtle.Render(sanitize(c)))
 	}
-	head = append(head, s.Faint.Render("‹ ")+s.KeyHint.Render("esc")+"  "+strings.Join(parts, s.Faint.Render(" › ")), "")
+	return out + "   " + s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + "  " + strings.Join(parts, s.Faint.Render(" › "))
+}
+
+// stepThread is the step's page below its chrome row: threadRender's
+// regions, filled with the step's own.
+func (m *Shell) stepThread(w, h int) string {
+	sv := m.stepv
+	s := m.styles
 	f := sv.face
+	inner := max(w-threadGutter, 8)
+	clip := func(str string) string {
+		if strings.TrimSpace(str) == "" {
+			return ""
+		}
+		return ansi.Truncate(str, inner, "…")
+	}
+	sep := 0
+	if h >= composerBlankRows {
+		sep = 1
+	}
+
+	// --- head: the step's masthead, as the card's: who it is, then where
+	// it stands, a row apart
+	var mast []string
 	if !sv.loaded {
-		head = append(head, s.Faint.Render("reading the step…"))
+		mast = []string{s.Faint.Render("reading the step…")}
 	} else {
 		title := roleStyle(s, domain.WorkflowRole(f.Role)).Render(f.Role) + "  " + s.Title.Render(f.ID)
 		if f.Path != f.ID {
 			title += s.Faint.Render("  " + f.Path)
 		}
-		head = append(head, title)
 		state := stepStateStyle(s, f.State).Render(f.State)
 		if f.Live {
 			state = s.Info.Render("live")
@@ -426,72 +482,80 @@ func (m *Shell) stepViewRender(w, h int) string {
 			facts = append(facts, s.Faint.Render("step-"+f.Tier))
 		}
 		facts = append(facts, s.Muted.Render(domain.FormatDollars(f.Spent)), s.Faint.Render("in the session's tree"))
-		head = append(head, strings.Join(facts, s.Faint.Render(" · ")))
+		mast = []string{title, " " + strings.Join(facts, s.Faint.Render(" · "))}
 		if f.Reason != "" && !f.Live {
-			head = append(head, s.Subtle.Render(f.Reason))
+			mast = append(mast, " "+s.Subtle.Render(f.Reason))
 		}
 	}
-	tabs := []struct {
-		t    stepTab
-		key  string
-		name string
-	}{{stepTabTranscript, "t", "Transcript"}, {stepTabDiff, "d", "Diff"}, {stepTabBrief, "b", "Brief"}}
-	var tl []string
-	for _, t := range tabs {
-		if t.t == sv.tab {
-			tl = append(tl, s.Title.Render(t.name))
-			continue
+	buildHead := func(sep int) []string {
+		var head []string
+		for i, l := range mast {
+			if i > 0 {
+				head = append(head, make([]string, sep)...)
+			}
+			head = append(head, clip(l))
 		}
-		tl = append(tl, s.KeyHint.Render(t.key)+" "+s.Faint.Render(t.name))
+		head = append(head, "")
+		if sep > 0 {
+			head = append([]string{""}, head...)
+		}
+		return head
 	}
-	head = append(head, "", strings.Join(tl, s.Faint.Render("   ")), s.Separator.Render(strings.Repeat("─", max(min(inner, 76), 0))))
+	head := buildHead(sep)
+	headMin := head
+	if sep > 0 {
+		headMin = buildHead(0)
+	}
 
-	// the foot: the step's open question, then the line to its agent
-	var foot []string
-	if q := m.stepQuestion(); q != nil {
-		foot = append(foot, "")
-		for _, l := range strings.Split(wrapText(f.ID+" asks: "+q.Question, max(inner-2, 8)), "\n") {
-			foot = append(foot, s.Warning.Render(l))
-		}
-		for i, o := range q.Options {
-			marker := "  "
-			style := s.Base
-			if i == clamp(sv.qCursor, 0, len(q.Options)-1) {
-				marker, style = s.KeyHint.Render("▸ "), s.Title
-			}
-			label := fmt.Sprintf("%d. %s", i+1, recommendedLabel(o))
-			row := marker + style.Render(label)
-			if o.Detail != "" {
-				row += s.Faint.Render(" — " + o.Detail)
-			}
-			foot = append(foot, row)
-		}
-	}
+	// --- foot: the line to the step's agent, the thread's composer
+	q := m.stepQuestion()
 	says := f.Says
-	if m.stepQuestion() != nil {
+	switch {
+	case q != nil:
 		says = "your line is the answer to its question"
+	case !sv.composing:
+		says = "/ to write — " + says
 	}
 	sv.input.Placeholder = says
-	sv.input.SetWidth(max(inner-4, 8))
-	marker := s.Faint.Render("┃ ")
-	if sv.composing {
-		marker = s.KeyHint.Render("┃ ")
+	sv.input.SetWidth(max(inner-2, 10))
+	var footMin []string
+	for _, l := range strings.Split(sv.input.View(), "\n") {
+		footMin = append(footMin, clip(l))
 	}
-	foot = append(foot, "", marker+sv.input.View())
-	if !sv.composing {
-		foot[len(foot)-1] = marker + s.Faint.Render(ansi.Truncate("/ to write — "+says, max(inner-4, 8), "…"))
-		if v := sv.input.Value(); v != "" {
-			foot[len(foot)-1] = marker + s.Subtle.Render(ansi.Truncate(v, max(inner-4, 8), "…"))
-		}
+	foot := footMin
+	if sep > 0 {
+		foot = append(make([]string, sep), footMin...)
 	}
 
-	bodyH := max(h-len(head)-len(foot), 1)
+	// --- decision: the step's open question, pinned above the composer
+	// as the thread pins a card's
+	budget := 0
+	if h > 0 {
+		budget = max(h-len(foot)-1-sep, 1)
+	}
+	decisionMin := m.stepQuestionBlock(q, inner, budget)
+	for i := range decisionMin {
+		decisionMin[i] = clip(decisionMin[i])
+	}
+	decision := decisionMin
+	if len(decisionMin) > 0 && sep > 0 {
+		decision = append(make([]string, sep), decisionMin...)
+	}
+
+	// --- body: the tab's
 	var body []string
+	up := 0
 	switch sv.tab {
 	case stepTabDiff:
+		// the diff view scrolls itself: it is given every row the body has,
+		// which no scroll marker needs
+		rows := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, h, h)
+		if all := rows + 2; bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, all, h) == all {
+			rows = all
+		}
 		switch {
 		case sv.diff != nil:
-			body = strings.Split(sv.diff.render(m, inner, bodyH), "\n")
+			body = strings.Split(sv.diff.render(m, inner, max(rows, 1)), "\n")
 		case !sv.diffLoaded:
 			body = []string{s.Faint.Render("reading the step's diff…")}
 		default:
@@ -499,50 +563,57 @@ func (m *Shell) stepViewRender(w, h int) string {
 		}
 	case stepTabBrief:
 		body = m.stepBriefLines(inner)
-		start := clamp(sv.scroll, 0, max(len(body)-bodyH, 0))
-		sv.scroll = start
-		body = body[start:min(start+bodyH, len(body))]
+		rows := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, len(body), h)
+		sv.scroll = clamp(sv.scroll, 0, max(len(body)-rows, 0))
+		up = max(len(body)-rows, 0) - sv.scroll
 	default:
-		body = m.stepTranscriptLines(inner)
-		up := clamp(sv.scroll, 0, max(len(body)-bodyH, 0))
-		sv.scroll = up
-		end := len(body) - up
-		body = body[max(end-bodyH, 0):end]
+		body = trimTrailingBlanks(m.stepTranscriptLines(inner))
+		rows := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, len(body), h)
+		sv.scroll = clamp(sv.scroll, 0, max(len(body)-rows, 0))
+		up = sv.scroll
 	}
-	out := make([]string, 0, h)
-	for _, l := range head {
-		out = append(out, clip(l))
+	for i := range body {
+		body[i] = clip(body[i])
 	}
-	for _, l := range body {
-		out = append(out, clip(l))
+	return strings.Join(composeThread(s, head, headMin, body, decision, decisionMin, foot, footMin, h, up, inner), "\n")
+}
+
+// stepQuestionBlock is the step's open question as the thread's picker
+// draws a card's (openDecisionBlock): its head, then its answers, the
+// highlighted one marked, windowed to rows.
+func (m *Shell) stepQuestionBlock(q *threadfold.StepQuestion, w, rows int) []string {
+	if q == nil {
+		return nil
 	}
-	for len(out)+len(foot) < h {
-		out = append(out, "")
+	s := m.styles
+	sv := m.stepv
+	options := make([]decisions.Option, 0, len(q.Options))
+	for _, o := range q.Options {
+		options = append(options, decisions.Option{Label: recommendedLabel(o), Detail: o.Detail})
 	}
-	for _, l := range foot {
-		out = append(out, clip(l))
+	cursor := clamp(sv.qCursor, 0, max(len(options)-1, 0))
+	title := sv.face.ID + " asks"
+	if sv.composing {
+		title += " · your line is the answer"
 	}
-	if len(out) > h {
-		out = out[:h]
-	}
-	return strings.Join(out, "\n")
+	width := max(w-2, 10)
+	lines := strings.Split(pickerView(s, title, q.Question, options, cursor, nil, q.Multi, w, sv.composing), "\n")
+	headRows := len(pickerHead(s, title, q.Question, width))
+	windowed := windowDecisionBlock(s, lines, headRows, len(options), cursor, rows)
+	return expandHighlighted(s, windowed, lines, headRows, options, cursor, nil, q.Multi, width, rows, sv.composing)
 }
 
 // stepTranscriptLines is the step card's own conversation, live: its
-// session's transcript while the board holds it, its recorded output
-// otherwise.
+// session's, drawn as the thread draws the session's (conversationLines),
+// while the board holds it; its recorded output otherwise.
 func (m *Shell) stepTranscriptLines(w int) []string {
 	s := m.styles
 	sv := m.stepv
 	if m.engine != nil {
 		if ff := m.engine.Freeform(sv.card); ff != nil {
 			snap := ff.Snapshot()
-			if len(snap.Transcript) > 0 {
-				lines := transcriptLines(s, snap, w, m.threadOutputs)
-				if snap.Busy {
-					lines = append(lines, "  "+s.Info.Render(m.spinner()+" working…"))
-				}
-				return trimTrailingBlanks(lines)
+			if len(snap.Transcript) > 0 || snap.Busy {
+				return m.conversationLines(s, snap, w, "", nil)
 			}
 		}
 	}
@@ -550,10 +621,10 @@ func (m *Shell) stepTranscriptLines(w int) []string {
 		return nil
 	}
 	if strings.TrimSpace(sv.face.Output) == "" {
-		return []string{s.Faint.Render("no conversation on record for this step yet")}
+		return []string{"  " + s.Faint.Render("no conversation on record for this step yet")}
 	}
 	out := []string{s.Title.Render(sv.face.Role)}
-	for _, l := range strings.Split(wrapText(sv.face.Output, max(w-4, 8)), "\n") {
+	for _, l := range strings.Split(wrapText(sanitize(sv.face.Output), max(w-4, 8)), "\n") {
 		out = append(out, "  "+s.Subtle.Render(l))
 	}
 	return out

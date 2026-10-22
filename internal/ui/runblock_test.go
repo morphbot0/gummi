@@ -160,12 +160,11 @@ func TestRunNotesLeaveTheTranscriptAndTheBlockStandsWhereProposed(t *testing.T) 
 	}
 }
 
-// A run in the terminal (DESIGN §25.9, §25.10, §25.6): the block stands in
-// the session's thread; alt+w steps into it; enter opens the step with its
-// crumb, transcript, own diff and brief; a line goes to the step's agent;
-// alt+v re-checks the validated mark; v reverts the run behind a confirm
-// that lists the paths.
-func TestARunInTheTerminal(t *testing.T) {
+// terminalRun is a session whose one-step run (webRunRecipe) has ended,
+// on a headless board: its step wrote out.txt, and every later message is
+// answered with reply's words when it has some, else "wrote out.txt".
+func terminalRun(t *testing.T, reply func(msg string) string) (*Bridge, *engine.Engine, domain.Feature, *engine.FreeformSession) {
+	t.Helper()
 	now := time.Now()
 	f := domain.Feature{
 		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Out file", Slug: "out-file",
@@ -175,12 +174,15 @@ func TestARunInTheTerminal(t *testing.T) {
 	fake := agent.NewFake("ok")
 	fake.Caps = agent.Capabilities{ClientTools: true, UsageEvents: true, Interrupt: true}
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		text := "wrote out.txt"
 		if strings.Contains(msg, "of workflow run") {
 			_ = os.WriteFile(filepath.Join(opts.WorkDir, "out.txt"), []byte("hi\n"), 0o600)
+		} else if reply != nil && reply(msg) != "" {
+			text = reply(msg)
 		}
 		return []agent.Event{
 			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 2, Model: "m"}},
-			{Kind: agent.EventMessage, Text: "wrote out.txt"},
+			{Kind: agent.EventMessage, Text: text},
 			{Kind: agent.EventIdle},
 		}
 	}
@@ -216,21 +218,38 @@ func TestARunInTheTerminal(t *testing.T) {
 		return len(r) == 1 && got != nil && got.State.Ended()
 	})
 	reloadRows(t, b)
+	return b, eng, f, ff
+}
 
-	do := func(fn func(m *Shell) tea.Cmd) {
+// shellDriver drives a headless board's Shell: do runs fn on it, view
+// reads what fn draws with its styling stripped, and key presses a key.
+func shellDriver(t *testing.T, b *Bridge) (do func(func(*Shell) tea.Cmd), view func(func(*Shell) string) string, key func(string)) {
+	ctx := context.Background()
+	do = func(fn func(m *Shell) tea.Cmd) {
 		t.Helper()
 		if err := b.Do(ctx, fn); err != nil {
 			t.Fatal(err)
 		}
 	}
-	view := func(fn func(m *Shell) string) string {
+	view = func(fn func(m *Shell) string) string {
 		var out string
 		do(func(m *Shell) tea.Cmd { out = ansi.Strip(fn(m)); return nil })
 		return out
 	}
-	key := func(k string) {
+	key = func(k string) {
 		do(func(m *Shell) tea.Cmd { return m.handleKey(keyPress(k)) })
 	}
+	return do, view, key
+}
+
+// A run in the terminal (DESIGN §25.9, §25.10, §25.6): the block stands in
+// the session's thread; alt+w steps into it; enter opens the step with its
+// crumb, transcript, own diff and brief; a line goes to the step's agent;
+// alt+v re-checks the validated mark; v reverts the run behind a confirm
+// that lists the paths.
+func TestARunInTheTerminal(t *testing.T) {
+	b, eng, _, ff := terminalRun(t, nil)
+	do, view, key := shellDriver(t, b)
 	// the card page opens on its thread, and its runs are read beside it
 	do(func(m *Shell) tea.Cmd { m.width, m.height = 140, 50; m.sel = 0; return m.openCard() })
 	waitUntilTrue(t, "the runs to be read", func() bool {
@@ -279,7 +298,7 @@ func TestARunInTheTerminal(t *testing.T) {
 	if surface := view(func(m *Shell) string { s, _ := m.activeSurface(); return s }); surface != "step" {
 		t.Errorf("the opened step's keys are %q's", surface)
 	}
-	for _, want := range []string{"implementer  write", "Transcript", "d Diff", "b Brief", "wrote out.txt"} {
+	for _, want := range []string{"implementer  write", "transcript  ·  diff d  ·  brief b", "‹ esc  Session › one run 1 › write", "wrote out.txt"} {
 		if !strings.Contains(sv, want) {
 			t.Errorf("the opened step does not say %q:\n%s", want, sv)
 		}

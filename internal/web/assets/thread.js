@@ -655,20 +655,13 @@ function renderLive () {
           k === 'freeform' ? h('span', { class: 'sum' }, role) : null)))
         if (c.notice) parts.push(cached(`${k}:notice`, c.notice, () => h('div', { class: 'live warnc', testid: `live-${k}-notice` }, c.notice)))
         if (k === 'freeform') runs = runsAt(c.turns || [])
-        parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null, k === 'freeform' ? runs : null))
-        if (c.sending) parts.push(cached(`${k}:sending`, c.sending, () => you({ text: c.sending, via: 'sending' })))
-        if (c.tasks?.length) parts.push(cached(`${k}:tasks`, JSON.stringify(c.tasks), () => tasks(c.tasks, k)))
-        if (k === 'freeform' && c.watches?.length) parts.push(cached(`${k}:watches`, JSON.stringify(c.watches), () => watches(c.watches)))
-        if (k === 'freeform' && c.objective) parts.push(cached(`${k}:objective`, JSON.stringify(c.objective), () => objectiveStrip(state.sel, c.objective)))
-        if (k === 'freeform' && c.queued?.length) parts.push(cached(`${k}:queued`, JSON.stringify(c.queued), () => queued(state.sel, c.queued)))
-        if (c.busy) {
-          // the same line a stage run shows: what it is doing, the call in
-          // flight, and what the session has cost and how full it is
-          const words = [c.verb || 'thinking', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
-          const ctx = c.context?.limit ? `${Math.round(100 * c.context.tokens / c.context.limit)}% context` : null
-          parts.push(busyLine(`live-${k}`, `${k}:busy`, words, [c.spent ? cr(c.spent) : null, ctx].filter(Boolean).join(' · ') || null))
-        }
-        if (c.err) parts.push(cached(`${k}:err`, c.err, () => h('div', { class: 'live badc' }, c.err)))
+        parts.push(...talk(k, c, {
+          role: c.role || (k === 'freeform' ? 'implementer' : 'consult'),
+          stage: k === 'freeform' ? 'open' : null,
+          runs: k === 'freeform' ? runs : null,
+          busy: `live-${k}`,
+          own: k === 'freeform'
+        }))
       }
     } else if (r.status === 'running') {
       parts.push(busyLine('live', 'run', `${ROLE[r.stage] || 'agent'} is ${r.running?.verb || 'working'}${pausing ? ' · pauses after this turn' : ''}`, null))
@@ -681,21 +674,35 @@ function renderLive () {
   stickToEnd(sc)
 }
 
-// stepTranscript is a workflow step's own conversation as the step panel
-// draws it: its turns, the activity between them, the message still
-// streaming and what it is doing now.
-function stepTranscript (card, l) {
-  const c = l?.freeform
-  if (!c) return []
-  const key = `step:${card}`
-  const parts = conversation(key, c, c.role || 'step', 'open')
+// talk is a conversation as the thread draws it under its head: its
+// turns (runs placed among them), the line on its way to it, its tasks,
+// the working line while it works — what it is doing, the call in flight,
+// what it has cost and how full it is — and its error. own marks the
+// card's own session, whose watches, objective and queued lines are the
+// card's to act on.
+function talk (key, c, { role, stage, runs = null, busy, own = false }) {
+  const parts = conversation(key, c, role, stage, runs)
   if (c.sending) parts.push(cached(`${key}:sending`, c.sending, () => you({ text: c.sending, via: 'sending' })))
+  if (c.tasks?.length) parts.push(cached(`${key}:tasks`, JSON.stringify(c.tasks), () => tasks(c.tasks, key)))
+  if (own && c.watches?.length) parts.push(cached(`${key}:watches`, JSON.stringify(c.watches), () => watches(c.watches)))
+  if (own && c.objective) parts.push(cached(`${key}:objective`, JSON.stringify(c.objective), () => objectiveStrip(state.sel, c.objective)))
+  if (own && c.queued?.length) parts.push(cached(`${key}:queued`, JSON.stringify(c.queued), () => queued(state.sel, c.queued)))
   if (c.busy) {
-    const words = [c.verb || 'working', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
-    parts.push(busyLine('step-busy', `${key}:busy`, words, c.spent ? cr(c.spent) : null))
+    const words = [c.verb || 'thinking', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
+    const ctx = c.context?.limit ? `${Math.round(100 * c.context.tokens / c.context.limit)}% context` : null
+    parts.push(busyLine(busy, `${key}:busy`, words, [c.spent ? cr(c.spent) : null, ctx].filter(Boolean).join(' · ') || null))
   }
   if (c.err) parts.push(cached(`${key}:err`, c.err, () => h('div', { class: 'live badc' }, c.err)))
   return parts
+}
+
+// stepTranscript is a workflow step's own conversation as the step panel
+// draws it: the session's conversation drawn by the same hand (talk), so
+// the two read the same (DESIGN §25.10).
+function stepTranscript (card, l) {
+  const c = l?.freeform
+  if (!c) return []
+  return talk(`step:${card}`, c, { role: c.role || 'step', stage: 'open', busy: 'step-busy' })
 }
 
 // reconcile makes parent's children els, in order, moving or taking out

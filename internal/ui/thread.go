@@ -1154,6 +1154,15 @@ func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
 	if len(snap.Transcript) == 0 && sending == "" {
 		return withBlocks(m.freeformAbsentLines(s, r, w))
 	}
+	return m.conversationLines(s, snap, w, sending, blocks)
+}
+
+// conversationLines is a freeform session's conversation as the thread
+// draws it: its turns, with blocks placed among them, its error, the line
+// on its way to it and the working line while it works. A card's thread
+// and a workflow step's view (stepview.go) both draw a conversation with
+// it, so the two read the same.
+func (m *Shell) conversationLines(s *theme.Styles, snap engine.Snapshot, w int, sending string, blocks []timedBlock) []string {
 	lines := transcriptLinesWith(s, snap, w, m.threadOutputs, blocks)
 	if snap.Err != nil {
 		for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {

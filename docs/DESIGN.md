@@ -7134,3 +7134,10 @@ The build follows §25, with these differences.
   shell is the session's own — the step runs in the session's tree, not
   one of its own, so there is nothing a step-level terminal would open
   that the session's doesn't already.
+- **A step's transcript reads as the session's thread, in both faces.**
+  The terminal's step view is laid out by the thread's own regions
+  (`composeThread`, `cardPageChrome`): its tabs and crumb stand where the
+  card page's tabs and crumb do, its masthead where the card's does, its
+  question is pinned above the composer as the card's decision is, and
+  its composer is the thread's. Its conversation is drawn by the same
+  function as the session's (`conversationLines`; on the page, `talk`).
