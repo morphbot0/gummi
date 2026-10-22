@@ -99,12 +99,18 @@ header) before it writes, naming the answer in its output; an answer
 that reaches a fresh process (the one that asked has ended) is the step's
 too, read off the brief in its hints. A person's
 message to a step after it ended is answered "Noted: <its first line>". A
+[workflow] turn that says [step-slow] marks its spec so too, and every step
+of the run runs one shell call, then works quietly GUMMI_E2E_STEP_SECONDS
+before it answers (an implementer that asks, again after the answer; a
+step a person talks to after it ended, before it says "Noted"), so steps
+are seen running with nothing streaming. A
 message opening with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
     GUMMI_E2E_FAST=1          skip the small pacing beats (the suite sets it;
                               [slow] cards stay slow regardless)
     GUMMI_E2E_SLOW_SECONDS    total streaming time of one [slow] stage
+    GUMMI_E2E_STEP_SECONDS    how long a [step-slow] run's step works (4)
     GUMMI_E2E_AGENT_LOG       append every frame in and out to this file
 """
 
@@ -122,6 +128,7 @@ SLOW_SECONDS = float(os.environ.get("GUMMI_E2E_SLOW_SECONDS") or "6")
 ASK_TIMEOUT = float(os.environ.get("GUMMI_E2E_ASK_TIMEOUT") or "2")
 ASK_SPEND = float(os.environ.get("GUMMI_E2E_ASK_SPEND") or "5000")
 FOLD_PAUSE = float(os.environ.get("GUMMI_E2E_FOLD_SECONDS") or "2.5")
+STEP_SECONDS = float(os.environ.get("GUMMI_E2E_STEP_SECONDS") or "4")
 LOG = os.environ.get("GUMMI_E2E_AGENT_LOG")
 CREDITS = 12  # per turn; small enough that no envelope in the suite runs dry
 
@@ -784,12 +791,25 @@ def workflow_session(turn, text):
     n = re.search(r"\bspec (\d+)\b", started)
     spec = int(n.group(1)) if n else 1
     asks = " [step-asks]" if "[step-asks]" in text else ""
+    if "[step-slow]" in text:
+        asks += " [step-slow]"
     for section, body in (("Problem", "made.txt is missing.%s\n" % asks),
                           ("Approach", "The workflow's steps write it.\n"),
                           ("Done when", WORKFLOW_DONE_WHEN)):
         call_tool("spec_replace_section", args={"spec": spec, "section": section, "body": body})
     result = call_tool("workflow_run", args={"recipe": recipe, "spec": spec})
     turn.say("workflow_run: %s" % result.strip())
+
+
+def slow_work(turn):
+    """A slow run's step at work: one command, then a quiet while, as a
+    model thinking does, so a face can watch steps run side by side with
+    nothing streaming."""
+    turn.tool("bash", "go test ./...")
+    deadline = time.time() + STEP_SECONDS
+    while time.time() < deadline:
+        time.sleep(0.2)
+        poll_interrupt()
 
 
 def workflow_step(turn, brief, answer=""):
@@ -802,6 +822,11 @@ def workflow_step(turn, brief, answer=""):
     sid = path.rsplit("/", 1)[-1]
     task = brief.split("Your task:", 1)[-1]
     wd = turn.ctx["workdir"]
+    def work():
+        if "[step-slow]" in task:
+            slow_work(turn)
+
+    work()
     artifacts = re.findall(r"(/\S+?/\.gummi/runs/\S+?\.(?:md|json))", task)
     if role == "reviewer":
         review = [p for p in artifacts if p.endswith("review.json")]
@@ -847,6 +872,7 @@ def workflow_step(turn, brief, answer=""):
             "options": [{"label": "Keep it plain (recommended)", "detail": "one line per step"},
                         {"label": "Give it a header"}],
         }).strip()
+        work()
     if role in ("implementer", "tester"):
         files = re.findall(r"check:\s*\"?test -f (\S+?)\"?\s*$", task, re.M) or ["WORKFLOW.md"]
         for f in files:
@@ -867,6 +893,8 @@ def step_followup(turn, text):
     if text.startswith("The run was paused and now carries on"):
         workflow_step(turn, STEP["brief"])
         return
+    if "[step-slow]" in STEP.get("brief", ""):
+        slow_work(turn)
     turn.say("Noted: %s" % (text.strip().splitlines() or [""])[0])
 
 

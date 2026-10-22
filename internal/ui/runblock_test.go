@@ -101,6 +101,29 @@ func tuiEndedRun() threadfold.RunInput {
 	}
 }
 
+// tuiReviewsRun is run 2 in build's first iteration, its two reviews at
+// work side by side.
+func tuiReviewsRun() threadfold.RunInput {
+	return threadfold.RunInput{
+		Run: domain.Run{
+			Session: "FF-001", N: 2, RecipeName: "deliver", Recipe: tuiDeliver(), Spec: 2, SpecRev: 2,
+			State: domain.RunRunning, StartTree: "aaaa", CreatedAt: tuiRunAt, StartedAt: tuiRunAt,
+		},
+		SpecTitle: "Resume pre-migration sessions",
+		Files:     []string{"internal/state/migrate_turns.go"},
+		Steps: []domain.RunStep{
+			tuiStep("design", domain.RoleContractor, domain.StepDone, 0, 40, "Design for the spec"),
+			tuiStep("build/1/implement", domain.RoleImplementer, domain.StepDone, 5, 80, "implemented it"),
+			tuiStep("build/1/reviews/review-a", domain.RoleReviewer, domain.StepRunning, 9, 0, ""),
+			tuiStep("build/1/reviews/review-b", domain.RoleReviewer, domain.StepRunning, 9, 0, ""),
+		},
+		Live: map[string]threadfold.StepLive{
+			"build/1/reviews/review-a": {Busy: true, Spent: 12, Action: "Bash  go test ./internal/state/..."},
+			"build/1/reviews/review-b": {Busy: true, Spent: 9, Action: "Read  internal/state/migrate_turns.go"},
+		},
+	}
+}
+
 // A run's block, drawn as text from its fold: the head, the strip, a row
 // per step with its role, glyph and spend, a folded iteration, the step's
 // question under its row, the files and, once ended, its fold.
@@ -118,12 +141,13 @@ func TestRunBlockGolden(t *testing.T) {
 			b.WriteString(strings.TrimRight(ansi.Strip(l), " ") + "\n")
 		}
 	}
-	draw("running, its asking step selected", runBlockLines(s, running, "row:build/2/implement", false, false, "14m", 110))
-	draw("running, unfocused", runBlockLines(s, running, "", false, true, "14m", 110))
-	draw("ended, folded, head selected", runBlockLines(s, ended, "head", false, false, "1h12m", 110))
-	draw("ended, unfolded", runBlockLines(s, ended, "", true, true, "1h12m", 110))
-	draw("proposed", runBlockLines(s, proposed, "", false, true, "", 110))
-	draw("narrow", runBlockLines(s, running, "", false, true, "14m", 60))
+	draw("running, its asking step selected", runBlockLines(s, running, "row:build/2/implement", false, false, "14m", "", 110))
+	draw("running, unfocused", runBlockLines(s, running, "", false, true, "14m", "", 110))
+	draw("ended, folded, head selected", runBlockLines(s, ended, "head", false, false, "1h12m", "", 110))
+	draw("ended, unfolded", runBlockLines(s, ended, "", true, true, "1h12m", "", 110))
+	draw("proposed", runBlockLines(s, proposed, "", false, true, "", "", 110))
+	draw("narrow", runBlockLines(s, running, "", false, true, "14m", "", 60))
+	draw("two reviews at work side by side", runBlockLines(s, threadfold.FoldRun(tuiReviewsRun()), "", false, true, "16m", "⠹", 110))
 	golden.RequireEqual(t, []byte(b.String()))
 }
 

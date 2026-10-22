@@ -56,6 +56,10 @@ func (m *Shell) spinnerActive() bool {
 	if len(m.consultSending) > 0 {
 		return true
 	}
+	// a workflow step at work in the open session's run block
+	if m.runsWorking() {
+		return true
+	}
 	// a foreign-driven card's busy state lives only in its row snapshot —
 	// unlike the local sources above, no live engine session covers
 	// another process's session, so this is the one place that state can

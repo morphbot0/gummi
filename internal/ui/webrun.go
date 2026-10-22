@@ -43,7 +43,8 @@ func isRunSession(f domain.Feature) bool { return hasSessionSpec(f) }
 
 // runInputs reads the session's runs for the thread's fold: each run and
 // its steps from the store, its spec's title, the files it has changed
-// (from its snapshots, never a fresh one), and each live step's session.
+// (from its snapshots, never a fresh one), and the session of each live
+// step and of each ended one working again.
 func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 	if !isRunSession(d.f) {
 		return nil
@@ -65,11 +66,13 @@ func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 		if d.eng != nil {
 			in.Files = d.eng.RunFiles(ctx, r, steps)
 			for _, s := range steps {
-				if !s.State.Live() {
+				if s.Card == "" {
 					continue
 				}
-				if now, ok := d.eng.StepNow(s.Card); ok {
-					in.Live[s.Path] = threadfold.StepLive{Spent: now.Spent, Action: now.Action, Ask: now.Ask}
+				// an ended step is read too: a person's follow-up has it
+				// working again
+				if now, ok := d.eng.StepNow(s.Card); ok && (s.State.Live() || now.Busy) {
+					in.Live[s.Path] = threadfold.StepLive{Busy: now.Busy, Spent: now.Spent, Action: now.Action, Ask: now.Ask}
 				}
 			}
 		}

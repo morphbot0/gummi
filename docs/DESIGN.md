@@ -6884,7 +6884,11 @@ The block holds:
 
   A finished iteration of a `repeat` folds to one row with its verdict.
   A step waiting on the person is ringed, and its question is drawn
-  under it with the recommended answer first.
+  under it with the recommended answer first. **Every step at work reads
+  as running and stands out**: in the TUI its glyph is the spinner and
+  its bar, name and line are lit; on the web page its row is tinted and
+  barred and its dot breathes. Side-by-side steps of a `parallel` are
+  each marked so.
 - **A footer**: the files the run has changed so far, uncommitted, and
   **Revert run…**.
 
@@ -7141,6 +7145,19 @@ The build follows §25, with these differences.
   question is pinned above the composer as the card's decision is, and
   its composer is the thread's. Its conversation is drawn by the same
   function as the session's (`conversationLines`; on the page, `talk`).
+- **A step's row reads its own session, not the store's last word.**
+  The stored state moves between running and asking only when the run is
+  ticked, so a step that had just asked, or had just been answered, read
+  as it was until the next tick (up to the ten-second poll). The fold now
+  takes a live step's state from its session (`threadfold.StepLive`): an
+  open question is asking, anything else running; a planner's revised
+  plan still waits on the person. An ended step a person is talking to
+  reads running ("a follow-up · …"), and the strip reads live steps as
+  their rows do.
+- **A tick that starts steps tells the faces at once.** The step rows are
+  written running by the tick, but the faces were told only once each
+  step's backend had come up, which on a real backend takes seconds; the
+  block showed the step before done and nothing at work meanwhile.
 - **A step's transcript follows its newest line**, as the thread does:
   it opens at the end, follows while the reader is there, and stays put
   while the reader has scrolled back (the terminal's BG-042 rule).

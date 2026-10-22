@@ -272,3 +272,47 @@ test('a step’s transcript reads and follows as the thread does', async ({ pair
   await say('back at the end');
   await expect.poll(atEnd).toBe(true);
 });
+
+// Every step at work reads as running, and stands out of the block (DESIGN
+// §25.9): the two reviews of deliver's parallel run side by side, both lit;
+// an ended step a person talks to is at work again.
+test.describe('a run whose steps take a while', () => {
+  test.use({ workspaceEnv: { GUMMI_E2E_STEP_SECONDS: '4' } });
+
+  test('every step at work reads as running, side by side', async ({ pairedPage: page, server, api }, info) => {
+    test.setTimeout(150_000);
+    const id = await openSession(page, server, api, 'Run the reviews side by side');
+    const input = page.getByTestId('composer-input');
+    await input.click();
+    await input.fill('[workflow] [step-slow] make the workflow file');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('decision-option-0')).toContainText('Allow', { timeout: 45_000 });
+    await page.getByTestId('decision-option-0').click();
+    const block = page.getByTestId('run-1');
+    const a = block.getByTestId('run-row-build/1/reviews/review-a');
+    const b = block.getByTestId('run-row-build/1/reviews/review-b');
+    await expect(a).toHaveAttribute('data-state', 'running', { timeout: 60_000 });
+    await expect(b).toHaveAttribute('data-state', 'running');
+    await expect(a).toHaveClass(/s-running/);
+    await expect(b).toHaveClass(/s-running/);
+    // lit apart from a row that is done
+    const look = (el: Element) => getComputedStyle(el).backgroundColor + getComputedStyle(el).boxShadow;
+    const done = block.getByTestId('run-row-build/1/implement');
+    await expect(done).toHaveAttribute('data-state', 'done');
+    expect(await a.evaluate(look)).not.toBe(await done.evaluate(look));
+    await expect(block.getByTestId('run-strip-build')).toHaveClass(/s-running/);
+    await shot(page, info, 'workflow-side-by-side');
+
+    // ended, a step a person talks to is at work again
+    await expect(block).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
+    await block.getByTestId('run-steps').locator('summary').click();
+    const design = block.getByTestId('run-row-design');
+    await expect(design).toHaveAttribute('data-state', 'done');
+    const card = await design.getAttribute('data-card');
+    const r = await api('POST', `/api/cards/${id}/steps/${encodeURIComponent(String(card))}/send`, { text: 'one more look' });
+    expect(r.status, r.text).toBe(200);
+    await expect(design).toHaveAttribute('data-state', 'running', { timeout: 15_000 });
+    await expect(design.getByTestId('run-row-line')).toContainText('a follow-up');
+    await expect(design).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
+  });
+});

@@ -35,12 +35,15 @@ type RunInput struct {
 	// Files are the paths that differ between the run's starting tree and
 	// its newest snapshot: what it has changed so far, or what it left.
 	Files []string
-	// Live is each live step's session, by its path.
+	// Live is each live step's session, by its path, and the session of
+	// an ended step that is working again (a person's follow-up).
 	Live map[string]StepLive
 }
 
 // StepLive is what a step's own session says while it works.
 type StepLive struct {
+	// Busy says a turn is in flight on the step's card.
+	Busy bool
 	// Spent is the step card's spend so far, in credits.
 	Spent float64
 	// Action is the call the step's agent has in flight, or its last one,
@@ -130,8 +133,11 @@ type StepRow struct {
 	// role, empty on a folded iteration.
 	ID   string `json:"id"`
 	Role string `json:"role,omitempty"`
-	// State is the step's (domain.StepState); a folded iteration's is
-	// done, or failed when one of its steps failed.
+	// State is the step's (domain.StepState) as its own session has it
+	// now: a live step asking while its question is open and running
+	// otherwise, and an ended step running while a person's follow-up is
+	// in flight. A folded iteration's is done, or failed when one of its
+	// steps failed.
 	State string  `json:"state"`
 	Spent float64 `json:"spent"`
 	// Line is the step's last action while it works, "asks you" while it
@@ -252,8 +258,16 @@ func FoldRun(in RunInput) Run {
 		live = live || s.State.Live()
 	}
 	r.Spent = roundCredits(r.Spent)
+	// the strip reads a live step as its row does (liveState); an ended
+	// step's follow-up moves its row, not where the recipe stands
+	now := append([]domain.RunStep(nil), steps...)
+	for i, s := range now {
+		if l, seen := in.Live[s.Path]; seen && s.State.Live() {
+			now[i].State = liveState(s, l, seen)
+		}
+	}
 	for _, en := range run.Recipe.Steps {
-		r.Strip = append(r.Strip, stripEntry(en, "", steps))
+		r.Strip = append(r.Strip, stripEntry(en, "", now))
 	}
 	r.Rows = stepRows(run, steps, in.Live)
 	if d := run.Pending; d != nil {
@@ -524,15 +538,19 @@ func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 		row.ID = s.Path[strings.LastIndex(s.Path, "/")+1:]
 	}
 	row.Repeat, row.Iter = innerIteration(s.Path)
-	l := live[s.Path]
+	l, seen := live[s.Path]
+	state := liveState(s, l, seen)
+	row.State = string(state)
 	switch {
-	case s.State == domain.StepAsking && s.EndTree != "":
+	case state == domain.StepAsking && s.EndTree != "":
 		row.Line = "its revised plan waits on you"
-	case s.State == domain.StepAsking:
+	case state == domain.StepAsking:
 		row.Line = "asks you"
-	case s.State.Live():
+	case state == domain.StepRunning && s.State.Settled():
+		row.Line = "a follow-up · " + actionWords(l.Action)
+	case state.Live():
 		row.Line = actionWords(l.Action)
-	case s.State == domain.StepDone:
+	case state == domain.StepDone:
 		row.Line = endSummary(s.Output)
 	default:
 		row.Line = Sanitize(firstLineOf(s.Reason))
@@ -542,6 +560,28 @@ func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 	}
 	row.Flag = ReaderFlag(len(s.Changed))
 	return row
+}
+
+// liveState is the state a step's row shows. The store's word on a live
+// step moves between running and asking only when the run is next ticked,
+// so a step that has just asked, or has just been answered, read as it was
+// until then; its own session (seen) is the authority while it has one. A
+// planner's revised plan waits on the person whatever its session says.
+// An ended step whose card is working again — a person's follow-up — is
+// running.
+func liveState(s domain.RunStep, l StepLive, seen bool) domain.StepState {
+	switch {
+	case !seen:
+		return s.State
+	case s.State.Live() && s.EndTree == "":
+		if l.Ask != nil {
+			return domain.StepAsking
+		}
+		return domain.StepRunning
+	case s.State.Settled() && l.Busy:
+		return domain.StepRunning
+	}
+	return s.State
 }
 
 // ReaderFlag is a reading step's row flag for the n files it changed, ""

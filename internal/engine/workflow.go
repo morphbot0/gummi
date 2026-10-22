@@ -1206,6 +1206,15 @@ func (e *Engine) tickHeld(ctx context.Context, session domain.FeatureID) ([]stri
 
 func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]string, error) {
 	st := e.cfg.Store
+	// steps this tick started are running from now: the faces are told
+	// once the run's lock is let go, rather than when each step's backend
+	// has come up, which can take a while
+	started := false
+	defer func() {
+		if started {
+			e.workflowEvent(session)
+		}
+	}()
 	unlock := e.lockRuns(session)
 	defer unlock()
 	var acts []string
@@ -1264,6 +1273,7 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 			if err := e.newStepLocked(ctx, run, a, byPath); err != nil {
 				return acts, err
 			}
+			started = true
 			e.startStepAsync(session, run.N, a.Path)
 		case workflowpolicy.Interrupt:
 			e.settleStepLocked(ctx, session, run.N, a.Path, domain.StepStopped, a.Reason)

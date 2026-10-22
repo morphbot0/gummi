@@ -401,6 +401,39 @@ expect "the spec view lists the session's specs" '▸ S1 Make the workflow file 
 send Escape
 alive "still alive after the run"
 
+section "13. steps at work side by side"
+for i in 1 2 3 4; do
+  pane | grep -qE 'BOARD  [0-9]+ cards' && break
+  send Escape
+done
+# every step of this run works a few seconds before it answers, so the two
+# reviews of deliver's parallel are seen at work together
+send n
+lit 'Side by side [workflow] [step-slow]'
+send Enter
+expect_long "its proposal is the pinned decision"  'workflow run 1 · allow run' 20
+send Enter
+expect_long "a step at work is lit and spins"      '┃ [^ ] +design +contractor' 30
+# both reviews at once: two lit rows, one each
+both=0
+for i in $(seq 1 200); do
+  p=$(pane)
+  if echo "$p" | grep -qE '┃ [^ ] ↺ 1 +review-a +reviewer' && echo "$p" | grep -qE '┃ [^ ] ↺ 1 +review-b +reviewer'; then both=1; break; fi
+  sleep 0.25
+done
+if [ "$both" = 1 ]; then PASS=$((PASS+1)); printf '  ok    %s\n' "both reviews read as at work, side by side"
+else FAIL=$((FAIL+1)); FAILED_NAMES+=("both reviews at work"); printf '  FAIL  %s\n' "both reviews read as at work, side by side"; dump; fi
+expect "…while the step before them reads done"  '│ ✓ ↺ 1 +implement +implementer'
+expect_long "the run ends validated"             'validated at tree [0-9a-f]{7}' 90
+# its report has pushed the block up the thread: alt+w brings it back
+tmux send-keys -t $S M-w; sleep 0.6
+expect "the ended run's block"                   'done · validated [0-9a-f]{7}'
+send Enter
+expect "its steps unfolded"                      '│ ✓ +validate +reviewer'
+refute "and nothing reads as at work after it"   '┃ [^ ] .*(reviewer|contractor|implementer)'
+send Escape
+alive "still alive after the side-by-side run"
+
 # ----------------------------------------------------------------- report
 printf '\n============ %d passed, %d failed, %d known defects ============\n' "$PASS" "$FAIL" "$KNOWN"
 if [ "$FAIL" -gt 0 ]; then printf 'failed:\n'; printf '  - %s\n' "${FAILED_NAMES[@]}"; fi

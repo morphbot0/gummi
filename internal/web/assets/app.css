@@ -1129,6 +1129,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 @media (prefers-reduced-motion:reduce){
   .shimmer{animation:none;color:var(--fg2);background:none}
   .spinner{animation:none}
+  .rb-row.s-running .dot{animation:none}
   .dots i{animation:none;opacity:.6}
   .ev-stage .fold,.tools summary::before,.mdec .sum .chev,.doc h2 .sc,.memdoc > summary .chev{transition:none}
 }
@@ -1339,7 +1340,12 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .rb-rows > .rb-row:first-child{border-top:0}
 .rb-row .dot{width:9px;height:9px;border-radius:50%;background:var(--line2)}
 .rb-row.s-done .dot{background:var(--s-verify)}
-.rb-row.s-running .dot{background:var(--q-run);box-shadow:0 0 0 3px color-mix(in srgb,var(--q-run) 20%,transparent)}
+.rb-row.s-running .dot{background:var(--q-run);box-shadow:0 0 0 3px color-mix(in srgb,var(--q-run) 20%,transparent);animation:rb-live 1.6s ease-in-out infinite}
+/* a step at work stands out of the block: lit, barred, its dot breathing */
+.rb-row.s-running{background:color-mix(in srgb,var(--q-run) 7%,var(--panel));box-shadow:inset 3px 0 0 var(--q-run)}
+.rb-row.s-running .ti .n{color:var(--q-run);font-weight:600}
+.rb-row.s-running .ti small{color:var(--fg2)}
+@keyframes rb-live{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--q-run) 6%,transparent)}}
 .rb-row.s-failed .dot{background:var(--q-fail)} .rb-row.s-stopped .dot{background:var(--fg4)}
 .rb-row.asking,.rb-row.waiting{background:color-mix(in srgb,var(--q-needs) 6%,var(--panel))}
 .rb-row.asking .dot,.rb-row.waiting .dot{background:var(--q-needs);box-shadow:0 0 0 3px color-mix(in srgb,var(--q-needs) 22%,transparent)}

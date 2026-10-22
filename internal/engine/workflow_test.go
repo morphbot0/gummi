@@ -1678,3 +1678,55 @@ func TestAnUntilChecksThatRanNoTestsAsks(t *testing.T) {
 		t.Fatalf("ended %s", r.State)
 	}
 }
+
+// A tick that starts steps tells the faces at once (DESIGN §25.9): both
+// branches of a parallel read as running while their backends are still
+// coming up, not only once each has.
+func TestATickThatStartsStepsTellsTheFacesAtOnce(t *testing.T) {
+	wf := newWFFake()
+	g := newGate(t)
+	var mu sync.Mutex
+	first := ""
+	wf.OnNewSession = func(opts agent.SessionOpts) {
+		mu.Lock()
+		if first == "" {
+			first = opts.FeatureID
+		}
+		step := opts.FeatureID != first
+		mu.Unlock()
+		if step {
+			<-g.ch // a step's backend is slow to come up
+		}
+	}
+	e, store, f, _ := wfEngine(t, wf)
+	t.Cleanup(g.open) // before the engine closes, which waits on the held backends
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: parallelRecipe("allSettled")})
+	// what the proposal and the allowance said is already heard
+	for quiet := false; !quiet; {
+		select {
+		case <-e.Events():
+		case <-time.After(200 * time.Millisecond):
+			quiet = true
+		}
+	}
+	if _, err := e.WorkflowTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	steps, _ := store.RunSteps(ctx, f.ID, run.N)
+	if len(steps) != 2 || steps[0].State != domain.StepRunning || steps[1].State != domain.StepRunning {
+		t.Fatalf("the tick did not start both branches: %+v", steps)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-e.Events():
+			if ev.Kind == EventWorkflow && ev.Feature == f.ID {
+				g.open()
+				return
+			}
+		case <-deadline:
+			t.Fatal("the faces were not told the run's steps started until their backends came up")
+		}
+	}
+}

@@ -209,10 +209,15 @@ func (m *Shell) runBlocks(s *theme.Styles, r featureRow, w int) []timedBlock {
 		}
 		unfolded := m.wf.unfolded[runFoldKey(r.F.ID, run.N)]
 		el := runElapsed(run.Run, now)
-		key := strings.Join([]string{string(r.F.ID), strconv.Itoa(run.N), run.Rev, strconv.Itoa(w), sel, strconv.FormatBool(unfolded), el, strconv.FormatBool(m.wf.focus)}, "|")
+		// a block with a step at work turns its spinner, as a working line does
+		spin := ""
+		if runWorking(run.Run) {
+			spin = m.spinnerGlyph(m.motionEnabled)
+		}
+		key := strings.Join([]string{string(r.F.ID), strconv.Itoa(run.N), run.Rev, strconv.Itoa(w), sel, strconv.FormatBool(unfolded), el, strconv.FormatBool(m.wf.focus), spin}, "|")
 		lines, ok := m.wf.cache[key]
 		if !ok {
-			lines = runBlockLines(s, run.Run, sel, unfolded, !m.wf.focus, el, w)
+			lines = runBlockLines(s, run.Run, sel, unfolded, !m.wf.focus, el, spin, w)
 			m.wf.cache[key] = lines
 		}
 		live[key] = true
@@ -229,6 +234,27 @@ func (m *Shell) runBlocks(s *theme.Styles, r featureRow, w int) []timedBlock {
 }
 
 func runFoldKey(id domain.FeatureID, n int) string { return string(id) + "|" + strconv.Itoa(n) }
+
+// runWorking says one of a run's rows is a step at work.
+func runWorking(r threadfold.Run) bool {
+	for _, row := range r.Rows {
+		if row.State == string(domain.StepRunning) {
+			return true
+		}
+	}
+	return false
+}
+
+// runsWorking says the open card's blocks have a step at work, whose
+// spinner turns.
+func (m *Shell) runsWorking() bool {
+	for _, run := range m.openRuns() {
+		if runWorking(run.Run) {
+			return true
+		}
+	}
+	return false
+}
 
 // runElapsed is a run's elapsed time to the minute, "" before it starts.
 func runElapsed(r threadfold.Run, now time.Time) string {
@@ -252,8 +278,9 @@ func runElapsed(r threadfold.Run, now time.Time) string {
 // runBlockLines draws one run's block at width w. sel is what the cursor
 // is on in it — "head", "row:<key>" or "" — unfolded whether an ended
 // run's steps are drawn, hint whether its foot names the key that steps
-// into the blocks, el its elapsed time.
-func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint bool, el string, w int) []string {
+// into the blocks, el its elapsed time and spin the spinner's frame a step
+// at work is marked with.
+func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint bool, el, spin string, w int) []string {
 	w = max(w, 24)
 	var lines []string
 	bar := s.Faint.Render("│ ")
@@ -297,14 +324,14 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 		return lines
 	}
 	if len(r.Strip) > 0 {
-		add(runStrip(s, r.Strip))
+		add(runStrip(s, r.Strip, spin))
 	}
 	if p := r.Pending; p != nil {
 		add(s.Warning.Render("waits on you · ") + s.Base.Render(firstLine(p.Question)) + s.Faint.Render(" — answer it below the thread"))
 	}
 	rows := func() {
 		for _, row := range r.Rows {
-			lines = append(lines, stepRowLines(s, row, sel == "row:"+row.Key, w)...)
+			lines = append(lines, stepRowLines(s, row, sel == "row:"+row.Key, spin, w)...)
 		}
 	}
 	if ended {
@@ -383,8 +410,9 @@ func spread(left, right string, w int) string {
 	return ansi.Truncate(left+"  "+right, w, "…")
 }
 
-// runStrip is the recipe's top-level entries, each in its state.
-func runStrip(s *theme.Styles, strip []threadfold.StripEntry) string {
+// runStrip is the recipe's top-level entries, each in its state; one at
+// work wears the spinner.
+func runStrip(s *theme.Styles, strip []threadfold.StripEntry, spin string) string {
 	var parts []string
 	for _, e := range strip {
 		word := e.ID
@@ -401,15 +429,27 @@ func runStrip(s *theme.Styles, strip []threadfold.StripEntry) string {
 		if mark := stepMark(e.State); mark != "" && e.State != "running" && e.State != "waiting" {
 			word += " " + mark
 		}
-		parts = append(parts, stepStateStyle(s, e.State).Render(word))
+		style := stepStateStyle(s, e.State)
+		if e.State == "running" {
+			style = style.Bold(true)
+			if spin != "" {
+				word += " " + spin
+			}
+		}
+		parts = append(parts, style.Render(word))
 	}
 	return strings.Join(parts, s.Faint.Render(" → "))
 }
 
 // stepRowLines is one step row, and its question beneath it while it
-// asks. selected rings it.
-func stepRowLines(s *theme.Styles, row threadfold.StepRow, selected bool, w int) []string {
+// asks. selected rings it. A step at work stands out from the rest: its
+// glyph is the spinner's frame spin, its bar, name and line are lit.
+func stepRowLines(s *theme.Styles, row threadfold.StepRow, selected bool, spin string, w int) []string {
+	working := row.State == string(domain.StepRunning)
 	lead := s.Faint.Render("│ ")
+	if working {
+		lead = s.Info.Render("┃ ")
+	}
 	if selected {
 		lead = s.Cursor.Render("▸ ")
 	}
@@ -430,9 +470,16 @@ func stepRowLines(s *theme.Styles, row threadfold.StepRow, selected bool, w int)
 	if row.Spent > 0 {
 		cost = domain.FormatDollars(row.Spent)
 	}
-	body := stepStateStyle(s, row.State).Render(stepGlyph(row.State)) + " " +
+	glyph, nameStyle, lineStyle := stepGlyph(row.State), s.Base, s.Subtle
+	if working {
+		if spin != "" {
+			glyph = spin
+		}
+		nameStyle, lineStyle = s.Info.Bold(true), s.Base
+	}
+	body := stepStateStyle(s, row.State).Render(glyph) + " " +
 		s.Faint.Render(padTo(where, 4)) + " " +
-		s.Base.Render(padTo(name, 14)) + " " +
+		nameStyle.Render(padTo(name, 14)) + " " +
 		roleStyle(s, domain.WorkflowRole(role)).Render(padTo(role, 12)) + " "
 	if row.Waiting {
 		body += s.Warning.Render("waits on you · ")
@@ -442,7 +489,7 @@ func stepRowLines(s *theme.Styles, row threadfold.StepRow, selected bool, w int)
 	}
 	costW := ansi.StringWidth(cost) + 1
 	room := max(w-ansi.StringWidth(lead)-ansi.StringWidth(body)-costW, 4)
-	out := []string{lead + body + s.Subtle.Render(padTo(ansi.Truncate(line, room, "…"), room)) + " " + s.Muted.Render(cost)}
+	out := []string{lead + body + lineStyle.Render(padTo(ansi.Truncate(line, room, "…"), room)) + " " + s.Muted.Render(cost)}
 	if q := row.Question; q != nil {
 		bar := s.Faint.Render("│ ")
 		qw := max(w-8, 8)

@@ -213,3 +213,52 @@ func TestAnUnjudgedIterationSaysSo(t *testing.T) {
 		t.Fatalf("verdict = %q", got)
 	}
 }
+
+// A step's row says what its own session is doing now, not what the store
+// said at the run's last tick: a step that has just asked asks, one that
+// has just been answered runs again, and an ended step a person is
+// talking to is running. Without a session to read, the store's word
+// stands; a planner's revised plan waits on the person whatever.
+func TestAStepRowReadsItsOwnSession(t *testing.T) {
+	ask := &engine.Ask{Question: "Plain or with a header?", Options: []engine.AskOption{{Label: "Plain"}}}
+	cases := []struct {
+		name    string
+		stored  domain.StepState
+		endTree string
+		live    *StepLive
+		state   string
+		line    string
+	}{
+		{"asked since the last tick", domain.StepRunning, "", &StepLive{Busy: true, Ask: ask}, "asking", "asks you"},
+		{"answered since the last tick", domain.StepAsking, "", &StepLive{Busy: true, Action: "Edit  made.txt"}, "running", "Edit made.txt"},
+		{"coming up, nothing said yet", domain.StepRunning, "", &StepLive{}, "running", "working"},
+		{"a person's follow-up", domain.StepDone, "", &StepLive{Busy: true, Action: "Bash  go test ./..."}, "running", "a follow-up · Bash go test ./..."},
+		{"ended, quiet", domain.StepDone, "", &StepLive{}, "done", "wrote it"},
+		{"no session to read", domain.StepAsking, "", nil, "asking", "asks you"},
+		{"a revised plan", domain.StepAsking, "bbbb", &StepLive{}, "asking", "its revised plan waits on you"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := step("make", domain.RoleImplementer, c.stored, 0, 10, "wrote it")
+			s.EndTree = c.endTree
+			in := RunInput{
+				Run: domain.Run{Session: "FF-001", N: 1, Recipe: domain.Recipe{Name: "one", Steps: []domain.Entry{
+					{Step: &domain.Step{ID: "make", Role: domain.RoleImplementer}},
+				}}, State: domain.RunRunning, CreatedAt: runAt, StartedAt: runAt},
+				Steps: []domain.RunStep{s}, Live: map[string]StepLive{},
+			}
+			if c.live != nil {
+				in.Live["make"] = *c.live
+			}
+			r := FoldRun(in)
+			row := r.Rows[0]
+			if row.State != c.state || row.Line != c.line {
+				t.Fatalf("the row reads %s %q, want %s %q", row.State, row.Line, c.state, c.line)
+			}
+			// the strip reads a live step as its row does
+			if c.stored.Live() && r.Strip[0].State != c.state {
+				t.Errorf("the strip reads %s, the row %s", r.Strip[0].State, c.state)
+			}
+		})
+	}
+}
