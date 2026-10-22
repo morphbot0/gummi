@@ -6896,6 +6896,45 @@ An ended run folds to:
 - Revert run;
 - a link to its report.
 
+**A live strip stands above the composer while a run is open** (running
+or paused; never while it is proposed or queued, and gone once it ends),
+so a person talking to the session keeps the run in sight after its
+block has scrolled up the thread. The block stays where the run was
+proposed. The strip is `threadfold`'s too: `RunStrip`, folded with the
+block from the same run, steps and live sessions and carried on it
+(`Run.Live`), so its words move the block's revision. It says one of:
+
+- **running**: a live mark, `<recipe> · run <n>`, the recipe's top-level
+  entries as the block's strip has them (done `✓`, the current one lit, a
+  `repeat` as `↺ i/max`), the active step's id and its live last action
+  (side-by-side steps' ids joined by `∥`), the spend and the elapsed time;
+  **↑ Jump to run**, and **Open <step>** — **Open… ▾**, a pick of the live
+  steps, when several work side by side;
+- **a step asks** (amber): `<step> asks: <question>`, **Answer**, which
+  opens the step on its question, and Jump;
+- **the run's own decision** (amber): what it waits on, answered in the
+  pinned decision;
+- **paused on a spent pool** (grey): "paused · the session's $X is spent ·
+  top up to carry on", **Top up…** (the session's budget action, whose
+  raise carries the run on), and Jump;
+- **paused by a person** (grey), with **Resume**.
+
+Jump scrolls the thread to the run's block and flashes it. A narrow strip
+gives up the recipe's entries first, then the money and the time; the
+run's name, the step's action and Jump stay.
+
+- **On the web page** the strip is a row of the dock, directly above the
+  composer (a phone's too, compact), updated in place part by part on
+  every refetch. A pill at the top of the thread, "↑ <recipe> · run <n>
+  is above", shows while the open run's block is scrolled out of view
+  above (an `IntersectionObserver`), and jumps to it.
+- **In the TUI** it is one line on the composer, with an `alt+w jump`
+  hint. alt+w jumps: the thread scrolls the open run's block into view
+  with the cursor on its active step's row, enter opens it and esc gives
+  the keys back. The line takes its row from the body: on a short
+  terminal it is the first pinned row to go, before the head, an open
+  decision or the composer give up one of theirs.
+
 The proposal and a revised plan are decisions in the thread (§25.5).
 The **Crew tab**, `ui/webcrew.go`, `web/assets/crew.js` and the TUI's
 `crewLines` are removed.
@@ -7074,6 +7113,13 @@ The build follows §25, with these differences.
   done-when check ran no tests".
 
 **Running.**
+- **The live strip has two moods its design did not draw**: the run's
+  own decision (a revised plan, a loop at its max or one that cannot
+  judge) reads amber and points at the pinned decision, and a person's
+  pause reads grey with **Resume**. A stopping run's strip says it is
+  stopping. A step that asks is answered in the step's panel as well as
+  under its row: the panel carries its question (`StepFace.Question`),
+  which is where the strip's **Answer** goes.
 - **A reading step is never spawned read-only.** The backend's read-only
   mode is a research session's allowlist (claude's is Read, Grep, Glob
   and a few git commands), which kept a reviewer from running `go test`.
