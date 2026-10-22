@@ -23,15 +23,15 @@ var ErrRunQueued = errors.New("a run is already queued behind the open one")
 const runCols = `session_id, n, recipe_name, recipe_yaml, recipe, inputs, spec_n, spec_rev, state,
 	estimate, spent, start_tree, end_tree, validated_tree, results, report, reason,
 	stopping, warned, out_of_budget, steers, pending, feedback, revision,
-	created_at, started_at, ended_at, updated_at`
+	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max`
 
 func scanRun(r rowScanner) (domain.Run, error) {
 	var run domain.Run
-	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated string
+	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated, until, onMax string
 	err := r.Scan(&session, &run.N, &run.RecipeName, &run.RecipeYAML, &recipe, &inputs, &run.Spec, &run.SpecRev, &st,
 		&run.Estimate, &run.Spent, &run.StartTree, &run.EndTree, &run.ValidatedTree, &results, &run.Report, &run.Reason,
 		&run.Stopping, &run.Warned, &run.OutOfBudget, &steers, &pending, &run.Feedback, &run.Revision,
-		&created, &started, &ended, &updated)
+		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax)
 	if err != nil {
 		return run, err
 	}
@@ -39,7 +39,7 @@ func scanRun(r rowScanner) (domain.Run, error) {
 	for _, j := range []struct {
 		raw string
 		v   any
-	}{{recipe, &run.Recipe}, {inputs, &run.Inputs}, {results, &run.Results}, {steers, &run.Steers}} {
+	}{{recipe, &run.Recipe}, {inputs, &run.Inputs}, {results, &run.Results}, {steers, &run.Steers}, {until, &run.Until}, {onMax, &run.OnMax}} {
 		if j.raw == "" {
 			continue
 		}
@@ -60,11 +60,14 @@ func scanRun(r rowScanner) (domain.Run, error) {
 	return run, nil
 }
 
-// runJSON is a run's JSON columns: recipe, inputs, results, steers and
-// pending, in that order.
-func runJSON(r *domain.Run) ([5]string, error) {
-	var out [5]string
-	for i, v := range []any{r.Recipe, r.Inputs, r.Results, r.Steers} {
+// runJSON is a run's JSON columns: recipe, inputs, results, steers,
+// pending, until and onMax, in that order.
+func runJSON(r *domain.Run) ([7]string, error) {
+	var out [7]string
+	for i, v := range []any{r.Recipe, r.Inputs, r.Results, r.Steers, nil, r.Until, r.OnMax} {
+		if i == 4 {
+			continue
+		}
 		b, err := json.Marshal(v)
 		if err != nil {
 			return out, err
@@ -105,11 +108,12 @@ func (s *Store) CreateRun(ctx context.Context, r *domain.Run) error {
 		r.N = int(last.Int64) + 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_runs (`+runCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(r.Session), r.N, r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State),
 		r.Estimate, r.Spent, r.StartTree, r.EndTree, r.ValidatedTree, j[2], r.Report, r.Reason,
 		r.Stopping, r.Warned, r.OutOfBudget, j[3], j[4], r.Feedback, r.Revision,
-		r.CreatedAt.UTC().Format(timeFmt), formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), r.UpdatedAt.UTC().Format(timeFmt)); err != nil {
+		r.CreatedAt.UTC().Format(timeFmt), formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), r.UpdatedAt.UTC().Format(timeFmt),
+		r.StartHead, j[5], j[6]); err != nil {
 		return fmt.Errorf("creating run %d on %s: %w", r.N, r.Session, err)
 	}
 	return tx.Commit()
@@ -133,11 +137,12 @@ func (s *Store) updateRun(ctx context.Context, db execer, r *domain.Run) error {
 	res, err := db.ExecContext(ctx, `UPDATE workflow_runs SET recipe_name=?, recipe_yaml=?, recipe=?, inputs=?,
 		spec_n=?, spec_rev=?, state=?, estimate=?, spent=?, start_tree=?, end_tree=?, validated_tree=?,
 		results=?, report=?, reason=?, stopping=?, warned=?, out_of_budget=?, steers=?, pending=?, feedback=?,
-		revision=?, started_at=?, ended_at=?, updated_at=? WHERE session_id=? AND n=?`,
+		revision=?, started_at=?, ended_at=?, updated_at=?, start_head=?, until_results=?, on_max=?
+		WHERE session_id=? AND n=?`,
 		r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State), r.Estimate, r.Spent,
 		r.StartTree, r.EndTree, r.ValidatedTree, j[2], r.Report, r.Reason, r.Stopping, r.Warned, r.OutOfBudget,
 		j[3], j[4], r.Feedback, rev, formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), updated.Format(timeFmt),
-		string(r.Session), r.N)
+		r.StartHead, j[5], j[6], string(r.Session), r.N)
 	if err != nil {
 		return err
 	}

@@ -318,7 +318,16 @@ type Run struct {
 	StartTree     string
 	EndTree       string
 	ValidatedTree string
-	Results       []ItemResult
+	// StartHead is the session's HEAD when the run started: the commits
+	// made while it ran are the ones after it, which its report names.
+	StartHead string
+	Results   []ItemResult
+	// Until holds each repeat iteration's stop condition as the engine
+	// judged it, keyed by the iteration's path (build/2).
+	Until map[string]UntilJudgement
+	// OnMax holds the person's answers to a repeat at its max, keyed by the
+	// iteration's path: more, continue or stop.
+	OnMax map[string]string
 	// Report is the run's report, also written into its spec.
 	Report string
 	// Reason says why a run ended partial or stopped, or why it paused.
@@ -344,6 +353,12 @@ type Run struct {
 	StartedAt time.Time
 	EndedAt   time.Time
 	UpdatedAt time.Time
+}
+
+// UntilJudgement is one repeat iteration's stop condition, judged.
+type UntilJudgement struct {
+	Met    bool   `json:"met"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // RunDecisionKind is what a run asks its person (§25.5, §25.7).

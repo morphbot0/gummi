@@ -48,3 +48,8 @@ const ActorObjective = "objective"
 // brief and reworks, and the report its session gets. A thread draws them
 // as the crew's.
 const ActorCrew = "crew"
+
+// ActorWorkflow is the actor of the turns a workflow run sends (DESIGN
+// §25): a step's brief and steers, and the report its session gets. A
+// thread draws them as the workflow's.
+const ActorWorkflow = "workflow"

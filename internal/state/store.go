@@ -174,7 +174,8 @@ CREATE TABLE IF NOT EXISTS spec_revisions (
 -- A session's workflow runs (DESIGN §25) and their step instances. The
 -- recipe is the copy the person allowed, kept both as its text and as the
 -- parsed recipe (JSON) a planner's revision splices into; the inputs,
--- results, steers and the open decision are JSON, read back whole. A
+-- results, steers, the open decision, the judged untils and the onMax
+-- answers are JSON, read back whole. A
 -- step's card is a hidden child of the session (features.crew_of, with
 -- crew_seq the run and crew_node the step's path).
 CREATE TABLE IF NOT EXISTS workflow_runs (
@@ -206,6 +207,9 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 	started_at     TEXT NOT NULL DEFAULT '',
 	ended_at       TEXT NOT NULL DEFAULT '',
 	updated_at     TEXT NOT NULL,
+	start_head     TEXT NOT NULL DEFAULT '',
+	until_results  TEXT NOT NULL DEFAULT '{}',
+	on_max         TEXT NOT NULL DEFAULT '{}',
 	PRIMARY KEY (session_id, n)
 );
 CREATE TABLE IF NOT EXISTS workflow_steps (
@@ -993,6 +997,12 @@ var migrations = []string{
 	`ALTER TABLE crews ADD COLUMN partial INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE crews ADD COLUMN budget_warned INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE crews ADD COLUMN out_of_budget INTEGER NOT NULL DEFAULT 0`,
+	// A workflow run's start HEAD, its judged untils and the person's
+	// onMax answers (DESIGN §25.7), for a database whose workflow_runs
+	// predates them.
+	`ALTER TABLE workflow_runs ADD COLUMN start_head TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE workflow_runs ADD COLUMN until_results TEXT NOT NULL DEFAULT '{}'`,
+	`ALTER TABLE workflow_runs ADD COLUMN on_max TEXT NOT NULL DEFAULT '{}'`,
 }
 
 // Close releases the database.
