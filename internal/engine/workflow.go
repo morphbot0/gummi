@@ -999,14 +999,7 @@ func (e *Engine) parkRunLocked(ctx context.Context, run *domain.Run, why string)
 	if err := e.cfg.Store.UpdateRun(ctx, run); err != nil {
 		return err
 	}
-	steps, _ := e.cfg.Store.RunSteps(ctx, run.Session, run.N)
-	for _, s := range steps {
-		if s.Card != "" && s.State.Live() {
-			if ff := e.Freeform(s.Card); ff != nil {
-				ff.stopBackend()
-			}
-		}
-	}
+	e.stopRunSteps(ctx, run)
 	e.runNote(run.Session, fmt.Sprintf("run %d %s", run.N, why))
 	e.workflowEvent(run.Session)
 	return nil
@@ -1319,10 +1312,10 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 				Options: []string{WorkflowCarryOn, WorkflowDrop},
 			}) || dirty
 		case workflowpolicy.Pause:
-			run.State, run.OutOfBudget, run.Reason = domain.RunPaused, true, a.Reason
-			e.raiseRunDecision(run, e.budgetDecision(run, a.Amount, true, a.Reason))
-			e.runNote(session, fmt.Sprintf("run %d paused: %s", run.N, a.Reason))
-			dirty = true
+			// the pool is spent: nothing new starts, and what runs stops
+			if err := e.pauseForBudgetLocked(ctx, run, a.Amount, a.Reason); err != nil {
+				return acts, err
+			}
 		case workflowpolicy.Warn:
 			if e.raiseRunDecision(run, e.budgetDecision(run, a.Amount, false, a.Reason)) {
 				run.Warned, dirty = true, true
@@ -1887,16 +1880,115 @@ func (e *Engine) sessionRunsSpent(ctx context.Context, session domain.FeatureID)
 }
 
 // stepBudget is a step card's cap: what its session's pool has left, at
-// least one turn's reserve, or the board's stage budget for a session with
-// no envelope.
+// least one turn's reserve while it has any, 0 once it is spent, or the
+// board's stage budget for a session with no envelope. It is read when the
+// step's backend spawns; the pool is held across all the session's steps
+// as they spend (checkRunPool).
 func (e *Engine) stepBudget(ctx context.Context, f domain.Feature) float64 {
 	sess, err := e.cfg.Store.GetFeature(ctx, f.Step().Session)
 	if err != nil {
 		return e.cfg.StageBudget
 	}
 	left, bounded := e.sessionPoolLeft(ctx, sess)
-	if !bounded {
+	switch {
+	case !bounded:
 		return e.cfg.StageBudget
+	case left <= 0:
+		return 0
 	}
 	return math.Max(left, e.turnReserve())
+}
+
+// errStepPoolSpent refuses a step's backend while its session's pool is
+// spent.
+var errStepPoolSpent = errors.New("the session's budget is spent: raise the session's envelope to carry on")
+
+// stepPoolSpent reports whether f is a step's card whose session's pool
+// is spent: no backend of it starts until the session is topped up.
+func (e *Engine) stepPoolSpent(ctx context.Context, f domain.Feature) bool {
+	if e.stepOf(ctx, f) == nil {
+		return false
+	}
+	sess, err := e.cfg.Store.GetFeature(ctx, f.Step().Session)
+	if err != nil {
+		return false
+	}
+	left, bounded := e.sessionPoolLeft(ctx, sess)
+	return bounded && left <= 0
+}
+
+// checkRunPool holds the session's envelope across its steps: a step's
+// spend lands, and when the session's pool is spent the open run pauses
+// at once and every live step's backend stops — the steps share one pool,
+// and each one's own cap was what the pool had left when it spawned.
+func (e *Engine) checkRunPool(card domain.FeatureID) {
+	e.goBrief(func() {
+		ctx := e.lifetime()
+		f, err := e.cfg.Store.GetFeature(ctx, card)
+		if err != nil || !f.IsChild() {
+			return
+		}
+		inst := e.stepOf(ctx, f)
+		if inst == nil {
+			return
+		}
+		sess, err := e.cfg.Store.GetFeature(ctx, inst.Session)
+		if err != nil {
+			return
+		}
+		if left, bounded := e.sessionPoolLeft(ctx, sess); !bounded || left > 0 {
+			return
+		}
+		unlock := e.lockRuns(inst.Session)
+		defer unlock()
+		run, err := e.cfg.Store.OpenRun(ctx, inst.Session)
+		if err != nil || run == nil || run.N != inst.Run || run.State != domain.RunRunning || run.Stopping {
+			return
+		}
+		in, _, err := e.runSnapshot(ctx, run)
+		if err != nil {
+			return
+		}
+		fc := workflowpolicy.ComputeForecast(in)
+		why := fmt.Sprintf("the session's budget is spent (the run has spent %.0f)", fc.Spent)
+		_ = e.pauseForBudgetLocked(ctx, run, workflowpolicy.TopUpFor(fc.ToFinish), why)
+	})
+}
+
+// pauseForBudgetLocked parks a running run whose session's pool is spent:
+// it puts the top-up to the person and stops every live step's backend,
+// its work kept in the tree. The caller holds the run lock.
+func (e *Engine) pauseForBudgetLocked(ctx context.Context, run *domain.Run, amount int, why string) error {
+	run.State, run.OutOfBudget, run.Reason = domain.RunPaused, true, why
+	e.raiseRunDecision(run, e.budgetDecision(run, amount, true, why))
+	if err := e.cfg.Store.UpdateRun(ctx, run); err != nil {
+		return err
+	}
+	e.stopRunSteps(ctx, run)
+	e.runNote(run.Session, fmt.Sprintf("run %d paused: %s", run.N, why))
+	e.workflowEvent(run.Session)
+	return nil
+}
+
+// stopRunSteps stops the backend of every live step of run: the run is
+// parked, and nothing of it spends until it carries on.
+func (e *Engine) stopRunSteps(ctx context.Context, run *domain.Run) {
+	steps, _ := e.cfg.Store.RunSteps(ctx, run.Session, run.N)
+	for _, s := range steps {
+		if s.Card != "" && s.State.Live() {
+			if ff := e.Freeform(s.Card); ff != nil {
+				stopStepBackend(ff)
+			}
+		}
+	}
+}
+
+// stopStepBackend stops a step's backend as an idle-out does: marked done,
+// so the turn that carries the step on spawns a fresh one, picking its
+// conversation up, rather than finding this one stopped.
+func stopStepBackend(ff *FreeformSession) {
+	if sess := ff.Session(); sess != nil {
+		sess.setState(StateDone)
+	}
+	ff.stopBackend()
 }

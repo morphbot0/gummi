@@ -1173,3 +1173,60 @@ func TestARevertIsOfWhatItsPreviewShowed(t *testing.T) {
 		t.Fatalf("the revert against a fresh preview: %v %v", paths, err)
 	}
 }
+
+// TestTheEnvelopeIsACeilingAcrossARunsSteps: steps side by side share
+// their session's pool. Each one's own cap is what the pool had when it
+// spawned, so the pool is held across them as they spend: when it is
+// spent the run pauses at once and every step's backend stops, and no
+// step's cap is ever more than nothing on a spent pool.
+func TestTheEnvelopeIsACeilingAcrossARunsSteps(t *testing.T) {
+	wf := newWFFake()
+	e, store, f, _ := wfEngine(t, wf)
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			if !strings.Contains(msg, "You are step p/") {
+				return base(opts, msg)
+			}
+			// spends most of the pool, and holds its turn open
+			return []agent.Event{
+				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 60, Model: "m"}},
+				{Kind: agent.EventTextDelta, Text: "working"},
+			}
+		}
+	}(wf.Responder)
+	ctx := context.Background()
+	if err := e.RaiseEnvelope(ctx, f.ID, 100); err != nil {
+		t.Fatal(err)
+	}
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: two\nsteps:\n  - id: p\n    parallel:\n      join: all\n      steps:\n" +
+		"        - { id: a, role: scout, envelope: 20, prompt: look }\n        - { id: b, role: scout, envelope: 20, prompt: look }\n"})
+	r := tickRuns(t, e, f.ID, run.N, "paused for money", func(r *domain.Run) bool {
+		return r.State == domain.RunPaused && r.OutOfBudget
+	})
+	if r.Pending == nil || r.Pending.Kind != domain.RunDecideBudget {
+		t.Fatalf("the paused run asks %+v", r.Pending)
+	}
+	steps := stepPaths(t, e, f.ID, run.N)
+	waitUntil(t, "every step's backend stopped", func() bool {
+		for _, s := range steps {
+			if s.Card == "" {
+				return false
+			}
+			if ff := e.Freeform(s.Card); ff != nil && ff.Session().Live() {
+				return false
+			}
+		}
+		return true
+	})
+	for _, s := range steps {
+		card, _ := store.GetFeature(ctx, s.Card)
+		if b := e.stepBudget(ctx, card); b != 0 {
+			t.Errorf("step %s's cap on a spent pool is %.0f, not nothing", s.Path, b)
+		}
+		if ff := e.Freeform(card.ID); ff == nil {
+			t.Errorf("step %s has no session", s.Path)
+		} else if _, err := ff.ensureBackend(ctx); err == nil || !strings.Contains(err.Error(), "budget is spent") {
+			t.Errorf("step %s's backend started again on a spent pool: %v", s.Path, err)
+		}
+	}
+}

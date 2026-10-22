@@ -254,6 +254,12 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		ff.dropLock()
 		return err
 	}
+	// A workflow step spends from its session's pool: with that spent, no
+	// backend of it starts (stepBudget would be no cap at all).
+	if e.stepPoolSpent(ctx, f) {
+		ff.dropLock()
+		return errStepPoolSpent
+	}
 	// The worktree, ensured here: this is what "gets its worktree/branch"
 	// means, and it is the same locate() every stage goes through, so the
 	// branch is cut the same way. A freeform card comes back with no artifact
@@ -536,6 +542,9 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 			return nil, ferr
 		}
 		if ff.engine.sessionBudget(f, sess.rate()) <= 0 {
+			if ff.engine.stepOf(ctx, f) != nil {
+				return nil, errStepPoolSpent
+			}
 			return nil, fmt.Errorf("%s has spent its budget of %s; raise it to carry on", ff.id, domain.FormatDollars(float64(f.Budget.Envelope)))
 		}
 	}
@@ -1315,6 +1324,11 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		e.recordUsage(sess, ff.id, domain.StageOpen, agent.RoleImplementer, ev.Usage)
 		if sess.overBudget() {
 			e.exhaustFreeform(ff, sess)
+		}
+		if sess.Feature.IsChild() {
+			// a step spends from its session's pool, which its siblings
+			// share: the pool is held across them all
+			e.checkRunPool(ff.id)
 		}
 	case agent.EventIdle:
 		// No commit here: a turn ending is not a reason to commit. The agent
