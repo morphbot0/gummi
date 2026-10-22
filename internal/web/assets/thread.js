@@ -17,7 +17,7 @@ import { $, h, clear, clock, dur, cr, ROLE, decisionWord, decisionColor, plural,
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { draftHero } from './session.js?v=__ASSET_V__'
-import { attachmentURL, post, cardPath } from './api.js?v=__ASSET_V__'
+import { attachmentURL, get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { restoreComposer } from './composer.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 
@@ -574,12 +574,20 @@ function decision (it) {
 // reader's selection in it and the scroll of its output.
 const turnNodes = new Map()
 let turnsFor = null
+// A live conversation sends only its newest turns and how many came before
+// them (omitted). The earlier ones a person asked for are kept here, per
+// conversation: from, the first one's number, and turns, the run of them
+// up to where the block starts — kept that way as the block slides on,
+// cut back when the conversation is (a rewind, a clear), and let go when
+// the stage run they belong to is replaced by another.
+const earlier = new Map() // kind -> { from, turns, session }
+const fetching = new Set() // kinds with an earlier read on the way
 
 function renderLive () {
   const box = $('#thread-live')
   const r = state.card || row(state.sel)
   const l = state.live
-  if (turnsFor !== state.sel) { turnNodes.clear(); turnsFor = state.sel }
+  if (turnsFor !== state.sel) { turnNodes.clear(); earlier.clear(); turnsFor = state.sel }
   const parts = []
   if (r) {
     const pausing = r.running?.pausing
@@ -749,9 +757,82 @@ function activityItems (run) {
 
 // conversation draws a session's settled turns (each run of tool calls and
 // thoughts folded into one activity row) and the message still streaming.
+// earlierFor is the earlier turns kept for conversation kind that run
+// straight on into its block, or null. A block that slid past them since
+// asks for the turns between, and draws without them until those land.
+function earlierFor (kind, c) {
+  const e = earlier.get(kind)
+  if (!e) return null
+  const omitted = c.omitted || 0
+  if (e.session !== sessionOf(kind) || omitted <= e.from) { earlier.delete(kind); return null }
+  const to = e.from + e.turns.length
+  if (to > omitted) e.turns = e.turns.slice(0, omitted - e.from)
+  if (to < omitted) { loadEarlier(kind, omitted); return null }
+  return e
+}
+
+function sessionOf (kind) { return kind === 'stage' ? state.live?.session || '' : '' }
+
+// loadEarlier reads the turns of conversation kind before turn before:
+// the window above what is drawn, which a person asked for (asked), or
+// the gap a sliding block opened below what is kept, which a redraw asks
+// for on its own and so must neither redraw nor speak up.
+async function loadEarlier (kind, before, asked = false) {
+  if (fetching.has(kind)) return
+  fetching.add(kind)
+  if (asked) renderLive() // the button says it is loading
+  const id = state.sel
+  const session = sessionOf(kind)
+  const sc = $('#thread')
+  let grew = false
+  try {
+    const r = await get(cardPath(id, `live/earlier?conv=${encodeURIComponent(kind)}&before=${before}`))
+    if (state.sel !== id || sessionOf(kind) !== session) return
+    const e = earlier.get(kind)
+    const to = e ? e.from + e.turns.length : 0
+    if (!e) {
+      earlier.set(kind, { from: r.from, turns: r.turns || [], session })
+      grew = true
+    } else if (before === e.from) {
+      e.turns = (r.turns || []).concat(e.turns)
+      e.from = r.from
+      grew = true
+    } else if (r.from <= to) {
+      e.turns = e.turns.concat((r.turns || []).slice(to - r.from))
+    } else {
+      earlier.delete(kind) // the block ran too far ahead to stitch: asked for again
+    }
+  } catch (err) {
+    if (state.sel === id && asked) toast(`Earlier turns did not load: ${err.message}`)
+    // a gap that would not fill is let go rather than asked for on every redraw
+    if (!asked) earlier.delete(kind)
+  } finally {
+    fetching.delete(kind)
+  }
+  if (state.sel !== id) return
+  // turns put above the reader keep what they were reading where it was
+  const below = sc.scrollHeight - sc.scrollTop
+  renderLive()
+  if (grew && !following) sc.scrollTop = sc.scrollHeight - below
+}
+
 function conversation (kind, c, role, stage) {
   const out = []
-  const turns = c.turns || []
+  const head = earlierFor(kind, c)
+  const turns = head ? head.turns.concat(c.turns || []) : (c.turns || [])
+  // first is the number of turns[0] in the whole conversation, which keys
+  // its nodes: a key that moved with the block's window redrew every turn
+  // on every one it slid
+  const first = head ? head.from : (c.omitted || 0)
+  if (first > 0) {
+    const busy = fetching.has(kind)
+    out.push(cached(`${kind}:earlier`, `${first}|${busy}`, () => h('div', { class: 'earlier-turns' }, h('button', {
+      type: 'button',
+      testid: `live-${kind}-earlier`,
+      disabled: busy,
+      onclick: () => loadEarlier(kind, first, true)
+    }, busy ? 'Loading earlier turns…' : `Show earlier turns (${first} more)`))))
+  }
   let run = []
   let start = 0
   // live is the run a busy session is still adding to: the last one, with
@@ -759,7 +840,7 @@ function conversation (kind, c, role, stage) {
   const flush = (live = false) => {
     if (!run.length) return
     const sig = `${live}:` + run.map(t => t.tool ? `${t.tool.status}|${t.tool.label}|${t.tool.ms || 0}|${(t.tool.output || '').length}` : `k|${(t.text || '').length}`).join(';')
-    const key = `${kind}:act:${start}`
+    const key = `${kind}:act:${first + start}`
     out.push(cached(key, sig, () => activity(activityItems(run), key, live)))
     run = []
   }
@@ -784,7 +865,7 @@ function conversation (kind, c, role, stage) {
     // back moves with every line sent after this one and with the busy
     // flag: it is set on the bubble's button rather than drawing it again
     const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}|${c.model || ''}`
-    const mkey = `${kind}:${i}`
+    const mkey = `${kind}:${first + i}`
     const el = cached(mkey, sig, () => t.author === 'you'
       ? you({ text: t.text, by: t.by, time: t.time, key: mkey, rewind: kind === 'freeform' ? (e) => rewind(state.sel, Number(e.currentTarget.dataset.back)) : null })
       : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text, key: mkey, time: t.time, ms, model: t.author === 'gummi' ? null : c.model }))

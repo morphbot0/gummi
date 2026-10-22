@@ -396,6 +396,21 @@ func TestDocsLiveDuringARunningSession(t *testing.T) {
 	}
 }
 
+// The earlier turns of a live conversation are asked for by number, and
+// only of a conversation the card is having.
+func TestDocsLiveEarlierRefusals(t *testing.T) {
+	b := newDocsBoard(t, agent.NewFake("ok"))
+	if st := b.get("/api/cards/FD-001/live/earlier?conv=freeform&before=x", nil); st != http.StatusBadRequest {
+		t.Errorf("a bad before = %d", st)
+	}
+	if st := b.get("/api/cards/FD-001/live/earlier?conv=freeform&before=0", nil); st != http.StatusNotFound {
+		t.Errorf("a feature card's freeform conversation = %d", st)
+	}
+	if st := b.get("/api/cards/FD-001/live/earlier?conv=stage&before=0", nil); st != http.StatusNotFound {
+		t.Errorf("a stage run that is not running = %d", st)
+	}
+}
+
 func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

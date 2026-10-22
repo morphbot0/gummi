@@ -19,6 +19,7 @@ func TestLiveShape(t *testing.T) {
 			{Author: "tool", Tool: &ToolCall{Tool: "Read", Label: "Read  main.go", Detail: "main.go", Status: "ok"}},
 			{Author: "you", Text: "keep it small"},
 		},
+		Omitted: 340,
 		Consult: &Conversation{
 			Busy: true, Notice: "consult is not confined on copilot: it can write to the checkout",
 			Verb: "thinking", Turns: []Turn{{Author: "you", Text: "why two funcs?"}, {Author: "thinking", Text: "one per backend"}},
@@ -29,6 +30,13 @@ func TestLiveShape(t *testing.T) {
 			Objective: &Objective{Text: "the parser is under 10ms", Check: "go test ./parser", State: "active", Turns: 3, Cap: 20, Note: "the lexer is still slow", Auditing: true},
 		},
 		Elsewhere: &Elsewhere{PID: 4411, Stage: "verify", Role: "gummi", Since: at, Busy: true, Watching: true, Note: "read-only: another gummi process owns this run"},
+	}))
+}
+
+func TestLiveEarlierShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Earlier{
+		From: 140, Omitted: 340,
+		Turns: []Turn{{Author: "you", Text: "start with the parser", Time: at}, {Author: "implementer", Text: "Reading it now."}},
 	}))
 }
 

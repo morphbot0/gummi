@@ -1,0 +1,15 @@
+{
+  "from": 140,
+  "turns": [
+    {
+      "author": "you",
+      "text": "start with the parser",
+      "time": "2026-09-27T09:12:00Z"
+    },
+    {
+      "author": "implementer",
+      "text": "Reading it now."
+    }
+  ],
+  "omitted": 340
+}

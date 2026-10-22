@@ -30,6 +30,7 @@ func (s *Server) docsRoutes() {
 	prs := newPRCache(prCacheTTL, s.now)
 	s.api("GET /api/cards/{id}/thread", s.handleThread)
 	s.api("GET /api/cards/{id}/live", s.handleLive)
+	s.api("GET /api/cards/{id}/live/earlier", s.handleLiveEarlier)
 	s.api("GET /api/cards/{id}/spec", s.handleSpec)
 	s.api("GET /api/cards/{id}/memory", s.handleMemory)
 	s.api("POST /api/cards/{id}/spec/notes", s.handleSpecNote)
@@ -146,6 +147,30 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, live)
+}
+
+// handleLiveEarlier is GET /api/cards/{id}/live/earlier?conv=&before=:
+// the turns a live conversation's block left out, a projection like
+// handleLive.
+func (s *Server) handleLiveEarlier(w http.ResponseWriter, r *http.Request) {
+	id, conv := r.PathValue("id"), r.URL.Query().Get("conv")
+	before, err := strconv.Atoi(r.URL.Query().Get("before"))
+	if err != nil || before < 0 {
+		writeError(w, http.StatusBadRequest, "before must be a turn number")
+		return
+	}
+	var (
+		earlier webapi.Earlier
+		ok      bool
+	)
+	if !s.do(w, r, func(m *ui.Shell) tea.Cmd { earlier, ok = m.WebLiveEarlier(id, conv, before); return nil }) {
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "no "+conv+" conversation on "+id)
+		return
+	}
+	writeJSON(w, http.StatusOK, earlier)
 }
 
 func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
