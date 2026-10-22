@@ -33,7 +33,7 @@
 │ ✓ DW-1  – DW-2
 │ ✓      design         contractor   Design for the spec                                                 $0.40
 │ ✓ ↺ 1  build                       implement · verdict — met · APPROVED                                $1.15
-│ ✓      validate       tester       checks pass                                                         $0.20
+│ ✓      validate       reviewer     changed 1 file although it only reads · checks pass                 $0.20
 │ commits made while it ran: abc1234 feat(state): store every turn
 └ 1 file left changed in the tree: internal/state/turns.go                   report in spec 1 · alt+w steps in
 == proposed

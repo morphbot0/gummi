@@ -6640,8 +6640,11 @@ steps:
 **Roles.** `scout`, `planner`, `contractor`, `implementer`, `tester`,
 `scribe` and `reviewer`.
 - Each role has a prompt preamble, and `planner` has its profile slot.
-- `scout` and `reviewer` are **reading roles**: they are told to change
-  nothing, and are spawned read-only where the backend enforces it.
+- `scout` and `reviewer` are **reading roles**: their preamble tells them
+  to change no files. They have the full shell any step has — a reviewer
+  runs the tests — so nothing enforces it; a reading step whose end
+  snapshot differs from its start is flagged in its row and the run's
+  report, as evidence, never a refusal.
 - Every other role writes.
 
 **Templates**, filled when a step starts:
@@ -6860,6 +6863,8 @@ The block holds:
 - **A row per step that has run or is running**:
   - its path, role, title or id, and spend;
   - its live last action, or its end summary;
+  - a flag when a reading step changed files ("changed 2 files although
+    it only reads");
   - **Open**.
 
   A finished iteration of a `repeat` folds to one row with its verdict.
@@ -7017,6 +7022,15 @@ The build follows §25, with these differences.
   `crew` line beside it drops `budget`; `workflow_runaway` is gone.
 
 **Running.**
+- **A reading step is never spawned read-only.** The backend's read-only
+  mode is a research session's allowlist (claude's is Read, Grep, Glob
+  and a few git commands), which kept a reviewer from running `go test`.
+  A scout or a reviewer gets the shell every step gets; its preamble
+  tells it to change no files. When its end snapshot differs from its
+  start, the paths are kept on the step (`RunStep.Changed`): its row says
+  "changed N files although it only reads" (a folded iteration says a
+  reading step in it did), and the report lists them under **Reading
+  steps that changed files**.
 - **A process conducts only the runs it holds.** A tick conducts a
   session's run only while its process holds the session's card lock,
   which it keeps while a run is open or queued, so two gummis never

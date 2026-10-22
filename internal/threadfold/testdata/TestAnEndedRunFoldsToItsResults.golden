@@ -1,6 +1,6 @@
 {
   "n": 2,
-  "rev": "371z5w90r5pb0",
+  "rev": "3aw379k5nyp7t",
   "recipe": "deliver",
   "spec": 2,
   "specTitle": "Resume pre-migration sessions",
@@ -48,6 +48,7 @@
       "state": "done",
       "spent": 170,
       "line": "not met · CHANGES · 2 findings: pruned logs come back out of order",
+      "flag": "a reading step in it changed 1 file",
       "folded": true,
       "steps": "implement · review-a ∥ review-b · verdict",
       "verdict": "not met · CHANGES · 2 findings: pruned logs come back out of order"
@@ -73,6 +74,7 @@
       "state": "done",
       "spent": 20,
       "line": "all good",
+      "flag": "changed 2 files although it only reads",
       "card": "FF-1va"
     }
   ],

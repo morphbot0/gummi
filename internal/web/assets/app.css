@@ -1348,6 +1348,7 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .rb-row .ti{min-width:0;display:flex;flex-direction:column}
 .rb-row .ti .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rb-row .ti small{font-family:var(--mono);font-size:11.5px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-row .ti small.flag{color:var(--warn)}
 .rb-row.folded .ti .n{font-size:12.5px;color:var(--fg2)}
 .rb-row .cost{font-size:12px;color:var(--fg3);text-align:right}
 .rb-open{justify-self:end;font-size:12px;font-weight:600;border-bottom:0}

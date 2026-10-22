@@ -437,6 +437,9 @@ func stepRowLines(s *theme.Styles, row threadfold.StepRow, selected bool, w int)
 	if row.Waiting {
 		body += s.Warning.Render("waits on you · ")
 	}
+	if row.Flag != "" {
+		body += s.Warning.Render(row.Flag + " · ")
+	}
 	costW := ansi.StringWidth(cost) + 1
 	room := max(w-ansi.StringWidth(lead)-ansi.StringWidth(body)-costW, 4)
 	out := []string{lead + body + s.Subtle.Render(padTo(ansi.Truncate(line, room, "…"), room)) + " " + s.Muted.Render(cost)}

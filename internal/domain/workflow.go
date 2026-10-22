@@ -17,11 +17,11 @@ import (
 // internal/workflowrecipe's; what a run does next is internal/workflowpolicy's.
 
 // WorkflowRole is a step's role, from a fixed catalogue (§25.4). Each role
-// has a prompt preamble; the reading roles are told to change nothing.
+// has a prompt preamble; the reading roles are told to change no files.
 type WorkflowRole string
 
 const (
-	// RoleScout reads, reproduces and maps; it changes nothing.
+	// RoleScout reads, reproduces and maps; it changes no files.
 	RoleScout WorkflowRole = "scout"
 	// RolePlanner plans; it may end with a gummi-workflow block that
 	// replaces the run's remaining steps. It has a profile slot of its own.
@@ -34,7 +34,7 @@ const (
 	RoleTester WorkflowRole = "tester"
 	// RoleScribe writes docs and reports.
 	RoleScribe WorkflowRole = "scribe"
-	// RoleReviewer reads the work against the spec; it changes nothing.
+	// RoleReviewer reads the work against the spec; it changes no files.
 	RoleReviewer WorkflowRole = "reviewer"
 )
 
@@ -51,8 +51,10 @@ func (r WorkflowRole) Known() bool {
 	return false
 }
 
-// Reads reports whether r is a reading role: told to change nothing, and
-// spawned read-only where the backend enforces it.
+// Reads reports whether r is a reading role: told to change no files. It
+// has the full shell any step has — a reviewer runs the tests — so nothing
+// holds it to that; a reading step that changes files is flagged, as
+// evidence (RunStep.Changed), never refused.
 func (r WorkflowRole) Reads() bool { return r == RoleScout || r == RoleReviewer }
 
 // Writes reports whether a step of this role may change the tree. Every
@@ -408,6 +410,11 @@ type RunStep struct {
 	// the step's own diff runs between them.
 	StartTree string
 	EndTree   string
+	// Changed lists the paths a reading step changed between its start and
+	// end snapshots, recorded when it ends: a reading role is told to
+	// change no files, and one that did is flagged. Nil for a writing step
+	// or a reading step that changed nothing.
+	Changed []string
 	// Prompt is the brief as filled in; Output the step's final message.
 	Prompt string
 	Output string

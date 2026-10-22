@@ -393,9 +393,10 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// and backgrounded commands have somewhere to report back to.
 		Watch:      true,
 		ScratchDir: e.scratchFilesDirFor(ff.id),
-		// a workflow step of a reading role changes nothing, where the
-		// backend can be held to that (DESIGN §25.4)
-		ReadOnly: e.stepReadOnly(ctx, f, ag.Capabilities()),
+		// A workflow step is never spawned ReadOnly, a reading role's
+		// neither: that is a research session's allowlist, which would
+		// keep a reviewer from running the tests. Its preamble tells it
+		// to change no files, and a run flags one that did (DESIGN §25.4).
 		// Image bytes a backend returns are kept in the workspace's
 		// attachment store, which the page already draws.
 		ImageSink: func(data []byte, name string) string {

@@ -173,7 +173,8 @@ A run's block, among the session's turns (§25.9, `workflow.js`): `run-<n>`
 per top-level entry of the recipe; `run-pending` (the run waits on the pinned
 decision); `run-rows` with one `run-row-<key>` per step or folded iteration
 (`data-card`, `data-state`; `sel` when open beside the thread), its
-`run-row-line` and `run-open`; a step's question `run-question` under its row,
+`run-row-line`, `run-row-flag` (a reading step that changed files) and
+`run-open`; a step's question `run-question` under its row,
 with `run-question-option-<i>` (the recommended first), `run-question-reply`
 and `run-question-send`; an ended run's `run-results` (`run-result-<DW-n>`),
 `run-steps` (its rows, folded), `run-commits`, `run-report`; and `run-files`

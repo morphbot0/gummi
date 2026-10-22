@@ -187,6 +187,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.State, st.Output, st.EndTree, st.Spent, st.EndedAt = domain.StepDone, "LGTM", "t1", 31, started.Add(time.Minute)
+	st.Changed = []string{"notes.md"} // a reviewer that changed a file, flagged
 	if err := s.UpdateRunStep(ctx, st); err != nil {
 		t.Fatal(err)
 	}

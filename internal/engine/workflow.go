@@ -1669,8 +1669,11 @@ func runReport(run *domain.Run, end domain.RunState, why string, items []domain.
 	if validated != "" {
 		fmt.Fprintf(&b, "\nValidated at tree %s.\n", short(validated))
 	}
-	var decisions, open, failed []string
+	var decisions, open, failed, strayed []string
 	for _, s := range steps {
+		if len(s.Changed) > 0 {
+			strayed = append(strayed, fmt.Sprintf("%s (%s) changed %s", s.Path, s.Role, strings.Join(s.Changed, ", ")))
+		}
 		n := workflowrecipe.GatherNotes(s.Output)
 		for _, d := range n.Decisions {
 			decisions = append(decisions, s.Path+": "+d)
@@ -1684,6 +1687,9 @@ func runReport(run *domain.Run, end domain.RunState, why string, items []domain.
 	}
 	if len(failed) > 0 {
 		b.WriteString("\nSteps that did not finish:\n- " + strings.Join(failed, "\n- ") + "\n")
+	}
+	if len(strayed) > 0 {
+		b.WriteString("\nReading steps that changed files, although they only read:\n- " + strings.Join(strayed, "\n- ") + "\n")
 	}
 	if len(decisions) > 0 {
 		b.WriteString("\nDecisions:\n- " + strings.Join(decisions, "\n- ") + "\n")

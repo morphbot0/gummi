@@ -137,6 +137,10 @@ type StepRow struct {
 	// Line is the step's last action while it works, "asks you" while it
 	// waits on the person, and its end summary once it has ended.
 	Line string `json:"line,omitempty"`
+	// Flag is what the row warns of, beside its line: a reading step that
+	// changed files ("changed 2 files although it only reads"). Evidence
+	// for the person, never a gate.
+	Flag string `json:"flag,omitempty"`
 	// Card is the step's card, the one Open shows and a message goes to.
 	Card string `json:"card,omitempty"`
 	// Folded marks a finished iteration: Steps names what ran in it
@@ -466,6 +470,7 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 	}
 	rows := []StepRow{}
 	placed := map[string]int{}
+	changed := map[string]int{}
 	for _, s := range steps {
 		if s.State == domain.StepWaiting {
 			continue
@@ -494,6 +499,12 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 		row.Spent = roundCredits(row.Spent + s.Spent)
 		if s.State == domain.StepFailed {
 			row.State = string(domain.StepFailed)
+		}
+		changed[into.path] += len(s.Changed)
+	}
+	for p, i := range placed {
+		if n := changed[p]; n > 0 {
+			rows[i].Flag = "a reading step in it " + strings.TrimSuffix(ReaderFlag(n), " although it only reads")
 		}
 	}
 	for p, i := range placed {
@@ -529,7 +540,20 @@ func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 	if s.State.Live() && l.Ask != nil {
 		row.Question = AskQuestion(l.Ask)
 	}
+	row.Flag = ReaderFlag(len(s.Changed))
 	return row
+}
+
+// ReaderFlag is a reading step's row flag for the n files it changed, ""
+// when it changed none.
+func ReaderFlag(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "changed 1 file although it only reads"
+	}
+	return fmt.Sprintf("changed %d files although it only reads", n)
 }
 
 // innerIteration is the repeat and iteration a step's path sits in, the

@@ -188,7 +188,8 @@ function stepRow (id, row) {
   h('span', { class: ['wrole', row.role && `r-${row.role}`] }, row.role || row.repeat || ''),
   h('span', { class: 'ti' },
     h('span', { class: 'n' }, row.folded ? row.steps : row.id),
-    row.line ? h('small', { testid: 'run-row-line' }, row.line) : null),
+    row.line ? h('small', { testid: 'run-row-line' }, row.line) : null,
+    row.flag ? h('small', { class: 'flag', testid: 'run-row-flag' }, row.flag) : null),
   h('span', { class: 'cost mono' }, row.spent ? cr(row.spent) : '–'),
   open
     ? h('button', { class: 'link rb-open', type: 'button', testid: 'run-open', 'aria-label': `Open step ${row.path}`, onclick: () => openStep(row.card) }, 'Open')

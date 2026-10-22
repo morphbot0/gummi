@@ -144,6 +144,8 @@ func TestAnEndedRunFoldsToItsResults(t *testing.T) {
 		step("build/2/reviews/review-b", domain.RoleReviewer, domain.StepStopped, 20, 10, ""),
 		step("build/2/verdict", domain.RoleReviewer, domain.StepDone, 22, 10, "APPROVED"),
 		step("validate", domain.RoleReviewer, domain.StepDone, 25, 20, "MET: DW-1\nall good"))
+	in.Steps[len(in.Steps)-1].Changed = []string{"internal/state/turns.go", "NOTES.md"}
+	in.Steps[2].Changed = []string{"go.sum"} // build/1/reviews/review-a, folded into build ↺ 1
 	in.Live = nil
 	r := FoldRun(in)
 	if r.CanPause || r.CanStop || r.CanResume || !r.CanRevert {
@@ -161,6 +163,19 @@ func TestAnEndedRunFoldsToItsResults(t *testing.T) {
 	}
 	if v := r.Rows[3]; v.Line != "all good" {
 		t.Fatalf("validate's end summary skips its judgement lines: %q", v.Line)
+	}
+	// a reviewer that changed files is flagged beside its line, and only it
+	if v := r.Rows[3]; v.Flag != "changed 2 files although it only reads" {
+		t.Fatalf("validate's flag = %q", v.Flag)
+	}
+	if d := r.Rows[0]; d.Flag != "" {
+		t.Fatalf("design is flagged: %q", d.Flag)
+	}
+	if b := r.Rows[1]; b.Flag != "a reading step in it changed 1 file" || r.Rows[2].Flag != "" {
+		t.Fatalf("the folded iterations' flags = %q, %q", b.Flag, r.Rows[2].Flag)
+	}
+	if ReaderFlag(1) != "changed 1 file although it only reads" {
+		t.Errorf("one file reads %q", ReaderFlag(1))
 	}
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {

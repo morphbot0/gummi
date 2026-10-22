@@ -1434,3 +1434,62 @@ func TestAnAmountReadsWithItsUnit(t *testing.T) {
 		t.Error("an amount with no number was read")
 	}
 }
+
+// TestAReadingStepHasAShellAndIsFlaggedWhenItChangesFiles: a scout or a
+// reviewer is spawned like any step — never ReadOnly, which is a research
+// session's allowlist and would keep a reviewer from running the tests —
+// even on a backend that could strip its write tools. Its brief tells it
+// to change no files. One that changes files anyway is recorded and named
+// in the run's report: evidence, never a refusal.
+func TestAReadingStepHasAShellAndIsFlaggedWhenItChangesFiles(t *testing.T) {
+	wf := newWFFake()
+	wf.Caps.ReadOnlyEnforce = true
+	var mu sync.Mutex
+	readOnly := map[string]bool{}
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			if m := wfStepRe.FindStringSubmatch(msg); m != nil {
+				mu.Lock()
+				readOnly[m[1]] = opts.ReadOnly
+				mu.Unlock()
+			}
+			return base(opts, msg)
+		}
+	}(wf.Responder)
+	wf.on("look", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "stray.txt"), []byte("oops\n"), 0o600)
+		return wfReply{text: "mapped it", credits: 2}
+	})
+	wf.on("check", func(string, string, int) wfReply { return wfReply{text: "ran the tests: all pass", credits: 2} })
+	e, _, f, _ := wfEngine(t, wf)
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: read\nsteps:\n" +
+		"  - { id: look, role: scout, prompt: map it }\n  - { id: check, role: reviewer, prompt: run the tests }\n"})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+
+	mu.Lock()
+	for _, id := range []string{"look", "check"} {
+		if ro, ran := readOnly[id]; !ran || ro {
+			t.Errorf("step %s: ran %v, spawned ReadOnly %v", id, ran, ro)
+		}
+	}
+	mu.Unlock()
+	steps := stepPaths(t, e, f.ID, run.N)
+	wf.mu.Lock()
+	brief := wf.stepT["check"][0]
+	wf.mu.Unlock()
+	if !strings.Contains(brief, "full shell") || !strings.Contains(brief, "Do not change files") {
+		t.Errorf("a reading step's brief: %s", brief)
+	}
+	if got := steps["look"].Changed; len(got) != 1 || got[0] != "stray.txt" {
+		t.Fatalf("the scout's changes = %q", got)
+	}
+	if got := steps["check"].Changed; got != nil {
+		t.Fatalf("a reviewer that changed nothing is flagged: %q", got)
+	}
+	if steps["look"].State != domain.StepDone || r.State == domain.RunPartial && strings.Contains(r.Reason, "look") {
+		t.Fatalf("the flag held the step: %+v, run %s (%s)", steps["look"], r.State, r.Reason)
+	}
+	if !strings.Contains(r.Report, "Reading steps that changed files") || !strings.Contains(r.Report, "look (scout) changed stray.txt") {
+		t.Fatalf("the report does not name the scout's change:\n%s", r.Report)
+	}
+}

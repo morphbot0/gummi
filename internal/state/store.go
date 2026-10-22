@@ -1010,6 +1010,9 @@ var migrations = []string{
 	// The commits a workflow run's steps made, for its block in the thread
 	// (DESIGN §25.9).
 	`ALTER TABLE workflow_runs ADD COLUMN commits TEXT NOT NULL DEFAULT 'null'`,
+	// The paths a reading step changed, flagged in its row and the run's
+	// report (DESIGN §25.4).
+	`ALTER TABLE workflow_steps ADD COLUMN changed TEXT NOT NULL DEFAULT 'null'`,
 }
 
 // Close releases the database.

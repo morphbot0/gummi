@@ -86,6 +86,8 @@ type RunStepRow struct {
 	Spent float64 `json:"spent"`
 	// Line is its last action while it works, its end summary after.
 	Line string `json:"line,omitempty"`
+	// Flag warns beside the line: a reading step that changed files.
+	Flag string `json:"flag,omitempty"`
 	// Card is the step's card: Open shows it, a message goes to it.
 	Card    string `json:"card,omitempty"`
 	Folded  bool   `json:"folded,omitempty"`

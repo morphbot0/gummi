@@ -21,6 +21,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/workflowrecipe"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // planTriesCap is how many times a planner's gummi-workflow block that
@@ -47,13 +48,6 @@ func (e *Engine) stepTreeDir(ctx context.Context, f domain.Feature) (string, boo
 	}
 	dir, err := e.sessionTree(ctx, f.Step().Session)
 	return dir, true, err
-}
-
-// stepReadOnly reports whether a step's card is spawned read-only: a
-// reading role, on a backend that enforces it.
-func (e *Engine) stepReadOnly(ctx context.Context, f domain.Feature, caps agent.Capabilities) bool {
-	st := e.stepOf(ctx, f)
-	return st != nil && st.Role.Reads() && caps.ReadOnlyEnforce
 }
 
 // stepRole is the profile slot a step's model comes from: step-<tier>,
@@ -292,7 +286,9 @@ func stepBrief(run *domain.Run, step domain.Step, path, filled string) string {
 	b.WriteString("You work in the session's own tree, which the run's other steps share. Do not commit: " +
 		"the run leaves its changes in the tree, and the session commits what it keeps.\n")
 	if step.Role.Reads() {
-		b.WriteString("Change nothing in the tree: read, run what you need, and report.\n")
+		b.WriteString("You have a full shell, like every step: read the code, and build and run what you need — " +
+			"the tests included. Do not change files in the tree: you read, run and report. gummi compares the tree " +
+			"before and after you, and a reading step that changed files is flagged in the run's report.\n")
 	} else {
 		b.WriteString("Change only what your task needs.\n")
 	}
@@ -465,6 +461,7 @@ func (e *Engine) endStep(ctx context.Context, inst *domain.RunStep, st domain.St
 		return
 	}
 	cur.State, cur.Reason, cur.Output, cur.EndTree, cur.EndedAt = st, why, output, endTree, e.now()
+	e.flagReaderChanges(ctx, cur)
 	if cur.Card != "" {
 		if f, err := e.cfg.Store.GetFeature(ctx, cur.Card); err == nil {
 			cur.Spent = f.Spend.CreditEquivalent()
@@ -481,6 +478,25 @@ func (e *Engine) endStep(ctx context.Context, inst *domain.RunStep, st domain.St
 		line += ": " + why
 	}
 	e.runNote(cur.Session, line)
+}
+
+// flagReaderChanges records the paths a reading step changed between its
+// snapshots (RunStep.Changed): it was told to change no files, and one
+// that did is flagged in its row and the run's report — evidence for the
+// person, never a refusal. A writing step's are its work, and not kept.
+func (e *Engine) flagReaderChanges(ctx context.Context, st *domain.RunStep) {
+	st.Changed = nil
+	if !st.Role.Reads() || st.StartTree == "" || st.EndTree == "" || st.StartTree == st.EndTree {
+		return
+	}
+	dir, err := e.sessionTree(ctx, st.Session)
+	if err != nil {
+		return
+	}
+	if _, paths, err := worktree.DiffTrees(ctx, dir, st.StartTree, st.EndTree); err == nil && len(paths) > 0 {
+		st.Changed = paths
+		e.runNote(st.Session, fmt.Sprintf("run %d: %s, a reading step, changed %d file%s", st.Run, st.Path, len(paths), plural(len(paths))))
+	}
 }
 
 // settleStep ends a live step without an output of its own: stopped,
@@ -500,6 +516,7 @@ func (e *Engine) settleStepLocked(ctx context.Context, session domain.FeatureID,
 	if cur.EndTree == "" {
 		cur.EndTree, _ = e.snapshotRun(ctx, session, n)
 	}
+	e.flagReaderChanges(ctx, cur)
 	if err := e.cfg.Store.UpdateRunStep(ctx, cur); err != nil {
 		return
 	}

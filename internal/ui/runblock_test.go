@@ -79,11 +79,13 @@ func tuiEndedRun() threadfold.RunInput {
 		tuiStep("design", domain.RoleContractor, domain.StepDone, 0, 40, "Design for the spec"),
 		tuiStep("build/1/implement", domain.RoleImplementer, domain.StepDone, 5, 80, "implemented it"),
 		tuiStep("build/1/verdict", domain.RoleReviewer, domain.StepDone, 12, 35, "APPROVED"),
-		tuiStep("validate", domain.RoleTester, domain.StepDone, 20, 20, "MET: DW-1\nchecks pass"),
+		tuiStep("validate", domain.RoleReviewer, domain.StepDone, 20, 20, "MET: DW-1\nchecks pass"),
 	}
 	for i := range steps {
 		steps[i].Run = 1
 	}
+	// the validating reviewer changed a file it was told to leave alone
+	steps[3].Changed = []string{"internal/state/turns_test.go"}
 	return threadfold.RunInput{
 		Run: domain.Run{
 			Session: "FF-001", N: 1, RecipeName: "deliver", Recipe: tuiDeliver(), Spec: 1, SpecRev: 4,

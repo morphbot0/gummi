@@ -243,15 +243,20 @@ func (s *Store) lastRunIn(ctx context.Context, session domain.FeatureID, a, b do
 }
 
 const stepCols = `session_id, run_n, path, step_id, card_id, role, tier, state, spent,
-	start_tree, end_tree, prompt, output, reason, started_at, ended_at`
+	start_tree, end_tree, prompt, output, reason, started_at, ended_at, changed`
 
 func scanStep(r rowScanner) (domain.RunStep, error) {
 	var st domain.RunStep
-	var session, card, role, tier, state, started, ended string
+	var session, card, role, tier, state, started, ended, changed string
 	err := r.Scan(&session, &st.Run, &st.Path, &st.StepID, &card, &role, &tier, &state, &st.Spent,
-		&st.StartTree, &st.EndTree, &st.Prompt, &st.Output, &st.Reason, &started, &ended)
+		&st.StartTree, &st.EndTree, &st.Prompt, &st.Output, &st.Reason, &started, &ended, &changed)
 	if err != nil {
 		return st, err
+	}
+	if changed != "" {
+		if err := json.Unmarshal([]byte(changed), &st.Changed); err != nil {
+			return st, fmt.Errorf("step %s/%d/%s: %w", session, st.Run, st.Path, err)
+		}
 	}
 	st.Session, st.Card = domain.FeatureID(session), domain.FeatureID(card)
 	st.Role, st.Tier, st.State = domain.WorkflowRole(role), domain.StepTier(tier), domain.StepState(state)
@@ -263,11 +268,15 @@ func scanStep(r rowScanner) (domain.RunStep, error) {
 // CreateRunStep inserts a step instance; its run must exist, and a path is
 // taken once per run.
 func (s *Store) CreateRunStep(ctx context.Context, st *domain.RunStep) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO workflow_steps (`+stepCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	changed, err := json.Marshal(st.Changed)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO workflow_steps (`+stepCols+`)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(st.Session), st.Run, st.Path, st.StepID, string(st.Card), string(st.Role), string(st.Tier), string(st.State),
 		st.Spent, st.StartTree, st.EndTree, st.Prompt, st.Output, st.Reason,
-		formatOptTime(st.StartedAt), formatOptTime(st.EndedAt))
+		formatOptTime(st.StartedAt), formatOptTime(st.EndedAt), string(changed))
 	if err != nil {
 		return fmt.Errorf("creating step %s of run %d on %s: %w", st.Path, st.Run, st.Session, err)
 	}
@@ -276,12 +285,16 @@ func (s *Store) CreateRunStep(ctx context.Context, st *domain.RunStep) error {
 
 // UpdateRunStep writes a step instance back whole.
 func (s *Store) UpdateRunStep(ctx context.Context, st *domain.RunStep) error {
+	changed, err := json.Marshal(st.Changed)
+	if err != nil {
+		return err
+	}
 	res, err := s.db.ExecContext(ctx, `UPDATE workflow_steps SET step_id=?, card_id=?, role=?, tier=?, state=?,
-		spent=?, start_tree=?, end_tree=?, prompt=?, output=?, reason=?, started_at=?, ended_at=?
+		spent=?, start_tree=?, end_tree=?, prompt=?, output=?, reason=?, started_at=?, ended_at=?, changed=?
 		WHERE session_id=? AND run_n=? AND path=?`,
 		st.StepID, string(st.Card), string(st.Role), string(st.Tier), string(st.State),
 		st.Spent, st.StartTree, st.EndTree, st.Prompt, st.Output, st.Reason,
-		formatOptTime(st.StartedAt), formatOptTime(st.EndedAt), string(st.Session), st.Run, st.Path)
+		formatOptTime(st.StartedAt), formatOptTime(st.EndedAt), string(changed), string(st.Session), st.Run, st.Path)
 	if err != nil {
 		return err
 	}

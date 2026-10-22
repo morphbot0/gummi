@@ -104,7 +104,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 	for _, row := range r.Rows {
 		w := webapi.RunStepRow{
 			Key: row.Key, Path: row.Path, Repeat: row.Repeat, Iter: row.Iter, ID: row.ID, Role: row.Role, State: row.State,
-			Spent: row.Spent, Line: row.Line, Card: row.Card, Folded: row.Folded, Steps: row.Steps,
+			Spent: row.Spent, Line: row.Line, Flag: row.Flag, Card: row.Card, Folded: row.Folded, Steps: row.Steps,
 			Verdict: row.Verdict, Waiting: row.Waiting,
 		}
 		if q := row.Question; q != nil {
