@@ -57,8 +57,8 @@ type specLoadedMsg struct {
 }
 
 // openSpec resolves the feature's spec file — a session's own spec file
-// directly (no draft, no migration: a person does not start one from the
-// TUI), or for a retired workflow card, the workspace copy under
+// directly (no draft, no migration: a session's spec is started whole, by
+// spec_start or + New spec), or for a retired workflow card, the workspace copy under
 // .gummi/specs|bugs once the feature has a worktree, the draft under
 // .gummi/state/drafts/ before then (created from the template on first
 // open).
@@ -105,9 +105,9 @@ func (m *Shell) sessionSpecAt(f domain.Feature, path string) int {
 
 // openSessionSpec mounts a session's own spec directly — no draft, no
 // migrateDraft, no EnsureDraft: those exist to seed a retired workflow
-// card's artifact, and a person does not start a session's spec from the
-// TUI (spec_start, the agent's own tool, and the web page's start button
-// remain the ways in). It opens spec 1, or the spec already open on f.
+// card's artifact; a session's specs are started by spec_start, the web
+// page's + New spec, or + in this view (startNewSpec). It opens spec 1, or
+// the spec already open on f.
 func (m *Shell) openSessionSpec(f domain.Feature) tea.Cmd {
 	n := 1
 	if m.spec != nil && m.spec.f.ID == f.ID && m.spec.n > 0 {
@@ -136,6 +136,44 @@ func (m *Shell) loadSessionSpec(f domain.Feature, n int) tea.Cmd {
 		}
 		return msg
 	}
+}
+
+// startNewSpec starts a new spec on the session the spec view is open on,
+// titled from the + dialog. It is refused where the web page's + New spec
+// is (newSpecRefusal), and recorded as the person at this board, the same
+// actor the view's own edits are. The engine call runs off the update
+// loop; specStartedMsg brings the new spec's number back to it, where the
+// view is switched, since loading the view reads the board's rows.
+func (m *Shell) startNewSpec(title string) tea.Cmd {
+	sv := m.spec
+	if sv == nil {
+		return nil
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil
+	}
+	f := sv.f
+	if err := newSpecRefusal(f); err != nil {
+		return errNoticeCmd(err.Error())
+	}
+	person := m.humanActor()
+	return func() tea.Msg {
+		return m.withEngine(func(eng *engine.Engine) tea.Msg {
+			sp, _, err := eng.StartSessionSpec(context.Background(), f, title, person)
+			if err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+			return specStartedMsg{f: f, n: sp.N}
+		})
+	}
+}
+
+// specStartedMsg is a new spec started from the spec view: the view opens
+// it.
+type specStartedMsg struct {
+	f domain.Feature
+	n int
 }
 
 // switchSpec opens the session's spec delta places along its list.
@@ -546,6 +584,9 @@ func (sv *specView) bindings() []binding {
 	if len(sv.specs) > 1 {
 		bs = append(bs, binding{key: "[ ]", label: "specs", help: "the session's previous / next spec", bar: true})
 	}
+	if hasSessionSpec(sv.f) {
+		bs = append(bs, binding{key: "+", label: "new spec", help: "start a new spec on this session", bar: true})
+	}
 	bs = append(bs, []binding{
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
@@ -565,6 +606,13 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		return m.switchSpec(-1)
 	case "]":
 		return m.switchSpec(1)
+	case "+":
+		if !hasSessionSpec(sv.f) {
+			return nil
+		}
+		m.Overlay.Push(newSpecTitleDialog(func(title string) tea.Cmd {
+			return m.startNewSpec(title)
+		}))
 	case "j", "down":
 		sv.setCursor(sv.cursor + 1)
 	case "k", "up":

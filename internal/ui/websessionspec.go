@@ -107,18 +107,25 @@ func (d *WebDocs) noteSessionRevision(ctx context.Context, path, person string) 
 	return engineRefusal(err)
 }
 
+// newSpecRefusal is why f may not take a new spec, or nil: only a session
+// does, and not once it is closed. The web route and the terminal's spec
+// view both ask it, so the two faces refuse in the same places.
+func newSpecRefusal(f domain.Feature) error {
+	if !hasSessionSpec(f) {
+		return ErrNoCard
+	}
+	return closedToReview(f, "it takes no new spec")
+}
+
 // StartSessionSpec is POST /api/cards/{id}/spec/start: a new spec on the
 // session from the template, as its first revision. The answer is the new
 // spec.
 func (d *WebDocs) StartSessionSpec(ctx context.Context, title, person string) (webapi.Spec, error) {
-	if !hasSessionSpec(d.f) {
-		return webapi.Spec{}, ErrNoCard
+	if err := newSpecRefusal(d.f); err != nil {
+		return webapi.Spec{}, err
 	}
 	if d.eng == nil {
 		return webapi.Spec{}, ErrDetached
-	}
-	if err := closedToReview(d.f, "it takes no new spec"); err != nil {
-		return webapi.Spec{}, err
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {

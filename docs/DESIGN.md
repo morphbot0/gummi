@@ -7045,10 +7045,11 @@ The build follows §25, with these differences.
   counter, so two folds that draw the same block carry the same `Rev`.
 - **A step's row names the step by its id.** A recipe gives a step no
   title.
-- **The terminal has no new-spec action.** There a spec is started by
-  the session agent's `spec_start`; the web page's Specs tab has
-  **+ New spec**. `[` and `]` switch between a session's specs in the
-  terminal's spec view.
-- **The terminal's step view has no Terminal tab.** It shows the
-  transcript, the diff and the brief. The web page opens the session's
-  terminal from the step's panel.
+- **The terminal's spec view starts a spec too.** `+` prompts for a
+  title and starts the spec through `Engine.StartSessionSpec`, refused
+  where the web page's **+ New spec** is (`newSpecRefusal`: only an open
+  session takes one); `[` and `]` still switch between a session's specs.
+- **A step has no terminal, in either face, by design.** A person's
+  shell is the session's own — the step runs in the session's tree, not
+  one of its own, so there is nothing a step-level terminal would open
+  that the session's doesn't already.

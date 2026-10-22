@@ -1875,6 +1875,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case specStartedMsg:
+		return m, m.loadSessionSpec(msg.f, msg.n)
+
 	case specLoadedMsg:
 		if msg.err != nil {
 			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}
