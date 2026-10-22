@@ -1230,3 +1230,87 @@ func TestTheEnvelopeIsACeilingAcrossARunsSteps(t *testing.T) {
 		}
 	}
 }
+
+// TestAStepStartedIntoAStopOrPauseIsNotBriefed: a step's backend takes a
+// while to come up, and the run may be stopped or paused meanwhile. The
+// step's brief goes only to a step still live in a running run: stopped,
+// it never runs its turn; paused, it is briefed when the run is resumed.
+func TestAStepStartedIntoAStopOrPauseIsNotBriefed(t *testing.T) {
+	const recipe = "name: one\nsteps:\n  - { id: one, role: scout, prompt: look }\n"
+	for _, tc := range []struct {
+		name string
+		act  func(e *Engine, session domain.FeatureID) error
+	}{
+		{"stop", func(e *Engine, s domain.FeatureID) error { return e.WorkflowStop(context.Background(), s, "changed my mind") }},
+		{"pause", func(e *Engine, s domain.FeatureID) error { return e.WorkflowPause(context.Background(), s) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wf := newWFFake()
+			e, _, f, _ := wfEngine(t, wf)
+			ctx := context.Background()
+			run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe})
+			// the run moves while the step's backend is coming up
+			var once sync.Once
+			wf.OnNewSession = func(opts agent.SessionOpts) {
+				if opts.FeatureID == string(f.ID) {
+					return
+				}
+				once.Do(func() {
+					if err := tc.act(e, f.ID); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			tickRuns(t, e, f.ID, run.N, "started the step", func(*domain.Run) bool {
+				s, ok := stepPaths(t, e, f.ID, run.N)["one"]
+				return ok && s.Card != "" && !e.wfRT().isBusy(stepKey(f.ID, run.N, "one"))
+			})
+			if tc.name == "stop" {
+				r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+				if r.State != domain.RunStopped || wf.count("one") != 0 {
+					t.Fatalf("ended %s; the step ran %d turns", r.State, wf.count("one"))
+				}
+				return
+			}
+			if wf.count("one") != 0 {
+				t.Fatalf("a step of a paused run ran its turn")
+			}
+			if s := stepPaths(t, e, f.ID, run.N)["one"]; s.State != domain.StepRunning || s.Prompt != "" {
+				t.Fatalf("the unbriefed step %+v", s)
+			}
+			if err := e.WorkflowResume(ctx, f.ID); err != nil {
+				t.Fatal(err)
+			}
+			r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+			if s := stepPaths(t, e, f.ID, run.N)["one"]; s.State != domain.StepDone || wf.count("one") != 1 {
+				t.Fatalf("resumed, the run ended %s, its step %s and briefed %d times", r.State, s.State, wf.count("one"))
+			}
+		})
+	}
+}
+
+// TestAMessageToAPausedRunsStepIsRefused: a paused run's steps have no
+// backend, and a message would start one under the person's pause.
+func TestAMessageToAPausedRunsStepIsRefused(t *testing.T) {
+	wf := newWFFake()
+	g := newGate(t)
+	wf.on("slow", func(string, string, int) wfReply {
+		<-g.ch
+		return wfReply{text: "done", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: slow\nsteps:\n  - { id: slow, role: scout, prompt: wait }\n"})
+	tickRuns(t, e, f.ID, run.N, "started its step", func(*domain.Run) bool { return wf.count("slow") > 0 })
+	if err := e.WorkflowPause(ctx, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	card := stepPaths(t, e, f.ID, run.N)["slow"].Card
+	waitUntil(t, "the step's backend stopped", func() bool { return !e.freeformBusy(card) })
+	if err := e.StepSend(ctx, card, "how far along?"); err == nil || !strings.Contains(err.Error(), "resume it") {
+		t.Fatalf("a message to a paused run's step: %v", err)
+	}
+	if wf.count("slow#") != 0 || e.freeformBusy(card) {
+		t.Fatal("the message started the step's backend under the pause")
+	}
+}

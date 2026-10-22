@@ -161,7 +161,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 		unlock()
 		return err
 	}
-	cur.Card, cur.Prompt, cur.StartTree = card.ID, filled, startTree
+	cur.Card, cur.StartTree = card.ID, startTree
 	err = st.UpdateRunStep(ctx, cur)
 	unlock()
 	if err != nil {
@@ -169,6 +169,28 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	}
 	ff, err := e.OpenFreeform(ctx, card)
 	if err != nil {
+		return err
+	}
+	// The backend took a while to come up, and the run may have moved
+	// meanwhile: a stop, a pause, a dropped step or a join that settled
+	// it. Its brief goes only to a step still live in a running run, under
+	// the run lock, so whatever moves the run next finds the turn in
+	// flight and stops it; a step not briefed carries no prompt, and
+	// starts again when its run carries on (carryOnRun).
+	unlock = e.lockRuns(session)
+	defer unlock()
+	cur, err = st.RunStep(ctx, session, n, path)
+	if err != nil || cur == nil {
+		return err
+	}
+	if now, err := st.Run(ctx, session, n); err != nil || now == nil || now.State != domain.RunRunning || now.Stopping || !cur.State.Live() {
+		if now != nil && now.State == domain.RunPaused {
+			stopStepBackend(ff)
+		}
+		return err
+	}
+	cur.Prompt = filled
+	if err := st.UpdateRunStep(ctx, cur); err != nil {
 		return err
 	}
 	e.runNote(session, fmt.Sprintf("run %d: %s (%s) started", n, path, step.Role))
@@ -505,7 +527,8 @@ func (e *Engine) carryOnRun(ctx context.Context, run *domain.Run) {
 	for _, s := range steps {
 		switch {
 		case !s.State.Live() || rt.isBusy(stepKey(run.Session, run.N, s.Path)):
-		case s.Card == "":
+		case s.Card == "" || s.Prompt == "":
+			// never briefed: its start begins again
 			e.startStepAsync(run.Session, run.N, s.Path)
 		case s.EndTree != "":
 			// a planner's revised plan, waiting on the person
@@ -550,6 +573,13 @@ func (e *Engine) StepSend(ctx context.Context, stepCard domain.FeatureID, text s
 	}
 	if inst.State == domain.StepAsking && inst.EndTree != "" {
 		return errors.New("the step's revised plan waits on the person: answer it first")
+	}
+	if inst.State.Live() {
+		// a paused run's steps have no backend, and a message would start
+		// one: the run carries on only when a person resumes it
+		if run, err := e.cfg.Store.Run(ctx, inst.Session, inst.Run); err == nil && run != nil && run.State == domain.RunPaused {
+			return fmt.Errorf("run %d is paused: resume it before talking to its step %s", run.N, inst.Path)
+		}
 	}
 	ff, err := e.OpenFreeform(ctx, card)
 	if err != nil {
