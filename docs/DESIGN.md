@@ -6910,8 +6910,9 @@ such as `Session › deliver run 2 › build ↺ 2 › implement`.
 - **Diff**: the step's own diff, from its snapshots.
 - **Brief**: the prompt as filled in, and the artifacts it reads and
   writes.
-- **Terminal**: the session's tree (§20.5), opened from the step's
-  panel.
+
+A step has these three tabs in both faces, and no **Terminal**: it works
+in the session's tree, whose terminal (§20.5) is the session's own.
 
 **A person may talk to the step's agent.**
 - While the step runs, a message is a turn to it, and the step's output

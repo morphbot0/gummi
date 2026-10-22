@@ -13,8 +13,9 @@
 // The step panel (§25.10): Open shows the step beside the thread, on the
 // surface the documents use (a phone's full screen). Its Transcript is the
 // step card's own conversation, live; Diff its own diff; Brief the prompt
-// as filled in and the artifacts it reads and writes; Terminal opens the
-// session's. A message typed under it goes to the step's agent.
+// as filled in and the artifacts it reads and writes. A step has no
+// terminal of its own: it works in the session's tree, whose terminal is
+// the session's. A message typed under it goes to the step's agent.
 //
 // The proposal's card (§25.5): the pinned decision that asks to allow a
 // run draws its step tree, the checks it will run and what it costs
@@ -378,11 +379,10 @@ function renderStep (pane, entry, pctx) {
       'in the session’s tree'),
     s.reason ? h('div', { class: 'rb-why' }, s.reason) : null)
   const tabs = [['transcript', 'Transcript'], ['diff', 'Diff'], ['brief', 'Brief']]
-  if (state.card?.terminal) tabs.push(['terminal', 'Terminal'])
   const bar = h('div', { class: 'seg stp-tabs', role: 'tablist', 'aria-label': 'The step' }, tabs.map(([k, l]) => h('button', {
     class: tab === k && 'on', type: 'button', role: 'tab', 'aria-selected': String(tab === k), testid: `step-tab-${k}`, onclick: () => setInner(k)
   }, l)))
-  pane.append(h('div', { class: 'stp', testid: 'step-panel', data: { card: s.card } }, head, bar, innerBody(tab, s, pctx), composer(s, pctx)))
+  pane.append(h('div', { class: 'stp', testid: 'step-panel', data: { card: s.card } }, head, bar, innerBody(tab, s), composer(s, pctx)))
 }
 
 // backToSession closes the step: the surface it was shown on closes with
@@ -391,7 +391,7 @@ function backToSession () {
   set({ step: null, tab: 'spec', ...(isMobile() ? { view: 'thread' } : { rightHidden: true }) })
 }
 
-function innerBody (tab, s, pctx) {
+function innerBody (tab, s) {
   if (tab === 'transcript') {
     if (!transcriptBox || transcriptBox.dataset.card !== s.card) {
       transcriptBox = h('div', { class: 'stp-transcript', testid: 'step-transcript', data: { card: s.card } })
@@ -412,20 +412,14 @@ function innerBody (tab, s, pctx) {
     }
     return box
   }
-  if (tab === 'brief') {
-    return h('div', { class: 'stp-brief', testid: 'step-brief' },
-      (s.artifacts || []).length
-        ? h('div', { class: 'stp-arts', testid: 'step-artifacts' }, s.artifacts.map(a => h('div', { class: ['stp-art', a.exists && 'there'] },
-          h('span', { class: 'k' }, a.writes ? 'writes' : 'reads'), h('b', null, a.name), h('span', { class: 'mono', title: a.path }, a.path),
-          a.exists ? null : h('span', { class: 'hint' }, 'not there yet'))))
-        : null,
-      h('pre', { class: 'stp-prompt', tabindex: '0', 'aria-label': 'The prompt as filled in' }, s.brief || ''),
-      s.output ? h('div', { class: 'stp-out' }, h('span', { class: 'k' }, 'its output'), h('pre', { tabindex: '0' }, s.output)) : null)
-  }
-  return h('div', { class: 'empty', testid: 'step-terminal' },
-    h('b', null, 'The session’s terminal'),
-    'A step works in the session’s tree: its terminal is the one the session has.',
-    h('button', { class: 'btn', type: 'button', testid: 'step-terminal-open', onclick: () => pctx.setTab('terminal') }, 'Open the terminal'))
+  return h('div', { class: 'stp-brief', testid: 'step-brief' },
+    (s.artifacts || []).length
+      ? h('div', { class: 'stp-arts', testid: 'step-artifacts' }, s.artifacts.map(a => h('div', { class: ['stp-art', a.exists && 'there'] },
+        h('span', { class: 'k' }, a.writes ? 'writes' : 'reads'), h('b', null, a.name), h('span', { class: 'mono', title: a.path }, a.path),
+        a.exists ? null : h('span', { class: 'hint' }, 'not there yet'))))
+      : null,
+    h('pre', { class: 'stp-prompt', tabindex: '0', 'aria-label': 'The prompt as filled in' }, s.brief || ''),
+    s.output ? h('div', { class: 'stp-out' }, h('span', { class: 'k' }, 'its output'), h('pre', { tabindex: '0' }, s.output)) : null)
 }
 
 function drawDiff (box, d) {

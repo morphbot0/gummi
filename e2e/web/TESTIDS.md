@@ -185,11 +185,10 @@ A step opened beside the thread (§25.10): the `tab-step` surface holds
 `step-panel` with `step-head` (`step-crumb`, whose first entry `step-close`
 goes back to the session, `step-title`, `step-live` or `step-state`,
 `step-spent`), the tabs `step-tab-transcript`, `step-tab-diff`,
-`step-tab-brief`, `step-tab-terminal` (with `--terminal`), their bodies
-`step-transcript` (`step-transcript-empty`), `step-diff` (`step-diff-file`,
-`step-diff-none`), `step-brief` (`step-artifacts`), `step-terminal`
-(`step-terminal-open`), and the composer `step-composer` (`step-input`,
-`step-send`).
+`step-tab-brief` (a step has no terminal tab: its tree is the session's),
+their bodies `step-transcript` (`step-transcript-empty`), `step-diff`
+(`step-diff-file`, `step-diff-none`), `step-brief` (`step-artifacts`), and
+the composer `step-composer` (`step-input`, `step-send`).
 
 A run's proposal on its pinned decision (§25.5): `run-proposal` with
 `proposal-tree` (the tree it runs in, and whether it holds uncommitted work),
