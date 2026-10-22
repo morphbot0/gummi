@@ -21,7 +21,7 @@
 // run draws its step tree, the checks it will run and what it costs
 // against the session's pool, with a box for feedback.
 
-import { h, clear, cr, dur, plural, isMobile } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, cr, dur, plural, isMobile } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -40,6 +40,14 @@ export function initWorkflow (c) {
   onEvent('live', (e) => { if (state.step && e.id === state.step) loadTranscript() })
   onEvent('card', (e) => { if (state.step && e.id === state.step) { loadTranscript(); stepDiff = null } })
   on(['step'], () => { stepDiff = null; transcript = null; loadTranscript() })
+  // the step's transcript follows its newest line while the reader is at
+  // it, as the thread does: scrolling up lets go, coming back down takes
+  // hold again. A scroll the page made redrawing the pane is not the
+  // reader's (stickStep).
+  const pane = $('#pane')
+  pane.addEventListener('scroll', () => {
+    if (!redrawing && state.tab === 'step' && transcriptBox?.isConnected) stepFollowing = atEnd(pane)
+  }, { passive: true })
   // an open run's elapsed time is counted in place, never by a redraw
   setInterval(tickElapsed, 15000)
 }
@@ -344,6 +352,22 @@ async function loadTranscript () {
 // redraws: the panel redraws its pane when the step's head moves, and the
 // conversation under the reader is not drawn again for that.
 let transcriptBox = null
+// stepFollowing says the reader is at the transcript's newest line, and a
+// redraw keeps them there; redrawing marks the pane's own redraw, whose
+// scroll is not the reader's.
+let stepFollowing = true
+let redrawing = false
+function atEnd (sc) { return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 24 }
+
+// stickStep keeps a following reader at the transcript's newest line once
+// the pane has laid out.
+function stickStep () {
+  requestAnimationFrame(() => {
+    const pane = $('#pane')
+    if (stepFollowing && state.tab === 'step' && transcriptBox?.isConnected) pane.scrollTop = pane.scrollHeight
+    redrawing = false
+  })
+}
 let drawTurns = () => []
 let reconcileInto = (box, els) => { clear(box); box.append(...els) }
 export function setTranscriptDrawer (draw, reconcile) { drawTurns = draw; reconcileInto = reconcile }
@@ -355,6 +379,7 @@ function drawTranscript () {
   if (t.err) { reconcileInto(transcriptBox, [h('div', { class: 'empty err' }, h('b', null, 'The step’s conversation did not load'), t.err.message)]); return }
   const els = drawTurns(t.card, t.thread.live)
   reconcileInto(transcriptBox, els.length ? els : [h('div', { class: 'empty', testid: 'step-transcript-empty' }, 'Nothing said yet.')])
+  stickStep()
 }
 
 function renderStep (pane, entry, pctx) {
@@ -394,10 +419,14 @@ function backToSession () {
 function innerBody (tab, s) {
   if (tab === 'transcript') {
     if (!transcriptBox || transcriptBox.dataset.card !== s.card) {
+      // a step opened lands on its newest line, as a thread does
       transcriptBox = h('div', { class: 'stp-transcript', testid: 'step-transcript', data: { card: s.card } })
+      stepFollowing = true
       drawTranscript()
       if (!transcript || transcript.card !== s.card) loadTranscript()
     }
+    redrawing = true
+    stickStep()
     return transcriptBox
   }
   if (tab === 'diff') {

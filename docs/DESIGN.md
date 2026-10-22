@@ -7141,3 +7141,6 @@ The build follows §25, with these differences.
   question is pinned above the composer as the card's decision is, and
   its composer is the thread's. Its conversation is drawn by the same
   function as the session's (`conversationLines`; on the page, `talk`).
+- **A step's transcript follows its newest line**, as the thread does:
+  it opens at the end, follows while the reader is there, and stays put
+  while the reader has scrolled back (the terminal's BG-042 rule).

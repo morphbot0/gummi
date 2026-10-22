@@ -220,8 +220,10 @@ test('the Specs tab switches between a session’s specs', async ({ pairedPage: 
 });
 
 // A step opened beside the thread reads as the thread does (DESIGN
-// §25.10): its transcript is spaced as the session's conversation is.
-test('a step’s transcript reads as the thread does', async ({ pairedPage: page, server, api, workspace }) => {
+// §25.10): its transcript is spaced as the session's conversation is,
+// opens on its newest line and follows what the step says while the reader
+// is there; scrolled up, what arrives does not move the reader.
+test('a step’s transcript reads and follows as the thread does', async ({ pairedPage: page, server, api, workspace }) => {
   test.setTimeout(150_000);
   fs.mkdirSync(path.join(workspace.repo, '.gummi', 'workflows'), { recursive: true });
   fs.writeFileSync(path.join(workspace.repo, '.gummi', 'workflows', 'make-and-read.yaml'), RECIPE);
@@ -235,6 +237,7 @@ test('a step’s transcript reads as the thread does', async ({ pairedPage: page
   const block = page.getByTestId('run-1');
   await expect(block).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
   await block.getByTestId('run-steps').locator('summary').click();
+  const card = await block.getByTestId('run-row-make').getAttribute('data-card');
   await block.getByTestId('run-row-make').getByTestId('run-open').click();
   const panel = page.getByTestId('step-panel');
   const transcript = panel.getByTestId('step-transcript');
@@ -243,4 +246,29 @@ test('a step’s transcript reads as the thread does', async ({ pairedPage: page
   // spaced as the session's conversation
   const gap = (el: Element) => getComputedStyle(el).rowGap;
   expect(await transcript.evaluate(gap)).toBe(await page.locator('#thread-live').evaluate(gap));
+
+  const pane = page.getByTestId('panel-pane');
+  const atEnd = () => pane.evaluate(p => p.scrollHeight - p.scrollTop - p.clientHeight < 24);
+  const say = async (text: string) => {
+    const r = await api('POST', `/api/cards/${id}/steps/${encodeURIComponent(String(card))}/send`, { text });
+    expect(r.status, r.text).toBe(200);
+    await expect(transcript).toContainText(`Noted: ${text}`, { timeout: 30_000 });
+  };
+  // at its newest line, it follows the step as it talks
+  for (let i = 1; i <= 10; i++) await say(`note ${i}`);
+  expect(await pane.evaluate(p => p.scrollHeight > p.clientHeight)).toBe(true);
+  await expect.poll(atEnd).toBe(true);
+
+  // scrolled up, it stays where the reader is
+  await pane.evaluate(p => { p.scrollTop = 0; });
+  await page.waitForTimeout(200);
+  await say('while scrolled up');
+  await page.waitForTimeout(300);
+  expect(await pane.evaluate(p => p.scrollTop)).toBe(0);
+
+  // back at the end, it takes hold again
+  await pane.evaluate(p => { p.scrollTop = p.scrollHeight; });
+  await page.waitForTimeout(200);
+  await say('back at the end');
+  await expect.poll(atEnd).toBe(true);
 });

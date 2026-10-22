@@ -144,3 +144,37 @@ func TestTheStepReadsAsTheThread(t *testing.T) {
 		})
 	}
 }
+
+// The step view follows its conversation as the thread follows the
+// session's: at the end it shows what the step just said; scrolled back,
+// what arrives under the reader does not move the window (BG-042).
+func TestTheStepFollowsItsConversation(t *testing.T) {
+	do, view, key, eng, card := openStepWithTalk(t, 6)
+	const w, h = 100, 30
+	page := func() []string { return pageRows(view(func(m *Shell) string { return m.mainView(w, h) })) }
+
+	talkToStep(t, eng, card, "at the end")
+	if p := strings.Join(page(), "\n"); !strings.Contains(p, "second line of the answer") || !strings.Contains(p, "about at the end:") {
+		t.Fatalf("at the end, the step's newest answer is not on screen:\n%s", p)
+	}
+
+	key("pgup")
+	before := page()
+	c := composerRow(before)
+	talkToStep(t, eng, card, "while scrolled back")
+	after := page()
+	// the window keeps the rows it showed; only the marker below counts
+	// what arrived
+	for i := 0; i < c-3; i++ {
+		if before[i] != after[i] {
+			t.Fatalf("scrolled back, row %d moved from %q to %q as the step talked:\n%s", i, before[i], after[i], strings.Join(after, "\n"))
+		}
+	}
+	if !strings.Contains(strings.Join(after, "\n"), "↓") {
+		t.Errorf("scrolled back, nothing says more arrived below:\n%s", strings.Join(after, "\n"))
+	}
+	do(func(m *Shell) tea.Cmd { m.stepv.scroll = 0; return nil })
+	if p := strings.Join(page(), "\n"); !strings.Contains(p, "about while scrolled back:") {
+		t.Errorf("back at the end, the newest answer is not on screen:\n%s", p)
+	}
+}

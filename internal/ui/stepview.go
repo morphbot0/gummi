@@ -48,8 +48,11 @@ type stepView struct {
 	diffWhy    string
 	diffLoaded bool
 	// scroll is how far the transcript is paged back from its end, or the
-	// brief down from its top.
-	scroll int
+	// brief down from its top. bodyLen is how many rows the transcript had
+	// at the last frame: one that grows while scrolled back keeps its
+	// place, as the thread's does (threadRender, BG-042).
+	scroll  int
+	bodyLen int
 	// input is the line to the step's agent, the thread's own composer;
 	// composing says it holds the keyboard.
 	input     textarea.Model
@@ -568,6 +571,12 @@ func (m *Shell) stepThread(w, h int) string {
 		up = max(len(body)-rows, 0) - sv.scroll
 	default:
 		body = trimTrailingBlanks(m.stepTranscriptLines(inner))
+		// scrolled back, the window keeps its place as the conversation
+		// grows under it; at the end, it follows (threadRender, BG-042)
+		if sv.scroll > 0 && len(body) > sv.bodyLen {
+			sv.scroll += len(body) - sv.bodyLen
+		}
+		sv.bodyLen = len(body)
 		rows := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, len(body), h)
 		sv.scroll = clamp(sv.scroll, 0, max(len(body)-rows, 0))
 		up = sv.scroll
