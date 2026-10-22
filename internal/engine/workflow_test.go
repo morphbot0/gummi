@@ -1403,3 +1403,17 @@ func TestASessionIsNotHandedOffUnderItsRun(t *testing.T) {
 		t.Fatalf("the proposal outlived its session: %+v", r)
 	}
 }
+
+// TestAnAmountReadsWithItsUnit: an amount is credits, bare or spelt
+// "300cr" or "300 credits" (the form the headless driver asks for, where a
+// bare number picks an option), or dollars as $N.NN.
+func TestAnAmountReadsWithItsUnit(t *testing.T) {
+	for in, want := range map[string]int{"300": 300, "300cr": 300, "300 cr": 300, "300 credits": 300, "$3": 300} {
+		if got, err := parseCredits(in); err != nil || got != want {
+			t.Errorf("parseCredits(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	if _, err := parseCredits("lots"); err == nil {
+		t.Error("an amount with no number was read")
+	}
+}

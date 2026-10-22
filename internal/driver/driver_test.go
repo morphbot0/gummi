@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 )
 
 // A run mints a session, sends the prompt as its first turn, and is done
@@ -259,13 +260,20 @@ func TestAnAnswerIsMappedOntoTheDecisionsWords(t *testing.T) {
 		"run only the tests":    "run only the tests",
 		"  ALLOW ":              "Allow",
 	} {
-		if got := workflowAnswer(dec, in); got != want {
-			t.Errorf("workflowAnswer(%q) = %q, want %q", in, got, want)
+		if got, err := workflowAnswer(dec, in); err != nil || got != want {
+			t.Errorf("workflowAnswer(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	budget := &domain.RunDecision{Kind: domain.RunDecideBudget, Options: []string{"Top up the session", "Continue"}}
-	if got := workflowAnswer(budget, "2"); got != "2" {
-		t.Errorf("a budget decision's number is a top-up, not an option: %q", got)
+	// on a budget decision too a number picks its option, and an amount is
+	// spelt with its unit; a bare number past the options is refused
+	budget := &domain.RunDecision{Kind: domain.RunDecideBudget, Options: []string{"Top up the session", "Continue", "Stop the run"}}
+	for in, want := range map[string]string{"1": "Top up the session", "2": "Continue", "300cr": "300cr", "$3": "$3"} {
+		if got, err := workflowAnswer(budget, in); err != nil || got != want {
+			t.Errorf("budget workflowAnswer(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if got, err := workflowAnswer(budget, "300"); err == nil || !strings.Contains(err.Error(), "300cr") {
+		t.Errorf("a bare amount on a budget decision = %q, %v; want a refusal naming 300cr", got, err)
 	}
 }
 
@@ -370,5 +378,59 @@ func TestADriverTicksOnlyItsOwnSession(t *testing.T) {
 	}
 	if steps, _ := h.store.RunSteps(ctx, other.ID, run.N); len(steps) != 0 {
 		t.Fatalf("the other session's run started steps: %+v", steps)
+	}
+}
+
+// parkedRun writes a run on session as a process that went away left it:
+// running, with pending (if any) open — the next process's first tick
+// parks it.
+func parkedRun(t *testing.T, h *harness, session domain.FeatureID, pending *domain.RunDecision) *domain.Run {
+	t.Helper()
+	run := &domain.Run{
+		Session: session, RecipeName: "x", State: domain.RunRunning, Spec: 1, SpecRev: 1, Pending: pending,
+		Recipe: domain.Recipe{Name: "x", Steps: []domain.Entry{{Step: &domain.Step{ID: "look", Role: domain.RoleScout, Prompt: "look"}}}},
+	}
+	if err := h.store.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
+// A resume that answers the decision a dead process left its run parked
+// on carries the run on: the answer was the person's say, and nothing
+// else holds the run.
+func TestAResumeThatAnswersARunsDecisionCarriesTheRunOn(t *testing.T) {
+	h := newHarness(t, newSessionFake("reply"))
+	_, f := h.run(Options{Envelope: 2000}, "tidy the README")
+	run := parkedRun(t, h, f.ID, &domain.RunDecision{
+		ID: "run:warn", Kind: domain.RunDecideBudget, Amount: 100, Question: "Run 1 is on course to run out of money.",
+		Options: []string{engine.WorkflowTopUp, engine.WorkflowContinue, engine.WorkflowStopRun},
+	})
+	h.reopen()
+	answer := "2"
+	out, err := h.driver(Options{}).Resume(context.Background(), f.ID, ResumeInput{Answer: &answer})
+	if err != nil || out.Status != StatusDone {
+		t.Fatalf("resume = %+v, %v; want done; stream %v", out, err, h.eventKinds())
+	}
+	if r, _ := h.store.Run(context.Background(), f.ID, run.N); r == nil || !r.State.Ended() {
+		t.Fatalf("the answered run did not carry on: %+v", r)
+	}
+}
+
+// --answer on a run that is only paused — nothing asks anything — is
+// refused before anything moves, saying a bare resume is what runs it.
+func TestAnAnswerToAPausedRunIsRefusedBeforeItResumes(t *testing.T) {
+	h := newHarness(t, newSessionFake("reply"))
+	_, f := h.run(Options{Envelope: 2000}, "tidy the README")
+	run := parkedRun(t, h, f.ID, nil)
+	h.reopen()
+	answer := "yes"
+	out, err := h.driver(Options{}).Resume(context.Background(), f.ID, ResumeInput{Answer: &answer})
+	if err == nil || out.Status != StatusError || !strings.Contains(err.Error(), "is paused") ||
+		!strings.Contains(err.Error(), "without --answer") {
+		t.Fatalf("an answer to a paused run = %+v, %v; want a refusal saying to resume without --answer", out, err)
+	}
+	if r, _ := h.store.Run(context.Background(), f.ID, run.N); r == nil || r.State != domain.RunPaused {
+		t.Fatalf("the refused answer moved the run: %+v", r)
 	}
 }

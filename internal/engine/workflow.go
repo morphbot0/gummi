@@ -877,9 +877,16 @@ func notAnOption(d domain.RunDecision) error {
 	return fmt.Errorf("answer with one of: %s", strings.Join(d.Options, "; "))
 }
 
-// parseCredits reads an amount: credits as a number, or dollars as $N.NN.
+// parseCredits reads an amount: credits as a number, "300cr" or "300
+// credits", or dollars as $N.NN.
 func parseCredits(s string) (int, error) {
-	s = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "credits"))
+	s = strings.TrimSpace(s)
+	for _, unit := range []string{"credits", "cr"} {
+		if t, ok := strings.CutSuffix(s, unit); ok {
+			s = strings.TrimSpace(t)
+			break
+		}
+	}
 	dollars := strings.HasPrefix(s, "$")
 	v, err := strconv.ParseFloat(strings.TrimPrefix(s, "$"), 64)
 	if err != nil || v <= 0 {

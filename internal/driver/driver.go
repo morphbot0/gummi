@@ -177,27 +177,43 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	if _, err := d.eng.WorkflowTickSession(ctx, id); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
+	ask := ff.Snapshot().PendingAsk
+	run, decision := d.eng.WorkflowDecision(ctx, id)
+	step, stepAsk := d.stepAsk(ctx, id)
+	waiting := ask != nil || decision != nil || stepAsk != nil
+	open, _ := d.store.OpenRun(ctx, id)
+	// an answer with nothing to answer is refused before anything moves:
+	// a paused run is resumed by a bare resume, not by an answer
+	if in.Answer != nil && !waiting {
+		if open != nil && open.State == domain.RunPaused {
+			return d.fail(ctx, string(id), fmt.Errorf("%s has no open question to answer: workflow run %d is paused — "+
+				"resume it with `%s`, without --answer", id, open.N, resumeCmd(string(id))))
+		}
+		return d.fail(ctx, string(id), fmt.Errorf("%s has no open question to answer — resume it with a message instead", id))
+	}
 	// one paused because the money ran out waits for a raise instead, and
 	// one with a decision open waits for its answer
-	if r, _ := d.store.OpenRun(ctx, id); r != nil && r.State == domain.RunPaused && !r.OutOfBudget && r.Pending == nil {
+	if open != nil && open.State == domain.RunPaused && !open.OutOfBudget && open.Pending == nil {
 		if err := d.eng.WorkflowResume(ctx, id); err != nil {
 			return d.fail(ctx, string(id), err)
 		}
 	}
 
-	ask := ff.Snapshot().PendingAsk
-	run, decision := d.eng.WorkflowDecision(ctx, id)
-	step, stepAsk := d.stepAsk(ctx, id)
-	waiting := ask != nil || decision != nil || stepAsk != nil
 	switch {
 	case in.Answer != nil && ask != nil:
 		err = d.eng.AnswerAs(ctx, id, *in.Answer, state.ActorUser)
 	case in.Answer != nil && decision != nil:
-		err = d.eng.WorkflowAnswer(ctx, id, run.N, decision.ID, workflowAnswer(decision, *in.Answer))
+		var answer string
+		if answer, err = workflowAnswer(decision, *in.Answer); err != nil {
+			break
+		}
+		if err = d.eng.WorkflowAnswer(ctx, id, run.N, decision.ID, answer); err == nil {
+			// the answer was the person's say on a run its dead process
+			// left parked: with nothing else holding it, it carries on
+			err = d.resumeAnswered(ctx, id)
+		}
 	case in.Answer != nil && stepAsk != nil:
 		err = d.eng.AnswerAs(ctx, step.Card, *in.Answer, state.ActorUser)
-	case in.Answer != nil:
-		err = fmt.Errorf("%s has no open question to answer — resume it with a message instead", id)
 	case in.Message != "" && waiting:
 		err = fmt.Errorf("%s is waiting on an answer: pass it with --answer", id)
 	case in.Message != "":
@@ -210,6 +226,18 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 		return d.fail(ctx, string(id), err)
 	}
 	return d.loop(ctx, id)
+}
+
+// resumeAnswered carries on the session's run once a resume's answer has
+// settled the decision that held it: a run parked when its process went
+// away (or paused for that decision) and now held by nothing — not the
+// money, not another decision — is resumed, as a bare resume would.
+func (d *Driver) resumeAnswered(ctx context.Context, id domain.FeatureID) error {
+	open, err := d.store.OpenRun(ctx, id)
+	if err != nil || open == nil || open.State != domain.RunPaused || open.OutOfBudget || open.Pending != nil || open.Stopping {
+		return err
+	}
+	return d.eng.WorkflowResume(ctx, id)
 }
 
 // loop drives the session until it stops: it ticks the session's run,
@@ -523,24 +551,35 @@ func crewKind(k domain.RunDecisionKind) string {
 }
 
 // workflowAnswer maps a caller's answer onto the decision's own words: a
-// number picks that option (from 1), and an option's label matches
-// whatever its case. Anything else is passed on as it was given — an
-// "Always allow up to N", a top-up in credits, or feedback in the
-// caller's own words, which Engine.WorkflowAnswer takes as such.
-func workflowAnswer(dec *domain.RunDecision, answer string) string {
+// number picks that option (from 1), on every decision, and an option's
+// label matches whatever its case. Anything else is passed on as it was
+// given — an "Always allow up to N", a top-up of another amount (credits
+// as "300cr", dollars as "$3"), or feedback in the caller's own words,
+// which Engine.WorkflowAnswer takes as such.
+//
+// A bare number that is no option is refused rather than guessed at: on
+// a budget decision it could read as an amount, which is spelt with its
+// unit instead.
+func workflowAnswer(dec *domain.RunDecision, answer string) (string, error) {
 	a := strings.TrimSpace(answer)
-	if n, err := strconv.Atoi(a); err == nil && n >= 1 && n <= len(dec.Options) && dec.Kind != domain.RunDecideBudget {
-		return dec.Options[n-1]
+	if n, err := strconv.Atoi(a); err == nil {
+		if n >= 1 && n <= len(dec.Options) {
+			return dec.Options[n-1], nil
+		}
+		if dec.Kind == domain.RunDecideBudget {
+			return "", fmt.Errorf("%d is no option: a number picks one, 1 to %d; give an amount to top up by as %dcr (credits) or $%d (dollars)",
+				n, len(dec.Options), n, n)
+		}
 	}
 	for _, o := range dec.Options {
 		if strings.EqualFold(a, o) {
-			return o
+			return o, nil
 		}
 	}
 	if p := engine.WorkflowAlwaysPrefix; len(a) > len(p) && strings.EqualFold(a[:len(p)], p) {
-		return p + strings.TrimSpace(a[len(p):])
+		return p + strings.TrimSpace(a[len(p):]), nil
 	}
-	return a
+	return a, nil
 }
 
 // stepAskStop is a step's own ask_user: the step waits on the person.
