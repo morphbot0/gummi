@@ -707,8 +707,13 @@ func (e *Engine) WorkflowDecision(ctx context.Context, session domain.FeatureID)
 // allow up to N" (credits, or $N.NN), or the person's own words, which go
 // to the session agent as a turn and close the proposal. A revised plan
 // answered in other words goes back to the planner as a turn; a budget
-// decision also takes a number, the top-up in credits.
-func (e *Engine) WorkflowAnswer(ctx context.Context, session domain.FeatureID, n int, answer string) error {
+// decision also takes an amount, the top-up: credits as "300cr" or
+// "300 credits", or dollars as "$3" (parseTopUp).
+//
+// decision is the id of the decision the answer was given to
+// (RunDecision.ID): a run raises one decision after another, and an
+// answer read off one is refused once another stands in its place.
+func (e *Engine) WorkflowAnswer(ctx context.Context, session domain.FeatureID, n int, decision, answer string) error {
 	st := e.cfg.Store
 	if st == nil {
 		return errors.New("workflows need the store")
@@ -717,8 +722,11 @@ func (e *Engine) WorkflowAnswer(ctx context.Context, session domain.FeatureID, n
 	if answer == "" {
 		return errors.New("empty answer")
 	}
+	if decision == "" {
+		return fmt.Errorf("an answer to run %d names the decision it answers", n)
+	}
 	unlock := e.lockRuns(session)
-	after, err := e.answerLocked(ctx, session, n, answer)
+	after, err := e.answerLocked(ctx, session, n, decision, answer)
 	unlock()
 	if err != nil {
 		return err
@@ -735,14 +743,18 @@ func (e *Engine) WorkflowAnswer(ctx context.Context, session domain.FeatureID, n
 
 // answerLocked applies an answer under the run lock; what it returns runs
 // once the lock is let go (a turn to send, a top-up that reads the run).
-func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n int, answer string) (func() error, error) {
+func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n int, decision, answer string) (func() error, error) {
 	st := e.cfg.Store
 	run, err := st.Run(ctx, session, n)
 	if err != nil {
 		return nil, err
 	}
 	if run == nil || run.Pending == nil {
-		return nil, fmt.Errorf("run %d has no open decision", n)
+		return nil, fmt.Errorf("run %d has no open decision: the one answered was settled already", n)
+	}
+	if run.Pending.ID != decision {
+		return nil, fmt.Errorf("run %d no longer asks what was answered: it now asks %q — read it and answer that",
+			n, firstLine(run.Pending.Question))
 	}
 	d := *run.Pending
 	run.Pending = nil

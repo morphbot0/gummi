@@ -141,8 +141,11 @@ func workflowDecisionWord(d *domain.RunDecision) string {
 func (m *Shell) answerWorkflow(r featureRow, d *threadDecision, answer string) tea.Cmd {
 	eng := m.engine
 	n := d.run.N
+	// the answer is to the decision the person read: the engine refuses it
+	// if the run has raised another since
+	decision := d.ask.DecisionID
 	return func() tea.Msg {
-		if err := eng.WorkflowAnswer(context.Background(), r.F.ID, n, answer); err != nil {
+		if err := eng.WorkflowAnswer(context.Background(), r.F.ID, n, decision, answer); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		// the row carries the run's decision: it is read again before the

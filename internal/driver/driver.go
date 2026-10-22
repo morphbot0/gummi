@@ -193,7 +193,7 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	case in.Answer != nil && ask != nil:
 		err = d.eng.AnswerAs(ctx, id, *in.Answer, state.ActorUser)
 	case in.Answer != nil && decision != nil:
-		err = d.eng.WorkflowAnswer(ctx, id, run.N, workflowAnswer(decision, *in.Answer))
+		err = d.eng.WorkflowAnswer(ctx, id, run.N, decision.ID, workflowAnswer(decision, *in.Answer))
 	case in.Answer != nil && stepAsk != nil:
 		err = d.eng.AnswerAs(ctx, step.Card, *in.Answer, state.ActorUser)
 	case in.Answer != nil:

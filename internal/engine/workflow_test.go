@@ -168,6 +168,16 @@ func tickRuns(t *testing.T, e *Engine, session domain.FeatureID, n int, what str
 
 func ended(r *domain.Run) bool { return r.State.Ended() }
 
+// pendingID is the id of run n's open decision, which an answer names.
+func pendingID(t *testing.T, e *Engine, session domain.FeatureID, n int) string {
+	t.Helper()
+	r, err := e.cfg.Store.Run(context.Background(), session, n)
+	if err != nil || r == nil || r.Pending == nil {
+		t.Fatalf("run %d has no open decision: %+v %v", n, r, err)
+	}
+	return r.Pending.ID
+}
+
 func pendingOf(kind domain.RunDecisionKind) func(*domain.Run) bool {
 	return func(r *domain.Run) bool { return r.Pending != nil && r.Pending.Kind == kind }
 }
@@ -183,7 +193,7 @@ func proposeAndAllow(t *testing.T, e *Engine, session domain.FeatureID, req Work
 	if run.State != domain.RunProposed || run.Pending == nil || run.Pending.Kind != domain.RunDecideProposal {
 		t.Fatalf("proposal %+v", run)
 	}
-	if err := e.WorkflowAnswer(ctx, session, run.N, WorkflowAllow); err != nil {
+	if err := e.WorkflowAnswer(ctx, session, run.N, run.Pending.ID, WorkflowAllow); err != nil {
 		t.Fatal(err)
 	}
 	return run
@@ -446,10 +456,10 @@ func TestARepeatAtItsMaxAsksThePerson(t *testing.T) {
 	if again, _ := e.cfg.Store.Run(ctx, f.ID, run.N); again.Pending == nil || again.Pending.ID != id {
 		t.Fatalf("the decision was raised again: %+v", again.Pending)
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, "maybe"); err == nil {
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), "maybe"); err == nil {
 		t.Fatal("an answer that is no option was taken")
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowOneMore); err != nil {
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowOneMore); err != nil {
 		t.Fatal(err)
 	}
 	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
@@ -484,7 +494,7 @@ func TestARunawayStepIsThePersonsToCarryOn(t *testing.T) {
 	if r.Pending.Step != "big" || r.Pending.Amount != 30 {
 		t.Fatalf("decision %+v", r.Pending)
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowCarryOn); err != nil {
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowCarryOn); err != nil {
 		t.Fatal(err)
 	}
 	if s := stepPaths(t, e, f.ID, run.N)["big"]; s.Allowance != 1 || s.State != domain.StepRunning {
@@ -535,7 +545,7 @@ func TestASpentPoolPausesTheRunAndATopUpCarriesItOn(t *testing.T) {
 	if left, _ := e.sessionPoolLeft(ctx, sess); left > 0 {
 		t.Fatalf("the session has %.0f left after its run overspent it", left)
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowTopUp); err != nil {
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowTopUp); err != nil {
 		t.Fatal(err)
 	}
 	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
@@ -703,7 +713,7 @@ func TestPreAuthorisationAllowsARunWithoutAsking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowAlwaysAnswer(100)); err != nil {
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowAlwaysAnswer(100)); err != nil {
 		t.Fatal(err)
 	}
 	if pre, _ := store.WorkflowPreauth(ctx, f.ID); pre != 100 {
@@ -742,7 +752,7 @@ func TestFeedbackOnAProposalReachesTheSession(t *testing.T) {
 			t.Errorf("the proposal does not show %q:\n%s", want, run.Pending.Question)
 		}
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, "use investigate first"); err != nil {
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), "use investigate first"); err != nil {
 		t.Fatal(err)
 	}
 	r, _ := e.cfg.Store.Run(ctx, f.ID, run.N)
@@ -814,7 +824,7 @@ func TestAPlannerReplacesTheRemainingSteps(t *testing.T) {
 	if s := stepPaths(t, e, f.ID, run.N)["plan"]; s.State != domain.StepAsking {
 		t.Fatalf("the planner %+v", s)
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowAllowPlan); err != nil {
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowAllowPlan); err != nil {
 		t.Fatal(err)
 	}
 	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
@@ -966,7 +976,7 @@ func TestAProposalReadsAsItsCard(t *testing.T) {
 	if !strings.HasPrefix(always, WorkflowAlwaysPrefix+"$") {
 		t.Fatalf("always allow is not in dollars: %q", always)
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, always); err != nil {
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), always); err != nil {
 		t.Fatal(err)
 	}
 	if r, _ := e.cfg.Store.Run(ctx, f.ID, run.N); r.State != domain.RunRunning {
@@ -1312,5 +1322,39 @@ func TestAMessageToAPausedRunsStepIsRefused(t *testing.T) {
 	}
 	if wf.count("slow#") != 0 || e.freeformBusy(card) {
 		t.Fatal("the message started the step's backend under the pause")
+	}
+}
+
+// TestAnAnswerIsToTheDecisionItWasGivenTo: a run raises one decision after
+// another, so an answer names the one it answers. An answer read off a
+// decision that has since been settled and replaced — here the proposal's,
+// once the loop asks about its max — is refused with what the run asks
+// now, and leaves that decision standing.
+func TestAnAnswerIsToTheDecisionItWasGivenTo(t *testing.T) {
+	wf := newWFFake()
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: loopRecipe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := run.Pending.ID
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, "", WorkflowAllow); err == nil {
+		t.Fatal("an answer naming no decision was taken")
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, proposal, WorkflowAllow); err != nil {
+		t.Fatal(err)
+	}
+	r := tickRuns(t, e, f.ID, run.N, "asked about the max", pendingOf(domain.RunDecideMax))
+	// the proposal's "Continue"-shaped answer, given late, is not the max's
+	err = e.WorkflowAnswer(ctx, f.ID, run.N, proposal, WorkflowContinue)
+	if err == nil || !strings.Contains(err.Error(), "now asks") {
+		t.Fatalf("a stale answer: %v", err)
+	}
+	if again, _ := e.cfg.Store.Run(ctx, f.ID, run.N); again.Pending == nil || again.Pending.ID != r.Pending.ID {
+		t.Fatalf("the stale answer moved the decision: %+v", again.Pending)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, r.Pending.ID, WorkflowStopRun); err != nil {
+		t.Fatal(err)
 	}
 }

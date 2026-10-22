@@ -78,7 +78,7 @@ func TestARunOnTheWebFace(t *testing.T) {
 		len(p.Checks) != 1 || p.Checks[0].Cmd != "test -f out.txt" || !p.Bounded {
 		t.Fatalf("the proposal's card: %+v", c.Decision)
 	}
-	if err := eng.WorkflowAnswer(ctx, f.ID, run.N, engine.WorkflowAllow); err != nil {
+	if err := eng.WorkflowAnswer(ctx, f.ID, run.N, run.Pending.ID, engine.WorkflowAllow); err != nil {
 		t.Fatal(err)
 	}
 	waitUntilTrue(t, "the run to end", func() bool {
@@ -244,7 +244,7 @@ func TestTheTreeTabWaitsWhileAStepWorksInTheTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := eng.WorkflowAnswer(ctx, f.ID, run.N, engine.WorkflowAllow); err != nil {
+	if err := eng.WorkflowAnswer(ctx, f.ID, run.N, run.Pending.ID, engine.WorkflowAllow); err != nil {
 		t.Fatal(err)
 	}
 	waitUntilTrue(t, "the step is writing", func() bool {
