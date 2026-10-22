@@ -1,27 +1,33 @@
 // Package crewpolicy decides what a running crew does next (DESIGN §24.7).
 // It is pure: given a snapshot of a crew and its nodes, Decide returns the
 // actions to take, in order, and never touches git, the store or an agent.
-// Engine.CrewTick builds the snapshot and executes them. It is the subset
-// of goalpolicy a crew needs, and holds a node's budget by the same rule:
-// an unsettled node holds the larger of its envelope and its spend, a
-// landed or dropped one only its spend.
+// Engine.CrewTick builds the snapshot and executes them.
+//
+// Money (§24.7a): a crew spends from its session's envelope, one pool.
+// The plan's budget and a node's envelope are estimates — what the person
+// approved and what a node is expected to cost — never a fence. Work in
+// flight is never thrown away over money: when the pool is spent the crew
+// pauses for a top-up, and before it is spent the forecast warns the
+// person while there is still money to finish what is running. A node
+// that runs far past its estimate is a runaway, and the person decides
+// whether it carries on.
 //
 // The rules, in the order Decide applies them:
 //
 //  1. Only a running crew is conducted.
-//  2. A stop, or a budget actually spent, winds the crew down: every
-//     ready node still lands, every other unsettled node is dropped. A
-//     budget past its reserve only by what nodes hold winds it down more
-//     gently: nothing new starts and the planner does not run, ready and
-//     live nodes finish and land, the rest are dropped.
-//  3. One ready node lands per tick, in plan order.
-//  4. A waiting node that needs a dropped node is stuck.
-//  5. An exhausted node goes to the planner once, then is dropped.
-//  6. A stuck node goes to the planner up to twice, then is dropped.
-//  7. Pending wake reasons, and those of rules 5 and 6, wake the planner
-//     — one turn at a time.
+//  2. A stop winds the crew down: every ready node still lands, every other
+//     unsettled node is dropped.
+//  3. A spent pool pauses the crew for a top-up; nothing else happens.
+//  4. One ready node lands per tick, in plan order.
+//  5. A waiting node that needs a dropped node is stuck.
+//  6. An exhausted node — a runaway, past its card's cap — goes to the
+//     person. A stuck node goes to the planner up to twice, then to the
+//     person.
+//  7. Pending wake reasons, and those of rule 6, wake the planner — one
+//     turn at a time.
 //  8. Waiting nodes whose needs have landed start, up to the lanes.
-//  9. When every node is settled, the final review runs.
+//  9. A forecast past what the pool has left warns the person, once.
+//  10. When every node is settled, the final review runs.
 package crewpolicy
 
 import (
@@ -33,8 +39,9 @@ import (
 
 // Node is one node in a snapshot.
 type Node struct {
-	ID       string
-	State    domain.NodeState
+	ID    string
+	State domain.NodeState
+	// Envelope is the node's estimate: what the plan expects it to cost.
 	Envelope int
 	Spent    float64
 	Needs    []string
@@ -45,20 +52,22 @@ type Node struct {
 	Reason string
 }
 
-// Held is what the node holds against the crew's budget.
-func (n Node) Held() float64 {
-	if n.State.Settled() {
-		return n.Spent
-	}
-	return math.Max(float64(n.Envelope), n.Spent)
-}
-
 // Input is a crew's snapshot.
 type Input struct {
-	State    domain.CrewState
-	Budget   int
-	Reserve  int
-	OwnSpent float64 // the planner's turns and the final review
+	State domain.CrewState
+	// Bounded marks a pool with a ceiling: a session with an envelope.
+	// Left is what the pool has left for the crew — the session's
+	// envelope less everything spent from it, the crew's own spend
+	// included. Meaningless when not Bounded.
+	Bounded bool
+	Left    float64
+	// Reserve is what the forecast keeps for the planner's turns and the
+	// final review still to come.
+	Reserve int
+	// Warned marks a forecast warning already put to the person since the
+	// pool was last topped up.
+	Warned   bool
+	OwnSpent float64 // the planner's turns and the reviews
 	Lanes    int
 	Nodes    []Node // in plan order
 	// Wake holds the planner's pending wake reasons: the start, a steer, a
@@ -86,10 +95,19 @@ const (
 	Start
 	// FinalReview runs the done-when checks and the crew-wide review.
 	FinalReview
+	// Pause parks the crew for a top-up: the pool is spent. Its nodes
+	// finish the turn they are in; Amount is the top-up suggested.
+	Pause
+	// Warn puts the forecast to the person: Amount is about what the crew
+	// needs beyond what the pool has left. Nothing pauses.
+	Warn
+	// AskNode puts a runaway or stuck node to the person: carry on, or
+	// drop it.
+	AskNode
 )
 
 func (k Kind) String() string {
-	return [...]string{"wind-down", "land", "drop", "stick", "planner", "start", "final-review"}[k]
+	return [...]string{"wind-down", "land", "drop", "stick", "planner", "start", "final-review", "pause", "warn", "ask"}[k]
 }
 
 // Action is one step for the engine.
@@ -98,6 +116,7 @@ type Action struct {
 	Node    string
 	Reason  string
 	Reasons []string // Planner only
+	Amount  int      // Pause and Warn: the top-up suggested, in credits
 }
 
 func (a Action) String() string {
@@ -111,30 +130,60 @@ func (a Action) String() string {
 	for _, r := range a.Reasons {
 		s += " [" + r + "]"
 	}
+	if a.Amount > 0 {
+		s += fmt.Sprintf(" (+%d)", a.Amount)
+	}
 	return s
 }
 
-// Ledger is a crew's budget.
-type Ledger struct {
-	Budget    int
-	Own       float64
-	Given     float64
-	Reserve   int
-	Available float64 // Budget − Own − Given − Reserve
-	// Spent is what has actually been spent: Own and every node's spend,
-	// with nothing held for what a node has yet to spend.
+// Forecast is where a crew's money is headed.
+type Forecast struct {
+	// Spent is what the crew has spent: its own and every node's.
 	Spent float64
+	// Ratio is how far the landed nodes ran over their estimates, never
+	// below 1: a crew that ran over so far is expected to keep doing so.
+	Ratio float64
+	// ToFinish is what the crew is expected to spend from here: every
+	// unsettled node's estimate scaled by Ratio, less what it has spent,
+	// plus the reserve for the planner and the final review.
+	ToFinish float64
+	// Short is how much ToFinish exceeds what the pool has left; 0 when
+	// it fits or the pool has no ceiling.
+	Short float64
 }
 
-// ComputeLedger totals a snapshot's budget.
-func ComputeLedger(in Input) Ledger {
-	l := Ledger{Budget: in.Budget, Own: in.OwnSpent, Reserve: in.Reserve, Spent: in.OwnSpent}
+// ComputeForecast reads a snapshot's money.
+func ComputeForecast(in Input) Forecast {
+	f := Forecast{Spent: in.OwnSpent, Ratio: 1}
+	var landedSpent, landedEst float64
 	for _, n := range in.Nodes {
-		l.Given += n.Held()
-		l.Spent += n.Spent
+		f.Spent += n.Spent
+		if n.State == domain.NodeLanded && n.Envelope > 0 {
+			landedSpent += n.Spent
+			landedEst += float64(n.Envelope)
+		}
 	}
-	l.Available = float64(in.Budget) - l.Own - l.Given - float64(in.Reserve)
-	return l
+	if landedEst > 0 {
+		f.Ratio = math.Max(1, landedSpent/landedEst)
+	}
+	for _, n := range in.Nodes {
+		if n.State.Settled() {
+			continue
+		}
+		f.ToFinish += math.Max(0, float64(n.Envelope)*f.Ratio-n.Spent)
+	}
+	f.ToFinish += float64(in.Reserve)
+	if in.Bounded {
+		f.Short = math.Max(0, f.ToFinish-in.Left)
+	}
+	return f
+}
+
+// TopUpFor is the top-up suggested to cover need: a quarter more, rounded
+// up to 50 credits, never below 100.
+func TopUpFor(need float64) int {
+	t := int(math.Ceil(need*1.25/50)) * 50
+	return max(t, 100)
 }
 
 // Decide returns the actions for one tick, in execution order.
@@ -148,25 +197,25 @@ func Decide(in Input) []Action {
 		byID[n.ID] = n
 	}
 
-	led := ComputeLedger(in)
-	if in.Stopping || led.Spent >= float64(in.Budget) {
-		why := "stopped"
-		if !in.Stopping {
-			why = fmt.Sprintf("the budget is spent (%.0f of %d)", led.Spent, in.Budget)
-		}
-		out = append(out, Action{Kind: WindDown, Reason: why})
+	if in.Stopping {
+		out = append(out, Action{Kind: WindDown, Reason: "stopped"})
 		for _, n := range in.Nodes {
 			switch {
 			case n.State == domain.NodeReady:
 				out = append(out, Action{Kind: Land, Node: n.ID})
 			case !n.State.Settled():
-				out = append(out, Action{Kind: Drop, Node: n.ID, Reason: "the crew wound down: " + why})
+				out = append(out, Action{Kind: Drop, Node: n.ID, Reason: "the crew wound down: stopped"})
 			}
 		}
 		return append(out, Action{Kind: FinalReview})
 	}
-	if led.Available < 0 {
-		return windDownOnBudget(in, -led.Available)
+	fc := ComputeForecast(in)
+	if in.Bounded && in.Left <= 0 {
+		return []Action{{
+			Kind:   Pause,
+			Reason: fmt.Sprintf("the session's budget is spent (the crew has spent %.0f)", fc.Spent),
+			Amount: TopUpFor(fc.ToFinish),
+		}}
 	}
 
 	for _, n := range in.Nodes {
@@ -195,11 +244,8 @@ func Decide(in Input) []Action {
 	for _, n := range in.Nodes {
 		switch n.State {
 		case domain.NodeExhausted:
-			if n.PlannerTries < 1 {
-				reasons = append(reasons, n.ID+" ran out of its envelope")
-			} else {
-				out = append(out, Action{Kind: Drop, Node: n.ID, Reason: "exhausted, and the planner did not raise it"})
-			}
+			why := fmt.Sprintf("it has spent %.0f against an estimate of %d", n.Spent, n.Envelope)
+			out = append(out, Action{Kind: AskNode, Node: n.ID, Reason: why})
 		case domain.NodeStuck:
 			if n.PlannerTries < 2 {
 				why := n.ID + " is stuck"
@@ -208,7 +254,7 @@ func Decide(in Input) []Action {
 				}
 				reasons = append(reasons, why)
 			} else {
-				out = append(out, Action{Kind: Drop, Node: n.ID, Reason: "stuck after two planner turns: " + n.Reason})
+				out = append(out, Action{Kind: AskNode, Node: n.ID, Reason: "stuck after two planner turns: " + n.Reason})
 			}
 		}
 	}
@@ -222,12 +268,6 @@ func Decide(in Input) []Action {
 			live++
 		}
 	}
-	dropping := map[string]bool{}
-	for _, a := range out {
-		if a.Kind == Drop {
-			dropping[a.Node] = true
-		}
-	}
 	for _, n := range in.Nodes {
 		if live >= in.Lanes {
 			break
@@ -239,46 +279,22 @@ func Decide(in Input) []Action {
 		live++
 	}
 
+	if fc.Short > 0 && !in.Warned {
+		out = append(out, Action{
+			Kind:   Warn,
+			Reason: fmt.Sprintf("the crew looks set to spend about %.0f more; the session has %.0f left", fc.ToFinish, math.Max(0, in.Left)),
+			Amount: TopUpFor(fc.Short),
+		})
+	}
+
 	settled := true
 	for _, n := range in.Nodes {
-		if !n.State.Settled() && !dropping[n.ID] {
+		if !n.State.Settled() {
 			settled = false
 			break
 		}
 	}
 	if settled && len(in.Nodes) > 0 && !in.PlannerBusy && len(reasons) == 0 {
-		out = append(out, Action{Kind: FinalReview})
-	}
-	return out
-}
-
-// windDownOnBudget is rule 2 for a budget past its reserve. What the
-// crew still holds is mostly what it has not spent — a waiting node
-// holds its whole envelope — so nothing new starts and no planner turn
-// runs, but work already in flight is not thrown away: a ready node
-// lands, a live node finishes its run, checks and review (its envelope
-// is already counted against the budget), and only the nodes that have
-// not started or have stalled are dropped. The final review runs once
-// every node is settled.
-func windDownOnBudget(in Input, over float64) []Action {
-	why := fmt.Sprintf("the budget is past its reserve (%.0f over)", over)
-	var out []Action
-	settled := true
-	for _, n := range in.Nodes {
-		switch {
-		case n.State == domain.NodeReady:
-			out = append(out, Action{Kind: Land, Node: n.ID})
-			settled = false
-		case n.State.Live():
-			settled = false
-		case !n.State.Settled():
-			out = append(out, Action{Kind: Drop, Node: n.ID, Reason: "the crew wound down: " + why})
-		}
-	}
-	if len(out) > 0 {
-		out = append([]Action{{Kind: WindDown, Reason: why}}, out...)
-	}
-	if settled && !in.PlannerBusy {
 		out = append(out, Action{Kind: FinalReview})
 	}
 	return out

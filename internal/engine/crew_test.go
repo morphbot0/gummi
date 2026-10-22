@@ -43,6 +43,8 @@ type crewFake struct {
 	review   func(n int) string
 	// plan replaces crewTestPlan when set
 	plan string
+	// nodeCredits, when set, is what each node turn spends
+	nodeCredits float64
 }
 
 func newCrewFake() *crewFake {
@@ -83,8 +85,12 @@ func newCrewFake() *crewFake {
 		case strings.Contains(msg, "You are node t") || strings.Contains(msg, "Your work was sent back"):
 			cf.mu.Lock()
 			cf.nodeRuns++
+			spend := cf.nodeCredits
 			cf.mu.Unlock()
 			_ = os.WriteFile(filepath.Join(opts.WorkDir, "crew.txt"), []byte("made by the crew\n"), 0o600)
+			if spend > 0 {
+				usage.Usage.Credits = spend
+			}
 			return []agent.Event{usage, {Kind: agent.EventMessage, Text: "Wrote it.\nDONE: wrote crew.txt\nDECISION: plain text"}, {Kind: agent.EventIdle}}
 		default:
 			cf.mu.Lock()
@@ -315,6 +321,14 @@ nodes:
 	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewRunPlan, "user"); err != nil {
 		t.Fatal(err)
 	}
+	// the node changes nothing, is sent back until it is stuck, and past
+	// the planner the person drops it
+	c = tickUntil(t, e, f.ID, "asked about the stuck node", func(c *domain.Crew) bool {
+		return c.Pending != nil && c.Pending.Kind == domain.CrewDecideNode
+	})
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewNodeDrop, "user"); err != nil {
+		t.Fatal(err)
+	}
 	c = tickUntil(t, e, f.ID, "reported", func(c *domain.Crew) bool { return c.State.Ended() })
 	if c.State != domain.CrewPartial {
 		t.Errorf("a crew that changed nothing ended %s", c.State)
@@ -389,5 +403,169 @@ func TestDecliningThePlanKeepsItASession(t *testing.T) {
 	got, _ := store.Crew(ctx, c.ID)
 	if got.State != domain.CrewDeclined || e.CrewHolds(ctx, f.ID) != "" {
 		t.Fatalf("declined crew: %+v", got)
+	}
+}
+
+// TestASpentSessionPausesTheCrewAndATopUpCarriesItOn: a crew spends from
+// its session's envelope. When that runs out the crew pauses — its node's
+// work kept, nothing dropped — and puts a top-up to the person; the top-up
+// carries it on from where it was, and it finishes.
+func TestASpentSessionPausesTheCrewAndATopUpCarriesItOn(t *testing.T) {
+	cf := newCrewFake()
+	cf.nodeCredits = 500
+	cf.plan = `lanes: 1
+budget: 400
+nodes:
+  - id: t1
+    role: implementer
+    title: write crew.txt
+    owns: [crew.txt]
+    serves: [DW-1]
+    checks: ["test -f crew.txt"]
+    envelope: 200
+`
+	e, store, f, _ := crewEngine(t, cf)
+	ctx := context.Background()
+	if err := e.RaiseEnvelope(ctx, f.ID, 460); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CrewStart(ctx, f.ID, "make the file", 400, ActorAgent); err != nil {
+		t.Fatal(err)
+	}
+	c := tickUntil(t, e, f.ID, "proposed", func(c *domain.Crew) bool { return c.Pending != nil })
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewRunPlan, "user"); err != nil {
+		t.Fatal(err)
+	}
+	c = tickUntil(t, e, f.ID, "paused for money", func(c *domain.Crew) bool {
+		return c.State == domain.CrewPaused && c.Pending != nil && c.Pending.Kind == domain.CrewDecideBudget
+	})
+	if !c.OutOfBudget || c.Pending.Amount <= 0 {
+		t.Fatalf("paused crew %+v", c)
+	}
+	nodes, _ := store.CrewNodes(ctx, c.ID)
+	if nodes[0].State == domain.NodeDropped {
+		t.Fatalf("the node was dropped over money: %+v", nodes[0])
+	}
+	// the session's own turns draw from the same envelope: it has nothing left
+	sess, _ := store.GetFeature(ctx, f.ID)
+	if left, _ := e.sessionPoolLeft(ctx, sess); left > 0 {
+		t.Fatalf("the session has %.0f left after its crew overspent it", left)
+	}
+
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewTopUp, "user"); err != nil {
+		t.Fatal(err)
+	}
+	c = tickUntil(t, e, f.ID, "reported", func(c *domain.Crew) bool { return c.State.Ended() })
+	if c.State != domain.CrewFinished {
+		t.Fatalf("crew ended %s:\n%s", c.State, e.CrewDoc(c))
+	}
+	cf.mu.Lock()
+	runs := cf.nodeRuns
+	cf.mu.Unlock()
+	if runs != 1 {
+		t.Errorf("the node ran %d turns; the top-up should take it straight to its review", runs)
+	}
+	sess, _ = store.GetFeature(ctx, f.ID)
+	if sess.Budget.Envelope <= 460 {
+		t.Errorf("the session's envelope is still %d after the top-up", sess.Budget.Envelope)
+	}
+	for _, want := range []string{"paused: the session's budget is spent", "the session was topped up"} {
+		if !strings.Contains(e.CrewDoc(c), want) {
+			t.Errorf("the run log does not say %q:\n%s", want, e.CrewDoc(c))
+		}
+	}
+}
+
+// TestARunawayNodeIsThePersonsToCarryOn: a node's card is capped at a
+// multiple of its estimate. Past it the node is not dropped: the person is
+// asked, and letting it carry on raises its cap and sends it on.
+func TestARunawayNodeIsThePersonsToCarryOn(t *testing.T) {
+	cf := newCrewFake()
+	e, store, f, _ := crewEngine(t, cf)
+	cf.nodeCredits = 400 // past the cap of 3 x 100 on the first turn
+	ctx := context.Background()
+	if _, err := e.CrewStart(ctx, f.ID, "make the file", 400, ActorAgent); err != nil {
+		t.Fatal(err)
+	}
+	c := tickUntil(t, e, f.ID, "proposed", func(c *domain.Crew) bool { return c.Pending != nil })
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewRunPlan, "user"); err != nil {
+		t.Fatal(err)
+	}
+	c = tickUntil(t, e, f.ID, "asked about the runaway", func(c *domain.Crew) bool {
+		return c.Pending != nil && c.Pending.Kind == domain.CrewDecideNode
+	})
+	if c.Pending.Node != "t1" || c.Pending.Amount != runawayFactor*100 || !strings.Contains(c.Pending.Question, "past its estimate") {
+		t.Fatalf("decision %+v", c.Pending)
+	}
+	cf.mu.Lock()
+	cf.nodeCredits = 2
+	cf.mu.Unlock()
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewNodeCarryOn, "user"); err != nil {
+		t.Fatal(err)
+	}
+	c = tickUntil(t, e, f.ID, "reported", func(c *domain.Crew) bool { return c.State.Ended() })
+	if c.State != domain.CrewFinished {
+		t.Fatalf("crew ended %s:\n%s", c.State, e.CrewDoc(c))
+	}
+	nodes, _ := store.CrewNodes(ctx, c.ID)
+	if nodes[0].State != domain.NodeLanded {
+		t.Fatalf("t1 ended %s (%s)", nodes[0].State, nodes[0].Reason)
+	}
+}
+
+// TestTheForecastWarnsBeforeTheMoneyRunsOut: a node that ran well over
+// its estimate scales the forecast for the rest; when that is past what
+// the session has left the person is asked to top up while the crew keeps
+// running, and the top-up lets it finish.
+func TestTheForecastWarnsBeforeTheMoneyRunsOut(t *testing.T) {
+	cf := newCrewFake()
+	cf.nodeCredits = 250
+	cf.plan = `lanes: 1
+budget: 400
+nodes:
+  - id: t1
+    role: implementer
+    title: write crew.txt
+    owns: [crew.txt]
+    serves: [DW-1]
+    checks: ["test -f crew.txt"]
+    envelope: 100
+  - id: t2
+    role: scout
+    title: read crew.txt back
+    needs: [t1]
+    envelope: 100
+`
+	e, store, f, _ := crewEngine(t, cf)
+	ctx := context.Background()
+	if err := e.RaiseEnvelope(ctx, f.ID, 500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CrewStart(ctx, f.ID, "make the file", 400, ActorAgent); err != nil {
+		t.Fatal(err)
+	}
+	c := tickUntil(t, e, f.ID, "proposed", func(c *domain.Crew) bool { return c.Pending != nil })
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewRunPlan, "user"); err != nil {
+		t.Fatal(err)
+	}
+	c = tickUntil(t, e, f.ID, "warned", func(c *domain.Crew) bool {
+		return c.Pending != nil && c.Pending.Kind == domain.CrewDecideBudget
+	})
+	if c.State != domain.CrewRunning || !c.BudgetWarned || c.OutOfBudget {
+		t.Fatalf("a warning paused the crew, or was not recorded: %+v", c)
+	}
+	if !strings.Contains(c.Pending.Question, "Nothing has stopped") || len(c.Pending.Options) != 3 {
+		t.Fatalf("warning %+v", c.Pending)
+	}
+	if err := e.CrewAnswer(ctx, f.ID, c.Pending.ID, CrewTopUp, "user"); err != nil {
+		t.Fatal(err)
+	}
+	c = tickUntil(t, e, f.ID, "reported", func(c *domain.Crew) bool { return c.State.Ended() })
+	if c.State != domain.CrewFinished {
+		t.Fatalf("crew ended %s:\n%s", c.State, e.CrewDoc(c))
+	}
+	sess, _ := store.GetFeature(ctx, f.ID)
+	if sess.Budget.Envelope <= 500 {
+		t.Errorf("the session's envelope is still %d after the top-up", sess.Budget.Envelope)
 	}
 }

@@ -135,6 +135,8 @@ A `question` event's `kind` says whose question it is:
 | `crew_plan` | the crew's plan costs more than the pre-authorisation | `--answer "Run the crew"` or `"Keep it a session"`; other words go to the planner as a note |
 | `crew_widen` | a running crew wants to widen its approved plan (a done-when item, more budget, a path outside what was approved) — always a person's call | `--answer "Widen the plan"` or `"Keep the scope: write it into Limits"`; other words go to the planner |
 | `crew_question` | a crew node asked something the frozen spec does not settle, and the planner passed it on (`node` names it) | `--answer "<text>"` |
+| `crew_budget` | the session's budget is spent and the crew paused, or the forecast says it will be before the crew finishes (the crew keeps running) | `--envelope <dollars>` (the `next` line suggests one) tops up and carries a paused crew on; or `--answer "Finish what is running; start nothing new"` or `"Stop the crew"` |
+| `crew_node` | a crew node ran far past its estimate, or stayed stuck past the planner (`node` names it) | `--answer "Let it carry on"` or `"Drop it"` |
 | `crew_paused` | the session's crew is paused (a person paused it, or the process running it stopped) | a bare `resume <id>` resumes it |
 
 Every resumable stop carries `next`: the literal `gummi resume …` command for

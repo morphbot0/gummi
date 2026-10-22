@@ -26,6 +26,14 @@ import (
 // nodeReworkCap is how many times a node is sent back before it is stuck.
 const nodeReworkCap = 2
 
+// The reasons a live node's row carries while its crew is paused for
+// money (§24.7a): its turn ended and it waits to be checked and reviewed,
+// or it was sent back and waits to be told so. carryOnCrew reads them.
+const (
+	nodeAwaitsReview = "its turn ended while the session's budget was spent: it waits to be checked and reviewed"
+	nodeSentBack     = "sent back while the crew was paused: "
+)
+
 func yamlOf(v any) (string, error) {
 	out, err := yaml.Marshal(v)
 	return string(out), err
@@ -107,8 +115,11 @@ func (e *Engine) startNode(ctx context.Context, crewID domain.FeatureID, nodeID 
 		if node.Role == domain.CrewScout {
 			rc, backend = e.resolveRoleWithFallback(sess.Profile, tierRole(node.Tier), agent.RoleArchitect, agent.RoleImplementer)
 		}
+		// the card is capped at the runaway cap, not the estimate: a node
+		// that runs over its estimate carries on, and only one that runs
+		// far past it stops for the person (§24.7a)
 		card, err := e.mintCrewCard(ctx, sess, c.ID, domain.CrewLink{Of: c.Session, Seq: c.Seq, Node: nodeID},
-			fmt.Sprintf("%s · %s", node.Title, nodeID), max(row.Envelope, node.Envelope), backend, rc.Model)
+			fmt.Sprintf("%s · %s", node.Title, nodeID), runawayFactor*max(row.Envelope, node.Envelope), backend, rc.Model)
 		if err != nil {
 			return err
 		}
@@ -292,6 +303,14 @@ func (e *Engine) afterNodeTurn(ctx context.Context, f domain.Feature, reply stri
 		}
 	}
 	if len(findings) == 0 {
+		// a review with no money to run on is not a failed review: the
+		// node waits, unreviewed, for the session to be topped up
+		if left, bounded := e.crewPoolLeft(ctx, c); bounded && left < e.turnReserve() {
+			n.State, n.Reason = domain.NodeRunning, nodeAwaitsReview
+			_ = e.crewStore().PutCrewNode(ctx, n)
+			e.crewLog(c, n.Node+" waits for budget to be reviewed")
+			return
+		}
 		n.State = domain.NodeReviewing
 		_ = e.crewStore().PutCrewNode(ctx, n)
 		review, err := e.reviewNode(ctx, c, node, f, n.Handoff)
@@ -374,9 +393,16 @@ func (e *Engine) reworkNode(ctx context.Context, c *domain.Crew, n domain.CrewNo
 	}
 	n.Reworks++
 	n.State, n.Reason = domain.NodeRunning, ""
+	paused := false
+	if cur, err := e.crewStore().Crew(ctx, c.ID); err == nil && cur != nil && cur.State == domain.CrewPaused {
+		// nothing is sent to a paused crew's node: it is told when the
+		// crew carries on
+		paused = true
+		n.Reason = nodeSentBack + findings
+	}
 	_ = e.crewStore().PutCrewNode(ctx, n)
 	e.crewLog(c, fmt.Sprintf("%s goes back (rework %d): %s", n.Node, n.Reworks, firstLine(findings)))
-	if n.Card != "" {
+	if n.Card != "" && !paused {
 		e.sendNodeTurn(n.Card, "Your work was sent back. Fix this, commit, and end with your handoff lines again:\n\n"+findings)
 	}
 	crewEvent(e, c.Session)
@@ -413,14 +439,25 @@ func (e *Engine) crewNodeExhausted(f domain.Feature) {
 	crewEvent(e, c.Session)
 }
 
+// dropNode ends a node. Its tree goes, its branch stays: what it
+// committed is paid for, and can still be read or landed by hand. The
+// branch goes when the crew lands or is declined (cleanupCrew).
 func (e *Engine) dropNode(ctx context.Context, c *domain.Crew, n domain.CrewNodeRun, why string) {
 	n.State, n.Reason = domain.NodeDropped, why
 	_ = e.crewStore().PutCrewNode(ctx, n)
+	kept := ""
 	if n.Card != "" {
-		e.removeCrewCard(ctx, n.Card, true)
+		if card, err := e.crewStore().GetFeature(ctx, n.Card); err == nil {
+			kept = card.BranchName()
+		}
+		e.removeCrewCard(ctx, n.Card, false)
 	}
 	e.forgetQuestion(c.ID, n.Node)
-	e.crewLog(c, n.Node+" dropped: "+why)
+	line := n.Node + " dropped: " + why
+	if kept != "" {
+		line += " (its branch " + kept + " is kept)"
+	}
+	e.crewLog(c, line)
 }
 
 // --- landing a node ----------------------------------------------------------

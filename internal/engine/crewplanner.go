@@ -20,7 +20,6 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/crewplan"
-	"github.com/morphis/gummi/internal/crewpolicy"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -137,10 +136,11 @@ func (e *Engine) proposeCrewPlan(ctx context.Context, c *domain.Crew) {
 		return
 	}
 	e.raiseCrewDecision(ctx, c, domain.CrewDecision{
-		Kind:     domain.CrewDecidePlan,
-		Question: fmt.Sprintf("Run this crew? %d nodes, planned %d of %d credits, %d lanes.", len(plan.Nodes), plan.Planned(), plan.Budget, plan.Lanes),
-		Options:  []string{CrewRunPlan, CrewDecline},
-		Plan:     &plan, Items: c.Items,
+		Kind: domain.CrewDecidePlan,
+		Question: fmt.Sprintf("Run this crew? %d nodes, %d lanes, estimated at %d credits (%d for the nodes), drawn from the session's budget.",
+			len(plan.Nodes), plan.Lanes, plan.Budget, plan.Planned()),
+		Options: []string{CrewRunPlan, CrewDecline},
+		Plan:    &plan, Items: c.Items,
 	})
 }
 
@@ -153,18 +153,22 @@ Rules a plan must pass (plan_write tells you what fails):
 - every done-when item is served by at least one node
 - a writing node owns at least one path, and has a check or serves an item that has one
 - two nodes whose owns overlap must be ordered by needs: one writer per path at a time
-- envelopes plus a reserve of 50 fit the budget; no envelope below 20
+- envelopes plus a reserve of 50 fit the budget; no envelope below 20. The budget is your estimate of the whole crew and an envelope your estimate of one node: the crew spends from the session's budget, a node that runs over its estimate carries on, and only one that runs far past it stops for the person. Estimate honestly rather than padding
 - tiers are cheap, standard or strong
 
 Prefer few nodes. A plan of one implementer is valid and right whenever the work does not divide. Put the shared surface first, in a contractor, so parallel implementers cannot disagree about it.
 
-Once a plan is approved, you may rework, split, reorder, drop or raise nodes inside the approved paths and budget; those are applied and logged. Adding a done-when item, changing one, raising the budget, or giving a node a path outside what was approved widens the plan, and goes to the person.
+Once a plan is approved, you may rework, split, reorder, drop or raise nodes' estimates inside the approved paths and budget; those are applied and logged. Adding a done-when item, changing one, raising the budget, or giving a node a path outside what was approved widens the plan, and goes to the person.
 
 A node's question: answer it with answer() when the frozen spec settles it; otherwise call ask_person(). Never guess what the person would want.`
 
 func (e *Engine) plannerPrompt(ctx context.Context, c *domain.Crew, reasons []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Crew %d of this session. State: %s. Budget: %d credits; spent by you and reviews so far: %.0f.\n\n", c.Seq, c.State, c.Budget, c.OwnSpent)
+	fmt.Fprintf(&b, "Crew %d of this session. State: %s. Estimate: %d credits; spent by you and reviews so far: %.0f", c.Seq, c.State, c.Budget, c.OwnSpent)
+	if left, bounded := e.crewPoolLeft(ctx, c); bounded {
+		fmt.Fprintf(&b, "; the session has %.0f left", max(0, left))
+	}
+	b.WriteString(".\n\n")
 	b.WriteString("You were woken because:\n")
 	for _, r := range reasons {
 		b.WriteString("- " + r + "\n")
@@ -222,7 +226,7 @@ func (pt *plannerTurn) tools() []agent.ToolDef {
 			map[string]any{"plan": str("The gummi-crew block's YAML."), "done_when": str("Optional: the done-when list's YAML, when it changes.")}, "plan"),
 		mkTool("node_rework", "Send a node back to work with a note.", map[string]any{"node": node, "note": str("What to change.")}, "node", "note"),
 		mkTool("node_drop", "Drop a node: it lands nothing more.", map[string]any{"node": node, "why": str("Why.")}, "node", "why"),
-		mkTool("node_raise", "Raise a node's envelope, inside the crew's budget.", map[string]any{"node": node, "to": num("The new envelope.")}, "node", "to"),
+		mkTool("node_raise", "Raise a node's estimate, inside the crew's estimate.", map[string]any{"node": node, "to": num("The new estimate.")}, "node", "to"),
 		mkTool("answer", "Answer a node's question from the frozen spec.", map[string]any{"node": node, "text": str("The answer.")}, "node", "text"),
 		mkTool("ask_person", "Pass a node's question to the person: the spec does not settle it.", map[string]any{"node": node}, "node"),
 	}
@@ -272,25 +276,27 @@ func (pt *plannerTurn) dispatch(ctx context.Context, name string, raw json.RawMe
 			return a.Node + " is dropped", nil
 		default:
 			if a.To <= n.Envelope {
-				return "", fmt.Errorf("%s already has %d", a.Node, n.Envelope)
+				return "", fmt.Errorf("%s is already estimated at %d", a.Node, n.Envelope)
 			}
-			in, _, _ := e.crewSnapshot(ctx, c)
-			if crewpolicy.ComputeLedger(in).Available+float64(n.Envelope) < float64(a.To) {
-				return "", errors.New("the crew's budget cannot fund that; widening the budget is the person's (plan_write with a higher budget)")
+			if n.State == domain.NodeExhausted {
+				return "", fmt.Errorf("%s has run far past its estimate: whether it carries on is the person's", a.Node)
+			}
+			// the nodes' estimates stay inside the crew's, as approved
+			planned := crewplan.PlannerReserve + a.To - n.Envelope
+			rows, _ := st.CrewNodes(ctx, c.ID)
+			for _, r := range rows {
+				planned += r.Envelope
+			}
+			if planned > c.Budget {
+				return "", errors.New("that takes the nodes past the crew's estimate; raising the estimate is the person's (plan_write with a higher budget)")
 			}
 			n.Envelope = a.To
-			if n.State == domain.NodeExhausted {
-				n.State = domain.NodeRunning
-			}
 			_ = st.PutCrewNode(ctx, n)
 			if n.Card != "" {
-				_ = e.RaiseEnvelope(ctx, n.Card, a.To)
+				_ = e.RaiseEnvelope(ctx, n.Card, runawayFactor*a.To)
 			}
-			e.crewLog(c, fmt.Sprintf("the planner raised %s to %d", a.Node, a.To))
-			if n.State == domain.NodeRunning && n.Card != "" {
-				e.sendNodeTurn(n.Card, "Your envelope was raised. Carry on, and end with your handoff lines.")
-			}
-			return fmt.Sprintf("%s now has %d", a.Node, a.To), nil
+			e.crewLog(c, fmt.Sprintf("the planner raised %s's estimate to %d", a.Node, a.To))
+			return fmt.Sprintf("%s is now estimated at %d", a.Node, a.To), nil
 		}
 	case "answer":
 		if _, ok := e.crewQuestions(c.ID)[a.Node]; !ok {
@@ -343,8 +349,8 @@ func (pt *plannerTurn) planWrite(ctx context.Context, c *domain.Crew, rawPlan, r
 	}
 	pt.failed = nil
 	if c.State == domain.CrewProposed {
-		if plan.Budget > c.Budget {
-			return "", fmt.Errorf("the session gave this crew %d credits; plan within them", c.Budget)
+		if left, bounded := e.crewPoolLeft(ctx, c); bounded && float64(plan.Budget) > left {
+			return "", fmt.Errorf("the session has %.0f credits left; estimate the crew within them", max(0, left))
 		}
 		c.Plan, c.Items = plan, items
 		pt.wrote = true
@@ -444,9 +450,13 @@ func (e *Engine) crewToolTurn(ctx context.Context, ts crewTurnSpec) (string, err
 			defer td()
 		}
 	}
-	left := float64(c.Budget) - c.OwnSpent
-	if left < e.turnReserve() {
-		return "", fmt.Errorf("the crew has %.0f credits left for its %s", max(0, left), ts.label)
+	// the crew's own turns draw from the session's pool, as its nodes do
+	maxCredits := 0.0
+	if left, bounded := e.crewPoolLeft(ctx, c); bounded {
+		if left < e.turnReserve() {
+			return "", fmt.Errorf("the session's budget is spent: %.0f credits left for the %s", max(0, left), ts.label)
+		}
+		maxCredits = left * capHeadroom
 	}
 	hints := ts.hints
 	if env := e.environmentCard(); env != "" {
@@ -457,7 +467,7 @@ func (e *Engine) crewToolTurn(ctx context.Context, ts crewTurnSpec) (string, err
 	as, err := ag.NewSession(tctx, agent.SessionOpts{
 		WorkDir: workDir, ArtifactPath: e.CrewDocPath(c), Role: ts.role, Model: rc.Model,
 		OutputTokenMax: rc.OutputTokenMax, Permission: e.cfg.Permission, SystemHints: hints,
-		Tools: tools, MaxCredits: left * capHeadroom, FeatureID: string(c.ID), MCPSockPath: sockPath,
+		Tools: tools, MaxCredits: maxCredits, FeatureID: string(c.ID), MCPSockPath: sockPath,
 		ReadOnly: ts.readOnly && caps.ReadOnlyEnforce, ExtraReadAllows: []string{e.CrewDocPath(c)},
 	})
 	if err != nil {

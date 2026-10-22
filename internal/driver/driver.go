@@ -144,10 +144,12 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	raised := false
 	if d.opts.Envelope > f.Budget.Envelope {
 		from := f.Budget.Envelope
-		f.Budget.Envelope = d.opts.Envelope
-		if err := d.store.UpdateFeature(ctx, &f); err != nil {
+		// through the engine: a crew paused because the session's money ran
+		// out carries on once the raise lands (§24.7a)
+		if err := d.eng.RaiseEnvelope(ctx, id, d.opts.Envelope); err != nil {
 			return d.fail(ctx, string(id), fmt.Errorf("raising envelope: %w", err))
 		}
+		f.Budget.Envelope = d.opts.Envelope
 		if err := d.eng.SetCrewPreauth(ctx, id, f.Budget.Envelope); err != nil {
 			return d.fail(ctx, string(id), err)
 		}
@@ -171,7 +173,9 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	if _, err := d.eng.CrewTick(ctx, id); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	if c, _ := d.store.OpenCrew(ctx, id); c != nil && c.State == domain.CrewPaused {
+	// one paused because the money ran out waits for a raise instead: its
+	// budget decision says so
+	if c, _ := d.store.OpenCrew(ctx, id); c != nil && c.State == domain.CrewPaused && !c.OutOfBudget {
 		if err := d.eng.CrewResume(ctx, id); err != nil {
 			return d.fail(ctx, string(id), err)
 		}
@@ -422,8 +426,15 @@ func (d *Driver) decisionStop(id domain.FeatureID, c *domain.Crew, dec *domain.C
 	if c != nil {
 		ev.Crew = c.Seq
 	}
-	if dec.Kind == domain.CrewDecideQuestion {
+	switch dec.Kind {
+	case domain.CrewDecideQuestion, domain.CrewDecideNode:
 		ev.Node = dec.Node
+	case domain.CrewDecideBudget:
+		// a raise of the session's envelope is the top-up: it answers the
+		// decision and carries a paused crew on (§24.7a)
+		if f, err := d.store.GetFeature(context.Background(), id); err == nil && f.Budget.Envelope > 0 {
+			ev.Next = resumeCmd(string(id), "--envelope", domain.DollarsInput(f.Budget.Envelope+dec.Amount))
+		}
 	}
 	d.out.Emit(ev)
 	return Outcome{Status: StatusNeedsYou, ID: string(id)}

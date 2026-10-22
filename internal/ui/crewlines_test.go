@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -27,7 +28,7 @@ func TestAnOpenCrewDrawsItsNodesUnderTheThread(t *testing.T) {
 	}}
 	got := stripANSI(strings.Join(crewLines(s, r, 100), "\n"))
 	for _, want := range []string{
-		"crew 2 · running · 60 of 400 credits",
+		"crew 2 · running · spent $0.60 of about $4.00",
 		"✓ t1 scout",
 		"landed",
 		"▸ t2 implementer",
@@ -39,6 +40,13 @@ func TestAnOpenCrewDrawsItsNodesUnderTheThread(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("crew strip lacks %q:\n%s", want, got)
 		}
+	}
+
+	// the session's pool, when it has a ceiling, is what the crew spends from
+	r.CrewMoney = &engine.CrewMoney{Spent: 60, Left: 250, Bounded: true}
+	got = stripANSI(strings.Join(crewLines(s, r, 120), "\n"))
+	if !strings.Contains(got, "· the session has $2.50 left") {
+		t.Errorf("crew strip does not say what the session has left:\n%s", got)
 	}
 
 	crew.State = domain.CrewFinished

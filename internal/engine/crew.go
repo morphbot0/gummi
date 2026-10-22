@@ -27,6 +27,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/atomicfile"
+	"github.com/morphis/gummi/internal/crewplan"
 	"github.com/morphis/gummi/internal/crewpolicy"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
@@ -48,10 +49,23 @@ const (
 	CrewDecline   = "Keep it a session"
 	CrewWiden     = "Widen the plan"
 	CrewKeepScope = "Keep the scope: write it into Limits"
+	// a budget decision's (§24.7a)
+	CrewTopUp         = "Top up the session"
+	CrewFinishRunning = "Finish what is running; start nothing new"
+	CrewStopCrew      = "Stop the crew"
+	// a node decision's: a runaway, or a node stuck past the planner
+	CrewNodeCarryOn = "Let it carry on"
+	CrewNodeDrop    = "Drop it"
 
-	// crewReserve is what a crew keeps back from its nodes for the
-	// planner's turns and the final review.
+	// crewReserve is what a crew's forecast keeps for the planner's turns
+	// and the final review.
 	crewReserve = 50
+
+	// runawayFactor caps a node's card at this many times its estimate:
+	// past it the node is a runaway, and the person decides whether it
+	// carries on (§24.7a). The cap is the only thing that stops a node
+	// over money; the estimate itself is never a fence.
+	runawayFactor = 3
 )
 
 // crewRuntime is what this process knows about crews beyond the store:
@@ -127,7 +141,7 @@ func crewTools() []agent.ToolDef {
 				"one implementer is valid, and small changes need no crew at all.",
 			map[string]any{
 				"brief":  str("What the crew is for, beyond the spec: what matters, what to watch."),
-				"budget": num("Credits the crew may spend in all, planner and reviews included."),
+				"budget": num("Your estimate of what the crew will cost in all, planner and reviews included, in credits. The crew spends from this session's budget; the person is asked before that runs out."),
 			}, "brief", "budget"),
 		mkTool(crewStatusToolName, "The crew's state, its nodes, spend and open questions.", map[string]any{}),
 		mkTool(crewSteerToolName, "Send a note to the crew's planner, which wakes it.",
@@ -211,10 +225,8 @@ func (e *Engine) CrewStart(ctx context.Context, session domain.FeatureID, brief 
 	} else if open != nil {
 		return nil, fmt.Errorf("crew %d is still open: one crew at a time", open.Seq)
 	}
-	if env := sess.Budget.Envelope; env > 0 {
-		if left := float64(env) - sess.Spend.Credits - e.crewsHeld(ctx, session); float64(budget) > left {
-			return nil, fmt.Errorf("the session has %.0f credits left; a crew of %d does not fit", max(0, left), budget)
-		}
+	if left, bounded := e.sessionPoolLeft(ctx, sess); bounded && float64(budget) > left {
+		return nil, fmt.Errorf("the session has %.0f credits left; a crew estimated at %d does not fit — raise the session's envelope first", max(0, left), budget)
 	}
 	text, ok := e.SessionSpec(sess)
 	if !ok {
@@ -307,16 +319,143 @@ func (e *Engine) mintCrewCard(ctx context.Context, sess domain.Feature, parent d
 	return f, nil
 }
 
-// crewsHeld is what the session's open crews hold of its envelope.
-func (e *Engine) crewsHeld(ctx context.Context, session domain.FeatureID) float64 {
-	crews, _ := e.crewStore().SessionCrews(ctx, session)
-	held := 0.0
-	for _, c := range crews {
-		if c.State.Open() {
-			held += float64(c.Budget)
+// --- the pool (§24.7a) --------------------------------------------------------
+
+// crewSpent is what a crew has spent: its own card (the planner and the
+// reviews) and every node's card.
+func (e *Engine) crewSpent(ctx context.Context, c domain.Crew) float64 {
+	st := e.crewStore()
+	t := 0.0
+	if f, err := st.GetFeature(ctx, c.ID); err == nil {
+		t += f.Spend.CreditEquivalent()
+	}
+	rows, _ := st.CrewNodes(ctx, c.ID)
+	for _, r := range rows {
+		if r.Card == "" {
+			continue
+		}
+		if f, err := st.GetFeature(ctx, r.Card); err == nil {
+			t += f.Spend.CreditEquivalent()
 		}
 	}
-	return held
+	return t
+}
+
+// sessionCrewsSpent is what every crew of the session has spent, landed
+// ones included: all of it came out of the session's envelope.
+func (e *Engine) sessionCrewsSpent(ctx context.Context, session domain.FeatureID) float64 {
+	if e.crewStore() == nil {
+		return 0
+	}
+	crews, err := e.crewStore().SessionCrews(ctx, session)
+	if err != nil {
+		return 0
+	}
+	t := 0.0
+	for _, c := range crews {
+		t += e.crewSpent(ctx, c)
+	}
+	return t
+}
+
+// sessionPoolLeft is what the session's envelope has left — its own spend
+// and its crews' taken off — and whether it has a ceiling at all.
+func (e *Engine) sessionPoolLeft(ctx context.Context, sess domain.Feature) (float64, bool) {
+	if sess.Budget.Envelope <= 0 {
+		return 0, false
+	}
+	return float64(sess.Budget.Envelope) - sess.Spend.CreditEquivalent() - e.sessionCrewsSpent(ctx, sess.ID), true
+}
+
+// crewPoolLeft is what the crew may still spend: its session's pool.
+func (e *Engine) crewPoolLeft(ctx context.Context, c *domain.Crew) (float64, bool) {
+	sess, err := e.crewStore().GetFeature(ctx, c.Session)
+	if err != nil {
+		return 0, false
+	}
+	return e.sessionPoolLeft(ctx, sess)
+}
+
+// CrewMoney is where a crew's money stands, in the words both faces use.
+type CrewMoney struct {
+	// Spent is what the crew has spent so far.
+	Spent float64
+	// ToFinish is what it is expected to spend from here (the forecast).
+	ToFinish float64
+	// Left is what the session's envelope has left; Bounded is false when
+	// the session has no envelope, and Left means nothing.
+	Left    float64
+	Bounded bool
+}
+
+// CrewMoney reads a crew's money: one derivation, for crew_status, the
+// terminal's crew block and the web page's Crew tab alike.
+func (e *Engine) CrewMoney(ctx context.Context, c *domain.Crew) CrewMoney {
+	in, _, err := e.crewSnapshot(ctx, c)
+	if err != nil {
+		return CrewMoney{}
+	}
+	fc := crewpolicy.ComputeForecast(in)
+	m := CrewMoney{Spent: fc.Spent, Left: in.Left, Bounded: in.Bounded}
+	if c.State.Open() {
+		m.ToFinish = fc.ToFinish
+	}
+	return m
+}
+
+// crewEnvelopeRaised is a session's envelope going up: a forecast may warn
+// again, and a crew paused because the money ran out carries on once the
+// pool has some again.
+func (e *Engine) crewEnvelopeRaised(ctx context.Context, session domain.FeatureID) {
+	if e.crewStore() == nil {
+		return
+	}
+	c, err := e.crewStore().OpenCrew(ctx, session)
+	if err != nil || c == nil {
+		return
+	}
+	c.BudgetWarned = false
+	if c.Pending != nil && c.Pending.Kind == domain.CrewDecideBudget {
+		c.Pending = nil
+	}
+	resumed := false
+	if c.OutOfBudget && c.State == domain.CrewPaused {
+		if left, bounded := e.crewPoolLeft(ctx, c); !bounded || left > 0 {
+			c.OutOfBudget = false
+			e.carryOnCrew(ctx, c)
+			resumed = true
+		}
+	}
+	if err := e.crewStore().UpdateCrew(ctx, c); err != nil {
+		return
+	}
+	if resumed {
+		e.crewLog(c, "the session was topped up: the crew carries on")
+	}
+	crewEvent(e, session)
+}
+
+// pauseForBudget parks the crew because its session's money ran out. Its
+// nodes are not stopped: each finishes the turn it is in, and nothing new
+// is sent until a top-up — no work in flight is thrown away.
+func (e *Engine) pauseForBudget(ctx context.Context, c *domain.Crew, why string, topUp int) {
+	c.State, c.OutOfBudget = domain.CrewPaused, true
+	if err := e.crewStore().UpdateCrew(ctx, c); err != nil {
+		return
+	}
+	e.crewLog(c, "paused: "+why)
+	e.raiseBudgetDecision(ctx, c, topUp)
+	crewEvent(e, c.Session)
+}
+
+// raiseBudgetDecision puts the spent pool to the person.
+func (e *Engine) raiseBudgetDecision(ctx context.Context, c *domain.Crew, topUp int) bool {
+	return e.raiseCrewDecision(ctx, c, domain.CrewDecision{
+		Kind: domain.CrewDecideBudget, Amount: topUp,
+		Question: fmt.Sprintf("The session's budget is spent: crew %d paused, its nodes' work kept. "+
+			"Top the session up by %s to carry on?", c.Seq, domain.FormatDollars(float64(topUp))),
+		Options: []string{CrewTopUp, CrewStopCrew},
+	})
 }
 
 // CrewDocPath is where a crew's doc lives: beside .gummi/goals/.
@@ -463,23 +602,60 @@ func (e *Engine) CrewResume(ctx context.Context, session domain.FeatureID) error
 	if c.State != domain.CrewPaused {
 		return fmt.Errorf("crew %d is %s, not paused", c.Seq, c.State)
 	}
-	c.State = domain.CrewRunning
-	nodes, _ := e.crewStore().CrewNodes(ctx, c.ID)
-	for _, n := range nodes {
-		// what was mid-flight when the quit came starts over from its
-		// tree: the work it committed is there, the backend that was doing
-		// it is not
-		if n.State.Live() {
-			n.State = domain.NodeWaiting
-			_ = e.crewStore().PutCrewNode(ctx, n)
+	if c.OutOfBudget {
+		if left, bounded := e.crewPoolLeft(ctx, c); bounded && left <= 0 {
+			return fmt.Errorf("crew %d is paused because the session's budget is spent: raise the session's envelope to carry on", c.Seq)
+		}
+		c.OutOfBudget = false
+		if c.Pending != nil && c.Pending.Kind == domain.CrewDecideBudget {
+			c.Pending = nil
 		}
 	}
+	e.carryOnCrew(ctx, c)
 	if err := e.crewStore().UpdateCrew(ctx, c); err != nil {
 		return err
 	}
 	e.crewLog(c, "resumed")
 	crewEvent(e, session)
 	return nil
+}
+
+// carryOnCrew runs a paused crew again from where its nodes are. A node
+// still in its turn, or with its checks under way, is left to finish. A
+// node whose turn ended while the crew was paused carries on in the same
+// tree and conversation — or, when it was waiting for money to be
+// reviewed, goes straight to its checks and review. Nothing a node did is
+// started over.
+func (e *Engine) carryOnCrew(ctx context.Context, c *domain.Crew) {
+	c.State = domain.CrewRunning
+	rt := e.crewRT()
+	nodes, _ := e.crewStore().CrewNodes(ctx, c.ID)
+	for _, n := range nodes {
+		if !n.State.Live() || n.Card == "" || rt.isBusy(nodeKey(c.ID, n.Node)) {
+			continue
+		}
+		ff := e.Freeform(n.Card)
+		if ff != nil && ff.Busy() {
+			continue
+		}
+		why := n.Reason
+		n.State, n.Reason = domain.NodeRunning, ""
+		_ = e.crewStore().PutCrewNode(ctx, n)
+		if why == nodeAwaitsReview && ff != nil && ff.Session() != nil {
+			card, err := e.crewStore().GetFeature(ctx, n.Card)
+			if err == nil {
+				reply := lastAssistant(ff.Session())
+				e.goBrief(func() { e.afterNodeTurn(e.lifetime(), card, reply) })
+				continue
+			}
+		}
+		msg := "The crew was paused and now carries on. Your tree holds your work so far: pick up where you left off, commit, and end with your handoff lines."
+		if strings.HasPrefix(why, nodeSentBack) {
+			msg = "Your work was sent back while the crew was paused. Fix this, commit, and end with your handoff lines again:\n\n" +
+				strings.TrimPrefix(why, nodeSentBack)
+		}
+		e.sendNodeTurn(n.Card, msg)
+	}
 }
 
 // CrewPause parks a running crew: nothing new starts, and its nodes'
@@ -599,6 +775,73 @@ func (e *Engine) CrewAnswer(ctx context.Context, session domain.FeatureID, id, a
 		}
 	case domain.CrewDecideQuestion:
 		e.answerNodeQuestion(c, d.Node, answer, "the person")
+	case domain.CrewDecideBudget:
+		switch answer {
+		case CrewTopUp:
+			// the decision is written answered first: the raise reads the
+			// crew back, and resumes it when the money ran out
+			if err := e.crewStore().UpdateCrew(ctx, c); err != nil {
+				return err
+			}
+			e.crewLog(c, fmt.Sprintf("the person topped the session up by %d", d.Amount))
+			if err := e.topUpSession(ctx, session, d.Amount); err != nil {
+				return err
+			}
+			e.send(Event{Feature: session, Stage: domain.StageOpen, Kind: EventUpdated})
+			crewEvent(e, session)
+			return nil
+		case CrewFinishRunning:
+			// what has not started is dropped — it holds no work — and
+			// what runs finishes and lands
+			nodes, _ := e.crewStore().CrewNodes(ctx, c.ID)
+			for _, n := range nodes {
+				if n.State == domain.NodeWaiting {
+					e.dropNode(ctx, c, n, "the person chose to finish what was running")
+				}
+			}
+			e.crewLog(c, "the person chose to finish what is running and start nothing new")
+		case CrewStopCrew:
+			c.Stopping = true
+			if c.State == domain.CrewPaused {
+				c.State = domain.CrewRunning
+			}
+			e.crewLog(c, "stopped by the person over its budget")
+		default:
+			c.Wake = append(c.Wake, "the person answered the budget question: "+answer)
+			e.crewLog(c, "the person talked the budget over: "+answer)
+		}
+	case domain.CrewDecideNode:
+		n, ok := e.crewNode(ctx, c, d.Node)
+		switch {
+		case !ok || n.State.Settled():
+		case answer == CrewNodeDrop:
+			e.dropNode(ctx, c, n, "the person dropped it")
+		case answer == CrewNodeCarryOn && n.State == domain.NodeExhausted:
+			if n.Card != "" {
+				if card, err := e.crewStore().GetFeature(ctx, n.Card); err == nil {
+					_ = e.RaiseEnvelope(ctx, n.Card, card.Budget.Envelope+d.Amount)
+				}
+			}
+			n.State, n.PlannerTries = domain.NodeRunning, 0
+			_ = e.crewStore().PutCrewNode(ctx, n)
+			e.crewLog(c, fmt.Sprintf("the person let %s carry on for up to %d more", n.Node, d.Amount))
+			if n.Card != "" {
+				e.sendNodeTurn(n.Card, "You ran past your estimate; the person lets you carry on. Finish the task, commit, and end with your handoff lines.")
+			}
+		case answer == CrewNodeCarryOn && n.Card == "":
+			// it never started: what it needed was dropped. Carrying on is
+			// starting it on what the crew's branch holds
+			e.crewLog(c, "the person started "+n.Node+" without what it needed")
+			e.startNodeAsync(c, n)
+		case answer == CrewNodeCarryOn:
+			// one more round: the rework cap counts from here
+			n.Reworks, n.PlannerTries = nodeReworkCap-1, 0
+			e.crewLog(c, "the person gave "+n.Node+" one more round")
+			e.reworkNode(ctx, c, n, "The person gives you one more round. What held you: "+n.Reason)
+		default:
+			c.Wake = append(c.Wake, "the person answered about "+d.Node+": "+answer)
+			e.crewLog(c, "the person talked "+d.Node+" over: "+answer)
+		}
 	}
 	if err := e.crewStore().UpdateCrew(ctx, c); err != nil {
 		return err
@@ -606,6 +849,20 @@ func (e *Engine) CrewAnswer(ctx context.Context, session domain.FeatureID, id, a
 	e.send(Event{Feature: session, Stage: domain.StageOpen, Kind: EventUpdated})
 	crewEvent(e, session)
 	return nil
+}
+
+// topUpSession raises the session's envelope by credits: a person's top-up
+// answering a crew's budget decision.
+func (e *Engine) topUpSession(ctx context.Context, session domain.FeatureID, credits int) error {
+	sess, err := e.crewStore().GetFeature(ctx, session)
+	if err != nil {
+		return err
+	}
+	if sess.Budget.Envelope <= 0 {
+		e.crewEnvelopeRaised(ctx, session)
+		return nil
+	}
+	return e.RaiseEnvelope(ctx, session, sess.Budget.Envelope+max(credits, 1))
 }
 
 // approveCrewPlan makes plan the one that runs.
@@ -695,6 +952,19 @@ func (e *Engine) CrewTick(ctx context.Context, session domain.FeatureID) (CrewTi
 		}
 		return res, nil
 	case domain.CrewRunning:
+	case domain.CrewPaused:
+		// out of money with another decision in the way: put the top-up to
+		// the person once that one is answered
+		if c.OutOfBudget && c.Pending == nil {
+			in, _, err := e.crewSnapshot(ctx, c)
+			if err != nil {
+				return res, err
+			}
+			if e.raiseBudgetDecision(ctx, c, crewpolicy.TopUpFor(crewpolicy.ComputeForecast(in).ToFinish)) {
+				res.Actions = append(res.Actions, "budget")
+			}
+		}
+		return res, nil
 	default:
 		return res, nil
 	}
@@ -734,9 +1004,39 @@ func (e *Engine) CrewTick(ctx context.Context, session domain.FeatureID) (CrewTi
 			c.State = domain.CrewReviewing
 			_ = e.crewStore().UpdateCrew(ctx, c)
 			e.finalReviewAsync(c)
+		case crewpolicy.Pause:
+			e.pauseForBudget(ctx, c, a.Reason, a.Amount)
+		case crewpolicy.Warn:
+			if e.raiseCrewDecision(ctx, c, domain.CrewDecision{
+				Kind: domain.CrewDecideBudget, Amount: a.Amount,
+				Question: fmt.Sprintf("Crew %d is on course to run out of money before it finishes: %s. "+
+					"Nothing has stopped. Top the session up by %s?", c.Seq, a.Reason, domain.FormatDollars(float64(a.Amount))),
+				Options: []string{CrewTopUp, CrewFinishRunning, CrewStopCrew},
+			}) {
+				c.BudgetWarned = true
+				_ = e.crewStore().UpdateCrew(ctx, c)
+				e.crewLog(c, "warned the person: "+a.Reason)
+			}
+		case crewpolicy.AskNode:
+			e.raiseNodeDecision(ctx, c, nodes[a.Node], a.Reason)
 		}
 	}
 	return res, nil
+}
+
+// raiseNodeDecision puts a runaway or a stuck node to the person.
+func (e *Engine) raiseNodeDecision(ctx context.Context, c *domain.Crew, n domain.CrewNodeRun, why string) {
+	node, _ := c.Plan.Node(n.Node)
+	d := domain.CrewDecision{Kind: domain.CrewDecideNode, Node: n.Node, Options: []string{CrewNodeCarryOn, CrewNodeDrop}}
+	if n.State == domain.NodeExhausted {
+		d.Amount = runawayFactor * max(n.Envelope, crewplan.MinNodeEnvelope)
+		d.Question = fmt.Sprintf("%s (%q) has run far past its estimate: %s. Let it carry on for up to %s more, or drop it? "+
+			"Its branch is kept either way.", n.Node, node.Title, why, domain.FormatDollars(float64(d.Amount)))
+	} else {
+		d.Question = fmt.Sprintf("%s (%q) is stuck: %s. Give it one more round of rework, or drop it? Its branch is kept either way.",
+			n.Node, node.Title, why)
+	}
+	e.raiseCrewDecision(ctx, c, d)
 }
 
 func mergeReasons(have, add []string) []string {
@@ -763,15 +1063,16 @@ func (e *Engine) crewSnapshot(ctx context.Context, c *domain.Crew) (crewpolicy.I
 	for _, r := range rows {
 		if r.Card != "" {
 			if f, err := e.crewStore().GetFeature(ctx, r.Card); err == nil {
-				r.Spent = f.Spend.Credits
+				r.Spent = f.Spend.CreditEquivalent()
 			}
 		}
 		byID[r.Node] = r
 	}
 	rt := e.crewRT()
+	left, bounded := e.crewPoolLeft(ctx, c)
 	in := crewpolicy.Input{
-		State: c.State, Budget: c.Budget, Reserve: crewReserve, OwnSpent: c.OwnSpent,
-		Lanes: max(1, c.Plan.Lanes), Wake: c.Wake, Stopping: c.Stopping,
+		State: c.State, Bounded: bounded, Left: left, Reserve: crewReserve, Warned: c.BudgetWarned,
+		OwnSpent: c.OwnSpent, Lanes: max(1, c.Plan.Lanes), Wake: c.Wake, Stopping: c.Stopping,
 		PlannerBusy: rt.isBusy(plannerKey(c.ID)),
 	}
 	for _, n := range c.Plan.Nodes {
@@ -809,7 +1110,15 @@ func (e *Engine) CrewStatusText(ctx context.Context, session domain.FeatureID) (
 	}
 	c := crews[len(crews)-1]
 	var b strings.Builder
-	fmt.Fprintf(&b, "crew %d: %s · budget %d\n", c.Seq, c.State, c.Budget)
+	m := e.CrewMoney(ctx, &c)
+	fmt.Fprintf(&b, "crew %d: %s · estimated %d · spent %.0f", c.Seq, c.State, c.Budget, m.Spent)
+	if m.ToFinish > 0 {
+		fmt.Fprintf(&b, " · about %.0f to finish", m.ToFinish)
+	}
+	if m.Bounded {
+		fmt.Fprintf(&b, " · the session has %.0f left", max(0, m.Left))
+	}
+	b.WriteString("\n")
 	if c.Pending != nil {
 		fmt.Fprintf(&b, "waiting on the person: %s\n", c.Pending.Question)
 	}

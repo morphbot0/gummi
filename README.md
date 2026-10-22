@@ -41,7 +41,9 @@ your read of its diff and your keypress.
 - **Pick the model per role** — the session, the planner, each node tier
   and the reviewer map to models through profiles: strong ones where they
   earn it, cheap or local ones elsewhere. Each session spends from a
-  budget in dollars, and a crew's budget is held against it.
+  budget in dollars, and its crews spend from the same budget: you are
+  warned before it runs out, and a crew that runs out pauses for a top-up
+  rather than throwing work away.
 - **Agents, schedules and heartbeats** — an agent is a session with a home
   of its own instead of a repository; a session can come back on a clock.
 - **Stacks and PRs** — slice work into stacked branches; push a branch

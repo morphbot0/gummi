@@ -207,8 +207,9 @@ worktrees and specs still work — the board just stays static. Key env vars are
   owns is enforced when it lands; every writing node is checked and
   reviewed by a fresh context; the final review runs the done-when
   checks; a node's question goes to the planner and on to the person
-  when the frozen spec does not answer it; the budget is a ceiling no
-  agent raises. The crew's review and checks are evidence for the
+  when the frozen spec does not answer it; the session's envelope is a
+  ceiling no agent raises, and a crew is never stopped over money but
+  paused for a person's top-up (DESIGN §24.7a). The crew's review and checks are evidence for the
   person's read of the diff, never a gate on it.
 - **The retired kinds are read-only.** A feature, bug, research or goal
   card left in an old database is shown but never run, minted or copied

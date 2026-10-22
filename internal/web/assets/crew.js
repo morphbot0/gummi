@@ -25,7 +25,7 @@ export const crewTab = {
 }
 
 // the words a node's state is said in, and the colour class it takes
-const NODE_WORD = { waiting: 'waiting', running: 'working', checking: 'checking', reviewing: 'in review', ready: 'ready to land', landed: 'landed', stuck: 'stuck', exhausted: 'out of budget', dropped: 'dropped' }
+const NODE_WORD = { waiting: 'waiting', running: 'working', checking: 'checking', reviewing: 'in review', ready: 'ready to land', landed: 'landed', stuck: 'stuck', exhausted: 'far past its estimate', dropped: 'dropped' }
 const nodeTone = (st) => ({ landed: 'ok', ready: 'ok', running: 'run', checking: 'run', reviewing: 'run', stuck: 'bad', exhausted: 'bad', dropped: 'off' })[st] || 'wait'
 
 const CREW_WORD = { proposed: 'proposed', running: 'running', paused: 'paused', reviewing: 'in final review', finished: 'finished', partial: 'partial', declined: 'declined', landed: 'landed' }
@@ -136,7 +136,7 @@ export function openCrewStart (card, after) {
   const brief = h('textarea', { rows: 4, testid: 'crew-brief', placeholder: 'What the crew is for, beyond the spec: what matters, what to watch.' })
   const budget = h('input', { type: 'text', inputmode: 'decimal', value: dollarsInput(400), testid: 'crew-budget', autocomplete: 'off' })
   const err = h('p', { class: 'spec-err', role: 'alert', testid: 'crew-start-error', hidden: true })
-  const env = card?.envelope ? ` The session has ${cr(Math.max(0, card.envelope - (card.spend || 0)))} left; the crew's budget is held against it.` : ''
+  const env = card?.envelope ? ` The crew spends from the session's budget (${cr(card.envelope)}); you are asked before it runs out, and a crew that runs out pauses rather than throwing work away.` : ''
   openModal({
     title: 'Start a crew',
     testid: 'crew-start-dialog',
@@ -144,7 +144,7 @@ export function openCrewStart (card, after) {
     body: [
       h('p', { class: 'spec-about' }, `A planner turns this session's spec into a plan of nodes, each checked and reviewed, on a branch of the crew's own. You approve the plan before anything runs. Starting freezes the spec's current revision.${env}`),
       h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Brief'), brief),
-      h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Budget'), budget, h('span', { class: 'fh' }, 'Dollars for the whole crew: its nodes, the planner and the reviews.')),
+      h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Estimate'), budget, h('span', { class: 'fh' }, 'What you expect the whole crew to cost, in dollars: its nodes, the planner and the reviews.')),
       err
     ],
     actions: [{ label: 'Cancel' }, {
@@ -213,7 +213,7 @@ const ACT = {
   land: { label: 'Land crew', primary: true, go: (c, ctx) => act(c.id, 'land', {}, null, swap(ctx)) },
   recheck: { label: 'Re-check', go: (c, ctx) => act(c.id, 'recheck', {}, null, swap(ctx)) },
   start: { label: 'Start a crew…', go: (c, ctx) => openCrewStart(c, swap(ctx)) },
-  preauth: { label: 'Pre-authorise…', go: (c, ctx, data) => openWords(c, { title: 'Pre-authorise', label: 'Up to', dollars: true, value: dollarsInput(data?.preauth || 0), about: 'A plan whose budget is at most this runs without asking you. A widening always asks. 0: every plan asks.', action: 'preauth', field: 'credits', testid: 'crew-preauth' }, swap(ctx)) }
+  preauth: { label: 'Pre-authorise…', go: (c, ctx, data) => openWords(c, { title: 'Pre-authorise', label: 'Up to', dollars: true, value: dollarsInput(data?.preauth || 0), about: 'A plan whose estimate is at most this runs without asking you. A widening, or a top-up of the session, always asks. 0: every plan asks.', action: 'preauth', field: 'credits', testid: 'crew-preauth' }, swap(ctx)) }
 }
 const swap = (ctx) => (res) => ctx.swap(res?.crew || null)
 
@@ -285,8 +285,9 @@ function budgetStrip (c) {
   return h('div', { class: 'crew-budget', testid: 'crew-budget' },
     h('span', null, 'spent ', h('b', { class: 'mono', testid: 'crew-spent' }, cr(b.spent))),
     h('span', { class: 'crew-bar', 'aria-hidden': 'true', style: { '--pl': pct(b.planned), '--sp': pct(b.spent) } }, h('i', { class: 'pl' }), h('i', { class: 'sp' })),
-    h('span', null, 'planned ', h('b', { class: 'mono' }, cr(b.planned)), ' · budget ', h('b', { class: 'mono' }, cr(b.budget)),
-      b.envelope ? [' · session ', h('b', { class: 'mono' }, cr(b.envelope))] : null),
+    h('span', null, 'planned ', h('b', { class: 'mono' }, cr(b.planned)), ' · estimate ', h('b', { class: 'mono' }, cr(b.budget)),
+      b.toFinish ? [' · to finish ~', h('b', { class: 'mono', testid: 'crew-to-finish' }, cr(b.toFinish))] : null,
+      b.left != null ? [' · session has ', h('b', { class: 'mono', testid: 'crew-left' }, cr(b.left)), ' left'] : null),
     h('span', null, 'lanes ', h('b', null, `${b.live || 0}/${b.lanes || 1}`)),
     h('span', null, 'rework ', h('b', null, String(b.rework || 0))),
     elapsed ? h('span', null, 'elapsed ', h('b', null, `${Math.round(elapsed)}m`)) : null)

@@ -922,7 +922,11 @@ func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
 		return nil
 	}
 	f.Budget.Envelope = int(raised)
-	return e.cfg.Store.UpdateFeature(ctx, &f)
+	if err := e.cfg.Store.UpdateFeature(ctx, &f); err != nil {
+		return err
+	}
+	e.envelopeRaised(ctx, f)
+	return nil
 }
 
 // RaiseEnvelope durably sets a feature's envelope to an explicit credit
@@ -943,8 +947,22 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 			return fmt.Errorf("%s: %s is below the %s floor (spend plus resume headroom)", id, domain.FormatDollars(float64(to)), domain.FormatDollars(float64(floor)))
 		}
 	}
+	raised := to == 0 || to > f.Budget.Envelope
 	f.Budget.Envelope = to
-	return e.cfg.Store.UpdateFeature(ctx, &f)
+	if err := e.cfg.Store.UpdateFeature(ctx, &f); err != nil {
+		return err
+	}
+	if raised {
+		e.envelopeRaised(ctx, f)
+	}
+	return nil
+}
+
+// envelopeRaised tells a session's crew its pool grew (§24.7a).
+func (e *Engine) envelopeRaised(ctx context.Context, f domain.Feature) {
+	if f.IsFreeform() && !f.InCrew() {
+		e.crewEnvelopeRaised(ctx, f.ID)
+	}
 }
 
 // Close stops every session and closes the event stream.

@@ -56,6 +56,10 @@ func crewDecisionWord(d *domain.CrewDecision) string {
 		return "crew plan"
 	case domain.CrewDecideWiden:
 		return "widen the plan"
+	case domain.CrewDecideBudget:
+		return "crew budget"
+	case domain.CrewDecideNode:
+		return "crew node"
 	}
 	return "crew asks"
 }
@@ -406,6 +410,14 @@ func (w *WebCrew) Read(ctx context.Context) (webapi.Crew, error) {
 		}
 	}
 	b.Spent = spent
+	if w.eng != nil {
+		m := w.eng.CrewMoney(ctx, &c)
+		b.Spent, b.ToFinish = m.Spent, m.ToFinish
+		if m.Bounded {
+			left := max(0, m.Left)
+			b.Left = &left
+		}
+	}
 	out.Budget = b
 	for _, n := range plan.Nodes {
 		if byID[n.ID].State == domain.NodeLanded {

@@ -157,14 +157,15 @@ const (
 	CrewProposed CrewState = "proposed"
 	// CrewRunning: the plan is approved and the conductor runs it.
 	CrewRunning CrewState = "running"
-	// CrewPaused: a quit parked it, or a person paused it; it runs again
-	// only when a person resumes it (decision 17).
+	// CrewPaused: a quit parked it, a person paused it, or the session's
+	// budget ran out; it runs again only when a person resumes it or tops
+	// the session up (decision 17).
 	CrewPaused CrewState = "paused"
 	// CrewReviewing: every node is settled and the final review runs.
 	CrewReviewing CrewState = "reviewing"
 	// CrewFinished: the final review passed.
 	CrewFinished CrewState = "finished"
-	// CrewPartial: stopped, stuck past the planner, or out of budget.
+	// CrewPartial: stopped, or a node dropped on the way.
 	CrewPartial CrewState = "partial"
 	// CrewDeclined: the person said no to the plan.
 	CrewDeclined CrewState = "declined"
@@ -267,6 +268,14 @@ const (
 	CrewDecideWiden CrewDecisionKind = "widen"
 	// CrewDecideQuestion: a node asked what the frozen spec does not settle.
 	CrewDecideQuestion CrewDecisionKind = "question"
+	// CrewDecideBudget: the session's budget is spent and the crew paused,
+	// or the forecast says it will be before the crew finishes. Amount is
+	// the top-up suggested.
+	CrewDecideBudget CrewDecisionKind = "budget"
+	// CrewDecideNode: a node ran far past its estimate, or stayed stuck
+	// past the planner — carry on, or drop it. Amount is a runaway's
+	// further allowance.
+	CrewDecideNode CrewDecisionKind = "node"
 )
 
 // CrewDecision is a crew's one open question to its person. A crew holds
@@ -285,6 +294,9 @@ type CrewDecision struct {
 	Plan    *CrewPlan  `json:"plan,omitempty"`
 	Items   []DoneWhen `json:"items,omitempty"`
 	Reasons []string   `json:"reasons,omitempty"`
+	// Amount is a budget decision's suggested top-up, or a node decision's
+	// further allowance, in credits.
+	Amount int `json:"amount,omitempty"`
 }
 
 // Crew is one crew's record.
@@ -296,7 +308,10 @@ type Crew struct {
 	Brief   string
 	// SpecRev is the session spec's revision the crew is judged against.
 	SpecRev int
-	Budget  int
+	// Budget is the crew's estimate: what the person approved it to cost.
+	// The crew spends from its session's envelope (§24.7a); this is no
+	// fence of its own.
+	Budget int
 	// Approved and ApprovedItems are what the person approved; Plan and
 	// Items are what runs now (equal to the approved until a revision).
 	Approved      CrewPlan
@@ -308,6 +323,13 @@ type Crew struct {
 	Wake     []string
 	OwnSpent float64
 	Stopping bool
+	// BudgetWarned marks the forecast warning put to the person, until the
+	// session's envelope is next raised.
+	BudgetWarned bool
+	// OutOfBudget marks a crew paused because its session's money ran out:
+	// a raise of the session's envelope resumes it, as a person's resume
+	// does any paused crew.
+	OutOfBudget bool
 	// Report is the crew's report once it ended; VerifiedSHA the session
 	// commit whose done-when checks passed when it landed (§24.8).
 	Report      string
@@ -327,7 +349,8 @@ type CrewNodeRun struct {
 	PlannerTries int
 	Reason       string
 	Reworks      int
-	// Envelope is the node's envelope, the plan's until the planner raises it.
+	// Envelope is the node's estimate, the plan's until the planner raises
+	// it. The node's card is capped at a multiple of it (the runaway cap).
 	Envelope int
 	Spent    float64
 	// Handoff is the node's last DONE:/DECISION:/OPEN: lines.

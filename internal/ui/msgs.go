@@ -28,6 +28,9 @@ type featureRow struct {
 	// cost the render nothing. Nil on every card that never ran one.
 	Crew      *domain.Crew
 	CrewNodes []domain.CrewNodeRun
+	// CrewMoney is an open crew's money — spent, the forecast, what the
+	// session has left — read at load with the crew (Engine.CrewMoney).
+	CrewMoney *engine.CrewMoney
 	// CrewMark is the session's "crew verified at <sha>" mark (§24.8),
 	// read at load for an open session whose last crew landed: it runs
 	// git, so never at render. Nil on every other card.
@@ -256,6 +259,10 @@ func (m *Shell) loadRows() tea.Msg {
 		if c := crews[f.ID]; c != nil {
 			row.Crew = c
 			row.CrewNodes, _ = m.store.CrewNodes(ctx, c.ID)
+			if c.State.Open() && m.engine != nil {
+				money := m.engine.CrewMoney(ctx, c)
+				row.CrewMoney = &money
+			}
 			if c.State == domain.CrewLanded && f.Stage != domain.StageDone && m.engine != nil {
 				if mk, ok := m.engine.CrewVerifiedMark(ctx, f.ID); ok {
 					row.CrewMark = &mk

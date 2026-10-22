@@ -2062,7 +2062,8 @@ Decided in the design interview (2026-07-03):
     widening always (decision 17's "may redo, may never widen"); no agent
     approves its own crew; a node's question
     reaches the person whenever the frozen spec does not answer it; and
-    the budget is a ceiling no agent raises. After a crew there is no
+    the session's envelope is a ceiling no agent raises — a crew that
+    reaches it pauses for the person's top-up (§24.7a). After a crew there is no
     automatic review: the card says how many commits it is past its last
     verification, and a person decides.
 
@@ -2854,8 +2855,7 @@ complying or silently ignoring the repo.
 > minted or run, and the goal engine, its ledger, substrates,
 > experiments, the notebook and programmes are deleted. A legacy `GL`
 > row is read-only and never lands. An outcome is a session with a spec;
-> its crews do the work, under a budget held against the session's
-> envelope (§24.3). This section is kept as the record of what crews
+> its crews do the work, spending from the session's envelope (§24.7a). This section is kept as the record of what crews
 > borrowed from it — the done-when items, the held-budget rule, a planner
 > that answers its workers' questions.
 
@@ -6042,15 +6042,12 @@ under it: the checks saw them, the crew's reviewers did not, and the
 report says so. Node branches go when their node lands; the crew branch
 goes when the crew lands, or with the session.
 
-**Budget.** A crew's budget is its own ceiling. Where the session has
-an envelope, the crew's budget is held against it from the start, so a
-session cannot spend what its crew was promised. A session without an
-envelope (`Budget.Envelope` 0, no cap) still gives its crew one. Inside
-the crew the rule the goal ledger used holds (`crewpolicy.Node.Held`):
-an unfinished node holds the larger of its envelope and its spend, and a
-landed or dropped one only its spend. The planner and the final review
-are the crew's own spend.
-The session's own turns during a run are the session's, not the crew's.
+**Budget.** A session and its crews spend from one pool: the session's
+envelope (§24.7a). A crew's budget is the person's approved estimate of
+what it will cost, and a node's envelope the planner's estimate of one
+node; neither is a fence. The planner and the reviews are the crew's own
+spend, and the session's turns are the session's, but all of it comes
+out of the same envelope.
 
 ### 24.4 The crew document
 
@@ -6184,20 +6181,18 @@ goal conductor a crew needs.
 `Engine.CrewTick` builds the snapshot and executes the actions. Each
 tick, in this order:
 
-1. Wind down when the budget is spent or stopped: land what is ready,
-   drop the rest. When it is past its reserve only by what the nodes hold
-   (a waiting node holds its whole envelope), wind down without throwing
-   work away: nothing starts and the planner does not wake, but ready
-   and live nodes finish and land, and only the nodes not yet started or
-   stalled are dropped.
-2. Land one node that has passed its checks and review.
-3. Send an exhausted node to the planner once, to raise or drop it.
-4. Send a stuck node to the planner up to twice, then drop it.
-5. Wake the planner on a pending reason: the start, a steer, a handoff
+1. Wind down when stopped: land what is ready, drop the rest.
+2. Pause when the session's pool is spent (§24.7a), and do nothing else.
+3. Land one node that has passed its checks and review.
+4. Put an exhausted node — a runaway — to the person.
+5. Send a stuck node to the planner up to twice, then to the person.
+6. Wake the planner on a pending reason: the start, a steer, a handoff
    with `DECISION:` or `OPEN:` lines, a question it must answer, or the
    person's answer to a widening.
-6. Start ready nodes up to the lanes.
-7. When nothing is left, run the **final review** and write the report.
+7. Start ready nodes up to the lanes.
+8. Warn the person, once, when the forecast is past what the pool has
+   left (§24.7a).
+9. When nothing is left, run the **final review** and write the report.
    The final review is the done-when checks on the crew's tip, plus one
    reviewer over the whole crew diff against the frozen spec.
    With no crew diff to read (nothing landed) or a stop, no reviewer
@@ -6206,6 +6201,47 @@ tick, in this order:
 
 Tranches, substrates, experiments and programmes were goal machinery,
 and were retired with goals.
+
+### 24.7a Money: one pool, estimates, and no work thrown away
+
+Stopping an agent that is doing its job wastes what it has spent, so a
+crew is never stopped over money unless the person says so.
+
+- **One pool.** A crew spends from its session's envelope: the session's
+  own turns, the crew's planner and reviews, and every node's card are
+  taken off the same figure (`Engine.sessionPoolLeft`), and the session's
+  own meter counts its crews' spend (`sessionBudget`). The crew's budget
+  and a node's envelope are estimates. A session without an envelope has
+  no ceiling.
+- **Pause, never drop.** When the pool is spent the crew pauses
+  (`OutOfBudget`). Its nodes are not stopped: each finishes the turn it
+  is in, and nothing new is sent. A node whose turn ends then waits,
+  unreviewed, rather than failing its review for want of money. The
+  person is asked to top the session up by a suggested amount. Raising
+  the session's envelope — from that decision, the envelope dialog, or
+  `gummi resume --envelope` — carries the crew on from where it was: a
+  node waiting to be reviewed goes straight to review, and any other node
+  carries on in its own tree and conversation. Nothing starts over.
+- **Warn ahead.** Every tick reads a forecast
+  (`crewpolicy.ComputeForecast`): each unsettled node's estimate, scaled
+  by how far the landed nodes ran over theirs (never below 1), less what
+  it has spent, plus a reserve for the planner and the final review. When
+  that is past what the pool has left the person is asked, once, while
+  there is still money to finish what runs: top up, finish what is
+  running and start nothing new (the nodes not yet started are dropped —
+  they hold no work), or stop. Nothing pauses while the question stands.
+  A raise of the envelope lets it warn again.
+- **Runaways are behaviour, not budget.** A node's card is capped at
+  three times its estimate (`runawayFactor`). Past it the node is a
+  runaway, and the person decides: let it carry on for another three
+  estimates, or drop it. A node stuck past the planner goes to the person
+  the same way: one more round of rework, or drop it. The conductor drops
+  nothing on its own.
+- **A dropped node keeps its branch.** Its tree goes; its commits stay
+  on `crew/<slug>/<n>.<node>` until the crew lands or is declined.
+- **Only a person raises the money.** No agent tops a session up; the
+  planner may move estimates between nodes inside the crew's approved
+  estimate, and raising that estimate is a widening.
 
 **The planner** is a short turn on `planner`, in the crew tree, waking
 only on those events and acting only through its own tools:
@@ -6234,7 +6270,7 @@ Limits instead.
 ### 24.8 The report, and after it
 
 A crew ends **finished** when the final review passes, and **partial**
-when it is stopped, stuck past the planner, or out of budget. Either way
+when it is stopped or a node was dropped on the way. Either way
 the report reaches the session as one turn, and the same text goes into
 the crew document. It holds:
 - each done-when item, met or not, with its check's result;

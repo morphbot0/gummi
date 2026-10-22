@@ -128,7 +128,7 @@ type CrewDecision struct {
 
 // CrewBudget is the Crew tab's budget strip: what the crew spent (its
 // nodes and its own planner and review turns), what its plan planned, its
-// budget, and the session's envelope it is held against (0: none).
+// estimate (Budget), and the session's envelope it spends from (0: none).
 type CrewBudget struct {
 	Spent    float64 `json:"spent"`
 	Own      float64 `json:"own"`
@@ -138,6 +138,10 @@ type CrewBudget struct {
 	Lanes    int     `json:"lanes"`
 	Live     int     `json:"live"`
 	Rework   int     `json:"rework"`
+	// ToFinish is the forecast of what the crew spends from here, and Left
+	// what the session's envelope has left (absent: no envelope).
+	ToFinish float64  `json:"toFinish,omitempty"`
+	Left     *float64 `json:"left,omitempty"`
 }
 
 // CrewLanded is one node that has landed on the crew's branch, in order.

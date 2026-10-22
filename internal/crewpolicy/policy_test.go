@@ -17,7 +17,7 @@ func kinds(as []Action) []string {
 }
 
 func in(nodes ...Node) Input {
-	return Input{State: domain.CrewRunning, Budget: 1000, Lanes: 2, Nodes: nodes}
+	return Input{State: domain.CrewRunning, Lanes: 2, Nodes: nodes}
 }
 
 func TestOnlyARunningCrewIsConducted(t *testing.T) {
@@ -65,18 +65,17 @@ func TestAStuckNodeGoesToThePlannerTwiceThenIsDropped(t *testing.T) {
 		}
 	}
 	n.PlannerTries = 2
-	if got := Decide(in(n)); got[0].Kind != Drop {
-		t.Fatalf("got %v", kinds(got))
+	if got := Decide(in(n)); len(got) != 1 || got[0].Kind != AskNode || got[0].Node != "t1" {
+		t.Fatalf("a node stuck past the planner is not put to the person: %v", kinds(got))
 	}
 }
 
-func TestAnExhaustedNodeGoesToThePlannerOnce(t *testing.T) {
-	n := Node{ID: "t1", State: domain.NodeExhausted, Envelope: 50, Spent: 50}
-	if got := Decide(in(n)); got[0].Kind != Planner {
-		t.Fatalf("got %v", kinds(got))
-	}
-	n.PlannerTries = 1
-	if got := Decide(in(n)); got[0].Kind != Drop {
+// A runaway — a node past its card's cap — is the person's to decide, and
+// is never dropped by the conductor.
+func TestAnExhaustedNodeGoesToThePerson(t *testing.T) {
+	n := Node{ID: "t1", State: domain.NodeExhausted, Envelope: 50, Spent: 150}
+	got := Decide(in(n))
+	if len(got) != 1 || got[0].Kind != AskNode || !strings.Contains(got[0].Reason, "150 against an estimate of 50") {
 		t.Fatalf("got %v", kinds(got))
 	}
 }
@@ -131,60 +130,63 @@ func TestStoppingWindsDown(t *testing.T) {
 	}
 }
 
-func TestASpentBudgetWindsDown(t *testing.T) {
-	x := in(Node{ID: "t1", State: domain.NodeRunning, Envelope: 50, Spent: 990})
-	x.OwnSpent = 10
-	want := []string{"wind-down: the budget is spent (1000 of 1000)", "drop t1: the crew wound down: the budget is spent (1000 of 1000)", "final-review"}
-	if got := kinds(Decide(x)); !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v", got)
-	}
-}
-
-// A budget past its reserve only by what the nodes hold — a waiting node
-// holds its whole envelope — keeps the work in flight: the ready node
-// lands, the reviewing one finishes, and only the one not started is
-// dropped. Nothing starts and the planner does not run.
-func TestABudgetPastItsReserveKeepsWorkInFlight(t *testing.T) {
+// A spent pool pauses the crew for a top-up and does nothing else: no
+// node is dropped, nothing lands or starts.
+func TestASpentPoolPausesTheCrew(t *testing.T) {
 	x := in(
-		Node{ID: "t1", State: domain.NodeReady, Envelope: 300, Spent: 250},
-		Node{ID: "t2", State: domain.NodeReviewing, Envelope: 300, Spent: 310},
-		Node{ID: "t3", State: domain.NodeWaiting, Envelope: 300},
-		Node{ID: "t4", State: domain.NodeWaiting, Envelope: 50, Needs: []string{"t1"}},
+		Node{ID: "t1", State: domain.NodeReady, Envelope: 100, Spent: 90},
+		Node{ID: "t2", State: domain.NodeRunning, Envelope: 100, Spent: 120},
+		Node{ID: "t3", State: domain.NodeWaiting, Envelope: 100},
 	)
-	x.Reserve, x.OwnSpent, x.Lanes = 100, 100, 4
-	x.Wake = []string{"a steer"}
-	why := "the budget is past its reserve (160 over)"
-	want := []string{"wind-down: " + why, "land t1", "drop t3: the crew wound down: " + why, "drop t4: the crew wound down: " + why}
-	if got := kinds(Decide(x)); !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v want %v", got, want)
+	x.Bounded, x.Left, x.Reserve, x.OwnSpent = true, 0, 50, 40
+	got := Decide(x)
+	if len(got) != 1 || got[0].Kind != Pause {
+		t.Fatalf("got %v", kinds(got))
 	}
-
-	// still past it with only the reviewing node left: ticks wait on it
-	// quietly — the steer wakes no planner — and the final review runs
-	// when it has landed
-	x.Nodes[0].State, x.Nodes[2].State, x.Nodes[3].State = domain.NodeLanded, domain.NodeDropped, domain.NodeDropped
-	x.Reserve = 600
-	if got := Decide(x); len(got) != 0 {
-		t.Fatalf("a tick waiting on the reviewing node: %v", kinds(got))
+	// to finish at the 1x ratio: t1's last 10, t2 nothing (it is past its
+	// estimate), t3's 100 and the reserve of 50 — 160, a quarter more,
+	// rounded up to the next 50
+	if got[0].Amount != 200 {
+		t.Errorf("suggested top-up %d, want 200", got[0].Amount)
 	}
-	x.Nodes[1].State = domain.NodeLanded
-	if got := kinds(Decide(x)); !reflect.DeepEqual(got, []string{"final-review"}) {
-		t.Fatalf("got %v", got)
+	x.Bounded = false
+	if got := Decide(x); len(got) == 0 || got[0].Kind == Pause {
+		t.Fatalf("a pool with no ceiling paused: %v", kinds(got))
 	}
 }
 
-func TestHeldIsTheGoalLedgersRule(t *testing.T) {
-	for _, c := range []struct {
-		n    Node
-		want float64
-	}{
-		{Node{State: domain.NodeRunning, Envelope: 50, Spent: 10}, 50},
-		{Node{State: domain.NodeRunning, Envelope: 50, Spent: 70}, 70},
-		{Node{State: domain.NodeLanded, Envelope: 50, Spent: 10}, 10},
-		{Node{State: domain.NodeDropped, Envelope: 50, Spent: 5}, 5},
-	} {
-		if got := c.n.Held(); got != c.want {
-			t.Fatalf("%v: %v want %v", c.n, got, c.want)
+// The forecast scales the unsettled nodes by how far the landed ones ran
+// over, and warns once when that is past what the pool has left; nothing
+// pauses for it.
+func TestTheForecastWarnsOnceAheadOfTheCeiling(t *testing.T) {
+	x := in(
+		Node{ID: "t1", State: domain.NodeLanded, Envelope: 100, Spent: 200},
+		Node{ID: "t2", State: domain.NodeRunning, Envelope: 100, Spent: 50},
+		Node{ID: "t3", State: domain.NodeWaiting, Envelope: 100, Needs: []string{"t2"}},
+	)
+	x.Bounded, x.Left, x.Reserve = true, 200, 50
+	fc := ComputeForecast(x)
+	if fc.Ratio != 2 || fc.ToFinish != 150+200+50 || fc.Short != 200 {
+		t.Fatalf("forecast %+v", fc)
+	}
+	got := Decide(x)
+	if len(got) != 1 || got[0].Kind != Warn || got[0].Amount != 250 {
+		t.Fatalf("got %v", kinds(got))
+	}
+	x.Warned = true
+	if got := Decide(x); len(got) != 0 {
+		t.Fatalf("a crew already warned is warned again: %v", kinds(got))
+	}
+	x.Warned, x.Left = false, 1000
+	if got := Decide(x); len(got) != 0 {
+		t.Fatalf("a forecast inside the pool warns: %v", kinds(got))
+	}
+}
+
+func TestTopUpFor(t *testing.T) {
+	for need, want := range map[float64]int{0: 100, 10: 100, 100: 150, 161: 250} {
+		if got := TopUpFor(need); got != want {
+			t.Errorf("TopUpFor(%v) = %d, want %d", need, got, want)
 		}
 	}
 }

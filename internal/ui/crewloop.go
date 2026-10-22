@@ -105,6 +105,16 @@ func crewOptionDetail(o string) string {
 		return "the revision becomes the approved plan"
 	case engine.CrewKeepScope:
 		return "the gap goes into the crew's Limits"
+	case engine.CrewTopUp:
+		return "raises the session's envelope; a paused crew carries on"
+	case engine.CrewFinishRunning:
+		return "nodes not yet started are dropped; the rest finish and land"
+	case engine.CrewStopCrew:
+		return "the crew winds down; what has landed stays"
+	case engine.CrewNodeCarryOn:
+		return "the node goes on from its own tree"
+	case engine.CrewNodeDrop:
+		return "it lands nothing more; its branch is kept"
 	}
 	return ""
 }
@@ -143,7 +153,14 @@ func crewLines(s *theme.Styles, r featureRow, w int) []string {
 		runs[n.Node] = n
 		spent += n.Spent
 	}
-	head := fmt.Sprintf("crew %d · %s · %.0f of %d credits", c.Seq, c.State, spent, c.Budget)
+	if r.CrewMoney != nil {
+		spent = r.CrewMoney.Spent
+	}
+	head := fmt.Sprintf("crew %d · %s · spent %s of about %s", c.Seq, c.State,
+		domain.FormatDollars(spent), domain.FormatDollars(float64(c.Budget)))
+	if m := r.CrewMoney; m != nil && m.Bounded {
+		head += " · the session has " + domain.FormatDollars(max(0, m.Left)) + " left"
+	}
 	if len(c.Plan.Nodes) == 0 {
 		head += " · the planner is writing the plan"
 	}
