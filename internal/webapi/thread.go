@@ -87,6 +87,8 @@ type Item struct {
 	// Decision is the decision a decision item raised, with Answer set once
 	// someone answered it.
 	Decision *ThreadDecision `json:"decision,omitempty"`
+	// Run is a run item's block (ItemRun).
+	Run *RunBlock `json:"run,omitempty"`
 	// Supersedes holds the keys of items this one takes the place of: the
 	// decisions a receipt answered. A page that drew one of them while it
 	// waited drops it — a paged read (after=) never sends an item that is

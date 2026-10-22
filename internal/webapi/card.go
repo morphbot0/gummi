@@ -107,6 +107,9 @@ type Decision struct {
 	// Multi marks a question that takes several of its options at once:
 	// the answer names them comma-separated ("0,2").
 	Multi bool `json:"multi,omitempty"`
+	// Proposal is a workflow run's proposal or revised plan, set on the
+	// decision that asks to allow it: the card the page draws it as.
+	Proposal *RunProposal `json:"proposal,omitempty"`
 }
 
 // Against is a decision's revision: an opaque token for the server, and a

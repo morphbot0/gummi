@@ -1,0 +1,105 @@
+{
+  "n": 2,
+  "rev": "34b6qlinkckg2",
+  "recipe": "deliver",
+  "spec": 2,
+  "specTitle": "Resume pre-migration sessions",
+  "specRev": 2,
+  "state": "done",
+  "spent": 280,
+  "estimate": 420,
+  "started": "2026-10-01T09:00:00Z",
+  "ended": "2026-10-01T10:12:00Z",
+  "strip": [
+    {
+      "id": "design",
+      "kind": "step",
+      "state": "done"
+    },
+    {
+      "id": "build",
+      "kind": "repeat",
+      "state": "done",
+      "iter": 2,
+      "max": 3
+    },
+    {
+      "id": "validate",
+      "kind": "step",
+      "state": "done"
+    }
+  ],
+  "rows": [
+    {
+      "key": "design",
+      "path": "design",
+      "id": "design",
+      "role": "contractor",
+      "state": "done",
+      "spent": 40,
+      "estimate": 30,
+      "line": "Design for the spec",
+      "card": "FF-1de"
+    },
+    {
+      "key": "build/1",
+      "path": "build/1",
+      "repeat": "build",
+      "iter": 1,
+      "id": "build",
+      "state": "done",
+      "spent": 170,
+      "estimate": 120,
+      "line": "not met · CHANGES · 2 findings: pruned logs come back out of order",
+      "folded": true,
+      "steps": "implement · review-a ∥ review-b · verdict",
+      "verdict": "not met · CHANGES · 2 findings: pruned logs come back out of order"
+    },
+    {
+      "key": "build/2",
+      "path": "build/2",
+      "repeat": "build",
+      "iter": 2,
+      "id": "build",
+      "state": "done",
+      "spent": 50,
+      "estimate": 120,
+      "line": "met · APPROVED",
+      "folded": true,
+      "steps": "implement · review-a ∥ review-b · verdict",
+      "verdict": "met · APPROVED"
+    },
+    {
+      "key": "validate",
+      "path": "validate",
+      "id": "validate",
+      "role": "reviewer",
+      "state": "done",
+      "spent": 20,
+      "estimate": 30,
+      "line": "all good",
+      "card": "FF-1va"
+    }
+  ],
+  "files": [
+    "internal/state/migrate_turns.go",
+    "internal/engine/migrate_test.go"
+  ],
+  "results": [
+    {
+      "item": "DW-1",
+      "verdict": "met",
+      "checked": true
+    },
+    {
+      "item": "DW-2",
+      "verdict": "unjudged"
+    }
+  ],
+  "commits": [
+    "9f8e7d6 feat(state): keep the turns"
+  ],
+  "validated": "0123456",
+  "report": true,
+  "canRevert": true
+}

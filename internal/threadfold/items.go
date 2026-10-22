@@ -98,6 +98,8 @@ type Item struct {
 	Receipt  *Receipt   `json:"receipt,omitempty"`
 	Checks   []Check    `json:"checks,omitempty"`
 	Decision *Decision  `json:"decision,omitempty"`
+	// Run is an ItemRun's block (runs.go).
+	Run *Run `json:"run,omitempty"`
 
 	// Supersedes names the keys of items this one takes the place of: the
 	// decisions a gate or ask receipt answered. A client that drew such a
@@ -162,6 +164,10 @@ type Options struct {
 	// Spend is the card's stage_spend rows (Store.StageBreakdown), the
 	// meter a stage divider's credits fall back to (ReceiptCredits).
 	Spend []state.StageSpend
+	// Runs are a session's workflow runs, read from the store by the
+	// caller: each is one item, keyed run:<n> (runs.go), placed where it
+	// was proposed.
+	Runs []RunInput
 }
 
 // Items folds a card's event log into the items a page draws, oldest
@@ -315,16 +321,18 @@ func Items(events []state.CardEvent, opt Options) []Item {
 			}
 		}
 	}
-	return out
+	return placeRuns(out, runItems(opt.Runs))
 }
 
 // Since returns the items a client that has seen everything up to seq
 // after still needs: every item whose Seq is newer, including one it
-// already drew that has grown since (upsert it by Key).
+// already drew that has grown since (upsert it by Key). A run's block
+// changes without an event of its own, so every one is delivered on every
+// page: a client upserts it by Key and redraws it only when its Rev moved.
 func Since(items []Item, after int64) []Item {
 	var out []Item
 	for _, it := range items {
-		if it.Seq > after {
+		if it.Seq > after || it.T == ItemRun {
 			out = append(out, it)
 		}
 	}
