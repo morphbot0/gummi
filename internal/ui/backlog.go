@@ -42,7 +42,8 @@ func (m *Shell) openCard() tea.Cmd {
 	m.threadScroll = 0
 	m.loadThreadDraft(r.F.ID)
 	m.focusThreadInput()
-	return m.loadCardEvents(r.F.ID)
+	m.leaveRuns()
+	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadRuns(r.F.ID))
 }
 
 // closeCard returns to the backlog list, stopping a live watch tail —
@@ -56,6 +57,7 @@ func (m *Shell) closeCard() {
 		m.saveThreadDraft(r.F.ID)
 	}
 	m.cardOpen = false
+	m.leaveRuns()
 	m.blurActions()
 	m.stopFollow()
 }
@@ -159,10 +161,11 @@ func (m *Shell) arriveOnCard() tea.Cmd {
 	if ok && m.follow != nil && m.follow.feature != r.F.ID {
 		m.stopFollow()
 	}
+	m.leaveRuns()
 	if !ok {
 		return nil
 	}
-	return m.loadCardEvents(r.F.ID)
+	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadRuns(r.F.ID))
 }
 
 // actionsOwnArrows reports whether the card's action list owns ↑↓ and

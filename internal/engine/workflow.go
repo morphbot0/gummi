@@ -151,6 +151,11 @@ func (e *Engine) workflowEvent(session domain.FeatureID) {
 	e.send(Event{Feature: session, Stage: domain.StageOpen, Kind: EventWorkflow})
 }
 
+// RunNotePrefix starts every line a run puts into its session's
+// transcript (runNote). The run's own block in the thread says the same
+// and more, so the faces leave these lines out (threadfold.IsRunNote).
+const RunNotePrefix = "workflow: "
+
 // runNote puts a line from a run into the session's thread.
 func (e *Engine) runNote(session domain.FeatureID, line string) {
 	ff := e.Freeform(session)
@@ -158,7 +163,7 @@ func (e *Engine) runNote(session domain.FeatureID, line string) {
 		return
 	}
 	if sess := ff.Session(); sess != nil {
-		sess.appendActivity("workflow: " + line)
+		sess.appendActivity(RunNotePrefix + line)
 		e.persist(sess)
 		e.send(Event{Feature: session, Stage: domain.StageOpen, Kind: EventUpdated})
 	}

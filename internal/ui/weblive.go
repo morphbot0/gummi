@@ -227,7 +227,8 @@ func webEarlier(snap engine.Snapshot, before int) webapi.Earlier {
 // arriving, which it returns apart, with the tool call in flight and that
 // call's place in the transcript (-1 when there is none).
 func settledTranscript(snap engine.Snapshot) (tr []engine.Message, streaming string, tool *webapi.ToolCall, inflight int) {
-	tr = snap.Transcript
+	// a run's notes are its block's to say (threadfold.IsRunNote)
+	tr = threadfold.WithoutRunNotes(snap.Transcript)
 	// A message is still arriving only while a turn is in flight. One a
 	// pause or a failure cut off is flagged streaming forever, and the
 	// page drew it under "writing" with a spinner for as long as the

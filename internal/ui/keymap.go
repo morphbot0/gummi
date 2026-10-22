@@ -61,6 +61,8 @@ func helpRows(bs []binding) [][2]string {
 func (m *Shell) activeSurface() (string, []binding) {
 	live := m.boardSurfacesLive()
 	switch {
+	case live && m.cardOpen && m.stepv != nil:
+		return "step", m.stepBindings()
 	case live && m.spec != nil:
 		// with a card page underneath, the artifact is one of that page's
 		// tabs (cardtabs.go) and its table has to name the way to the
@@ -77,6 +79,8 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "stats", m.wsStatsBindings()
 	case m.tab == TabInbox:
 		return "inbox", m.inboxBindings()
+	case m.tab == TabBoard && len(m.rows) > 0 && m.cardOpen && m.wf.focus:
+		return "runs", m.runBindings()
 	case m.tab == TabBoard && len(m.rows) > 0 && m.cardOpen:
 		return "card", m.cardPageBindings()
 	case m.tab == TabBoard && len(m.rows) > 0:

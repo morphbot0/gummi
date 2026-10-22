@@ -208,6 +208,11 @@ type Shell struct {
 	// (workflowloop.go).
 	workflowTicking   bool
 	workflowTickAgain bool
+	// wf is what the terminal holds of the open session's workflow runs
+	// (runblock.go), and stepv a step opened over its thread
+	// (stepview.go), nil when none is.
+	wf    runState
+	stepv *stepView
 	// sizedFor is how many landed rows worktreeSizeText was measured
 	// against, so a reload that did not change the set does not re-walk
 	// every worktree on disk. -1 until the first measurement.
@@ -1457,6 +1462,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.updateWorkflow(msg); ok {
 		return m, cmd
 	}
+	if cmd, ok := m.updateRuns(msg); ok {
+		return m, cmd
+	}
 	if cmd, ok := m.updateStack(msg); ok {
 		return m, cmd
 	}
@@ -1535,6 +1543,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// figure that is one landing stale is still the right order of
 		// magnitude for the decision it informs.
 		cmds := []tea.Cmd{jump}
+		if m.cardOpen {
+			// a run's decision, its state and its spend all move with the
+			// rows: its blocks are read again beside them
+			cmds = append(cmds, m.loadRuns(m.selectedID()))
+		}
 		if n := landedRows(m.rows); n != m.sizedFor {
 			m.sizedFor = n
 			cmds = append(cmds, m.refreshWorktreeSize())
@@ -2000,7 +2013,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// just signal "re-render from Snapshot" — so keep listening, plus
 		// any automatic review-loop follow-up and, when the event means
 		// the open card's event log grew, a reload of it.
-		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev), m.measureToday())
+		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev), m.openRunsChanged(msg.ev), m.measureToday())
 
 	case engineClosedMsg:
 		// the agent backend shut down unexpectedly. There is no pane left
@@ -2074,6 +2087,14 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	// Focused() at once — a card page stays open across a tab switch and
 	// nothing blurs its input — so an ungated test here answered for
 	// whichever branch came first, and this one did.
+	if m.boardSurfacesLive() && m.cardOpen && m.stepv != nil {
+		if m.stepv.composing {
+			var cmd tea.Cmd
+			m.stepv.input, cmd = m.stepv.input.Update(msg)
+			return cmd
+		}
+		return nil
+	}
 	if m.boardSurfacesLive() && m.cardOpen && m.threadInput.Focused() {
 		return m.handleThreadPaste(msg)
 	}
@@ -2134,6 +2155,12 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.boardSurfacesLive() {
 		// the card page's tabs, answered before any of the three surfaces
 		// they switch between gets the key (cardtabs.go)
+		if m.cardOpen && m.stepv != nil {
+			// a step opened over the thread answers first: its own tabs,
+			// its line to the agent, and the way back (stepview.go)
+			m.clearTransientNotice()
+			return m.handleStepKey(msg)
+		}
 		if m.cardOpen {
 			if cmd, ok := m.cardTabKey(key); ok {
 				return cmd
@@ -2163,6 +2190,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.logv != nil {
 			m.clearTransientNotice()
 			return m.handleLogKey(key)
+		}
+		if m.cardOpen && m.wf.focus {
+			m.clearTransientNotice()
+			return m.handleRunKey(key)
 		}
 		if m.cardOpen && m.threadInput.Focused() {
 			return m.handleThreadInputKey(msg)
@@ -2260,6 +2291,12 @@ func (m *Shell) textEntry() bool {
 	// from someone typing prose", and that reason does not hold when a
 	// review surface, not the composer, is what the user is actually
 	// looking at and typing into.
+	if m.cardOpen && m.stepv != nil {
+		return m.stepv.composing
+	}
+	if m.cardOpen && m.wf.focus {
+		return false
+	}
 	return m.cardOpen && m.threadInput.Focused() && m.spec == nil && m.diff == nil
 }
 
@@ -3096,6 +3133,10 @@ func (m *Shell) mainView(w, h int) string {
 		// bar naming where it is and how to get back (cardtabs.go).
 		// Reached from the backlog list there is no page underneath and no
 		// bar — the same surface, mounted without a card page around it.
+		if m.stepv != nil && m.cardOpen {
+			// a step opened over the thread, with its own crumb back
+			return m.stepViewRender(w, h)
+		}
 		if m.spec != nil {
 			if m.cardOpen {
 				return m.cardSurface(cardTabArtifact, w, h, m.specViewRender)

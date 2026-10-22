@@ -285,6 +285,16 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "alt+z":
 		m.rewindFreeform(r)
 		return nil
+	case "alt+w":
+		// the run blocks take the keyboard (runkeys.go)
+		m.focusRuns(r)
+		return nil
+	case "alt+v":
+		if r.Validated == nil {
+			m.notice = noticeMsg{text: r.F.Name() + ": no run has validated this session's tree yet"}
+			return nil
+		}
+		return m.recheckRun(r)
 	case "pgup", "pgdown":
 		// scrolling the conversation is never text, so it works mid-draft
 		m.scrollThread(msg.String() == "pgup")
@@ -1290,13 +1300,17 @@ func (m *Shell) threadInputBindings() []binding {
 			}
 			bs = append(bs, m.threadOutputsBinding(),
 				binding{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"})
+			bs = append(bs, m.runKeyBindings(r)...)
 			// esc stays last: the status bar drops hints from the
 			// second-to-last backwards precisely so the surface's escape
 			// hatch outlives every other row (statusbar.Render).
 			return m.withCardTabs(append(bs, binding{key: "esc", label: "board", help: "back to the board (the draft is kept)", bar: true}))
 		}
 	}
-	var unqueue []binding
+	var unqueue, runs []binding
+	if r, ok := m.selected(); ok {
+		runs = m.runKeyBindings(r)
+	}
 	if r, ok := m.selected(); ok && r.F.IsFreeform() && m.engine != nil {
 		if ff := m.engine.Freeform(r.F.ID); ff != nil && len(ff.Queued()) > 0 {
 			unqueue = []binding{{key: "alt+u", label: "unqueue", help: "take the newest queued line back into the empty composer, before the agent hears it", bar: true}}
@@ -1304,17 +1318,18 @@ func (m *Shell) threadInputBindings() []binding {
 			unqueue = []binding{{key: "alt+z", label: "rewind", help: "take the conversation back to before your last message and put it in the composer to edit; again to go further back. The branch keeps its commits"}}
 		}
 	}
-	return m.withCardTabs(append(unqueue, []binding{
+	bs := append(unqueue, []binding{
 		{key: "enter", label: "send", help: "send the line — a message, or route a verb command; does nothing when the line is empty", bar: true},
 		{key: "↑", label: "actions", help: "open the action inventory while the line is empty (the placeholder says so too)", bar: true},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
 		m.threadOutputsBinding(),
 		{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
-		// esc last, for the reason the decision table gives above: the
-		// bar sheds the second-to-last hint first, so the way out is the
-		// last thing to go.
-		{key: "esc", label: "board", help: "back to the board (the draft is kept)", bar: true},
-	}...))
+	}...)
+	bs = append(bs, runs...)
+	// esc last, for the reason the decision table gives above: the bar
+	// sheds the second-to-last hint first, so the way out is the last
+	// thing to go.
+	return m.withCardTabs(append(bs, binding{key: "esc", label: "board", help: "back to the board (the draft is kept)", bar: true}))
 }
 
 // threadEnterLabel names what enter will actually do with a verb-leading

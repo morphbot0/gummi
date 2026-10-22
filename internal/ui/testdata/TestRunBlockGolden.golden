@@ -1,0 +1,53 @@
+== running, its asking step selected
+┌ workflow deliver · run 2  spec Resume pre-migration sessions                 running · $3.10 of ~$4.20 · 14m
+│ design ✓ → build ↺ 2/3 ? → validate
+│ ✓      design         contractor   Design for the spec                                                 $0.40
+│ ✓ ↺ 1  build                       implement · review-a ∥ review-b · verdict — not met · CHANGES · 2 … $1.70
+▸ ? ↺ 2  implement      implementer  asks you                                                            $1.00
+│     implement asks: Resume a pruned v40 session, or refuse it?
+│       1. Resume with what's left (recommended) — the log is ordered by event id
+│       2. Refuse with a sentence
+│       open the step (alt+w, enter) to answer
+└ 2 files changed in the tree · uncommitted: internal/state/migrate_turns.go, internal/engine/migrate_test.go
+== running, unfocused
+┌ workflow deliver · run 2  spec Resume pre-migration sessions                 running · $3.10 of ~$4.20 · 14m
+│ design ✓ → build ↺ 2/3 ? → validate
+│ ✓      design         contractor   Design for the spec                                                 $0.40
+│ ✓ ↺ 1  build                       implement · review-a ∥ review-b · verdict — not met · CHANGES · 2 … $1.70
+│ ? ↺ 2  implement      implementer  asks you                                                            $1.00
+│     implement asks: Resume a pruned v40 session, or refuse it?
+│       1. Resume with what's left (recommended) — the log is ordered by event id
+│       2. Refuse with a sentence
+│       open the step (alt+w, enter) to answer
+└ 2 files changed in the tree · uncommitted: internal/state/migrate_turns.go, internal/engine…  alt+w steps in
+== ended, folded, head selected
+▸ workflow deliver · run 1  spec Persist turns              done · validated bbbbbbb · $1.75 of ~$4.20 · 1h12m
+│ design ✓ → build ↺ 1/3 ✓ → validate ✓
+│ ✓ DW-1  – DW-2
+│ 3 steps · design · build ↺ 1 · validate · enter unfolds them
+│ commits made while it ran: abc1234 feat(state): store every turn
+└ 1 file left changed in the tree: internal/state/turns.go                                    report in spec 1
+== ended, unfolded
+┌ workflow deliver · run 1  spec Persist turns              done · validated bbbbbbb · $1.75 of ~$4.20 · 1h12m
+│ design ✓ → build ↺ 1/3 ✓ → validate ✓
+│ ✓ DW-1  – DW-2
+│ ✓      design         contractor   Design for the spec                                                 $0.40
+│ ✓ ↺ 1  build                       implement · verdict — met · APPROVED                                $1.15
+│ ✓      validate       tester       checks pass                                                         $0.20
+│ commits made while it ran: abc1234 feat(state): store every turn
+└ 1 file left changed in the tree: internal/state/turns.go                   report in spec 1 · alt+w steps in
+== proposed
+┌ workflow fix-until-green · run 3  spec Resume pre-migration sessions                    waits on your answer
+│ waits on your answer below
+== narrow
+┌ workflow deliver · run 2  spec…  running · $3.10 of ~$4.20
+│ design ✓ → build ↺ 2/3 ? → validate
+│ ✓      design         contractor   Design for the s… $0.40
+│ ✓ ↺ 1  build                       implement · revi… $1.70
+│ ? ↺ 2  implement      implementer  asks you          $1.00
+│     implement asks: Resume a pruned v40 session, or
+│     refuse it?
+│       1. Resume with what's left (recommended) — the log …
+│       2. Refuse with a sentence
+│       open the step (alt+w, enter) to answer
+└ 2 files changed in the tree · uncommitted…  alt+w steps in

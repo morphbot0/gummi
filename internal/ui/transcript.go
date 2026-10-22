@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -32,9 +33,35 @@ import (
 // shows its output tail (the error is the point) and showOutput expands
 // every entry's full output.
 func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bool) []string {
+	return transcriptLinesWith(s, snap, w, showOutput, nil)
+}
+
+// timedBlock is a block of lines the transcript draws among its turns, at
+// the moment it belongs to: a workflow run's block, where it was proposed.
+type timedBlock struct {
+	at    time.Time
+	lines []string
+}
+
+// transcriptLinesWith is transcriptLines with blocks placed among the
+// turns, each before the first turn newer than it (the rest after the
+// last turn). A run's own notes in the transcript are left out: its block
+// says all of them (threadfold.IsRunNote).
+func transcriptLinesWith(s *theme.Styles, snap engine.Snapshot, w int, showOutput bool, blocks []timedBlock) []string {
 	var lines []string
+	snap.Transcript = threadfold.WithoutRunNotes(snap.Transcript)
+	k := 0
+	place := func(before time.Time) {
+		for k < len(blocks) && (before.IsZero() || blocks[k].at.Before(before)) {
+			lines = append(lines, blocks[k].lines...)
+			k++
+		}
+	}
 	for i := 0; i < len(snap.Transcript); i++ {
 		msg := snap.Transcript[i]
+		if !msg.At.IsZero() {
+			place(msg.At)
+		}
 		// everything the agent did between two messages is one summary row
 		// until alt+o expands it; expanded, each entry renders as below.
 		if isActivityMsg(msg) && !showOutput {
@@ -141,6 +168,7 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		}
 		lines = append(lines, "")
 	}
+	place(time.Time{})
 	lines = append(lines, taskLines(s, snap.Tasks, w)...)
 	lines = append(lines, watchLines(s, snap.Watches, w)...)
 	lines = append(lines, objectiveLines(s, snap.Objective, w)...)

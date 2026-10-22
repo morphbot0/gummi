@@ -530,7 +530,7 @@ func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 		row.Line = Sanitize(firstLineOf(s.Reason))
 	}
 	if s.State.Live() && l.Ask != nil {
-		row.Question = stepQuestion(l.Ask)
+		row.Question = AskQuestion(l.Ask)
 	}
 	return row
 }
@@ -569,8 +569,9 @@ func endSummary(out string) string {
 	return "done"
 }
 
-// stepQuestion is a step's ask with its recommended answer first.
-func stepQuestion(a *engine.Ask) *StepQuestion {
+// AskQuestion is a step's ask with its recommended answer first, as its
+// row and its opened step both draw it.
+func AskQuestion(a *engine.Ask) *StepQuestion {
 	q := &StepQuestion{Question: Sanitize(a.Question), Multi: a.MultiPick}
 	rec := engine.RecommendedOption(a)
 	first := 0
@@ -662,3 +663,49 @@ func shortHash(h string) string {
 // RunLine is a run in one line, the words a list of runs (a spec's, the
 // TUI's crumb) names it by: "deliver · run 2".
 func RunLine(r Run) string { return fmt.Sprintf("%s · run %d", r.Recipe, r.N) }
+
+// IsRunNote reports whether a transcript entry is one of the lines a run
+// puts into its session's transcript ("workflow: run 1 started"). The
+// run's block says all of it, in place, so neither face draws them: a
+// session's thread reads as its conversation with one block per run.
+func IsRunNote(msg engine.Message) bool {
+	return msg.Author == engine.AuthorTool && msg.Tool == "" && strings.HasPrefix(msg.Content, engine.RunNotePrefix)
+}
+
+// WithoutRunNotes is a transcript with its run notes left out (IsRunNote).
+// It returns tr itself when it holds none.
+func WithoutRunNotes(tr []engine.Message) []engine.Message {
+	k := -1
+	for i, msg := range tr {
+		if IsRunNote(msg) {
+			k = i
+			break
+		}
+	}
+	if k < 0 {
+		return tr
+	}
+	out := append([]engine.Message(nil), tr[:k]...)
+	for _, msg := range tr[k+1:] {
+		if !IsRunNote(msg) {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+// RunStateWord is a run's state as its block's head says it.
+func RunStateWord(r Run) string {
+	if r.Stopping {
+		return "stopping"
+	}
+	switch domain.RunState(r.State) {
+	case domain.RunProposed:
+		return "waits on your answer"
+	case domain.RunQueued:
+		return "queued behind the open run"
+	case domain.RunDenied:
+		return "not run"
+	}
+	return r.State
+}

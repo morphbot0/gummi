@@ -684,8 +684,18 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	room := max(inner-idWidth-badgeWidth, 0)
 	strip := stageStrip(s, f, inner)
 	if mark := validatedMarkText(r.Validated); mark != "" {
-		if full := strip + s.Faint.Render(" · ") + s.Success.Render(mark); ansi.StringWidth(full) <= inner {
-			strip = full
+		style := s.Success
+		if !r.Validated.Current {
+			style = s.Warning
+		}
+		withMark := strip + s.Faint.Render(" · ") + style.Render(mark)
+		// the mark's re-check key rides beside it, when there is room
+		recheck := withMark + s.Faint.Render(" · ") + s.KeyHint.Render("alt+v") + s.Faint.Render(" re-check")
+		switch {
+		case ansi.StringWidth(recheck) <= inner:
+			strip = recheck
+		case ansi.StringWidth(withMark) <= inner:
+			strip = withMark
 		}
 	}
 	return []string{id + " " + ansi.Truncate(title, room, "…") + badges(), strip}
@@ -1118,19 +1128,30 @@ func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
 		ff = m.engine.Freeform(r.F.ID)
 	}
 	sending := m.consultSending[r.F.ID]
+	// the session's workflow runs, one block each, among its turns
+	blocks := m.runBlocks(s, r, w)
+	withBlocks := func(lines []string) []string {
+		for _, b := range blocks {
+			if len(lines) > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, b.lines...)
+		}
+		return lines
+	}
 	if ff == nil {
 		if sending != "" {
 			// A line on its way to a session that does not exist yet, drawn
 			// so the composer is not seen to empty itself into nothing.
-			return m.askingLines(s, sending, w)
+			return withBlocks(m.askingLines(s, sending, w))
 		}
-		return m.freeformAbsentLines(s, r, w)
+		return withBlocks(m.freeformAbsentLines(s, r, w))
 	}
 	snap := ff.Snapshot()
 	if len(snap.Transcript) == 0 && sending == "" {
-		return m.freeformAbsentLines(s, r, w)
+		return withBlocks(m.freeformAbsentLines(s, r, w))
 	}
-	lines := transcriptLines(s, snap, w, m.threadOutputs)
+	lines := transcriptLinesWith(s, snap, w, m.threadOutputs, blocks)
 	if snap.Err != nil {
 		for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {
 			lines = append(lines, "  "+s.Error.Render(l))
