@@ -123,8 +123,9 @@ export async function loadThread (id = state.sel, full = false) {
     const items = after ? upsert(state.thread.items, t.items || []) : (t.items || [])
     const lastSeq = Math.max(t.lastSeq || 0, after)
     const was = state.thread
-    const moved = !was || was.err || was.gone || was.lastSeq !== lastSeq ||
-      (after ? (t.items || []).length > 0 : !same(items, was.items))
+    // a run's block comes on every page (it moves without an event of its
+    // own), so a page that brought only what is held moves nothing
+    const moved = !was || was.err || was.gone || was.lastSeq !== lastSeq || !same(items, was.items)
     if (moved) set({ thread: { items, lastSeq } })
     if (t.live !== undefined && !liveRoute) setLive(liveOrNull(t.live))
   } catch (err) {
