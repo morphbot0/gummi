@@ -1251,7 +1251,9 @@ func TestAStepStartedIntoAStopOrPauseIsNotBriefed(t *testing.T) {
 		name string
 		act  func(e *Engine, session domain.FeatureID) error
 	}{
-		{"stop", func(e *Engine, s domain.FeatureID) error { return e.WorkflowStop(context.Background(), s, "changed my mind") }},
+		{"stop", func(e *Engine, s domain.FeatureID) error {
+			return e.WorkflowStop(context.Background(), s, "changed my mind")
+		}},
 		{"pause", func(e *Engine, s domain.FeatureID) error { return e.WorkflowPause(context.Background(), s) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
