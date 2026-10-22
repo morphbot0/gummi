@@ -1,0 +1,24 @@
+name: investigate
+description: Look into a question in the tree and write up what was found
+tier: standard
+inputs: {}
+steps:
+  - id: scout
+    role: scout
+    prompt: |
+      Investigate the spec below in the tree: read the code, reproduce what
+      it describes where you can, and map what bears on it. Change nothing.
+      End with what you found, and where.
+
+      {{spec}}
+  - id: report
+    role: scribe
+    prompt: |
+      Write a report of the investigation below into {{artifacts.report}}:
+      what was asked, what was found and where, and what is still open.
+      Edit nothing but the report. End with the report's text.
+
+      {{scout.output}}
+
+      {{spec}}
+    artifacts: { report: report.md }

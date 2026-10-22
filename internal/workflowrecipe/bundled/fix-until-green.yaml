@@ -1,0 +1,18 @@
+name: fix-until-green
+description: Fix the tree until every done-when check of the spec passes
+tier: standard
+inputs: {}
+steps:
+  - id: fix
+    repeat:
+      max: 5
+      until: checks
+      onMax: pause
+      steps:
+        - id: implement
+          role: implementer
+          prompt: |
+            Run the done-when checks of the spec below, and fix the code
+            until they pass. Do not weaken a check to make it pass.
+
+            {{spec}}

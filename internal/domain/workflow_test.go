@@ -1,0 +1,158 @@
+package domain
+
+import "testing"
+
+func TestWorkflowRoles(t *testing.T) {
+	reads := map[WorkflowRole]bool{RoleScout: true, RoleReviewer: true}
+	for _, r := range WorkflowRoles {
+		if !r.Known() || r.Reads() != reads[r] || r.Writes() == reads[r] {
+			t.Errorf("%s: known %v reads %v writes %v", r, r.Known(), r.Reads(), r.Writes())
+		}
+	}
+	if WorkflowRole("wizard").Known() || WorkflowRole("wizard").Writes() || WorkflowRole("").Writes() {
+		t.Error("an unknown role is known or writes")
+	}
+}
+
+func TestEntryID(t *testing.T) {
+	for _, tc := range []struct {
+		e    Entry
+		want string
+	}{
+		{Entry{Step: &Step{ID: "s"}}, "s"},
+		{Entry{Parallel: &Parallel{ID: "p"}}, "p"},
+		{Entry{Repeat: &Repeat{ID: "r"}}, "r"},
+		{Entry{}, ""},
+	} {
+		if got := tc.e.ID(); got != tc.want {
+			t.Errorf("ID = %q, want %q", got, tc.want)
+		}
+	}
+}
+
+func TestUntilKind(t *testing.T) {
+	for _, tc := range []struct {
+		u    Until
+		want string
+	}{
+		{Until{Checks: true}, UntilChecks},
+		{Until{Verdict: "OK", In: "r"}, UntilVerdict},
+		{Until{In: "r"}, UntilVerdict},
+		{Until{Contains: "x"}, UntilContains},
+		{Until{}, ""},
+		{Until{Checks: true, Contains: "x"}, ""},
+	} {
+		if got := tc.u.Kind(); got != tc.want {
+			t.Errorf("%+v: kind %q, want %q", tc.u, got, tc.want)
+		}
+	}
+}
+
+func TestJoinsAndOnMax(t *testing.T) {
+	for _, j := range []Join{JoinAll, JoinAllSettled, JoinAny} {
+		if !j.Known() {
+			t.Errorf("%s unknown", j)
+		}
+	}
+	if Join("").Known() || Join("race").Known() {
+		t.Error("a bad join is known")
+	}
+	if !OnMax("").Known() || OnMax("").Or() != OnMaxPause || OnMaxAbort.Or() != OnMaxAbort || OnMax("retry").Known() {
+		t.Error("onMax")
+	}
+	if !(Step{}).Captures() {
+		t.Error("a step captures its output by default")
+	}
+	no := false
+	if (Step{CaptureOutput: &no}).Captures() {
+		t.Error("captureOutput: false captured")
+	}
+}
+
+func TestRunAndStepStates(t *testing.T) {
+	for _, tc := range []struct {
+		s           RunState
+		open, ended bool
+	}{
+		{RunProposed, false, false},
+		{RunQueued, false, false},
+		{RunRunning, true, false},
+		{RunPaused, true, false},
+		{RunDone, false, true},
+		{RunPartial, false, true},
+		{RunStopped, false, true},
+		{RunDenied, false, false},
+	} {
+		if tc.s.Open() != tc.open || tc.s.Ended() != tc.ended {
+			t.Errorf("%s: open %v ended %v", tc.s, tc.s.Open(), tc.s.Ended())
+		}
+	}
+	for _, tc := range []struct {
+		s             StepState
+		live, settled bool
+	}{
+		{StepWaiting, false, false},
+		{StepRunning, true, false},
+		{StepAsking, true, false},
+		{StepDone, false, true},
+		{StepFailed, false, true},
+		{StepStopped, false, true},
+	} {
+		if tc.s.Live() != tc.live || tc.s.Settled() != tc.settled {
+			t.Errorf("%s: live %v settled %v", tc.s, tc.s.Live(), tc.s.Settled())
+		}
+	}
+}
+
+func TestRunawayAndPaths(t *testing.T) {
+	if got := (RunStep{Estimate: 50}).Runaway(); got != 150 {
+		t.Errorf("runaway = %v", got)
+	}
+	if got := (RunStep{Estimate: 50, Allowance: 2}).Runaway(); got != 450 {
+		t.Errorf("runaway with allowance = %v", got)
+	}
+	if got := StepPath("build", "2", "implement"); got != "build/2/implement" {
+		t.Errorf("StepPath = %q", got)
+	}
+	if got := IterationPath("", "build", 2); got != "build/2" {
+		t.Errorf("IterationPath = %q", got)
+	}
+	if got := IterationPath("outer/1", "inner", 3); got != "outer/1/inner/3" {
+		t.Errorf("nested IterationPath = %q", got)
+	}
+}
+
+func TestSpecStateOf(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		runs []Run
+		want SpecState
+	}{
+		{"no runs", nil, SpecDraft},
+		{"only proposed and denied", []Run{{N: 1, State: RunDenied}, {N: 2, State: RunProposed}, {N: 3, State: RunQueued}}, SpecDraft},
+		{"one running", []Run{{N: 1, State: RunDone, ValidatedTree: "t"}, {N: 2, State: RunRunning}}, SpecRunning},
+		{"one paused", []Run{{N: 1, State: RunPaused}}, SpecRunning},
+		{"last validated", []Run{{N: 2, State: RunDone, ValidatedTree: "t"}, {N: 1, State: RunPartial}}, SpecMet},
+		{"last not validated", []Run{{N: 1, State: RunDone, ValidatedTree: "t"}, {N: 2, State: RunDone}}, SpecPartial},
+		{"stopped", []Run{{N: 1, State: RunStopped}}, SpecPartial},
+	} {
+		if got := SpecStateOf(tc.runs); got != tc.want {
+			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestQualifiedItem(t *testing.T) {
+	if got := QualifiedItem(2, "DW-1"); got != "S2/DW-1" {
+		t.Errorf("QualifiedItem = %q", got)
+	}
+	n, item, err := ParseQualifiedItem(" S12/DW-3 ")
+	if err != nil || n != 12 || item != "DW-3" {
+		t.Errorf("ParseQualifiedItem = %d %q %v", n, item, err)
+	}
+	for _, bad := range []string{"DW-1", "S0/DW-1", "S/DW-1", "2/DW-1", "S2/dw-1", "S2/DW-", "Sx/DW-1", "S2-DW-1"} {
+		if _, _, err := ParseQualifiedItem(bad); err == nil {
+			t.Errorf("%q parsed", bad)
+		}
+	}
+}
