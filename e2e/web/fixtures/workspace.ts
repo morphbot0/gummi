@@ -188,7 +188,7 @@ export class Workspace {
     return JSON.parse(r.stdout) as CardStatus;
   }
 
-  /** The card's worktree (feature and bug cards; research has none). */
+  /** The card's worktree under .gummi/worktrees. */
   worktree(id: string): string {
     return path.join(this.repo, '.gummi', 'worktrees', id);
   }

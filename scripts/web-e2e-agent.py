@@ -95,7 +95,9 @@ validate, and APPROVED otherwise; a scout reports; a planner keeps the plan.
 The session acknowledges the run's report without touching its tree. A
 [workflow] turn that also says [step-asks] marks its spec so, and the run's
 implementer asks its person with ask_user (keep made.txt plain, or add a
-header) before it writes, naming the answer in its output. A person's
+header) before it writes, naming the answer in its output; an answer
+that reaches a fresh process (the one that asked has ended) is the step's
+too, read off the brief in its hints. A person's
 message to a step after it ended is answered "Noted: <its first line>". A
 message opening with [slow] is streamed slowly, so a test can interrupt it.
 
@@ -681,6 +683,11 @@ def freeform_turn(turn, text):
         turn.say("Watching the build; I will tell you when it breaks.")
         return
     answered = re.search(r"^The answer is: (.*)$", text, re.M)
+    if answered and turn.ctx.get("step_brief"):
+        # a step's answer reaching a fresh process: its brief rides the
+        # hints, so the step does its task with the answer in hand
+        workflow_step(turn, turn.ctx["step_brief"], answered.group(1).strip())
+        return
     if answered:
         # an answer that reaches the session as a turn of its own (its
         # backend was replaced, or gave up on the call that asked)
@@ -785,8 +792,10 @@ def workflow_session(turn, text):
     turn.say("workflow_run: %s" % result.strip())
 
 
-def workflow_step(turn, brief):
-    """A workflow step's turn, answered by its role (DESIGN §25.4)."""
+def workflow_step(turn, brief, answer=""):
+    """A workflow step's turn, answered by its role (DESIGN §25.4). answer
+    is the person's answer to the step's question when it reaches a fresh
+    process (the one that asked has ended): the step carries on with it."""
     m = STEP_RE.search(brief)
     path, role = m.group(1), m.group(4)
     STEP.update(path=path, role=role, brief=brief)
@@ -828,7 +837,8 @@ def workflow_step(turn, brief):
         with open(p, "w", encoding="utf-8") as fh:
             fh.write("# %s\n\nWritten by step %s.\n" % (sid, path))
         wrote.append(os.path.basename(p))
-    answer = ""
+    if answer:
+        STEP["asked"] = True
     if role == "implementer" and "[step-asks]" in task and not STEP.get("asked"):
         # blocks until the person answers the step's question
         STEP["asked"] = True
@@ -970,6 +980,9 @@ def detect(frame):
     m = re.search(r"The source document is at (\S+?)\.? \(relative to your working directory\)", hints)
     if m:
         ctx["ingest_source"] = m.group(1)
+    if STEP_RE.search(hints):
+        # a step's card restarted: its brief is in the hints
+        ctx["step_brief"] = hints[STEP_RE.search(hints).start():]
     m = re.search(r"at (/\S+\.md)", hints)
     if m:
         ctx["spec"] = m.group(1).rstrip(".")
