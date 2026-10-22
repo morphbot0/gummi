@@ -82,14 +82,18 @@ containing [watch] starts a Monitor watch it leaves open, one containing
 answered, one containing [spec] writes the session's spec before its edit,
 and one containing [tasks-done] completes its checklist.
 
-A session turn containing [crew] calls a crew (DESIGN §24): it starts the
-session's spec (spec_start), writes its Done when as one item checked by
-`test -f crew.txt`, and asks for a crew (crew_start, budget 400). The
-crew's planner (its hints name it) writes a one-node plan: t1, an
-implementer that owns crew.txt; the node writes the file it owns and ends
-with its DONE:/DECISION: handoff; every crew reviewer says VERDICT: pass;
-and the session acknowledges the crew's report without touching its tree. A message opening
-with [slow] is streamed slowly, so a test can interrupt it.
+A session turn containing [workflow] proposes a workflow run (DESIGN §25):
+it starts a spec (spec_start), writes its Done when as two items -- one
+checked by `test -f made.txt`, one judged -- and calls workflow_run with the
+bundled deliver recipe, or the one [workflow=<name>] names. Each step is
+answered by its role, read off its brief: a writing role (contractor,
+implementer, tester, scribe) writes the run's artifacts its task names and,
+for an implementer or tester, every file a `test -f` check of the spec looks
+for; a reviewer writes {"verdict": "APPROVED"} into review.json where its
+task names it, answers MET: for every done-when item where it is asked to
+validate, and APPROVED otherwise; a scout reports; a planner keeps the plan.
+The session acknowledges the run's report without touching its tree. A
+message opening with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
     GUMMI_E2E_FAST=1          skip the small pacing beats (the suite sets it;
@@ -652,16 +656,19 @@ def stage_verify(turn, kickoff):
 
 
 def freeform_turn(turn, text):
-    if re.search(r"You are node t\d+ of a crew", text) or "Your work was sent back" in text:
-        crew_node(turn, text)
+    if STEP_RE.search(text):
+        workflow_step(turn, text)
         return
-    if text.startswith("The crew has reported"):
-        # the crew's report reaches the session as a turn; reading it
-        # changes nothing in the session's tree, so the crew can land
-        turn.say("The crew reported; its branch is ready to land.")
+    if STEP:
+        step_followup(turn, text)
         return
-    if "[crew]" in text:
-        crew_session(turn)
+    if re.match(r"Workflow run \d+ has reported", text):
+        # the run's report reaches the session as a turn; reading it
+        # changes nothing in the session's tree
+        turn.say("The run reported; its changes are in the tree for you to read.")
+        return
+    if "[workflow" in text:
+        workflow_session(turn, text)
         return
     if "[watch]" in text:
         # a Monitor watch the turn leaves open: no result comes for it, so
@@ -694,7 +701,7 @@ def freeform_turn(turn, text):
         call_tool("spec_start", args={"title": "Notes for the helper"})
         call_tool("spec_replace_section", args={"section": "Problem", "body": "The helper needs a note.\n"})
         call_tool("spec_replace_section", args={"section": "Approach", "body": "Write it in NOTES.md.\n"})
-        call_tool("spec_replace_section", args={"section": "Done when", "body": CREW_DONE_WHEN})
+        call_tool("spec_replace_section", args={"section": "Done when", "body": WORKFLOW_DONE_WHEN})
     wd = turn.ctx["workdir"]
     notes = os.path.join(wd, "NOTES.md")
     with open(notes, "a", encoding="utf-8") as fh:
@@ -736,60 +743,106 @@ def session_where_ask(turn, text):
     turn.say("Decided with the user: %s" % answer.strip().splitlines()[0])
 
 
-CREW_PLAN = """lanes: 1
-budget: 400
-nodes:
-  - id: t1
-    role: implementer
-    title: Write crew.txt
-    brief: Write crew.txt at the top of the tree.
-    owns: [crew.txt]
-    serves: [DW-1]
-    checks: ["test -f crew.txt"]
-    envelope: 120
-"""
-
-CREW_DONE_WHEN = """```gummi-done-when
+WORKFLOW_DONE_WHEN = """```gummi-done-when
 - id: DW-1
-  says: crew.txt exists
-  check: test -f crew.txt
+  says: made.txt exists
+  check: test -f made.txt
+- id: DW-2
+  says: made.txt reads well
+  judge: true
 ```
 """
 
+# the step brief's head: "You are step build/1/implement of workflow run 1
+# (the deliver recipe) in gummi: a implementer. ..."
+STEP_RE = re.compile(r"You are step (\S+) of workflow run (\d+) \(([^)]*)\) in gummi: an? (\w+)\.")
 
-def crew_session(turn):
-    """A session turn asking for a crew: a spec with one done-when item, then crew_start."""
-    # a second [crew] turn finds the spec already there, and carries on
-    call_tool("spec_start", args={"title": "Make the crew file"})
-    call_tool("spec_replace_section", args={"section": "Problem", "body": "crew.txt is missing.\n"})
-    call_tool("spec_replace_section", args={"section": "Approach", "body": "One implementer writes it.\n"})
-    call_tool("spec_replace_section", args={"section": "Done when", "body": CREW_DONE_WHEN})
-    result = call_tool("crew_start", args={"brief": "make the crew file", "budget": 400})
-    turn.say("crew_start: %s" % result.strip())
+# STEP is the step this process answers for, once its brief has arrived: a
+# step's card keeps its agent across its turns, so a later turn on it (a
+# carry-on, a steer, the person's message) is the step's too.
+STEP = {}
 
 
-def crew_planner(turn, text):
-    """The crew's planner: the first plan, and nothing to change after."""
-    if "Write the plan now" not in text:
-        turn.say("Nothing to change in the plan.")
-        return
-    result = call_tool("plan_write", args={"plan": CREW_PLAN})
-    turn.say("Planned one node: t1 writes crew.txt. (%s)" % result.strip().splitlines()[0])
+def workflow_session(turn, text):
+    """A session turn asking for a workflow: a spec with done-when items, then workflow_run."""
+    m = re.search(r"\[workflow=([\w-]+)\]", text)
+    recipe = m.group(1) if m else "deliver"
+    # a second [workflow] turn finds a spec already there and adds another;
+    # the run then names the newest
+    started = call_tool("spec_start", args={"title": "Make the workflow file"})
+    n = re.search(r"\bspec (\d+)\b", started)
+    spec = int(n.group(1)) if n else 1
+    for section, body in (("Problem", "made.txt is missing.\n"),
+                          ("Approach", "The workflow's steps write it.\n"),
+                          ("Done when", WORKFLOW_DONE_WHEN)):
+        call_tool("spec_replace_section", args={"spec": spec, "section": section, "body": body})
+    result = call_tool("workflow_run", args={"recipe": recipe, "spec": spec})
+    turn.say("workflow_run: %s" % result.strip())
 
 
-def crew_node(turn, text):
-    """A crew node: write what it owns, then hand off."""
+def workflow_step(turn, brief):
+    """A workflow step's turn, answered by its role (DESIGN §25.4)."""
+    m = STEP_RE.search(brief)
+    path, role = m.group(1), m.group(4)
+    STEP.update(path=path, role=role, brief=brief)
+    sid = path.rsplit("/", 1)[-1]
+    task = brief.split("Your task:", 1)[-1]
     wd = turn.ctx["workdir"]
-    m = re.search(r"You may change only these paths: (.+?)\. A change", text)
-    owns = [p.strip() for p in m.group(1).split(",")] if m else ["crew.txt"]
-    for p in owns:
-        path = os.path.join(wd, p)
-        os.makedirs(os.path.dirname(path) or wd, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write("made by the crew\n")
-    turn.tool("edit", ", ".join(owns), "node-edit")
-    turn.tool_result("node-edit", "edit")
-    turn.say("Wrote %s.\nDONE: wrote %s\nDECISION: plain text, one line" % (", ".join(owns), ", ".join(owns)))
+    artifacts = re.findall(r"(/\S+?/\.gummi/runs/\S+?\.(?:md|json))", task)
+    if role == "reviewer":
+        review = [p for p in artifacts if p.endswith("review.json")]
+        if review:
+            # the verdict step: the reviews merged into the artifact a
+            # repeat's until reads
+            os.makedirs(os.path.dirname(review[0]), exist_ok=True)
+            with open(review[0], "w", encoding="utf-8") as fh:
+                json.dump({"verdict": "APPROVED", "findings": []}, fh)
+            turn.tool("write", os.path.basename(review[0]), "step-write")
+            turn.tool_result("step-write", "write")
+            turn.say("The reviews agree.\nAPPROVED")
+        elif "MET: DW-" in task:
+            # the validate step: one line per done-when item of the spec
+            ids = sorted(set(re.findall(r"^- id: (DW-\d+)", task, re.M))) or ["DW-1"]
+            turn.tool("read", "the run's diff")
+            turn.say("Read the run's diff against the spec.\n" + "\n".join("MET: %s" % i for i in ids))
+        else:
+            turn.tool("read", "the run's diff")
+            turn.say("Read %s's change against the spec. No findings.\nAPPROVED" % sid)
+        return
+    if role == "scout":
+        turn.tool("read", "the tree")
+        turn.say("Mapped what bears on the spec.\nDECISION: none")
+        return
+    if role == "planner":
+        turn.say("The plan stands.")
+        return
+    # a writing role: its artifacts, and what the spec's checks look for
+    wrote = []
+    for p in artifacts:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("# %s\n\nWritten by step %s.\n" % (sid, path))
+        wrote.append(os.path.basename(p))
+    if role in ("implementer", "tester"):
+        files = re.findall(r"check:\s*\"?test -f (\S+?)\"?\s*$", task, re.M) or ["WORKFLOW.md"]
+        for f in files:
+            target = os.path.join(wd, f)
+            os.makedirs(os.path.dirname(target) or wd, exist_ok=True)
+            with open(target, "a", encoding="utf-8") as fh:
+                fh.write("made by step %s\n" % path)
+            wrote.append(f)
+    turn.tool("edit", ", ".join(wrote) or "nothing", "step-edit")
+    turn.tool_result("step-edit", "edit")
+    turn.say("Wrote %s.\nDECISION: plain text, one line" % (", ".join(wrote) or "nothing"))
+
+
+def step_followup(turn, text):
+    """A later turn on a step's card: a carry-on runs its task again; any
+    other line (a steer, the person's message) is acknowledged."""
+    if text.startswith("The run was paused and now carries on"):
+        workflow_step(turn, STEP["brief"])
+        return
+    turn.say("Noted: %s" % (text.strip().splitlines() or [""])[0])
 
 
 def ingest(turn):
@@ -880,9 +933,6 @@ def detect(frame):
         "has_verdict_tool": any(t.get("name") == "submit_verdict" for t in frame.get("tools") or []),
         "has_propose_tool": any(t.get("name") == "propose_features" for t in frame.get("tools") or []),
         "card": "", "kind": "", "title": "", "stage": "", "spec": "",
-        # a crew's own turns (DESIGN §24): its planner, and its reviewers
-        "crew_planner": "You are a crew's planner" in hints,
-        "crew_reviewer": "You review one piece of a crew's work" in hints,
     }
     m = re.search(r"You are the \w+ for \w+ ((FD|BG|RS|FF)-\d+): (.*)", hints)
     if m:
@@ -916,13 +966,10 @@ def detect(frame):
 
 def handle_send(ctx, text, first):
     turn = Turn(ctx)
-    if ctx.get("crew_planner") or ctx.get("crew_reviewer"):
-        # a crew's own turn: its prompt quotes the spec, which no scribe
-        # pattern may read as one of its prompts
-        if ctx.get("crew_planner"):
-            crew_planner(turn, text)
-        else:
-            turn.say("Read the change against its brief.\nVERDICT: pass")
+    if STEP_RE.search(text) or STEP:
+        # a workflow step's turn: its brief quotes the spec, which no
+        # scribe pattern may read as one of its prompts
+        freeform_turn(turn, text)
         turn.usage()
         return
     if text.lstrip().startswith("[slow]"):

@@ -197,40 +197,34 @@ cues() {
     chapter "3 · Agree it, then write it down" "the session's spec"
     say "Every question comes with its recommendation attached — agree in one key." 3.2
     press_when "Which denominator" Enter "enter" "The pool total, not the quota." 15 2.0
-    await "Hand it to a crew" 60
+    await "Run deliver" 60
     say "It wrote what you agreed into the session's spec — with done-when items gummi can run." 3.8
-    say "The work divides, so it offers a crew. A small change would not need one." 3.4
+    say "The work deserves a design, a reviewed build and a validation, so it offers a workflow." 3.6
 
     # -- 4 ------------------------------------------------------------------
-    chapter "4 · A crew, when the work is worth one" "planned, then approved by you"
-    press_when "Hand it to a crew" Enter "enter" "Yes: call a crew." 15 2.0
-    await "Run this crew" 60
-    say "A planner turned the spec into nodes: a scout, the column, its test." 3.4
-    say "Each node owns its paths. Two nodes never write the same file at once." 3.4
-    say "No agent approves its own crew. That is your key to press." 3.0
-    press_when "Run this crew" Enter "enter" "Run the crew." 15 2.0
+    chapter "4 · A workflow, when the work is worth one" "proposed, then allowed by you"
+    press_when "Run deliver" Enter "enter" "Yes: run deliver." 15 2.0
+    await "Run the deliver workflow" 60
+    say "The proposal shows every step, its role and its estimate, and the checks it will run." 3.6
+    say "No agent allows its own run. That is your key to press." 3.0
+    press_when "Run the deliver workflow" Enter "enter" "Allow." 15 2.0
 
     # -- 5 ------------------------------------------------------------------
-    chapter "5 · The crew works" "every node checked and reviewed"
-    await "t1 scout +landed" 120
-    say "Each node runs on a branch of its own, forked from the crew's." 3.2
-    await "rework 1" 150
-    say "t2's reviewer is a fresh agent with no stake in it — and it sent t2 back." 3.8
-    say "The help text never learned about U. The rework adds it; review runs again." 3.8
-    await "t3 tester +(running|checking|reviewing|landed)" 150
-    say "Then the tester, building on what t2 landed." 3.0
-    await "crew · report" 180
-    say "A final review runs the spec's done-when checks on the crew's whole branch." 3.6
+    chapter "5 · The run works" "every step a fresh agent, in the session's own tree"
+    say "A designer, then an implementer; two fresh reviewers read the run's diff." 3.4
+    say "They find the help text never learned about U, so the build loops once." 3.6
+    await "commit it" 240
+    say "Then a validation reads every done-when item against the diff." 3.2
 
     # -- 6 ------------------------------------------------------------------
-    chapter "6 · The crew reports to the session" "and the session carries on"
-    await "land it" 60
+    chapter "6 · The run reports to the session" "and the session carries on"
     say "The report comes back to the session, which tells you what it means." 3.4
-    typeline "land it" "Land the crew's work on the session's branch."
+    say "Nothing was committed: the run left its changes in the tree." 3.2
+    typeline "commit it" "Tell it to commit what the run validated."
     press Enter "enter" "Send it." 2.0
-    await "verified at" 60
-    say "One commit, and the head now says which crew verified it, at which commit." 3.8
-    say "Commit on top of it later and the head says how many commits no crew checked." 3.8
+    await "validated at" 60
+    say "One commit, and the head says the tree is the one the run validated." 3.8
+    say "Change the tree later and the head says it changed since validation." 3.6
     press M-d "alt+d" "alt+d reads the diff: the column, its guard, its test." 3.2
     t 2.4
 
@@ -244,7 +238,7 @@ cues() {
     press Escape "esc" "Not today — the branch keeps." 2.2
 
     chapter "gummi" "a meta-harness for coding agents"
-    say "Sessions by default. A planned, reviewed crew when the work is worth one." 4.2
+    say "Sessions by default. A workflow of fresh agents when the work is worth one." 4.2
     t 2.0
 }
 

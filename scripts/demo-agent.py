@@ -2,8 +2,8 @@
 """A scripted agent for the gummi demo recording.
 
 Speaks gummi's headless backend protocol (internal/agent/headless.go) on
-stdio, so the engine, the worktrees, the session's spec, the crew's
-branches, its checks and the diff are all real -- only the model's words
+stdio, so the engine, the worktrees, the session's spec, the workflow
+run, its checks and the diff are all real -- only the model's words
 are pre-authored. That makes the demo deterministic and offline: every
 take is identical, and a re-record after a UI change costs one command.
 
@@ -15,16 +15,16 @@ The hero is a session titled "lxc list: add a disk usage percent column"
 in a clone of canonical/lxd. Its story, turn by turn:
 
   session     reads lxc/list.go, asks which denominator (ask_user), writes
-              a spec with four done-when items, then offers a crew
-              (ask_user); on yes it calls crew_start
-  planner     plans three nodes: t1 scout, t2 implementer (lxc/list.go),
-              t3 tester (lxc/list_test.go), each needing the one before
-  t1          reads and reports how the memory pair is built
-  t2          adds the column and its shorthand entry -- but not the help
-              line, so its reviewer sends it back once; the rework adds it
-  t3          adds TestDiskUsagePercentColumn
-  final       the final review passes; the report reaches the session
-  session     explains the report; told to land it, calls crew_land
+              a spec with four done-when items, then offers the deliver
+              workflow (ask_user); on yes it calls workflow_run
+  design      writes design.md in the run's directory
+  implement   adds the column, its shorthand entry and its test -- but not
+              the help line, so both reviewers find it and the verdict
+              writes CHANGES; the build loops once, and the second
+              implement adds the help line
+  verdict     APPROVED once the help line is there
+  validate    MET for every done-when item; the report reaches the session
+  session     explains the report; told to commit it, commits the tree
 
 Every other session (the board's seeded ones) gets a short, generic turn
 that edits one file and commits it. A session whose title ends in "?"
@@ -198,40 +198,8 @@ DONE_WHEN = """\
 ```
 """
 
-CREW_PLAN = """\
-lanes: 2
-budget: 600
-nodes:
-  - id: t1
-    role: scout
-    title: Map how the memory pair is built
-    brief: Read lxc/list.go and report how -c m and -c M are built and registered, so t2 mirrors them.
-    tier: cheap
-    envelope: 60
-  - id: t2
-    role: implementer
-    title: Add the DISK USAGE% column under -c U
-    brief: The column function, its shorthand entry, and the help line, per the spec's Approach.
-    needs: [t1]
-    owns: [lxc/list.go]
-    serves: [DW-1, DW-2, DW-4]
-    checks: ["go build ./lxc/...", "go vet ./lxc/"]
-    tier: standard
-    envelope: 200
-  - id: t3
-    role: tester
-    title: Test the column, Total == 0 included
-    brief: A table test of diskUsagePercentColumnData in lxc/list_test.go.
-    needs: [t2]
-    owns: [lxc/list_test.go]
-    serves: [DW-3]
-    checks: ["go test ./lxc/ -run TestDiskUsagePercentColumn"]
-    tier: cheap
-    envelope: 120
-"""
-
 # --------------------------------------------------------------------------
-# the change the crew makes to the real lxd tree
+# the change the workflow makes to the real lxd tree
 # --------------------------------------------------------------------------
 
 IMPL_GO = '''
@@ -351,50 +319,51 @@ def hero_kickoff(ctx):
     call_tool("spec_replace_section", {"section": "Done when", "body": DONE_WHEN})
     say("The pool total it is. The spec now holds the problem, the approach\n"
         "and four done-when items -- three of them commands gummi can run.\n\n"
-        "This divides cleanly: read the memory pair, add the column, test it.")
+        "It is worth a design, a reviewed build and a validation.")
     usage(ctx, 44, 11800, 920)
     answer = call_tool("ask_user", {
-        "question": "Hand it to a crew? A planner splits it into nodes, each reviewed by a fresh agent.",
+        "question": "Run the deliver workflow on it? A designer, then a build two fresh reviewers check, then a validation.",
         "options": [
-            {"label": "Call a crew (recommended)",
-             "detail": "you approve its plan before anything runs"},
+            {"label": "Run deliver (recommended)",
+             "detail": "you allow the run before anything starts"},
             {"label": "Keep it here", "detail": "I make the change in this session"},
         ],
     })
     if "keep" in answer.lower():
         say("Then I'll do it here.")
         return
-    result = call_tool("crew_start", {
-        "brief": "Mirror the memory pair; the blank-cell rule matters more than the column.",
-        "budget": 600,
-    })
-    say("Asked for a crew: %s" % first_line(result))
+    result = call_tool("workflow_run", {"recipe": "deliver"})
+    say("Proposed a run: %s" % first_line(result))
     usage(ctx, 12, 3100, 160)
 
 
 def hero_report(ctx):
-    think("reading the crew's report against the spec")
-    say("The crew finished and its final review passed. All three checks ran\n"
-        "on the crew's branch -- build, vet and the new test -- and the\n"
-        "reviewer judged DW-4 against the combined diff.\n\n"
-        "Worth knowing: t2 was sent back once, because its first commit left\n"
-        "`U` out of `lxc list --help`. Say \"land it\" and I'll put it on this\n"
-        "branch.")
+    think("reading the run's report against the spec")
+    say("The run is done and validated. All three checks ran in this tree --\n"
+        "build, vet and the new test -- and the validate step judged DW-4\n"
+        "against the run's diff.\n\n"
+        "Worth knowing: the build looped once, because the first implement\n"
+        "left `U` out of `lxc list --help` and both reviewers caught it. The\n"
+        "changes are in the tree, uncommitted. Say \"commit it\" and I will.")
     usage(ctx, 22, 8400, 300)
 
 
-def hero_land(ctx):
-    result = call_tool("crew_land", {})
-    say("Landed: %s" % first_line(result))
+def hero_commit(ctx):
+    wd = ctx["workdir"]
+    git(wd, "add", "-A", "lxc")
+    git(wd, "commit", "-qm", "lxc/list: add a DISK USAGE% column under -c U")
+    tool("bash", "git commit")
+    say("Committed the run's change on this session's branch, as it was\n"
+        "validated: the head still says so.")
     usage(ctx, 6, 2000, 80)
 
 
 def hero_turn(ctx, text):
     low = text.lower()
-    if text.startswith("The crew has reported"):
+    if re.match(r"Workflow run \d+ has reported", text):
         hero_report(ctx)
-    elif "land" in low and len(low) < 80:
-        hero_land(ctx)
+    elif "commit" in low and len(low) < 80:
+        hero_commit(ctx)
     elif ctx["first"]:
         hero_kickoff(ctx)
     else:
@@ -403,87 +372,87 @@ def hero_turn(ctx, text):
 
 
 # --------------------------------------------------------------------------
-# the crew
+# the workflow's steps -- each a fresh agent, told apart by its brief
 # --------------------------------------------------------------------------
 
-def planner_turn(ctx, text):
-    if "Write the plan now" not in text:
-        say("Nothing to change in the plan.")
-        usage(ctx, 4)
-        return
-    think("three pieces, each building on the one before")
-    call_tool("crew_doc", {"section": "Done when"})
-    result = call_tool("plan_write", {"plan": CREW_PLAN})
-    say("Planned three nodes: a scout, the column, its test. (%s)" % first_line(result))
-    usage(ctx, 30, 9800, 700)
+STEP_RE = re.compile(r"You are step (\S+) of workflow run (\d+) \(([^)]*)\) in gummi: an? (\w+)\.")
 
 
-def node_turn(ctx, text):
+def help_listed(workdir):
+    with open(os.path.join(workdir, "lxc", "list.go"), encoding="utf-8") as fh:
+        return HELP_LINE in fh.read()
+
+
+def step_turn(ctx, text):
     wd = ctx["workdir"]
-    m = re.search(r"You are node (t\d+)", text)
-    node = m.group(1) if m else ctx.get("node", "")
-    ctx["node"] = node
-    if text.startswith("Your work was sent back"):
-        think("the reviewer is right: the help text never learned about U")
-        patch_list_go(wd, with_help=True)
-        tool("edit", "lxc/list.go")
-        git(wd, "commit", "-qam", "lxc/list: list U beside D in the help text")
-        tool("bash", "git commit")
-        say("Added `U - Disk usage (%)` under `D - disk usage`.\n"
-            "DONE: listed U in lxc list --help\n"
-            "DECISION: kept it beside D so the disk pair reads together")
-        usage(ctx, 18, 6000, 240)
-    elif node == "t1":
+    m = STEP_RE.search(text)
+    if m:
+        ctx["step"] = m.group(1)
+    path = ctx.get("step", "")
+    sid = path.rsplit("/", 1)[-1]
+    task = text.split("Your task:", 1)[-1]
+    artifacts = re.findall(r"(/\S+?/\.gummi/runs/\S+?\.(?:md|json))", task)
+    if sid == "design":
+        think("the memory pair is the pattern: mirror it")
         tool("read", "lxc/list.go")
-        tool("grep", "memoryUsagePercentColumnData")
-        say("`-c M` is `memoryUsagePercentColumnData`, registered as `'M'` in\n"
-            "`columnsShorthandMap`; it renders blank when `limits.memory` is unset.\n"
-            "DONE: mapped the memory pair for t2\n"
-            "DECISION: none")
-        usage(ctx, 14, 7000, 300)
-    elif node == "t2":
-        think("the column function below diskUsageColumnData, then its entry")
-        patch_list_go(wd, with_help=False)
-        tool("edit", "lxc/list.go")
-        tool("bash", "go build ./lxc/...")
-        git(wd, "commit", "-qam", "lxc/list: add a DISK USAGE% column under -c U")
-        tool("bash", "git commit")
-        say("Added `diskUsagePercentColumnData` and registered it as `'U'`.\n"
-            "DONE: the column and its shorthand entry\n"
-            "DECISION: a blank cell when Total is 0, as the spec says")
-        usage(ctx, 52, 16000, 1400)
-    elif node == "t3":
-        think("a table test: half full, whole pool, no usage, no state")
-        patch_list_test_go(wd)
-        tool("edit", "lxc/list_test.go")
-        tool("bash", "go test ./lxc/ -run TestDiskUsagePercentColumn")
-        git(wd, "commit", "-qam", "lxc/list: test the DISK USAGE% column")
-        tool("bash", "git commit")
-        say("Added `TestDiskUsagePercentColumn`, Total == 0 included.\n"
-            "DONE: the column's table test\n"
-            "DECISION: none")
-        usage(ctx, 26, 9000, 700)
+        for p in artifacts:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write("# Design\n\n- diskUsagePercentColumnData beside diskUsageColumnData\n"
+                         "- registered as 'U' in columnsShorthandMap\n- `U - Disk usage (%)` under `D` in the help\n"
+                         "- a table test, Total == 0 included\n")
+        tool("write", "design.md")
+        say("Wrote the design: the column, its entry, the help line, the test.\n"
+            "DECISION: shorthand U, since d and D are taken")
+        usage(ctx, 24, 8000, 500)
+    elif sid == "implement":
+        if re.search(r"/\d+/", path) and not path.startswith("build/1/"):
+            think("the reviewers are right: the help text never learned about U")
+            patch_list_go(wd, with_help=True)
+            tool("edit", "lxc/list.go")
+            say("Added `U - Disk usage (%)` under `D - disk usage`.\n"
+                "DECISION: kept it beside D so the disk pair reads together")
+            usage(ctx, 18, 6000, 240)
+        else:
+            think("the column function below diskUsageColumnData, then its entry and its test")
+            patch_list_go(wd, with_help=False)
+            tool("edit", "lxc/list.go")
+            patch_list_test_go(wd)
+            tool("edit", "lxc/list_test.go")
+            tool("bash", "go test ./lxc/ -run TestDiskUsagePercentColumn")
+            say("Added `diskUsagePercentColumnData`, registered it as `'U'`, and\n"
+                "its table test.\nDECISION: a blank cell when Total is 0, as the spec says")
+            usage(ctx, 60, 18000, 1600)
+    elif sid in ("review-a", "review-b"):
+        think("fresh context: the spec and the run's diff")
+        tool("read", "the run's diff")
+        if help_listed(wd):
+            say("The column, its guard and its test match the spec. No findings.")
+        else:
+            say("The column is right, and the blank-cell guard is commented.\n"
+                "Finding: DW-4 needs `U` in `lxc list --help`, and the diff never adds it.")
+        usage(ctx, 20, 12000, 400)
+    elif sid == "verdict":
+        ok = help_listed(wd)
+        for p in artifacts:
+            if p.endswith("review.json"):
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w", encoding="utf-8") as fh:
+                    json.dump({"verdict": "APPROVED" if ok else "CHANGES",
+                               "findings": [] if ok else ["lxc list --help does not list U - Disk usage (%)"]}, fh)
+        tool("write", "review.json")
+        say("APPROVED" if ok else "CHANGES: list U in lxc list --help")
+        usage(ctx, 8, 3000, 120)
+    elif sid == "validate":
+        think("each done-when item against the run's diff")
+        tool("read", "the run's diff")
+        say("`lxc list --help` lists `U` beside `D`, and `defaultColumns` is\n"
+            "untouched, so bare `lxc list` output is unchanged.\n"
+            "MET: DW-1\nMET: DW-2\nMET: DW-3\nMET: DW-4")
+        usage(ctx, 20, 12000, 400)
     else:
-        say("DONE: nothing to do\nDECISION: none")
+        say("Nothing to do here.")
         usage(ctx, 4)
-
-
-def reviewer_turn(ctx, text):
-    think("fresh context: the brief, the spec, the diff")
-    tool("read", "the change")
-    if text.startswith("Review the whole of crew"):
-        say("The three nodes add up to the spec. `lxc list --help` lists `U`\n"
-            "beside `D`, and `defaultColumns` is untouched, so bare `lxc list`\n"
-            "output is unchanged: DW-4 holds.\n"
-            "VERDICT: pass")
-    elif "Review node t2" in text and HELP_LINE.strip() not in text:
-        say("The column is right, and the blank-cell guard is commented.\n"
-            "But DW-4 needs `U` in `lxc list --help`, and the diff never adds it.\n"
-            "FINDING: lxc list --help does not list U - Disk usage (%)\n"
-            "VERDICT: changes")
-    else:
-        say("Read the change against its brief. Nothing blocking.\nVERDICT: pass")
-    usage(ctx, 20, 12000, 400)
 
 
 # --------------------------------------------------------------------------
@@ -546,8 +515,6 @@ def detect(frame):
         "workdir": frame.get("workdir") or os.getcwd(),
         "model": frame.get("model") or "demo",
         "hero": HERO_MARKER in hints.lower(),
-        "planner": "You are a crew's planner" in hints,
-        "reviewer": "You review one piece of a crew's work" in hints,
         "first": True,
     }
 
@@ -558,12 +525,10 @@ def handle(ctx, text):
         emit({"type": "text", "text": reply})
         usage(ctx, 3)
         return
-    if ctx["planner"]:
-        planner_turn(ctx, text)
-    elif ctx["reviewer"]:
-        reviewer_turn(ctx, text)
-    elif re.search(r"You are node t\d+ of a crew", text) or text.startswith("Your work was sent back"):
-        node_turn(ctx, text)
+    if STEP_RE.search(text) or ctx.get("step"):
+        # a step's card carries its session's title, so it reads as the
+        # hero's too: its brief says it is a step
+        step_turn(ctx, text)
     elif ctx["hero"]:
         hero_turn(ctx, text)
     else:
@@ -578,8 +543,7 @@ def main():
         kind = frame.get("type")
         if kind == "init":
             ctx = detect(frame)
-            print("demo-agent: hero=%s planner=%s reviewer=%s" %
-                  (ctx["hero"], ctx["planner"], ctx["reviewer"]), file=sys.stderr)
+            print("demo-agent: hero=%s" % ctx["hero"], file=sys.stderr)
         elif kind == "send":
             handle(ctx, frame.get("text") or "")
             ctx["first"] = False

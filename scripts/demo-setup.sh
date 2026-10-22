@@ -35,7 +35,7 @@ git -C "$repo" reset --hard --quiet origin/main 2>/dev/null || true
 git -C "$repo" clean -qfd -e .gummi
 
 # LXD's go.mod asks for a newer toolchain than the container ships; let Go
-# fetch it once here so the crew's recorded checks do not stall on it.
+# fetch it once here so the workflow run's checks do not stall on it.
 export GOTOOLCHAIN=auto
 (cd "$repo" && go build ./lxc/... >/dev/null 2>&1) || \
     echo "warning: go build ./lxc/... did not succeed; verify may fail" >&2
@@ -50,8 +50,8 @@ if [ -d "$repo/.gummi" ]; then
         [ -d "$wt" ] && git -C "$repo" worktree remove --force "$wt" 2>/dev/null || true
     done
     git -C "$repo" worktree prune 2>/dev/null || true
-    # Every branch but main is one an earlier take's sessions and crews
-    # cut (ff/, crew/), and a leftover one collides with the next take's.
+    # Every branch but main is one an earlier take's sessions cut (ff/),
+    # and a leftover one collides with the next take's.
     for b in $(git -C "$repo" branch --format='%(refname:short)' | grep -vx main); do
         git -C "$repo" branch -D "$b" >/dev/null 2>&1 || true
     done
@@ -72,8 +72,9 @@ profiles:
   demo: # every role on the scripted demo agent (GUMMI_AGENT_CMD)
     implementer: { model: demo-session }
     planner: { model: demo-planner }
-    crew-cheap: { model: demo-cheap }
-    crew-standard: { model: demo-standard }
+    step-cheap: { model: demo-cheap }
+    step-standard: { model: demo-standard }
+    step-strong: { model: demo-strong }
     reviewer: { model: demo-reviewer }
     scribe: { model: demo-scribe }
 YAML
