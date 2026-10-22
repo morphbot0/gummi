@@ -7,12 +7,13 @@ loop as a calling agent reads it.
 
 `gummi run` starts a **session** — a coding agent on a branch and worktree of
 its own (DESIGN §19) — from a prompt, and keeps it moving. The session may
-start a **crew** (DESIGN §24): a planner turns the session's spec into a plan
-of specialist nodes, each checked and reviewed on the crew's own branch, and
-the crew's report comes back to the session as a turn. A person running
-`gummi run` pre-authorises the session's crew up to the envelope; anything
-that pre-authorisation does not cover comes back to the caller. `run` and
-`resume` never merge: landing is the separate `merge` verb.
+run a **workflow** (DESIGN §25): a recipe of steps, each a fresh-context
+agent, working in the session's own tree against one of its specs. The run
+leaves its changes in the tree, uncommitted, and its report comes back to the
+session as a turn. A person running `gummi run` pre-authorises the session's
+runs up to the envelope; anything that pre-authorisation does not cover comes
+back to the caller. `run` and `resume` never merge: landing is the separate
+`merge` verb.
 
 ## Starting a session
 
@@ -27,11 +28,11 @@ Two things must be true before any work begins, and both fail loud:
   unattended run has no one to read a default, so it must name one.
 - an agent backend is configured. `gummi doctor` tells you which.
 
-The run mints the session, sets its crew pre-authorisation to the envelope (a
-crew plan whose budget fits runs without asking), sends the prompt as the
-session's first turn, and then waits on the session and its crew. It stops
-when the session is idle with no crew open (`done`), or when something needs
-a person.
+The run mints the session, sets its workflow pre-authorisation to the
+envelope (a run whose estimate fits starts without asking), sends the prompt
+as the session's first turn, and then waits on the session and its workflow
+run. It stops when the session is idle with no run open or queued (`done`),
+or when something needs a person.
 
 Other `run` flags:
 
@@ -41,7 +42,7 @@ Other `run` flags:
 | `--repo <name>` | which managed repository to start the session in. Required when `repos:` is configured |
 | `--base <branch>` | the branch the session's work forks from and lands on |
 | `--profile <name>` | the profile mapping roles to models |
-| `--timeout <dur>` | stop as a `timeout` after this long with nothing happening on the session or its crew; 0 disables (default 20m) |
+| `--timeout <dur>` | stop as a `timeout` after this long with nothing happening on the session or its workflow run; 0 disables (default 20m) |
 | `--verbose` | add the session's per-tool-call activity lines to the stream |
 
 Wherever a verb takes a card as `<id>`, its number alone works too:
@@ -54,7 +55,7 @@ carry the full id. One flag still wants the id itself:
 | command | purpose |
 |---|---|
 | `gummi run [flags] "<prompt>"` | start a session from a prompt and drive it until it is done or needs you |
-| `gummi resume <id\|ref> [--answer <text> \| "<message>"]` | answer a stopped session (or its crew), or send it a turn, and drive on |
+| `gummi resume <id\|ref> [--answer <text> \| "<message>"]` | answer a stopped session (or its workflow run), or send it a turn, and drive on |
 | `gummi status <id\|ref> [--json]` | where a card is: blockers, spend, branch state |
 | `gummi status <id\|ref> --stats [--json]` | how the card ran: each pass and what it cost, and the share of its life spent waiting on a person |
 | `gummi watch <id\|ref> [--json] [--wait] [--once]` | follow the live agent stream of a card another gummi is driving |
@@ -94,19 +95,26 @@ Cards of the retired workflow kinds (FD, BG, RS) stay readable — `status`,
 ```
 {"event":"created","id":"FF-012","branch":"…","envelope":500,"preauth":500}
 {"event":"reply","id":"FF-012","text":"…"}                  each finished reply of the session's agent
-{"event":"crew","id":"FF-012","crew":1,"state":"proposed","budget":300}
-{"event":"crew","id":"FF-012","crew":1,"state":"running","budget":300,"nodes":2}
-{"event":"crew","id":"FF-012","crew":1,"state":"finished","budget":300,"nodes":2,"report":"…"}
+{"event":"workflow","id":"FF-012","run":1,"recipe":"deliver","spec":1,"state":"running","estimate":660,"steps":6}
+{"event":"crew","id":"FF-012","crew":1,"state":"running","budget":660,"nodes":6}
+{"event":"workflow","id":"FF-012","run":1,"recipe":"deliver","spec":1,"state":"done","estimate":660,"steps":6,"report":"…"}
+{"event":"crew","id":"FF-012","crew":1,"state":"finished","budget":660,"nodes":6,"report":"…"}
 {"event":"done","id":"FF-012","branch":"…","spent_credits":212.5}
 ```
 
-A `crew` line is written whenever one of the session's crews changes state:
-`proposed` (the planner is writing the plan), `running`, `paused`,
-`reviewing` (the final review), and its ending — `finished`, `partial`,
-`declined` or `landed`. The report of an ended crew rides its line, and the
-same report reaches the session as a turn; the run is not done until that
-turn has been answered. `--verbose` adds one `activity` line per tool call
-of the session's agent, crew notes included.
+A `workflow` line is written whenever one of the session's runs changes
+state: `proposed`, `queued` (allowed, behind the open run), `running`,
+`paused`, and its ending — `done`, `partial`, `stopped` or `denied`. The
+report of an ended run rides its line, and the same report reaches the
+session as a turn; the driver is not done until that turn has been answered.
+`--verbose` adds one `activity` line per tool call of the session's agent,
+run notes included.
+
+Each `workflow` line is followed by the `crew` line that crews wrote, for one
+release (DESIGN §25.11): `crew` is the run's number, `budget` its estimate,
+`nodes` its recipe's step count, and the state is the run's, with `done`
+read as `finished`, `denied` as `declined` and `queued` as `proposed`. Read
+`workflow`; the `crew` line goes away.
 
 To measure where a run's spend went rather than watch it, `gummi status
 <id> --json` carries `stage_spend`: one row per (stage, role) with the
@@ -118,8 +126,8 @@ Every `run` and `resume` ends on a typed exit the caller branches on:
 
 | exit | status | last event | caller action |
 |---|---|---|---|
-| `0` | `done` | `done` | the session is idle with no crew open. Report its branch, or send it a next turn with `resume <id> "<message>"` |
-| `2` | `needs_you` | `question` | the session asked, or its crew has a decision the pre-authorisation does not cover, or its crew is paused — see below |
+| `0` | `done` | `done` | the session is idle with no workflow run open or queued. Report its branch, or send it a next turn with `resume <id> "<message>"` |
+| `2` | `needs_you` | `question` | the session asked, or its workflow run has a decision the pre-authorisation does not cover, or a step asked, or the run is paused — see below |
 | `5` | `exhausted` | `exhausted` | envelope dry. `resume --envelope N` with a higher number |
 | `6` | `timeout` | `timeout` | nothing happened for the `--timeout` window. Report; resumable |
 | `1` | `error` | `error` | setup or agent failure. `resumable` on the event says whether a session was left to resume |
@@ -132,12 +140,20 @@ A `question` event's `kind` says whose question it is:
 | kind | what stopped | how to continue |
 |---|---|---|
 | `ask` | the session's own `ask_user` | `resume <id> --answer "<text>"`: one of `options`, or your own words |
-| `crew_plan` | the crew's plan costs more than the pre-authorisation | `--answer "Run the crew"` or `"Keep it a session"`; other words go to the planner as a note |
-| `crew_widen` | a running crew wants to widen its approved plan (a done-when item, more budget, a path outside what was approved) — always a person's call | `--answer "Widen the plan"` or `"Keep the scope: write it into Limits"`; other words go to the planner |
-| `crew_question` | a crew node asked something the frozen spec does not settle, and the planner passed it on (`node` names it) | `--answer "<text>"` |
-| `crew_budget` | the session's budget is spent and the crew paused, or the forecast says it will be before the crew finishes (the crew keeps running) | `--envelope <dollars>` (the `next` line suggests one) tops up and carries a paused crew on; or `--answer "Finish what is running; start nothing new"` or `"Stop the crew"` |
-| `crew_node` | a crew node ran far past its estimate, or stayed stuck past the planner (`node` names it) | `--answer "Let it carry on"` or `"Drop it"` |
-| `crew_paused` | the session's crew is paused (a person paused it, or the process running it stopped) | a bare `resume <id>` resumes it |
+| `workflow_proposal` | the session proposed a run estimated over the pre-authorisation | `--answer "Allow"`, `"Always allow up to <N>"` (credits, or `$N.NN`; it also sets the pre-authorisation) or `"Deny"`; other words go to the session as feedback, and the run does not start |
+| `workflow_plan` | a planner step revised the run's remaining steps — always a person's call (`step` names it) | `--answer "Allow the revised plan"` or `"Keep the plan"`; other words go to the planner step |
+| `workflow_max` | a `repeat` reached its `max` without its `until`, and its `onMax` is `pause` (`step` names it) | `--answer "Run one more iteration"`, `"Continue"` or `"Stop the run"` |
+| `workflow_runaway` | a step ran past three times its estimate (`step` names it) | `--answer "Let it carry on"` (three estimates more) or `"Drop it"` (the step fails) |
+| `workflow_budget` | the session's pool is spent and the run paused, or the forecast says it will be before the run finishes (the run keeps going) | `--envelope <dollars>` (the `next` line suggests one) tops up and carries a paused run on; or `--answer "Top up the session"` (by the amount it names), a number of credits to top up by, `"Continue"` (a forecast only) or `"Stop the run"` |
+| `workflow_ask` | a step's own `ask_user` (`step` names it); the step waits | `--answer "<text>"`: one of `options`, or your own words |
+| `workflow_paused` | the session's run is paused (a person paused it, or the process running it stopped) | a bare `resume <id>` resumes it |
+
+A run's decision may also be answered by an option's number (`--answer 1`),
+and an option's label in any case. Every `workflow_*` question also carries
+`run` (the run's number) and, beside it for one release, the kind a crew's
+stop of the same sort had as `crew_kind` (`crew_plan`, `crew_widen`,
+`crew_question`, `crew_budget`, `crew_node`, `crew_paused`), with `crew` and
+`node` repeating `run` and `step`.
 
 Every resumable stop carries `next`: the literal `gummi resume …` command for
 it, with a `<placeholder>` where a value is yours to supply. `exhausted` and
@@ -152,22 +168,23 @@ so a setup step can branch on the exit code instead of parsing `.ready`.
 ## Resuming
 
 `gummi resume <id>` picks the session back up in a fresh process: the
-session's conversation, its open question and its crew come back from the
-store. Then:
+session's conversation, its open question and its workflow runs come back
+from the store. Then:
 
 - `--answer "<text>"` answers the open question — the session's own
   (through the same round trip the board's picker rides, and the card's
-  history records who answered), or else the crew's open decision. With
-  nothing open it is refused.
+  history records who answered), or else the run's open decision, or else a
+  step's question. With nothing open it is refused.
 - `"<message>"` — a second argument — is the session's next turn. Refused
   while a question is open.
-- `--envelope N` raises the session's envelope, and the crew
+- `--envelope N` raises the session's envelope, and the workflow
   pre-authorisation with it, before anything else. It never lowers either.
   With no message, the session is told to carry on where it stopped.
-- with none of these, it carries on: a crew the process before left running
-  (which comes back paused, DESIGN §24 decision 17) or a person paused is
-  resumed — the person running `resume` is the one who may — and the run
-  waits on the session and its crew as before.
+- with none of these, it carries on: a run the process before left running
+  (which comes back paused: nothing resumes itself, DESIGN §25.7) or a
+  person paused is resumed — the person running `resume` is the one who
+  may — and the driver waits on the session and its run as before. A run
+  paused because the money ran out waits for `--envelope` instead.
 
 `--timeout` and `--verbose` work as they do on `run`.
 
@@ -185,7 +202,7 @@ The flag writes NDJSON to stdout instead of the table layout.
 MSG
 ```
 
-`merge` refuses a session whose crew is still open or whose diff has
+`merge` refuses a session whose workflow run is still open or whose diff has
 unresolved comments (and a retired-workflow card that is not at a verified
 branch), takes no other input, and is stricter than the board's dialog: the message must be a
 Conventional Commits `type(scope): summary` with no diff dump and no agent
@@ -212,7 +229,7 @@ gummi handoff FF-042
 ```
 
 It stamps `handed_off` and closes the card with the landing waived and
-**every other floor intact**: an open crew and open diff annotations still
+**every other floor intact**: an open workflow run and open diff annotations still
 refuse it. A session's loose work is not committed for it — commit what you
 mean to keep first (`gummi commit`).
 
