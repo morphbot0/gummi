@@ -166,6 +166,13 @@ type SessionOpts struct {
 	// Adapters with a path cage let the session read and write it;
 	// adapters without one ignore it.
 	ScratchDir string
+	// WriteDirs are further directories outside WorkDir the session must
+	// be able to write: a workflow step's run directory, where the
+	// artifacts its brief names are kept. Adapters with a path cage open
+	// each to every file tool, as they do ScratchDir (claude --add-dir,
+	// opencode's edit and write rules); adapters confined to their working
+	// directory alone (WriteCageCwd) cage nothing, so they ignore it.
+	WriteDirs []string
 	// ImageSink stores image bytes a backend produced and returns the
 	// markdown that shows them (empty when it could not). Nil means the
 	// session has nowhere to keep them, and an image block is dropped.

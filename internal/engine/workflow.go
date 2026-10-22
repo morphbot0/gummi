@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -664,8 +665,9 @@ func (e *Engine) raiseRunDecision(run *domain.Run, d domain.RunDecision) bool {
 }
 
 // WorkflowDecision is the session's run with an open decision, if any:
-// a proposal, a revised plan, a repeat at its max or the budget. A step's
-// own ask_user is a question on the step's card.
+// a proposal, a revised plan, a repeat at its max or one that cannot judge
+// its condition, or the budget. A step's own ask_user is a question on the
+// step's card.
 func (e *Engine) WorkflowDecision(ctx context.Context, session domain.FeatureID) (*domain.Run, *domain.RunDecision) {
 	if e.cfg.Store == nil {
 		return nil, nil
@@ -793,7 +795,7 @@ func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n i
 		if err := st.UpdateRunStep(ctx, inst); err != nil {
 			return nil, err
 		}
-	case domain.RunDecideMax:
+	case domain.RunDecideMax, domain.RunDecideUnjudged:
 		if run.OnMax == nil {
 			run.OnMax = map[string]string{}
 		}
@@ -1274,6 +1276,18 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 				Question: fmt.Sprintf("Run %d: %s. Run one more iteration, continue to the next step, or stop the run?", run.N, a.Reason),
 				Options:  []string{WorkflowOneMore, WorkflowContinue, WorkflowStopRun},
 			}) || dirty
+		case workflowpolicy.AskUnjudged:
+			// the loop cannot tell whether it is done: the run waits on the
+			// person rather than counting the iteration as not met
+			if e.raiseRunDecision(run, domain.RunDecision{
+				Kind: domain.RunDecideUnjudged, Step: a.Path,
+				Question: fmt.Sprintf("Run %d waits after %s: %s. Run one more iteration (it does not count against the loop's max), "+
+					"continue to the next step, or stop the run?", run.N, a.Path, a.Reason),
+				Options: []string{WorkflowOneMore, WorkflowContinue, WorkflowStopRun},
+			}) {
+				dirty = true
+				e.runNote(session, fmt.Sprintf("run %d waits on the person after %s: %s", run.N, a.Path, a.Reason))
+			}
 		case workflowpolicy.Pause:
 			// the pool is spent: nothing new starts, and what runs stops
 			if err := e.pauseForBudgetLocked(ctx, run, a.Reason); err != nil {
@@ -1407,7 +1421,7 @@ func (e *Engine) runSnapshot(ctx context.Context, run *domain.Run) (workflowpoli
 		in.Steps = append(in.Steps, workflowpolicy.Step{Path: s.Path, State: s.State, Spent: s.Spent})
 	}
 	for k, v := range run.Until {
-		in.Until[k] = workflowpolicy.UntilResult{Met: v.Met, Detail: v.Detail}
+		in.Until[k] = workflowpolicy.UntilResult{Met: v.Met, Unjudged: v.Unjudged, Detail: v.Detail}
 	}
 	for k, v := range run.OnMax {
 		in.OnMax[k] = workflowpolicy.OnMaxAnswer(v)
@@ -1458,8 +1472,11 @@ func (e *Engine) judgeUntilAsync(run *domain.Run, iter, repeatID string) {
 			return
 		}
 		verdict := "not met"
-		if j.Met {
+		switch {
+		case j.Met:
 			verdict = "met"
+		case j.Unjudged:
+			verdict = "could not be judged"
 		}
 		e.runNote(session, fmt.Sprintf("run %d: %s's condition %s after %s (%s)", n, repeatID, verdict, iter, j.Detail))
 	}) {
@@ -1500,8 +1517,14 @@ func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID
 	case domain.UntilVerdict:
 		path := e.runArtifacts(run)[r.Until.In]
 		raw, err := os.ReadFile(path) // #nosec G304 -- an artifact in the run's own directory
+		if errors.Is(err, os.ErrNotExist) {
+			// never written, nor captured from the step's output: the loop
+			// cannot judge, which is not the same as not met
+			return domain.UntilJudgement{Unjudged: true, Detail: fmt.Sprintf("the loop can't judge: %s (%s) was never written",
+				r.Until.In, filepath.Base(path))}
+		}
 		if err != nil {
-			return domain.UntilJudgement{Detail: "no " + r.Until.In + " artifact was written"}
+			return domain.UntilJudgement{Detail: "reading " + r.Until.In + ": " + err.Error()}
 		}
 		var v struct {
 			Verdict string `json:"verdict"`

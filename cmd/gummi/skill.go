@@ -379,7 +379,7 @@ func exitTable() string {
 	}{
 		{driver.StatusDone, "the session is idle with no workflow run open — report its branch, or send it a next turn with `resume <id> \"<message>\"`"},
 		{driver.StatusError, "setup/agent failure — check `status <id>`; resumable if a session was left behind (`resumable` on the error event)"},
-		{driver.StatusNeedsYou, "a `question` event: the session asked (`kind: ask`), its workflow run has a decision (`workflow_proposal`, `workflow_plan`, `workflow_max`, `workflow_budget`), or a step asked (`workflow_ask`) → `resume <id> --answer <text>`; a paused run (`workflow_paused`) → `resume <id>`"},
+		{driver.StatusNeedsYou, "a `question` event: the session asked (`kind: ask`), its workflow run has a decision (`workflow_proposal`, `workflow_plan`, `workflow_max`, `workflow_unjudged`, `workflow_budget`), or a step asked (`workflow_ask`) → `resume <id> --answer <text>`; a paused run (`workflow_paused`) → `resume <id>`"},
 		{driver.StatusExhausted, "budget dry — `resume <id> --envelope <dollars>` (more than the dry budget) raises it and carries on"},
 		{driver.StatusTimeout, "nothing happened for the --timeout window — read the event `hint`, report to the human; `resume <id>` carries on"},
 	}

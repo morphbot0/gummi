@@ -7,7 +7,8 @@ package ui
 // runs is coalesced into one more after it.
 //
 // A run's open decision — a proposal, a revised plan, a repeat at its
-// max or the budget — is its session's open decision,
+// max or one that cannot judge its condition, or the budget — is its
+// session's open decision,
 // asked the way an ask_user question is and answered through
 // Engine.WorkflowAnswer.
 
@@ -124,6 +125,8 @@ func workflowDecisionWord(d *domain.RunDecision) string {
 		return "revised plan"
 	case domain.RunDecideMax:
 		return "loop at max"
+	case domain.RunDecideUnjudged:
+		return "loop can't judge"
 	case domain.RunDecideBudget:
 		return "run budget"
 	}

@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -452,8 +453,13 @@ func startedEntries(r domain.Recipe, steps []domain.RunStep) int {
 }
 
 // endStep records a step's end: its output, its end snapshot, its spend,
-// and its output in the run's directory.
+// and its output in the run's directory. A step that ends done without an
+// artifact it declared has it captured from its output first, before the
+// step reads as done, so the repeat it sits in is judged with it.
 func (e *Engine) endStep(ctx context.Context, inst *domain.RunStep, st domain.StepState, why, output, endTree string) {
+	if st == domain.StepDone {
+		e.captureArtifacts(ctx, inst, output)
+	}
 	unlock := e.lockRuns(inst.Session)
 	cur, err := e.cfg.Store.RunStep(ctx, inst.Session, inst.Run, inst.Path)
 	if err != nil || cur == nil || !cur.State.Live() {
@@ -478,6 +484,61 @@ func (e *Engine) endStep(ctx context.Context, inst *domain.RunStep, st domain.St
 		line += ": " + why
 	}
 	e.runNote(cur.Session, line)
+}
+
+// captureArtifacts writes each artifact a step declared and did not write
+// from the step's output (workflowrecipe.CaptureArtifact): the last JSON
+// object for a .json artifact, else the last fenced block. Each one gummi
+// writes is said in the run's notes; one the output does not hold stays
+// unwritten.
+func (e *Engine) captureArtifacts(ctx context.Context, inst *domain.RunStep, output string) {
+	run, err := e.cfg.Store.Run(ctx, inst.Session, inst.Run)
+	if err != nil || run == nil {
+		return
+	}
+	def, ok := workflowrecipe.Find(run.Recipe, inst.StepID)
+	if !ok {
+		return
+	}
+	names := make([]string, 0, len(def.Artifacts))
+	for name := range def.Artifacts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		file := def.Artifacts[name]
+		if _, err := os.Stat(filepath.Join(e.RunDir(inst.Session, inst.Run), file)); !errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		body, ok := workflowrecipe.CaptureArtifact(output, file)
+		if !ok {
+			e.runNote(inst.Session, fmt.Sprintf("run %d: %s did not write its artifact %s (%s), and its output holds none to capture",
+				inst.Run, inst.Path, name, file))
+			continue
+		}
+		if _, err := e.writeRunFile(inst.Session, inst.Run, file, body); err != nil {
+			continue
+		}
+		e.runNote(inst.Session, fmt.Sprintf("run %d: %s did not write its artifact %s (%s); gummi wrote it from the step's output",
+			inst.Run, inst.Path, name, file))
+	}
+}
+
+// stepWriteDirs is what a step's backend must be able to write beyond its
+// working directory, the session's checkout: its run's directory, where
+// the artifacts its brief names go (SessionOpts.WriteDirs). It is made
+// here, so a backend that opens it finds it. Nil for a card that is no
+// step's.
+func (e *Engine) stepWriteDirs(ctx context.Context, f domain.Feature) []string {
+	st := e.stepOf(ctx, f)
+	if st == nil {
+		return nil
+	}
+	dir := e.RunDir(st.Session, st.Run)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil
+	}
+	return []string{dir}
 }
 
 // flagReaderChanges records the paths a reading step changed between its

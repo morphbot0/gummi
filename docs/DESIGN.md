@@ -6664,7 +6664,12 @@ next.
 
 **The run's directory.** `.gummi/runs/<ID>/<n>/` holds the recipe copy,
 the artifacts, the diff files and each step's output. It is in the
-workspace, not the tree, so it is never in the session's diff.
+workspace, not the tree, so it is never in the session's diff. Every
+step may write it: a backend that cages its writes to the working
+directory has the run's directory opened beside it. A step that ends
+without writing an artifact it declared has it captured from its
+output — the last JSON object for a `.json` artifact, else the last
+fenced block — and the run's notes say gummi wrote it.
 
 **Stop conditions for `repeat`.** After each iteration, a `repeat` checks
 its `until`:
@@ -6680,6 +6685,12 @@ At `max` without the condition, `onMax` decides:
 - `continue` goes on to the next step;
 - `pause` asks the person whether to run one more iteration, continue,
   or stop.
+
+A condition gummi **cannot judge** is never counted as not met: the
+artifact a verdict is read from was never written (nor captured). The run waits on the person, whatever
+`onMax` says — "the loop can't judge: `review` (`review.json`) was
+never written" — with the same answers: one more iteration (which does
+not count against `max`), continue, or stop.
 
 **Joins for `parallel`.** Each branch is a step of its own, in the same
 tree.
@@ -7020,6 +7031,24 @@ The build follows §25, with these differences.
 - **The NDJSON follows.** `created` carries `always_allow` instead of
   `preauth`; a `workflow` line carries `spent` instead of `estimate`; the
   `crew` line beside it drops `budget`; `workflow_runaway` is gone.
+
+**Artifacts and checks.**
+- **Steps write the run's directory on every backend that cages
+  writes.** It lies outside the session's checkout, so on claude a
+  verdict step's `review.json` was refused and `until: {verdict: …}`
+  never held: the loop ran to its max. A step's backend is handed the
+  directory (`SessionOpts.WriteDirs`, made before it spawns): claude
+  takes it as `--add-dir`, opencode opens it to edit, write, read and
+  `external_directory` beside the scratch directory. pi, copilot, codex,
+  antigravity and the headless backend cage nothing but their working
+  directory, so they need nothing.
+- **A missing artifact is captured from the step's output** when the
+  step ends done (`workflowrecipe.CaptureArtifact`), before the step
+  reads as done, so the loop is judged on it; one the output does not
+  hold stays unwritten, and the run's notes say which.
+- **A loop that cannot judge asks** (`RunDecideUnjudged`, the
+  driver's `workflow_unjudged`). The run starts nothing while it waits,
+  as at a loop's max; its block's folded iteration says "can't judge".
 
 **Running.**
 - **A reading step is never spawned read-only.** The backend's read-only

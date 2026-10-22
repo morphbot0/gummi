@@ -1254,3 +1254,47 @@ func TestClaudeSlashCommandsFromInit(t *testing.T) {
 	}
 	var _ Commander = s
 }
+
+// A workflow step writes its artifacts into its run's directory, outside
+// the worktree acceptEdits cages edits to: each of SessionOpts.WriteDirs
+// is opened with --add-dir, so the verdict step's review.json is not
+// refused. A ReadOnly session never takes one.
+func TestClaudeCodeOpensTheWriteDirs(t *testing.T) {
+	ag, err := NewClaudeCode(writeFakeClaude(t, claudeArgvEchoScript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	echo := func(opts SessionOpts) string {
+		t.Helper()
+		sess, err := ag.NewSession(context.Background(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sess.Close()
+		if err := sess.Send(context.Background(), "ping"); err != nil {
+			t.Fatal(err)
+		}
+		var msg string
+		for _, e := range collect(t, sess) {
+			if e.Kind == EventMessage {
+				msg = e.Text
+			}
+		}
+		return msg
+	}
+	const runDir = "/ws/.gummi/runs/FF-001/2"
+	msg := echo(SessionOpts{WorkDir: t.TempDir(), WriteDirs: []string{runDir}})
+	if !strings.Contains(msg, "--add-dir "+runDir+" ") || !strings.Contains(msg, "--permission-mode acceptEdits") {
+		t.Errorf("a step's argv does not open its run directory: %s", msg)
+	}
+	if strings.Count(msg, "--add-dir") != 1 {
+		t.Errorf("more than the run directory is opened: %s", msg)
+	}
+	if msg := echo(SessionOpts{WorkDir: t.TempDir()}); strings.Contains(msg, "--add-dir") {
+		t.Errorf("a session with no write dirs opens one: %s", msg)
+	}
+	if msg := echo(SessionOpts{WorkDir: t.TempDir(), ReadOnly: true, WriteDirs: []string{runDir}}); strings.Contains(msg, "--add-dir") {
+		t.Errorf("a ReadOnly session opens a directory to writes: %s", msg)
+	}
+}

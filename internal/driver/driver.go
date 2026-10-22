@@ -504,8 +504,8 @@ func (d *Driver) askStop(id domain.FeatureID, ask *engine.Ask) Outcome {
 }
 
 // decisionStop is the run's decision: a proposal on a session whose runs
-// are not always allowed, a revised plan, a repeat at its max or the
-// budget.
+// are not always allowed, a revised plan, a repeat at its max or one that
+// cannot judge its condition, or the budget.
 func (d *Driver) decisionStop(id domain.FeatureID, run *domain.Run, dec *domain.RunDecision) Outcome {
 	rec := ""
 	if len(dec.Options) > 0 {

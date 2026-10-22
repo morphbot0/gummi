@@ -393,6 +393,10 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// and backgrounded commands have somewhere to report back to.
 		Watch:      true,
 		ScratchDir: e.scratchFilesDirFor(ff.id),
+		// A workflow step writes its artifacts into its run's directory,
+		// outside the session's checkout: a backend with a write cage opens
+		// it (DESIGN §25.4).
+		WriteDirs: e.stepWriteDirs(ctx, f),
 		// A workflow step is never spawned ReadOnly, a reading role's
 		// neither: that is a research session's allowlist, which would
 		// keep a reviewer from running the tests. Its preamble tells it

@@ -79,8 +79,8 @@ type crewEvent struct {
 
 // questionEvent is every stop that waits on a person. Kind says whose
 // question it is: "ask" (the session's ask_user); "workflow_proposal",
-// "workflow_plan", "workflow_max" or "workflow_budget" (a workflow run's
-// decision); "workflow_ask" (a step's own ask_user); or
+// "workflow_plan", "workflow_max", "workflow_unjudged" or
+// "workflow_budget" (a workflow run's decision); "workflow_ask" (a step's own ask_user); or
 // "workflow_paused". CrewKind is the kind a crew's stop of the same sort
 // carried, emitted beside it for one release (§25.11).
 type questionEvent struct {

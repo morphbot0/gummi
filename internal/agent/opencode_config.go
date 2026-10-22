@@ -46,24 +46,35 @@ import (
 // requires process-level confinement, which is out of scope for this feature
 // (see FD-014 sandbox mode). opencode strips // comments from its JSON config,
 // so this note lives in the Go source only.
-// scratchDir (SessionOpts.ScratchDir) is the one place outside the
-// worktree the stage hints send a session to, so it is opened to every
+// openDirs are the places outside the worktree a session is sent to
+// write: the card's scratch directory (SessionOpts.ScratchDir), which the
+// stage hints name, and a workflow step's run directory
+// (SessionOpts.WriteDirs), where its artifacts go. Each is opened to every
 // file tool here: external_directory and read for all sessions, edit and
-// write unless readOnly. A cage that denied it answered the hint's own
+// write unless readOnly. A cage that denied one answered the session's own
 // instruction with a refusal, and a model that retried the refusal never
-// stopped. Last, because the string parameters ahead of it are too many
-// to transpose silently.
+// stopped. Last but one, because the string parameters ahead of it are too
+// many to transpose silently.
 //
 // Every pattern map relies on opencode letting the LAST matching rule
 // win and on encoding/json writing keys sorted: "*" sorts before any
 // absolute path, so the catch-all deny lands first and each allow after.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, scratchDir string, permission Permission) ([]byte, error) {
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, openDirs []string, permission Permission) ([]byte, error) {
 	worktreeOnly := worktreeCage(workdir)
 	var external any = "deny"
-	if scratchDir != "" {
-		scratch := scratchDir + "/**"
-		worktreeOnly[scratch] = "allow"
-		external = map[string]string{"*": "deny", scratch: "allow"}
+	var opened []string
+	for _, d := range openDirs {
+		if d != "" {
+			opened = append(opened, d+"/**")
+		}
+	}
+	if len(opened) > 0 {
+		ext := map[string]string{"*": "deny"}
+		for _, o := range opened {
+			worktreeOnly[o] = "allow"
+			ext[o] = "allow"
+		}
+		external = ext
 	}
 
 	perm := map[string]any{
@@ -85,8 +96,8 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 		for _, p := range extraReadAllows {
 			readOnly[p] = "allow"
 		}
-		if scratchDir != "" {
-			readOnly[scratchDir+"/**"] = "allow"
+		for _, o := range opened {
+			readOnly[o] = "allow"
 		}
 		perm["read"] = readOnly
 	}

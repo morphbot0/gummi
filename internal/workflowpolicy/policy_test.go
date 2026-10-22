@@ -1,6 +1,7 @@
 package workflowpolicy
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -382,5 +383,54 @@ func TestActionString(t *testing.T) {
 	}
 	if got := (Action{Kind: Pause}).String(); got != "pause" {
 		t.Errorf("String = %q", got)
+	}
+}
+
+// TestAnUnjudgedUntilGoesToThePerson: a repeat whose condition could not
+// be judged — its verdict's artifact was never written — is never counted
+// as not met. The run asks the person, and their answer decides: one more
+// iteration (which does not count against the max), continue, or stop.
+func TestAnUnjudgedUntilGoesToThePerson(t *testing.T) {
+	deliver := recipe(t, "deliver")
+	iteration := func(n int) []Step {
+		p := fmt.Sprintf("build/%d/", n)
+		return []Step{
+			{Path: p + "implement", State: domain.StepDone},
+			{Path: p + "reviews/review-a", State: domain.StepDone},
+			{Path: p + "reviews/review-b", State: domain.StepDone},
+			{Path: p + "verdict", State: domain.StepDone},
+		}
+	}
+	steps := append([]Step{{Path: "design", State: domain.StepDone}}, iteration(1)...)
+	never := UntilResult{Unjudged: true, Detail: "the loop can't judge: review (review.json) was never written"}
+	in := Snapshot{State: domain.RunRunning, Recipe: deliver, Steps: steps, Until: map[string]UntilResult{"build/1": never}}
+
+	got := Decide(in)
+	if !reflect.DeepEqual(render(got), []string{"ask-unjudged build/1"}) || got[0].Reason != never.Detail {
+		t.Fatalf("an unjudged iteration = %v, want the person asked", got)
+	}
+	for answer, want := range map[OnMaxAnswer][]string{
+		OnMaxMore: {"start build/2/implement"},
+		OnMaxGoOn: {"start validate"},
+		OnMaxStop: {"end stopped"},
+	} {
+		in.OnMax = map[string]OnMaxAnswer{"build/1": answer}
+		if got := render(Decide(in)); !reflect.DeepEqual(got, want) {
+			t.Errorf("answered %s: %q, want %q", answer, got, want)
+		}
+	}
+
+	// at the max, one more still runs: the unjudged iteration is not
+	// counted against it, and onMax is not what is asked
+	steps = append(append(steps, iteration(2)...), iteration(3)...)
+	in = Snapshot{State: domain.RunRunning, Recipe: deliver, Steps: steps, Until: map[string]UntilResult{
+		"build/1": {Detail: "CHANGES"}, "build/2": {Detail: "CHANGES"}, "build/3": never,
+	}}
+	if got := render(Decide(in)); !reflect.DeepEqual(got, []string{"ask-unjudged build/3"}) {
+		t.Fatalf("unjudged at the max = %q", got)
+	}
+	in.OnMax = map[string]OnMaxAnswer{"build/3": OnMaxMore}
+	if got := render(Decide(in)); !reflect.DeepEqual(got, []string{"start build/4/implement"}) {
+		t.Fatalf("one more at the max = %q", got)
 	}
 }

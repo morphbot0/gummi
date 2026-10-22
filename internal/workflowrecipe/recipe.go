@@ -2,9 +2,10 @@
 // the YAML a recipe is kept as, the rules a recipe must pass before it may
 // run (Check), the templates a
 // step's prompt is filled from (Fill), the recipes gummi bundles and the
-// workspace's own (Load, List), and the lines a step's output may carry —
+// workspace's own (Load, List), the lines a step's output may carry —
 // a planner's gummi-workflow block, FAILED:, MET:/UNMET:, DECISION: and
-// OPEN:. It is pure apart from Load and List reading recipe files: no
+// OPEN: — and an artifact captured from a step's output when the step did
+// not write it (CaptureArtifact). It is pure apart from Load and List reading recipe files: no
 // store, no git, no agent.
 package workflowrecipe
 

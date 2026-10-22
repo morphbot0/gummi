@@ -354,9 +354,13 @@ type Run struct {
 }
 
 // UntilJudgement is one repeat iteration's stop condition, judged.
+// Unjudged marks one gummi could not judge — the artifact its verdict is
+// read from was never written, or a check ran no tests — which is put to
+// the person rather than counted as not met.
 type UntilJudgement struct {
-	Met    bool   `json:"met"`
-	Detail string `json:"detail,omitempty"`
+	Met      bool   `json:"met"`
+	Unjudged bool   `json:"unjudged,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 // RunDecisionKind is what a run asks its person (§25.5, §25.7).
@@ -371,6 +375,10 @@ const (
 	// RunDecideMax: a repeat reached its max without its condition and its
 	// onMax is pause — one more iteration, continue, or stop.
 	RunDecideMax RunDecisionKind = "max"
+	// RunDecideUnjudged: a repeat's condition could not be judged after an
+	// iteration — its artifact was never written, or a check ran no tests
+	// — so the run paused: one more iteration, continue, or stop.
+	RunDecideUnjudged RunDecisionKind = "unjudged"
 	// RunDecideBudget: the session's pool is spent and the run paused.
 	// Amount is the top-up suggested.
 	RunDecideBudget RunDecisionKind = "budget"

@@ -1493,3 +1493,129 @@ func TestAReadingStepHasAShellAndIsFlaggedWhenItChangesFiles(t *testing.T) {
 		t.Fatalf("the report does not name the scout's change:\n%s", r.Report)
 	}
 }
+
+// verdictLoop is a repeat whose until reads a verdict from an artifact
+// its last step declares.
+const verdictLoop = "name: loop\nsteps:\n  - id: build\n    repeat:\n      max: 2\n      until: { verdict: APPROVED, in: review }\n" +
+	"      steps:\n        - { id: implement, role: implementer, prompt: build }\n" +
+	"        - { id: verdict, role: reviewer, prompt: judge, artifacts: { review: review.json } }\n" +
+	"  - { id: after, role: scribe, prompt: wrap up }\n"
+
+// writesOut is an implementer that makes the spec's check pass.
+func writesOut(dir, _ string, _ int) wfReply {
+	_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o600)
+	return wfReply{text: "wrote it", credits: 1}
+}
+
+// TestAStepMayWriteItsRunsArtifacts: the run's directory lies outside the
+// session's checkout, so a step's backend is handed it to write
+// (SessionOpts.WriteDirs), made before the backend spawns; the session's
+// own backend is handed nothing. A verdict step that writes review.json
+// there ends its loop.
+func TestAStepMayWriteItsRunsArtifacts(t *testing.T) {
+	wf := newWFFake()
+	var mu sync.Mutex
+	dirs := map[string][]string{}
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			key := "session"
+			if m := wfStepRe.FindStringSubmatch(msg); m != nil {
+				key = m[1]
+			}
+			mu.Lock()
+			dirs[key] = opts.WriteDirs
+			mu.Unlock()
+			return base(opts, msg)
+		}
+	}(wf.Responder)
+	e, _, f, _ := wfEngine(t, wf)
+	wf.on("implement", writesOut)
+	wf.on("verdict", func(string, string, int) wfReply {
+		mu.Lock()
+		d := append([]string(nil), dirs["build/1/verdict"]...)
+		mu.Unlock()
+		if len(d) == 1 {
+			_ = os.WriteFile(filepath.Join(d[0], "review.json"), []byte(`{"verdict":"APPROVED"}`), 0o600)
+		}
+		return wfReply{text: "approved", credits: 1}
+	})
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: verdictLoop})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	mu.Lock()
+	defer mu.Unlock()
+	if d := dirs["build/1/verdict"]; len(d) != 1 || d[0] != e.RunDir(f.ID, run.N) {
+		t.Fatalf("the verdict step was handed %q to write, want its run's directory %s", d, e.RunDir(f.ID, run.N))
+	}
+	if d := dirs["session"]; d != nil {
+		t.Fatalf("the session's own backend was handed %q", d)
+	}
+	if r.State != domain.RunDone || !r.Until["build/1"].Met || wf.count("implement") != 1 {
+		t.Fatalf("ended %s after %d iterations, until %+v", r.State, wf.count("implement"), r.Until)
+	}
+}
+
+// TestAMissingArtifactIsCapturedFromTheOutput: a step that declared an
+// artifact and ended without writing it has it written from its output —
+// the last JSON object for a .json — so the loop is judged on it, and the
+// run's notes say gummi wrote it.
+func TestAMissingArtifactIsCapturedFromTheOutput(t *testing.T) {
+	wf := newWFFake()
+	wf.on("implement", writesOut)
+	wf.on("verdict", func(string, string, int) wfReply {
+		return wfReply{text: "Merged the reviews:\n```json\n{\"verdict\": \"APPROVED\", \"findings\": []}\n```", credits: 1}
+	})
+	e, _, f, ff := wfEngine(t, wf)
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: verdictLoop})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone || !r.Until["build/1"].Met || wf.count("implement") != 1 {
+		t.Fatalf("ended %s after %d iterations, until %+v", r.State, wf.count("implement"), r.Until)
+	}
+	raw, err := os.ReadFile(filepath.Join(e.RunDir(f.ID, run.N), "review.json"))
+	if err != nil || string(raw) != "{\"verdict\": \"APPROVED\", \"findings\": []}\n" {
+		t.Fatalf("captured review.json = %q, %v", raw, err)
+	}
+	var said bool
+	for _, l := range ff.Snapshot().Activity {
+		said = said || strings.Contains(l, "gummi wrote it from the step's output")
+	}
+	if !said {
+		t.Errorf("the run's notes do not say the artifact was captured: %q", ff.Snapshot().Activity)
+	}
+}
+
+// TestALoopThatCannotJudgeAsksThePerson: when the artifact a repeat's
+// verdict is read from was never written — nor held in the step's output
+// — the iteration is not counted as not met. The run waits on the person:
+// one more iteration, continue, or stop.
+func TestALoopThatCannotJudgeAsksThePerson(t *testing.T) {
+	wf := newWFFake()
+	wf.on("verdict", func(string, string, int) wfReply { return wfReply{text: "Looks good to me.", credits: 1} })
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: verdictLoop})
+	r := tickRuns(t, e, f.ID, run.N, "asked", pendingOf(domain.RunDecideUnjudged))
+	if !strings.Contains(r.Pending.Question, "the loop can't judge: review (review.json) was never written") || r.Pending.Step != "build/1" ||
+		!reflect.DeepEqual(r.Pending.Options, []string{WorkflowOneMore, WorkflowContinue, WorkflowStopRun}) {
+		t.Fatalf("decision %+v", r.Pending)
+	}
+	if u := r.Until["build/1"]; u.Met || !u.Unjudged {
+		t.Fatalf("until %+v", u)
+	}
+	// it waits: ticking starts nothing
+	for range 5 {
+		if _, err := e.WorkflowTick(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ran := stepPaths(t, e, f.ID, run.N)["build/2/implement"]; ran || wf.count("after") != 0 {
+		t.Fatal("the run went on while it could not judge its loop")
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowContinue); err != nil {
+		t.Fatal(err)
+	}
+	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if wf.count("implement") != 1 || wf.count("after") != 1 {
+		t.Fatalf("ended %s: implement ran %d, after %d", r.State, wf.count("implement"), wf.count("after"))
+	}
+}
+

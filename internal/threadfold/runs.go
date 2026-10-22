@@ -621,8 +621,11 @@ func verdictWords(run domain.Run, it iteration) string {
 		return ""
 	}
 	word := "not met"
-	if j.Met {
+	switch {
+	case j.Met:
 		word = "met"
+	case j.Unjudged:
+		word = "can't judge"
 	}
 	if d := firstLineOf(j.Detail); d != "" {
 		return cut(Sanitize(word+" · "+d), 110)

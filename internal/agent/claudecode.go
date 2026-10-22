@@ -286,6 +286,17 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	if pluginDir != "" {
 		args = append(args, "--plugin-dir", pluginDir)
 	}
+	// A workflow step's run directory, where it writes the artifacts its
+	// brief names: outside the worktree, so acceptEdits' cwd cage would
+	// refuse the write without it. --add-dir opens the one directory, never
+	// the main checkout (below), and never for a ReadOnly session.
+	if !opts.ReadOnly {
+		for _, d := range opts.WriteDirs {
+			if d != "" {
+				args = append(args, "--add-dir", d)
+			}
+		}
+	}
 	// Static allowlist: pre-approving a tool skips its permission checks
 	// entirely, so Edit, Write, and MultiEdit MUST stay off this list —
 	// allowlisting any of them would neutralize acceptEdits' cwd check

@@ -201,3 +201,15 @@ func TestARunItemIsPlacedByTimeAndAlwaysDelivered(t *testing.T) {
 		t.Fatalf("a page past every event is not handed the run: %+v", since)
 	}
 }
+
+// A folded iteration whose condition could not be judged says so, never
+// "not met".
+func TestAnUnjudgedIterationSaysSo(t *testing.T) {
+	run := domain.Run{Until: map[string]domain.UntilJudgement{
+		"build/1": {Unjudged: true, Detail: "the loop can't judge: review (review.json) was never written"},
+	}}
+	got := verdictWords(run, iteration{path: "build/1", n: 1})
+	if got != "can't judge · the loop can't judge: review (review.json) was never written" {
+		t.Fatalf("verdict = %q", got)
+	}
+}

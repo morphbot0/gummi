@@ -24,7 +24,8 @@
 //  2. A spent pool pauses the run for a top-up; nothing else happens.
 //  3. A parallel whose join is decided settles, stopping branches it no
 //     longer needs; a repeat whose iteration has ended has its until
-//     judged, then iterates, ends, or applies onMax.
+//     judged, then iterates, ends, or applies onMax. An until that could
+//     not be judged goes to the person, never counted as not met.
 //  4. The next ready step starts: the next entry in order, or every branch
 //     of a parallel.
 //  5. When nothing is left, the run ends: done, or partial on a failed step
@@ -48,14 +49,17 @@ type Step struct {
 }
 
 // UntilResult is the engine's judgement of a repeat's until after one
-// iteration.
+// iteration. Unjudged marks a condition gummi could not judge, which is
+// never counted as not met: the person decides (AskUnjudged).
 type UntilResult struct {
-	Met    bool
-	Detail string
+	Met      bool
+	Unjudged bool
+	Detail   string
 }
 
 // OnMaxAnswer is the person's answer to a repeat that reached its max
-// without its condition, under onMax: pause.
+// without its condition, under onMax: pause — or to one whose condition
+// could not be judged.
 type OnMaxAnswer string
 
 const (
@@ -76,7 +80,7 @@ type Snapshot struct {
 	// Until holds the judged untils, keyed by iteration path (build/2).
 	Until map[string]UntilResult
 	// OnMax holds the person's onMax answers, keyed by the iteration path
-	// that reached the max.
+	// that reached the max or could not be judged.
 	OnMax map[string]OnMaxAnswer
 	// Bounded marks a pool with a ceiling: a session with an envelope. Left
 	// is what it has left, the run's own spend taken out. Meaningless when
@@ -104,6 +108,10 @@ const (
 	// iteration, continue, or stop. The answer comes back as
 	// Snapshot.OnMax[Path].
 	AskOnMax
+	// AskUnjudged puts a repeat whose until could not be judged after the
+	// iteration at Path to the person: one more iteration, continue, or
+	// stop, answered as Snapshot.OnMax[Path]. Reason says why.
+	AskUnjudged
 	// Pause parks the run for a top-up: the pool is spent.
 	Pause
 	// End ends the run in State: run the end checks, write the report and
@@ -112,14 +120,14 @@ const (
 )
 
 func (k Kind) String() string {
-	return [...]string{"start", "interrupt", "need-until", "ask-on-max", "pause", "end"}[k]
+	return [...]string{"start", "interrupt", "need-until", "ask-on-max", "ask-unjudged", "pause", "end"}[k]
 }
 
 // Action is one thing for the engine to do.
 type Action struct {
 	Kind Kind
-	// Path is the step instance's path, or for NeedUntil and AskOnMax the
-	// iteration's.
+	// Path is the step instance's path, or for NeedUntil, AskOnMax and
+	// AskUnjudged the iteration's.
 	Path string
 	// Step is the recipe id of the step to start, or of the repeat whose
 	// until or max is in question.
@@ -393,8 +401,22 @@ func (d *decider) repeat(prefix string, r domain.Repeat) (outcome, string) {
 		d.settle = append(d.settle, Action{Kind: NeedUntil, Path: iter, Step: r.ID})
 		return pending, ""
 	}
-	if u.Met {
+	switch {
+	case u.Met:
 		return ok, ""
+	case u.Unjudged:
+		// the loop cannot tell whether it is done: the person says, and one
+		// more iteration does not count against its max (limit)
+		switch d.in.OnMax[iter] {
+		case OnMaxGoOn:
+			return ok, ""
+		case OnMaxStop:
+			return stopped, fmt.Sprintf("repeat %s could not judge its condition (%s); the person stopped the run", base, u.Detail)
+		case OnMaxMore:
+		default:
+			d.settle = append(d.settle, Action{Kind: AskUnjudged, Path: iter, Step: r.ID, Reason: u.Detail})
+			return pending, ""
+		}
 	}
 	if cur < d.limit(prefix, r, cur) {
 		return d.seq(domain.IterationPath(prefix, r.ID, cur+1), r.Steps)
