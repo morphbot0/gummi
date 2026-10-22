@@ -2067,18 +2067,21 @@ Decided in the design interview (2026-07-03):
     automatic review: the card says how many commits it is past its last
     verification, and a person decides.
 
-28. **A crew becomes a workflow the session runs, and its work lands as
-    it goes**, decided 2026-10-22 (§25, *not built*). A workflow is a
-    recipe file (`.gummi/workflows/*.yaml`, with `deliver` and
-    `investigate` bundled). A session runs one at a time, against one of
-    a list of specs it holds, and a spec may be run again. Each step
-    passes its checks, the owns check and review, then lands as one
-    commit straight on the session's branch, so there is no crew branch
-    and no `crew_land`. A run is drawn as one block in the session's
-    thread, and a person may attach to any step and talk to its agent.
-    This **amends decision 27** and §24.2, §24.3, §24.4 and §24.9. Every
-    rule of 27's "what does not bend" carries over, and no recipe may
-    remove one.
+28. **A crew becomes a workflow on Kiro's model**, decided 2026-10-22
+    (§25, *not built*). A workflow is a recipe file of steps, with
+    `parallel` and `repeat`, in `.gummi/workflows/` alongside the bundled
+    `deliver`, `investigate` and `fix-until-green`. Its steps are
+    fresh-context agents that run in the session's own worktree. There
+    is no branch per step and nothing to land: a run leaves its changes
+    uncommitted, and the session commits what it keeps. A session holds
+    a list of specs and runs one workflow at a time. A run is drawn in
+    the thread, and a person may open any step and talk to its agent.
+    This **amends decision 27**: inside a run only three rules stay
+    fixed. The person approves its plan, money is a ceiling no agent
+    raises, and a question the run cannot settle reaches the person.
+    Review, checks and ownership become steps a recipe chooses. This
+    decision also replaces the crew branch, node landing and the owns
+    check (§24.3–24.6).
 
 Still open:
 
@@ -5900,9 +5903,9 @@ not a spec's reviewer threads.
 ## 24. Sessions and crews — work without a workflow
 
 > **Amended by §25 (decision 28), not yet built.** Crews become
-> workflows that a session runs one at a time, a session holds a list of
-> specs, and a run's steps land straight on the session's branch, so
-> `crew_land` and the crew branch go.
+> workflows on Kiro's model: recipe files of steps that run in the
+> session's own tree and leave their changes uncommitted, a list of
+> specs per session, and no crew branch, node landing or owns check.
 
 *Decided 2026-10-21 (decision 27); built.* This section describes the
 code as it is. It supersedes the workflow (§3), the kinds' stage
@@ -6430,290 +6433,299 @@ as written:
 - **An integrator role** separate from the node whose landing conflicts
   (§24.4).
 
-## 25. Workflows — the runs a session makes, one at a time
+## 25. Workflows — Kiro's shape, run in the session's own tree
 
 *Decided 2026-10-22 (decision 28); not built.* §24 describes the code as
-it is. This section says what changes, and where it disagrees with §24
-it wins. A crew is renamed a **workflow**. A session holds a list of
-specs rather than one. A run's steps land straight on the session's
-branch, so there is no crew branch and no `crew_land`. A running
-workflow is drawn in the session's thread, and a person can attach to
-any step of it and talk to that step's agent.
+it is. This section says what replaces it, and where it disagrees with
+§24 it wins. A crew becomes a **workflow**, on the model of Kiro's
+workflows. A workflow is a recipe of steps. Each step is a fresh-context
+agent, and **the steps run in the session's own worktree**: there is no
+branch per step and nothing to land. A run leaves its changes
+uncommitted for the session. Review is a step a recipe may include, not
+a floor gummi imposes. A session holds a list of specs and runs one
+workflow at a time. A run is drawn in the session's thread, and a
+person can open any step and talk to its agent.
 
 ```
-session ──spec A──▶ run 1 (deliver) ──▶ report into spec A
-   │       steps land on the session's branch as each is reviewed
-   ├──spec B──▶ run 2 (deliver) ──▶ report into spec B      one run at a time
-   └──spec B──▶ run 3 (fix-until-green) …                     a spec may run again
+session ──spec A──▶ run 1 (deliver) ──▶ report · changes left in the tree
+   │                 the session (or you) reads them and commits
+   ├──spec B──▶ run 2 ──▶ …                       one run at a time
    lands on a person's read of its diff, as a session always has (§19.1)
 ```
 
 ### 25.1 Why
 
-Three things about crews were wrong once they were used:
+Crews were used, and three things about them were wrong:
 
 - **`crew_land` made a crew a thing beside the session**, with a branch
-  of its own that had to be landed. A crew is how a session gets a piece
-  of work done, so its work belongs on the session's branch as it is
-  done.
-- **One spec per session joined unrelated pieces of work.** A second
-  crew on the same session had to be judged against a spec that had
-  grown to cover both.
-- **A crew was drawn off to the side**, on the web page's Crew tab and
-  in the strip under the terminal's thread, rather than where the
-  session's story is told.
+  of its own to land.
+- **One spec per session tied unrelated pieces of work together.**
+- **The crew was drawn off to the side**, on the Crew tab and the
+  terminal's strip, not in the thread.
 
-Kiro's workflows (surveyed 2026-10) have the shape this section takes.
-A workflow is a background run of steps. Each step is an agent with a
-fresh context, and steps hand off through output and files, never
-through transcripts. A plan is approved before it runs. A **Workflows**
-section sits above the chat, one card per run. A step opens in a tab of
-its own, where you can message its agent. Recipes are files a person
-can save and share. What gummi does not take is Kiro's lack of
-isolation. A Kiro run writes into the checkout it started in, with no
-branch or worktree, so two runs overwrite each other and Stop leaves
-half-made edits behind. gummi keeps a branch per step, the owns check
-and the review, and lands each step as one commit.
+A first answer kept the crew's isolation and landed each reviewed step
+on the session's branch. A fresh-context review of it found that answer
+needs:
 
-### 25.2 Names
+- git writes into a live agent's tree, which no backend can be confined
+  from;
+- a reviewed-commit pin;
+- checks on the integrated result;
+- an integration tree per run.
+
+That machinery exists only to support parallel writers that are each
+reviewed before their work counts. Kiro (surveyed 2026-10) does without
+it. Its steps share one checkout, its review is a step of the recipe,
+and its runs end with the changes in your tree for you to inspect. gummi
+takes that model whole. Parallel writers and per-step isolation go,
+along with all their machinery.
+
+### 25.2 What Kiro does, and what gummi takes
+
+| Kiro | gummi |
+|---|---|
+| a **step** is one agent in its own session with a fresh context; it cannot read another step's session | the same; a step is a hidden card row in the session's worktree |
+| **handoffs**: a step's captured output or a declared artifact | the same: `{{previous.output}}`, `{{<step>.output}}`, artifacts under the run's directory |
+| **parallel** branches with a join policy: `all`, `allSettled`, `any` | the same, no guard; gummi warns when one parallel block holds two writing roles |
+| **repeat** with a stop condition and `maxIterations`, ending in `abort`, `continue` or `pause` | the same |
+| **wait** on a PR or a command | deferred; a wait on a PR is a person's publishing (§22) |
+| the plan shown for **Allow / Deny**, with typed feedback and **Always allow** | the same, as a decision in the thread; Always allow is pre-authorisation (§24.3) |
+| runs write into the checkout they started in; **Stop doesn't revert** | the same, with a snapshot at every step boundary (§25.6) |
+| a **Workflows** section above the chat; one card per run, with Pause and Stop | one block per run inline in the thread (§25.8) |
+| a **Workflow step** tab: the step's own history; you can message its agent | the same (§25.9) |
+| **Needs input** rows in the parent chat | a step's question in the run's block |
+| recipes are files: `.kiro/workflows/` | `.gummi/workflows/*.yaml`, plus the bundled ones |
+| no accept or merge step | none; the session commits what it keeps |
+
+### 25.3 Names
 
 | was (§24) | now |
 |---|---|
-| crew | a **workflow** (the recipe) and its **run** (one execution of it) |
+| crew | a **workflow** (the recipe) and its **run** |
 | node | **step** |
-| crew branch `crew/<slug>/<n>` | none |
-| node branch `crew/<slug>/<n>.<node>` | `wf/<slug>/<run>.<step>` |
+| crew branch, node branches | none |
 | `crew_start(brief, budget)` | `workflow_run(recipe, spec, budget)` |
 | `crew_status`, `crew_steer`, `crew_stop` | `workflow_status`, `workflow_steer`, `workflow_stop` |
-| `crew_land` | none (§25.5) |
-| the session's spec | the session's **specs** (§25.3) |
-| Crew tab | the run's block in the thread (§25.7) |
+| `crew_land` | none |
+| the session's spec | the session's **specs** (§25.4) |
+| Crew tab, `crewLines` | the run's block in the thread (§25.8) |
 | profile slot `crew-<tier>` | `step-<tier>`, falling back to `crew-<tier>`, then `implementer` |
 
-The planner, the reviewer and the role catalogue (§24.4) keep their
-names.
+### 25.4 A session's specs
 
-### 25.3 A session's specs
-
-A session holds a **list of specs, one per piece of work**, and most
+A session holds a **list of specs, one per piece of work**. Most
 sessions still have none.
 
-- `spec_start(title)` adds a spec. `spec_view`, `spec_replace_section`
-  and `spec_annotate` take the spec they act on, and default to the one
-  most recently written.
-- Each spec keeps its own numbered revisions, and lives under
-  `.gummi/specs/<ID>/<n>-<slug>.md`. The session's single
-  `Feature.SpecPath` becomes a table of the session's specs. An existing
-  session spec becomes its session's spec 1.
-- **A run freezes the revision it starts on**, and is judged on that
-  revision's done-when items. An edit made during the run is a new
-  revision for the next run, and a steer to this run's planner.
-- **The report is written back into its spec**, in a Report section, so
-  the spec says what was done, decided and left open. The thread carries
-  the same report as a turn.
-- **A spec may be run again.** Running a partial spec picks up what is
-  left. Running a met spec proves it again. A spec's state comes from
-  its runs: *draft* (never run), *running*, *met* (its last run met
-  every item), or *partial*.
-- **Earlier specs are a warning, never a judgement.** Prove (§25.4)
-  runs the frozen spec's done-when checks, and judges the run on them.
-  It also runs every other spec's checks on the session's tip. One that
-  used to pass and now fails is reported as a regression. It does not
-  fail the run.
+- **The tools.** `spec_start(title)` adds a spec. `spec_view`,
+  `spec_replace_section` and `spec_annotate` take the spec to act on.
+  The argument is required once a session has more than one spec, so
+  no write lands in the wrong spec.
+- **Storage.** Each spec keeps its own numbered revisions, keyed by
+  spec, under `.gummi/specs/<ID>/<n>-<slug>.md`. An existing session
+  spec becomes the session's spec 1.
+- **Item ids.** A done-when item is named by its spec wherever two specs
+  meet, as in `S2/DW-1`.
+- **A run freezes the revision it starts on.** An edit made during the
+  run is the next revision, and a steer to the run.
+- **The report goes back into its spec**, in a Report section. The
+  thread carries the same text as a turn.
+- **A spec may be run again.** Its state comes from its runs: *draft*,
+  *running*, *met* (its last run's validation passed every item), or
+  *partial*.
 
-The Spec tab becomes **Specs**: the list, each spec's state, revision,
-runs and done-when count, and the selected spec beneath.
+The Spec tab becomes **Specs**: a list of the session's specs, with the
+selected one beneath it.
 
-### 25.4 Recipes
+### 25.5 Recipes
 
-A workflow is a **recipe file**. A recipe is looked up in the repository
-first, under `.gummi/workflows/*.yaml`, then among the recipes gummi
-ships with. A recipe is copied into the run when the run starts, so an
-edit to the file never changes a run under way.
+A recipe is a file, copied into the run when the run starts. gummi looks
+under `.gummi/workflows/*.yaml` first, then in its bundled recipes. The
+format follows Kiro's:
+
+- `name`, `description`, `inputs`, and a default `tier` for the recipe;
+- `steps` that run in order, each of which is one of:
+  - a **step**: `id`, `role`, `prompt`, and optionally `tier`,
+    `artifacts`, `captureOutput` and `envelope`;
+  - **`parallel`**: branches with a `join` of `all`, `allSettled` or
+    `any`;
+  - **`repeat`**: a body, a `max`, a stop condition (`until: checks`,
+    `verdict: APPROVED` read from an artifact, or `contains: <text>`),
+    and `onMax: abort | continue | pause`.
 
 ```yaml
-# bundled: deliver
+# bundled: deliver, after Kiro's "Deliver a feature"
 name: deliver
-description: Build a spec's done-when items with a planned team of steps
-stages:
-  - id: plan
-    planner: true        # the planner writes the build stage's steps
+description: Design, build and validate a spec's done-when items
+steps:
+  - id: design
+    role: contractor
+    prompt: Write the design for {{spec}} to {{artifacts.design}}. Do not edit code.
+    artifacts: { design: design.md }
   - id: build
-    from: plan
-    rework: 2
-  - id: prove            # the frozen spec's done-when checks, and the final review
-  - id: report           # into the spec and the thread
+    repeat:
+      max: 3
+      until: { verdict: APPROVED, in: review.json }
+      onMax: pause
+      steps:
+        - id: implement
+          role: implementer
+          prompt: Implement {{artifacts.design}}. Address {{artifacts.review}} if present.
+        - id: review
+          parallel:
+            join: allSettled
+            steps:
+              - { id: review-a, role: reviewer, tier: strong,   prompt: Review the run's diff against {{spec}}. }
+              - { id: review-b, role: reviewer, tier: standard, prompt: Review the run's diff against {{spec}}. }
+        - id: verdict
+          role: reviewer
+          prompt: Merge the reviews into {{artifacts.review}} with one verdict.
+          artifacts: { review: review.json }
+  - id: validate
+    role: tester
+    prompt: Run the done-when checks of {{spec}} and report each.
 ```
 
-```yaml
-# .gummi/workflows/fix-until-green.yaml
-name: fix-until-green
-description: Rework one implementer until the done-when checks pass
-stages:
-  - id: fix
-    repeat: { max: 5, until: checks }
-    steps:
-      - id: fix
-        role: implementer
-        brief: Make the failing done-when checks pass.
-        owns: [internal/]
-  - id: prove
-  - id: report
-```
+- **Bundled recipes.** gummi ships **deliver** (above), **investigate**
+  (a scout, then a scribe writing a report artifact), and
+  **fix-until-green** (a `repeat` around one implementer, until the
+  done-when checks pass).
+- **Recipes are validated, not floored.** A pure `workflowrecipe.Check`
+  refuses only a recipe that cannot run: unknown roles or tiers, a
+  dangling `{{…}}`, a `repeat` without a `max`, or a handoff read before
+  its producer runs. It warns when one `parallel` block holds two
+  writing roles. Review, validation and ownership are the recipe's to
+  include.
+- **The planner** is a role a recipe may use. A `plan` step's output may
+  replace the run's remaining steps, as Kiro lets a run "revise
+  remaining work between steps". The revision goes to the person as a
+  new plan to allow. It never rewrites a step that is already running.
 
-The stage kinds are:
-- `plan`: the planner writes the steps of the stage that names it in
-  `from`;
-- a stage of `steps`, fixed or `from: plan`, with the step fields of
-  §24.4;
-- `repeat`, with a `max` and an `until` of `checks` or `review`, which
-  ends the run on `max` and says so rather than claiming success;
-- `prove`;
-- `report`.
+### 25.6 The tree
 
-Two bundled recipes ship: **deliver**, today's crew in this shape, and
-**investigate**, a scout and a scribe that write nothing to the branch
-but the report.
+- **Steps work in the session's worktree**, one after another, or side
+  by side inside a `parallel`.
+- **gummi commits nothing**, and neither does a step. A step that
+  commits anyway is not refused, but the report says it did.
+- **A snapshot at every step boundary.** When a step starts and when it
+  ends, gummi records the tree as a git tree object: `git add -A` into a
+  temporary index, then `write-tree`. This touches neither the branch
+  nor the real index. The snapshots give:
+  - each step's own **diff** (end against start) for its tab;
+  - the input to a reviewer step ("the run's diff" is the run's start
+    against now);
+  - **Revert run**, a person's act, which puts back the run's starting
+    snapshot for the paths the run changed, and only after showing them.
+- **Stop** ends the running step at its next tool boundary. It reverts
+  nothing, as in Kiro. The run's block shows what changed and offers
+  Revert run.
+- **The verified mark** (§24.8) becomes "**validated at tree
+  `<hash>`**". It still holds when the session commits that very tree;
+  any edit since shows as "changed since validation".
+- **A run starts on whatever is in the tree.** A tree that already
+  holds uncommitted work is named on the approval, and the snapshot
+  keeps the run's diff apart from it.
 
-**The floor is not the recipe's to set** (decision 27's "what does not
-bend"). A pure `workflowrecipe.Problems` refuses a recipe that:
-- does not end in `prove` and `report`;
-- would carry a writing step past review. A recipe cannot name the
-  reviewer, so it cannot leave it out;
-- has fixed steps that fail the plan checks of §24.5.
+### 25.7 The session during a run
 
-The plan a run is about to carry out goes to the person for approval
-before it starts, the planner's or the recipe's own fixed steps alike.
-Pre-authorisation (§24.3) still covers it.
+- **One run at a time.** A `workflow_run` asked for while one is open
+  waits behind it, at most one deep. Its plan goes to the person when it
+  starts.
+- **The session agent keeps talking**, as Kiro's parent chat does. Each
+  turn during a run is told that the tree is the run's until it ends,
+  and not to touch files. Nothing enforces that. A file the session
+  changes during a run shows in the next step's snapshot, as if the run
+  had changed it.
+- **The session's own landing waits for its run** (`CrewHolds`, renamed).
+  After the run, the session agent reads the report and the diff, then
+  commits on purpose, or the person does. gummi never commits for it.
 
-### 25.5 Where the work goes
+### 25.8 In the thread
 
-**There is no run branch.** Each step forks from the session's branch
-when it starts, on `wf/<slug>/<run>.<step>`. Once it has passed its
-checks, the owns check and review, it lands as **one squash commit on
-the session's branch**, made in the session's own worktree. That commit
-carries the step's `DONE:` line as its subject and is attributed to the
-run and the step. When the run ends its work is already on the branch,
-so there is nothing to land. The session lands, as ever, on a person's
-read of its diff, and an open run holds that landing, as an open crew
-does (`CrewHolds`).
-
-- **The session only reads while a run is open.** Its agent may answer
-  the person, read and run commands. Every turn is told that the branch
-  is the run's until it ends. A step can land only on a clean tree. If
-  the session's tree holds uncommitted work at that moment, the run
-  pauses and asks the person to commit, stash or discard it. gummi never
-  commits for the session, and never discards work on its own.
-- **A conflict** sends the step back to merge the session's branch into
-  its own and resolve the conflict, as a node does today (§24.6).
-- **Stop keeps what landed.** Every commit a run made passed its review.
-  Because each step is one commit, the run's block offers **Revert
-  run**, which adds one `git revert` commit for the run's commits.
-  Nothing is rewritten.
-- **The verified mark** (§24.8) becomes "**run 2 verified at
-  `<sha>`** · N commits since". The sha is the session's tip when Prove
-  passed.
-- A dropped step keeps its branch until the session is cleaned up
-  (§24.7a).
-
-### 25.6 One run at a time
-
-A session runs **one workflow at a time**. A `workflow_run` asked for
-while one is open is queued behind it, and its plan is drafted only when
-it starts, from the tip the earlier run left.
-
-Two at once would put two writers on one branch, which brings back the
-integration that this section removes. Each run starts from what the
-last one landed, and can read its report. Parallel work lives inside a
-run, in its steps, and across sessions, each with a branch of its own.
-
-### 25.7 In the thread
-
-Each run is **one block in the session's thread**, updated in place
-rather than appended to as events arrive:
+Each run is **one block in the session's thread**, updated in place:
 
 - **A head**: the recipe, the run number, its spec, spend against the
   estimate, elapsed time, and Pause and Stop.
-- **The stage strip**, from the recipe: `Plan ✓ → Build 1/3 → Review →
-  Prove → Report`.
-- **One row per step**: its role, title and live last action (or its
-  check line), its spend, and **Open** or **Attach**. A step waiting on
-  the person is ringed, and its question is drawn under it with the
-  recommended answer first.
-- **A footer** saying where its work lands.
+- **The recipe's shape**, as a strip of its top-level steps.
+  - A `repeat` shows its iteration (`build ↺ 2/3`).
+  - A `parallel` shows its branches.
+- **A row per step that has run or is running**: its role, title, live
+  last action, spend, and **Open**. Landed iterations of a `repeat`
+  fold to one line. A step waiting on the person is ringed, and its
+  question is drawn under it.
+- **A footer**: the files the run has changed so far, uncommitted.
 
-An ended run folds to its met items, the commits it put on the branch,
-and a link to its report. The plan approval and a widening stay
-decisions in the thread (§24.9). The Crew tab and the TUI's crew strip
-(`crewLines`) go. The block is a `threadfold` item, so both faces draw
-it from one fold, and the TUI draws it in the thread as text. The
-board's squares per step (§24.9) stay.
+An ended run folds to:
+- its validation result per done-when item;
+- the files it left changed;
+- **Revert run**;
+- a link to its report.
 
-### 25.8 Attaching to a step
+The approval and a revised plan are decisions in the thread.
+`threadfold` takes the run as an input rather than an event per step
+action. Both faces draw the block from that one fold, the TUI as text.
+The Crew tab and the TUI's `crewLines` go.
 
-A step is still a hidden card row (§24.6). **Attach** opens its face
-beside the session's thread on the web page; in the TUI it is a pushed
-view with a crumb back (`Session › deliver run 2 › t2`). The face
-holds:
+### 25.9 Opening a step
 
-- a head: the role, the model and tier, spend against the estimate, its
-  rework count and its branch;
-- **Transcript**: the step's own conversation, live;
-- **Diff**: its branch against where it forked;
-- **Checks**;
-- **Brief**: the brief, the frozen spec revision, the handoffs it was
-  given, and what it owns;
-- **Terminal**: a person's shell in the step's tree (§20.5).
+**Open** sets the step's face beside the session's thread (web), or
+pushes it with a crumb back (TUI). It has these tabs:
 
-**A person may talk to the step's agent**, as Kiro's step tab allows.
-A message is delivered as a turn, under the same mid-turn rule as a
-session's (§10, still open 3). Three things keep the floor
-intact:
+- **Transcript**: live while the step runs.
+- **Diff**: the step's own, from its snapshots.
+- **Brief**: the prompt as filled in, with its handoffs and artifacts.
+- **Terminal**: in the session's tree, which is the step's.
 
-- The exchange is logged on the step, and the step's reviewer reads it
-  as what the person told this step.
-- It cannot widen. The owns check at landing still holds, so a person
-  who wants more than the step owns goes through the session or the
-  planner, and that is a widening (§24.7).
-- A step's question may be answered here as well as in the thread. It
-  still goes to the planner first (§24.6).
+**A person may talk to the step's agent** while it runs, or ask it a
+follow-up once it has ended, as in Kiro. Each message is a turn on the
+step's card, paid from the session's pool. The person's word goes
+straight to the step. The recipe and the run's other steps know only
+what the step's output and artifacts carry.
 
-### 25.9 What carries over
+### 25.10 What goes, and what stays
 
-Unchanged from §24, with the new names:
-- the plan checks (§24.5);
-- a step's life, except where it lands (§24.6);
-- the conductor and the planner (§24.7). The conductor gains one pause:
-  a session tree that is not clean;
-- money (§24.7a): one pool, estimates, pause and never drop, runaways;
-- widening;
-- the roles and the profile slots;
-- pre-authorisation;
-- questions to the planner first;
-- the report's contents (§24.8);
-- the headless driver, whose `run`/`resume` drive workflows as they
-  drive crews, with the NDJSON renamed and the old names kept as
-  aliases for one release.
+**Goes:**
+- the crew branch and the node branches;
+- `Pool.SquashMerge` for nodes, and `CrewLand`;
+- the owns check and the one-writer rule (§24.5 rules 3–4);
+- the reviewer that gummi placed after every writing node;
+- the conflict-integration path;
+- `crewplan.Problems` as a floor; what is left is `workflowrecipe.Check`;
+- the handoff grammar as a requirement. `DONE:`, `DECISION:` and
+  `OPEN:` lines are still read for the report when a step writes them.
 
-### 25.10 The order of building
+**Stays:**
+- money (§24.7a): one pool, estimates, pause and never drop, and
+  runaways at three times a step's estimate;
+- a person's approval of each plan and each revision, or
+  pre-authorisation, and no agent approves its own run;
+- questions going to the person, through the planner where the recipe
+  has one;
+- the headless driver, which drives runs as it drove crews;
+- a session landing on a person's read of its diff.
 
-1. **The rename**: domain, store (the crew tables keep their data),
-   tools, the faces and `docs/HEADLESS.md`.
-2. **Steps land on the session's branch**, with the clean-tree pause,
-   Revert run and the new verified mark. The crew branch and `crew_land`
-   are deleted.
-3. **A session's specs**: the table, the tools' spec argument, the Specs
-   tab, and the report written back into the spec.
-4. **The run's block in the thread**, and **attaching to a step**, web
-   first, then the TUI.
-5. **Recipes as files**, with `deliver` and `investigate` bundled, and
-   `workflowrecipe.Problems`.
+**Decision 27 is amended here.** Its "what does not bend, inside a crew"
+shrinks to three rules: the person approves a run's plan, money is a
+ceiling no agent raises, and a question the run cannot settle reaches
+the person. Review, checks and ownership become what a recipe chooses,
+and the bundled `deliver` chooses all three.
 
-### 25.11 Deferred
+### 25.11 The order of building
 
-- **Read-only runs alongside a writing one** (an `investigate` beside a
-  `deliver`), once a recipe can be proved to write nothing.
+1. **The rename**, with the store keeping the crew tables' data.
+2. **Steps in the session's tree**, the snapshots, Stop and Revert run,
+   and the validated-tree mark. Delete the crew and node branches,
+   `CrewLand` and the owns check.
+3. **Recipes as files**: the format, `workflowrecipe.Check`, the runner
+   for step, `parallel` and `repeat`, and the bundled `deliver`,
+   `investigate` and `fix-until-green`. Today's planner-and-nodes crew
+   is not carried over as a recipe.
+4. **A session's specs.**
+5. **The run's block in the thread, and opening a step**, web first,
+   then the TUI.
+
+### 25.12 Deferred
+
+- **Waits** (`watch`) on a command.
 - **Personal recipes** outside the repository.
-- **Joins other than "all"**, conditional stages, and waits on an
-  outside system. A wait on a PR is a person's publishing (§22), never a
-  run's.
+- **Isolated parallel writers**, as an opt-in for a recipe that wants
+  them: §24's branches and owns check, kept in history.
