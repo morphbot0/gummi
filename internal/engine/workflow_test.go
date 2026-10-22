@@ -922,3 +922,57 @@ func TestAStepsQuestionWaitsOnThePerson(t *testing.T) {
 		t.Fatalf("ended %s; step %+v; answered turns %d", r.State, s, wf.count("ask#"))
 	}
 }
+
+// TestAProposalReadsAsItsCard: the proposal the faces draw (DESIGN §25.5)
+// carries the recipe's step tree with each step's role, tier and estimate,
+// the spec and the revision it would freeze, every done-when check command,
+// the estimate against the pool, and whether the tree is dirty; the
+// "Always allow" answer is offered in dollars and allows the run.
+func TestAProposalReadsAsItsCard(t *testing.T) {
+	wf := newWFFake()
+	e, _, f, ff := wfEngine(t, wf)
+	ctx := context.Background()
+	if err := os.WriteFile(filepath.Join(ff.WorkDir(), "scratch.txt"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: "deliver"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.WorkflowProposal(ctx, f.ID, run.N)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Recipe != "deliver" || p.Spec != 1 || p.SpecTitle != "Workflow test" || p.SpecRev == 0 {
+		t.Fatalf("head %+v", p)
+	}
+	if !p.Dirty || !p.Bounded || p.Estimate != run.Estimate || p.PoolLeft <= 0 {
+		t.Fatalf("money or tree %+v", p)
+	}
+	if len(p.Checks) != 1 || p.Checks[0].Item != "DW-1" || p.Checks[0].Cmd != "test -f out.txt" {
+		t.Fatalf("checks %+v", p.Checks)
+	}
+	kinds := map[string]ProposalStep{}
+	for _, s := range p.Steps {
+		kinds[s.ID] = s
+	}
+	if b := kinds["build"]; b.Kind != "repeat" || b.Max != 3 || b.Depth != 0 {
+		t.Fatalf("build %+v", b)
+	}
+	if r := kinds["review-a"]; r.Kind != "step" || r.Role != domain.RoleReviewer || r.Tier != domain.TierStrong || r.Depth != 2 || r.Estimate == 0 {
+		t.Fatalf("review-a %+v", r)
+	}
+	always := run.Pending.Options[1]
+	if !strings.HasPrefix(always, WorkflowAlwaysPrefix+"$") {
+		t.Fatalf("always allow is not in dollars: %q", always)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, always); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := e.cfg.Store.Run(ctx, f.ID, run.N); r.State != domain.RunRunning {
+		t.Fatalf("always allow left the run %s", r.State)
+	}
+	if _, err := e.WorkflowProposal(ctx, f.ID, run.N); err == nil {
+		t.Fatal("an allowed run still reads as a proposal")
+	}
+}

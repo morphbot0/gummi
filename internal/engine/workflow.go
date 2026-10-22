@@ -68,9 +68,15 @@ const (
 	workflowRunawayFactor = 3
 )
 
-// WorkflowAlwaysAnswer is the "Always allow up to" answer for credits.
+// WorkflowAlwaysAnswer is the "Always allow up to" answer for credits,
+// spelt in dollars as a person reads it ("Always allow up to $5"), which
+// the answer reads back as the same credits.
 func WorkflowAlwaysAnswer(credits int) string {
-	return WorkflowAlwaysPrefix + strconv.Itoa(credits)
+	cents := float64(credits) * domain.CreditsToDollars * 100
+	if math.Mod(cents, 100) == 0 {
+		return fmt.Sprintf("%s$%d", WorkflowAlwaysPrefix, int(cents/100))
+	}
+	return fmt.Sprintf("%s$%.2f", WorkflowAlwaysPrefix, cents/100)
 }
 
 // workflowRuntime is what this process knows about runs beyond the store:
@@ -1540,7 +1546,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 		return
 	}
 	cur.State, cur.Reason, cur.EndedAt = end, why, e.now()
-	cur.EndTree, cur.ValidatedTree, cur.Results, cur.Report = endTree, validated, results, report
+	cur.EndTree, cur.ValidatedTree, cur.Results, cur.Report, cur.Commits = endTree, validated, results, report, commits
 	cur.Stopping, cur.Pending, cur.OutOfBudget = false, nil, false
 	err = st.UpdateRun(ctx, cur)
 	unlock()

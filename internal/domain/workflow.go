@@ -315,7 +315,11 @@ type Run struct {
 	// StartHead is the session's HEAD when the run started: the commits
 	// made while it ran are the ones after it, which its report names.
 	StartHead string
-	Results   []ItemResult
+	// Commits are the commits made in the session's tree while the run ran
+	// ("<short sha> <subject>", oldest last), recorded when it ended: gummi
+	// commits nothing, so these are a step's or the session's own.
+	Commits []string
+	Results []ItemResult
 	// Until holds each repeat iteration's stop condition as the engine
 	// judged it, keyed by the iteration's path (build/2).
 	Until map[string]UntilJudgement
