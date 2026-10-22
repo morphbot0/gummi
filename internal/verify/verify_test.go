@@ -104,3 +104,35 @@ func TestRunDistinguishesTimeoutFromSpawnFailure(t *testing.T) {
 		t.Errorf("killed check should be StatusTimeout, got %+v", res[1])
 	}
 }
+
+// A passing `go test -run` that matched no test proves nothing: its
+// result says it ran no tests. Only that phrase on a go test with -run
+// counts — a package that did run, or any other command, does not.
+func TestRanNoTests(t *testing.T) {
+	for _, tc := range []struct {
+		name, cmd, out string
+		want           bool
+	}{
+		{"one package, verbose", "go test ./internal/x -run TestNope -v", "testing: warning: no tests to run\nPASS\nok  \tx\t0.01s [no tests to run]\n", true},
+		{"every package matched nothing", "go test ./... -run=TestNope", "ok  \ta\t0.01s [no tests to run]\nok  \tb\t(cached) [no tests to run]\n?   \tc\t[no test files]\n", true},
+		{"one package ran its test", "go test ./... -run TestThing", "ok  \ta\t0.01s [no tests to run]\nok  \tb\t0.20s\n", false},
+		{"a verbose test ran", "go test -run TestThing -v ./b", "=== RUN   TestThing\n--- PASS: TestThing (0.00s)\nPASS\nok  \tb\t0.2s\n", false},
+		{"no -run", "go test ./a", "ok  \ta\t0.01s [no tests to run]\n", false},
+		{"not go test", "make check -run", "no tests to run", false},
+		{"tests ran", "go test ./a -run TestA", "ok  \ta\t0.01s\n", false},
+	} {
+		if got := RanNoTests(tc.cmd, tc.out); got != tc.want {
+			t.Errorf("%s: RanNoTests = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// Run marks it on a passing check, and only a passing one
+	dir := t.TempDir()
+	rs := Run(context.Background(), dir, []domain.Check{
+		{Name: "empty", Cmd: "printf 'testing: warning: no tests to run\\n' # go test -run TestNope"},
+		{Name: "broken", Cmd: "printf 'testing: warning: no tests to run\\n'; exit 1 # go test -run TestNope"},
+		{Name: "real", Cmd: "printf 'ok  x 0.1s\\n' # go test -run TestReal"},
+	})
+	if !rs[0].OK || !rs[0].RanNoTests || rs[1].RanNoTests || rs[2].RanNoTests {
+		t.Fatalf("results %+v", rs)
+	}
+}

@@ -200,7 +200,9 @@ func doneWhenChecks(ctx context.Context, dir string, items []domain.DoneWhen) ma
 }
 
 // itemResults judges each done-when item: by its check where it has one,
-// else by the last step's MET:/UNMET: line, else unjudged.
+// else by the last step's MET:/UNMET: line, else unjudged. A check that
+// passed but ran no tests (verify.Result.RanNoTests) leaves its item
+// unjudged: it proves nothing, so it is no ✓.
 func itemResults(items []domain.DoneWhen, checks map[string]verify.Result, lastOutput string) []domain.ItemResult {
 	lines := workflowrecipe.ParseItemLines(lastOutput)
 	var out []domain.ItemResult
@@ -209,9 +211,12 @@ func itemResults(items []domain.DoneWhen, checks map[string]verify.Result, lastO
 		if c, has := checks[it.ID]; has {
 			r.Checked = true
 			r.Verdict = domain.ItemUnmet
-			if c.OK {
+			switch {
+			case c.OK && c.RanNoTests:
+				r.Verdict, r.Detail = domain.ItemUnjudged, ranNoTests
+			case c.OK:
 				r.Verdict = domain.ItemMet
-			} else {
+			default:
 				r.Detail = strings.TrimSpace(tail(c.Output, 600))
 			}
 		} else if l, has := lines[it.ID]; has {
@@ -225,8 +230,12 @@ func itemResults(items []domain.DoneWhen, checks map[string]verify.Result, lastO
 	return out
 }
 
+// ranNoTests is a vacuous check's detail.
+const ranNoTests = "the check ran no tests"
+
 // checkedPass reports whether every checked result passed, and how many
-// were checked.
+// were checked. A checked item left unjudged — its check ran no tests —
+// did not pass.
 func checkedPass(rs []domain.ItemResult) (bool, int) {
 	n := 0
 	for _, r := range rs {
@@ -344,11 +353,14 @@ func (e *Engine) WorkflowRecheck(ctx context.Context, session domain.FeatureID) 
 		if !has {
 			continue
 		}
-		mark := "✓"
-		if !c.OK {
+		mark, note := "✓", ""
+		switch {
+		case !c.OK:
 			mark, pass = "✗", false
+		case c.RanNoTests:
+			mark, note, pass = "–", " ("+ranNoTests+")", false
 		}
-		fmt.Fprintf(&b, "%s %s: %s\n", mark, it.ID, c.Cmd)
+		fmt.Fprintf(&b, "%s %s: %s%s\n", mark, it.ID, c.Cmd, note)
 	}
 	unlock := e.lockRuns(session)
 	defer unlock()
@@ -358,9 +370,13 @@ func (e *Engine) WorkflowRecheck(ctx context.Context, session domain.FeatureID) 
 	}
 	for i, r := range cur.Results {
 		if c, has := checks[r.Item]; has && r.Checked {
-			cur.Results[i].Verdict, cur.Results[i].Detail = domain.ItemUnmet, strings.TrimSpace(tail(c.Output, 600))
-			if c.OK {
+			switch {
+			case c.OK && c.RanNoTests:
+				cur.Results[i].Verdict, cur.Results[i].Detail = domain.ItemUnjudged, ranNoTests
+			case c.OK:
 				cur.Results[i].Verdict, cur.Results[i].Detail = domain.ItemMet, ""
+			default:
+				cur.Results[i].Verdict, cur.Results[i].Detail = domain.ItemUnmet, strings.TrimSpace(tail(c.Output, 600))
 			}
 		}
 	}
@@ -374,7 +390,7 @@ func (e *Engine) WorkflowRecheck(ctx context.Context, session domain.FeatureID) 
 	if pass {
 		return "the done-when checks pass: validated at tree " + short(tree) + "\n" + strings.TrimRight(b.String(), "\n"), nil
 	}
-	return "the done-when checks do not all pass in the tree:\n" + strings.TrimRight(b.String(), "\n"), nil
+	return "the done-when checks do not all pass in the tree (a check that ran no tests is no pass):\n" + strings.TrimRight(b.String(), "\n"), nil
 }
 
 // --- Revert run ------------------------------------------------------------

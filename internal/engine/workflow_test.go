@@ -1619,3 +1619,62 @@ func TestALoopThatCannotJudgeAsksThePerson(t *testing.T) {
 	}
 }
 
+// emptyCheckSpec is the test spec with a done-when check that passes and
+// runs no tests: a `go test -run` whose pattern matches nothing.
+var emptyCheckSpec = strings.Replace(wfTestSpec, "check: test -f out.txt",
+	`check: "printf 'testing: warning: no tests to run\\nok  x 0.01s [no tests to run]\\n' # go test ./x -run TestNope"`, 1)
+
+// TestACheckThatRanNoTestsIsUnjudged: a done-when check that passed while
+// running no tests proves nothing. At a run's end its item is unjudged
+// (–), saying so, never ✓; the run validates no tree and ends partial.
+func TestACheckThatRanNoTestsIsUnjudged(t *testing.T) {
+	wf := newWFFake()
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	if _, err := e.WriteSessionSpec(ctx, f, 1, emptyCheckSpec, "user"); err != nil {
+		t.Fatal(err)
+	}
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: one\nsteps:\n  - { id: one, role: implementer, prompt: build }\n"})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if len(r.Results) == 0 || r.Results[0].Item != "DW-1" || r.Results[0].Verdict != domain.ItemUnjudged ||
+		!r.Results[0].Checked || r.Results[0].Detail != "the check ran no tests" {
+		t.Fatalf("DW-1 = %+v", r.Results)
+	}
+	if r.State != domain.RunPartial || r.ValidatedTree != "" || r.Reason != "a done-when check ran no tests" {
+		t.Fatalf("ended %s (%s), validated %q", r.State, r.Reason, r.ValidatedTree)
+	}
+	if !strings.Contains(r.Report, "– DW-1 out.txt exists (check): the check ran no tests") {
+		t.Fatalf("the report:\n%s", r.Report)
+	}
+	// a re-check says the same, and moves no mark
+	out, err := e.WorkflowRecheck(ctx, f.ID)
+	if err != nil || !strings.Contains(out, "– DW-1") || !strings.Contains(out, "ran no tests") {
+		t.Fatalf("re-check = %q, %v", out, err)
+	}
+	if _, ok := e.ValidatedMark(ctx, f.ID); ok {
+		t.Fatal("a check that ran no tests validated the tree")
+	}
+}
+
+// TestAnUntilChecksThatRanNoTestsAsks: a repeat's `until: checks` whose
+// check ran no tests cannot judge the loop: the run asks the person
+// rather than iterating to its max on a check that proves nothing.
+func TestAnUntilChecksThatRanNoTestsAsks(t *testing.T) {
+	wf := newWFFake()
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	if _, err := e.WriteSessionSpec(ctx, f, 1, emptyCheckSpec, "user"); err != nil {
+		t.Fatal(err)
+	}
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{Recipe: "fix-until-green"})
+	r := tickRuns(t, e, f.ID, run.N, "asked", pendingOf(domain.RunDecideUnjudged))
+	if !strings.Contains(r.Pending.Question, "the check of DW-1 ran no tests") || wf.count("implement") != 1 {
+		t.Fatalf("after %d iterations, decision %+v", wf.count("implement"), r.Pending)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowStopRun); err != nil {
+		t.Fatal(err)
+	}
+	if r = tickRuns(t, e, f.ID, run.N, "ended", ended); r.State != domain.RunStopped {
+		t.Fatalf("ended %s", r.State)
+	}
+}

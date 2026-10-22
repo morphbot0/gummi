@@ -6687,7 +6687,8 @@ At `max` without the condition, `onMax` decides:
   or stop.
 
 A condition gummi **cannot judge** is never counted as not met: the
-artifact a verdict is read from was never written (nor captured). The run waits on the person, whatever
+artifact a verdict is read from was never written (nor captured), or a
+check ran no tests (§25.6). The run waits on the person, whatever
 `onMax` says — "the loop can't judge: `review` (`review.json`) was
 never written" — with the same answers: one more iteration (which does
 not count against `max`), continue, or stop.
@@ -6796,6 +6797,9 @@ call returns at once, saying the run is proposed.
   - An item without a check is judged by the last step's `MET: DW-n`
     or `UNMET: DW-n` line, if it has one. Otherwise it is unjudged
     (`–`).
+  - An item whose check passed but ran no tests — a `go test` with
+    `-run` whose output says "no tests to run" — is unjudged too, "the
+    check ran no tests", never ✓: it proves nothing.
   - When every checked item passes, the run's end snapshot becomes its
     **validated tree**.
 - **The validated mark** replaces the crew-verified mark (§24.8). It
@@ -7049,6 +7053,13 @@ The build follows §25, with these differences.
 - **A loop that cannot judge asks** (`RunDecideUnjudged`, the
   driver's `workflow_unjudged`). The run starts nothing while it waits,
   as at a loop's max; its block's folded iteration says "can't judge".
+- **A check that ran no tests is unjudged**, at a run's end, on a
+  re-check and in `until: checks` (where it makes the loop unable to
+  judge). Detection is deliberately narrow (`verify.RanNoTests`): a
+  passing `go test` naming `-run`, whose output says "no tests to run"
+  and shows no package or test that ran. Such an item fails the
+  validated mark, and a run that would have been done ends partial: "a
+  done-when check ran no tests".
 
 **Running.**
 - **A reading step is never spawned read-only.** The backend's read-only

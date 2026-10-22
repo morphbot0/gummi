@@ -1503,15 +1503,23 @@ func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID
 		if len(checks) == 0 {
 			return domain.UntilJudgement{Met: true, Detail: "the spec has no done-when checks"}
 		}
-		var failed []string
+		var failed, empty []string
 		for id, c := range checks {
-			if !c.OK {
+			switch {
+			case !c.OK:
 				failed = append(failed, id)
+			case c.RanNoTests:
+				empty = append(empty, id)
 			}
 		}
-		if len(failed) > 0 {
-			sort.Strings(failed)
+		sort.Strings(failed)
+		sort.Strings(empty)
+		switch {
+		case len(failed) > 0:
 			return domain.UntilJudgement{Detail: "failing: " + strings.Join(failed, ", ")}
+		case len(empty) > 0:
+			// a check that ran no tests proves nothing either way
+			return domain.UntilJudgement{Unjudged: true, Detail: "the loop can't judge: the check of " + strings.Join(empty, ", ") + " ran no tests"}
 		}
 		return domain.UntilJudgement{Met: true, Detail: "every done-when check passes"}
 	case domain.UntilVerdict:
@@ -1616,6 +1624,8 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	results := itemResults(items, doneWhenChecks(ctx, dir, items), last)
 	pass, checked := checkedPass(results)
 	switch {
+	case end == domain.RunDone && !pass && vacuous(results):
+		end, why = domain.RunPartial, "a done-when check ran no tests"
 	case end == domain.RunDone && !pass:
 		end, why = domain.RunPartial, "a checked done-when item does not pass"
 	case end == domain.RunStopped && why == "" || end == domain.RunStopped && why == "stopped":
@@ -1683,7 +1693,7 @@ func runReport(run *domain.Run, end domain.RunState, why string, items []domain.
 				how = "unjudged"
 			}
 			fmt.Fprintf(&b, "%s %s %s (%s)", verdictMark(r.Verdict), r.Item, says[r.Item], how)
-			if r.Detail != "" && r.Verdict == domain.ItemUnmet {
+			if r.Detail != "" && r.Verdict != domain.ItemMet {
 				b.WriteString(": " + firstLine(r.Detail))
 			}
 			b.WriteString("\n")
@@ -1768,6 +1778,17 @@ func (e *Engine) writeRunReport(ctx context.Context, run *domain.Run) {
 	if raw, err := os.ReadFile(path); err == nil { // #nosec G304 -- as above
 		_, _ = e.recordSpecRevision(ctx, run.Session, run.Spec, string(raw), state.ActorWorkflow)
 	}
+}
+
+// vacuous reports whether a checked result is unjudged: its check passed
+// and ran no tests.
+func vacuous(rs []domain.ItemResult) bool {
+	for _, r := range rs {
+		if r.Checked && r.Verdict == domain.ItemUnjudged {
+			return true
+		}
+	}
+	return false
 }
 
 // specSectionReport is the section a run's report is written into.

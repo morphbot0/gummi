@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,6 +42,10 @@ type Result struct {
 	ExitCode int
 	Output   string // combined stdout+stderr, truncated
 	Duration time.Duration
+	// RanNoTests marks a passing check that tested nothing: a `go test`
+	// with `-run` whose every package said "no tests to run". It passed,
+	// but proves nothing, and a caller must not read it as a pass.
+	RanNoTests bool
 }
 
 // CheckTimeout bounds a single check so one hung command can't consume the
@@ -121,12 +126,13 @@ func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCh
 		}
 	}
 	res := Result{
-		Name:     ch.Name,
-		Cmd:      ch.Cmd,
-		Status:   status,
-		OK:       status == StatusPass,
-		Output:   truncate(buf.String()),
-		Duration: time.Since(start),
+		Name:       ch.Name,
+		Cmd:        ch.Cmd,
+		Status:     status,
+		OK:         status == StatusPass,
+		Output:     truncate(buf.String()),
+		Duration:   time.Since(start),
+		RanNoTests: status == StatusPass && RanNoTests(ch.Cmd, buf.String()),
 	}
 	if err != nil {
 		var exit *exec.ExitError
@@ -137,6 +143,26 @@ func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCh
 		}
 	}
 	return res
+}
+
+// RanNoTests reports whether a check's output says it tested nothing. It
+// is deliberately narrow: only a `go test` naming `-run`, whose output
+// says "no tests to run" (as "testing: warning: no tests to run" or a
+// package's "[no tests to run]") and shows no package or test that did
+// run — a -run pattern that matched nothing anywhere.
+func RanNoTests(cmd, output string) bool {
+	if !strings.Contains(cmd, "go test") || !strings.Contains(cmd, "-run") || !strings.Contains(output, "no tests to run") {
+		return false
+	}
+	for _, l := range strings.Split(output, "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(l, "ok ") && !strings.Contains(l, "no tests to run"),
+			strings.HasPrefix(l, "=== RUN"), strings.HasPrefix(l, "--- PASS"):
+			return false
+		}
+	}
+	return true
 }
 
 func truncate(s string) string {
