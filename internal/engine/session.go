@@ -53,6 +53,11 @@ const (
 	// node's turn ended, a decision was answered, the planner finished.
 	// The driving loop ticks the session's crew on it (Engine.CrewTick).
 	EventCrew EventKind = "crew"
+	// EventWorkflow fires when something a workflow run's conductor reads
+	// changed: a step's turn ended, a decision was answered, a run was
+	// proposed or allowed. The driving loop ticks the runs on it
+	// (Engine.WorkflowTick).
+	EventWorkflow EventKind = "workflow"
 )
 
 // Event is one item in the engine's UI-facing stream.

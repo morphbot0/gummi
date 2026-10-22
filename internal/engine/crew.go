@@ -364,7 +364,7 @@ func (e *Engine) sessionPoolLeft(ctx context.Context, sess domain.Feature) (floa
 	if sess.Budget.Envelope <= 0 {
 		return 0, false
 	}
-	return float64(sess.Budget.Envelope) - sess.Spend.CreditEquivalent() - e.sessionCrewsSpent(ctx, sess.ID), true
+	return float64(sess.Budget.Envelope) - sess.Spend.CreditEquivalent() - e.sessionCrewsSpent(ctx, sess.ID) - e.sessionRunsSpent(ctx, sess.ID), true
 }
 
 // crewPoolLeft is what the crew may still spend: its session's pool.

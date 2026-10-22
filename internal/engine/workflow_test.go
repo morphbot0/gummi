@@ -1,0 +1,924 @@
+package engine
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
+)
+
+const wfTestSpec = "# Workflow test\n\n## Problem\n\nA file is missing.\n\n## Approach\n\nWrite it.\n\n" +
+	"## Done when\n\n```gummi-done-when\n- id: DW-1\n  says: out.txt exists\n  check: test -f out.txt\n" +
+	"- id: DW-2\n  says: out.txt reads well\n  judge: true\n```\n\n## Limits\n\nNothing else.\n\n## Notes\n\nnone\n"
+
+var wfStepRe = regexp.MustCompile(`You are step (\S+) of workflow run`)
+
+// wfReply is what a step's turn answers: its final message, and what the
+// turn spends.
+type wfReply struct {
+	text    string
+	credits float64
+}
+
+// wfFake answers a workflow's steps by their id: each step's handler is
+// given the working directory, the turn's text and how many times that
+// step id has run. A turn on a step's card that is not its brief (a steer,
+// a carry-on, a person's message) goes to the handler under "<id>#". Every
+// other turn is the session's.
+type wfFake struct {
+	*agent.Fake
+	mu       sync.Mutex
+	calls    map[string]int
+	cardStep map[string]string
+	steps    map[string]func(dir, msg string, n int) wfReply
+	sessionT []string
+	stepT    map[string][]string
+}
+
+func newWFFake() *wfFake {
+	wf := &wfFake{
+		Fake: agent.NewFake(""), calls: map[string]int{}, cardStep: map[string]string{},
+		steps: map[string]func(string, string, int) wfReply{}, stepT: map[string][]string{},
+	}
+	wf.Caps = agent.Capabilities{ClientTools: true, UsageEvents: true, Interrupt: true}
+	wf.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		wf.mu.Lock()
+		id := ""
+		if m := wfStepRe.FindStringSubmatch(msg); m != nil {
+			id = m[1][strings.LastIndex(m[1], "/")+1:]
+			wf.cardStep[opts.FeatureID] = id
+		} else if s, ok := wf.cardStep[opts.FeatureID]; ok {
+			id = s + "#"
+		}
+		if id == "" {
+			wf.sessionT = append(wf.sessionT, msg)
+			wf.mu.Unlock()
+			return []agent.Event{
+				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: "m"}},
+				{Kind: agent.EventMessage, Text: "ok"},
+				{Kind: agent.EventIdle},
+			}
+		}
+		wf.calls[id]++
+		n := wf.calls[id]
+		wf.stepT[id] = append(wf.stepT[id], msg)
+		fn := wf.steps[id]
+		wf.mu.Unlock()
+		r := wfReply{text: "done", credits: 2}
+		if fn != nil {
+			r = fn(opts.WorkDir, msg, n)
+		}
+		return []agent.Event{
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: r.credits, Model: "m"}},
+			{Kind: agent.EventMessage, Text: r.text},
+			{Kind: agent.EventIdle},
+		}
+	}
+	return wf
+}
+
+func (wf *wfFake) on(id string, fn func(dir, msg string, n int) wfReply) {
+	wf.mu.Lock()
+	wf.steps[id] = fn
+	wf.mu.Unlock()
+}
+
+func (wf *wfFake) count(id string) int {
+	wf.mu.Lock()
+	defer wf.mu.Unlock()
+	return wf.calls[id]
+}
+
+func (wf *wfFake) sessionTurns() []string {
+	wf.mu.Lock()
+	defer wf.mu.Unlock()
+	return append([]string(nil), wf.sessionT...)
+}
+
+// gate holds a step's turn until it is opened; the test's cleanup opens
+// it before the engine closes.
+type gate struct {
+	ch   chan struct{}
+	once sync.Once
+}
+
+func newGate(t *testing.T) *gate {
+	g := &gate{ch: make(chan struct{})}
+	t.Cleanup(g.open)
+	return g
+}
+
+func (g *gate) open() { g.once.Do(func() { close(g.ch) }) }
+
+func wfEngine(t *testing.T, wf *wfFake) (*Engine, *state.Store, domain.Feature, *FreeformSession) {
+	t.Helper()
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(wf), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e.Close() })
+	f := freeformCard(1, "make the file")
+	f.Budget.Envelope = 2000
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	ctx := context.Background()
+	if _, _, err := e.StartSessionSpec(ctx, f, "Workflow test", "user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.WriteSessionSpec(ctx, f, 1, wfTestSpec, "user"); err != nil {
+		t.Fatal(err)
+	}
+	return e, store, f, ff
+}
+
+// tickRuns ticks the workspace's runs until cond holds of the session's
+// run n.
+func tickRuns(t *testing.T, e *Engine, session domain.FeatureID, n int, what string, cond func(*domain.Run) bool) *domain.Run {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(testWaitTimeout)
+	for time.Now().Before(deadline) {
+		if _, err := e.WorkflowTick(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if r, _ := e.cfg.Store.Run(ctx, session, n); r != nil && cond(r) {
+			return r
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	r, _ := e.cfg.Store.Run(ctx, session, n)
+	steps, _ := e.cfg.Store.RunSteps(ctx, session, n)
+	t.Fatalf("never %s: run %+v\nsteps %+v", what, r, steps)
+	return nil
+}
+
+func ended(r *domain.Run) bool { return r.State.Ended() }
+
+func pendingOf(kind domain.RunDecisionKind) func(*domain.Run) bool {
+	return func(r *domain.Run) bool { return r.Pending != nil && r.Pending.Kind == kind }
+}
+
+// propose proposes recipe and allows it.
+func proposeAndAllow(t *testing.T, e *Engine, session domain.FeatureID, req WorkflowRequest) *domain.Run {
+	t.Helper()
+	ctx := context.Background()
+	run, err := e.WorkflowPropose(ctx, session, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != domain.RunProposed || run.Pending == nil || run.Pending.Kind != domain.RunDecideProposal {
+		t.Fatalf("proposal %+v", run)
+	}
+	if err := e.WorkflowAnswer(ctx, session, run.N, WorkflowAllow); err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
+func stepPaths(t *testing.T, e *Engine, session domain.FeatureID, n int) map[string]domain.RunStep {
+	t.Helper()
+	steps, err := e.cfg.Store.RunSteps(context.Background(), session, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]domain.RunStep{}
+	for _, s := range steps {
+		out[s.Path] = s
+	}
+	return out
+}
+
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(testWaitTimeout)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("never %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+var artifactRe = regexp.MustCompile(`(/\S+review\.json)`)
+
+// TestADeliverRunIteratesUntilApproved: the bundled deliver recipe, end to
+// end. The build loop goes round again on a CHANGES verdict and ends on
+// APPROVED; the validation's MET: lines judge the judge item and the check
+// the checked one; the run ends done with its tree validated, its changes
+// left uncommitted, and its report in the spec, the run's directory and the
+// session's thread.
+func TestADeliverRunIteratesUntilApproved(t *testing.T) {
+	wf := newWFFake()
+	wf.on("implement", func(dir, _ string, n int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte(fmt.Sprintf("take %d\n", n)), 0o600)
+		return wfReply{text: "wrote out.txt\nDECISION: plain text", credits: 2}
+	})
+	wf.on("verdict", func(_, msg string, n int) wfReply {
+		verdict := "CHANGES"
+		if n > 1 {
+			verdict = "APPROVED"
+		}
+		if m := artifactRe.FindStringSubmatch(msg); m != nil {
+			_ = os.WriteFile(m[1], []byte(`{"verdict": "`+verdict+`", "findings": []}`), 0o600)
+		}
+		return wfReply{text: "merged: " + verdict, credits: 1}
+	})
+	wf.on("validate", func(string, string, int) wfReply {
+		return wfReply{text: "Read it.\nMET: DW-1\nMET: DW-2", credits: 1}
+	})
+	e, store, f, ff := wfEngine(t, wf)
+	ctx := context.Background()
+
+	if hold := e.RunHolds(ctx, f.ID); hold != "" {
+		t.Fatalf("a session with no run is held: %s", hold)
+	}
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{Recipe: "deliver"})
+	if hold := e.RunHolds(ctx, f.ID); hold == "" {
+		t.Fatal("an open run does not hold its session")
+	}
+	// a session turn during the run begins with the note
+	if err := ff.Send(ctx, "how is it going"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the session heard the note", func() bool {
+		for _, m := range wf.sessionTurns() {
+			if strings.Contains(m, "workflow run 1 is changing this session's tree") && strings.Contains(m, "how is it going") {
+				return true
+			}
+		}
+		return false
+	})
+
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone {
+		t.Fatalf("run ended %s (%s):\n%s", r.State, r.Reason, r.Report)
+	}
+	paths := stepPaths(t, e, f.ID, run.N)
+	for _, p := range []string{
+		"design", "build/1/implement", "build/1/reviews/review-a", "build/1/reviews/review-b",
+		"build/1/verdict", "build/2/implement", "build/2/verdict", "validate",
+	} {
+		if s, ok := paths[p]; !ok || s.State != domain.StepDone {
+			t.Errorf("step %s: %+v", p, s)
+		}
+	}
+	if _, ok := paths["build/3/implement"]; ok {
+		t.Error("the loop ran past its APPROVED verdict")
+	}
+	if r.Until["build/1"].Met || !r.Until["build/2"].Met {
+		t.Errorf("untils %+v", r.Until)
+	}
+	if r.ValidatedTree == "" || r.ValidatedTree != r.EndTree {
+		t.Errorf("validated %q end %q", r.ValidatedTree, r.EndTree)
+	}
+	want := map[string]domain.ItemResult{
+		"DW-1": {Item: "DW-1", Checked: true, Verdict: domain.ItemMet},
+		"DW-2": {Item: "DW-2", Verdict: domain.ItemMet},
+	}
+	for _, res := range r.Results {
+		if w := want[res.Item]; res.Checked != w.Checked || res.Verdict != w.Verdict {
+			t.Errorf("result %+v, want %+v", res, w)
+		}
+	}
+	for _, want := range []string{"✓ DW-1", "✓ DW-2", "out.txt", "build/2/implement: plain text"} {
+		if !strings.Contains(r.Report, want) {
+			t.Errorf("the report lacks %q:\n%s", want, r.Report)
+		}
+	}
+	// a step's prompt had its templates filled
+	if p := paths["build/1/reviews/review-a"].Prompt; !strings.Contains(p, filepath.Join(e.RunDir(f.ID, 1), "diffs")) || strings.Contains(p, "{{") {
+		t.Errorf("review-a's prompt:\n%s", p)
+	}
+	// the work is in the tree, uncommitted
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	if st := gitOut(t, tree, "status", "--porcelain"); !strings.Contains(st, "out.txt") {
+		t.Errorf("out.txt is not left uncommitted: %q", st)
+	}
+	// the report: the spec, the run's directory, the thread
+	if text, _ := e.SessionSpec(f, 1); !strings.Contains(text, "## Report") || !strings.Contains(text, "✓ DW-1") {
+		t.Errorf("the spec has no report:\n%s", text)
+	}
+	if _, err := os.Stat(filepath.Join(e.RunDir(f.ID, 1), "report.md")); err != nil {
+		t.Error(err)
+	}
+	if _, err := os.Stat(filepath.Join(e.RunDir(f.ID, 1), "outputs", "build", "2", "verdict.md")); err != nil {
+		t.Error(err)
+	}
+	waitUntil(t, "the session got the report", func() bool {
+		for _, m := range ff.Snapshot().Transcript {
+			if m.Author == AuthorUser && m.By == state.ActorWorkflow && strings.Contains(m.Content, "Workflow run 1 has reported") {
+				return true
+			}
+		}
+		return false
+	})
+	if hold := e.RunHolds(ctx, f.ID); hold != "" {
+		t.Errorf("an ended run still holds: %s", hold)
+	}
+	// the step cards are hidden children of the session, working in its tree
+	card, _ := store.GetFeature(ctx, paths["design"].Card)
+	if !card.InRun() || card.ParentID != f.ID {
+		t.Errorf("design's card %+v", card)
+	}
+	if ff := e.Freeform(card.ID); ff == nil || ff.WorkDir() != tree {
+		t.Errorf("design worked outside the session's tree")
+	}
+}
+
+func parallelRecipe(join string) string {
+	return `name: par
+steps:
+  - id: p
+    parallel:
+      join: ` + join + `
+      steps:
+        - {id: a, role: scout, prompt: "look at a"}
+        - {id: b, role: scout, prompt: "look at b"}
+  - id: after
+    role: scribe
+    prompt: "sum up {{a.output}}"
+`
+}
+
+// TestAParallelSettlesUnderItsJoin: all fails on one failed branch and the
+// run ends partial; allSettled carries on past one; any settles on the
+// first success and stops the branch still running.
+func TestAParallelSettlesUnderItsJoin(t *testing.T) {
+	t.Run("all", func(t *testing.T) {
+		wf := newWFFake()
+		wf.on("b", func(string, string, int) wfReply { return wfReply{text: "no luck\nFAILED: nothing to see", credits: 1} })
+		e, _, f, _ := wfEngine(t, wf)
+		run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: parallelRecipe("all")})
+		r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+		if r.State != domain.RunPartial {
+			t.Fatalf("ended %s: %s", r.State, r.Reason)
+		}
+		if _, ran := stepPaths(t, e, f.ID, run.N)["after"]; ran {
+			t.Error("the step after a failed parallel ran")
+		}
+	})
+	t.Run("allSettled", func(t *testing.T) {
+		wf := newWFFake()
+		wf.on("b", func(string, string, int) wfReply { return wfReply{text: "FAILED: nothing to see", credits: 1} })
+		e, _, f, _ := wfEngine(t, wf)
+		run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: parallelRecipe("allSettled")})
+		r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+		paths := stepPaths(t, e, f.ID, run.N)
+		if paths["p/b"].State != domain.StepFailed || paths["after"].State != domain.StepDone {
+			t.Fatalf("steps %+v", paths)
+		}
+		// out.txt is missing, so the checked item fails the run
+		if r.State != domain.RunPartial || r.ValidatedTree != "" {
+			t.Fatalf("ended %s validated %q", r.State, r.ValidatedTree)
+		}
+	})
+	t.Run("any", func(t *testing.T) {
+		wf := newWFFake()
+		g := newGate(t)
+		wf.on("b", func(string, string, int) wfReply {
+			<-g.ch
+			return wfReply{text: "late", credits: 1}
+		})
+		e, _, f, _ := wfEngine(t, wf)
+		run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: parallelRecipe("any")})
+		tickRuns(t, e, f.ID, run.N, "started after", func(*domain.Run) bool {
+			_, ok := stepPaths(t, e, f.ID, run.N)["after"]
+			return ok
+		})
+		g.open()
+		tickRuns(t, e, f.ID, run.N, "ended", ended)
+		paths := stepPaths(t, e, f.ID, run.N)
+		if paths["p/a"].State != domain.StepDone || paths["p/b"].State != domain.StepStopped {
+			t.Fatalf("a %s b %s (%s)", paths["p/a"].State, paths["p/b"].State, paths["p/b"].Reason)
+		}
+	})
+}
+
+const loopRecipe = `name: loop
+steps:
+  - id: build
+    repeat:
+      max: 1
+      until: { contains: ALL GOOD }
+      onMax: pause
+      steps:
+        - { id: implement, role: implementer, prompt: "make it" }
+`
+
+// TestARepeatAtItsMaxAsksThePerson: onMax pause puts the loop to the
+// person, and one more iteration is theirs to give.
+func TestARepeatAtItsMaxAsksThePerson(t *testing.T) {
+	wf := newWFFake()
+	wf.on("implement", func(dir, _ string, n int) wfReply {
+		if n == 1 {
+			return wfReply{text: "not yet", credits: 1}
+		}
+		_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o600)
+		return wfReply{text: "ALL GOOD", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: loopRecipe})
+	r := tickRuns(t, e, f.ID, run.N, "asked about the max", pendingOf(domain.RunDecideMax))
+	if r.Pending.Step != "build/1" || len(r.Pending.Options) != 3 {
+		t.Fatalf("decision %+v", r.Pending)
+	}
+	// ticking again asks nothing new
+	id := r.Pending.ID
+	if _, err := e.WorkflowTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := e.cfg.Store.Run(ctx, f.ID, run.N); again.Pending == nil || again.Pending.ID != id {
+		t.Fatalf("the decision was raised again: %+v", again.Pending)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, "maybe"); err == nil {
+		t.Fatal("an answer that is no option was taken")
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowOneMore); err != nil {
+		t.Fatal(err)
+	}
+	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone || wf.count("implement") != 2 {
+		t.Fatalf("ended %s after %d iterations: %s", r.State, wf.count("implement"), r.Reason)
+	}
+}
+
+// TestARunawayStepIsThePersonsToCarryOn: a step past three times its
+// estimate goes to the person; letting it carry on gives it three more.
+func TestARunawayStepIsThePersonsToCarryOn(t *testing.T) {
+	wf := newWFFake()
+	e, _, f, _ := wfEngine(t, wf)
+	// the step spends past its cap, then holds its turn open
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			if !strings.Contains(msg, "You are step big") {
+				return base(opts, msg)
+			}
+			wf.mu.Lock()
+			wf.calls["big"]++
+			wf.mu.Unlock()
+			return []agent.Event{
+				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 40, Model: "m"}},
+				{Kind: agent.EventTextDelta, Text: "working"},
+			}
+		}
+	}(wf.Responder)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: big\nsteps:\n  - { id: big, role: scout, envelope: 10, prompt: look }\n"})
+	r := tickRuns(t, e, f.ID, run.N, "asked about the runaway", pendingOf(domain.RunDecideRunaway))
+	if r.Pending.Step != "big" || r.Pending.Amount != 30 {
+		t.Fatalf("decision %+v", r.Pending)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowCarryOn); err != nil {
+		t.Fatal(err)
+	}
+	if s := stepPaths(t, e, f.ID, run.N)["big"]; s.Allowance != 1 || s.State != domain.StepRunning {
+		t.Fatalf("step %+v", s)
+	}
+	// with its allowance it is no runaway: ticking asks nothing
+	if _, err := e.WorkflowTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := e.cfg.Store.Run(ctx, f.ID, run.N); r.Pending != nil {
+		t.Fatalf("asked again: %+v", r.Pending)
+	}
+	if err := e.WorkflowStop(ctx, f.ID, "enough"); err != nil {
+		t.Fatal(err)
+	}
+	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunStopped {
+		t.Fatalf("ended %s", r.State)
+	}
+}
+
+// TestASpentPoolPausesTheRunAndATopUpCarriesItOn: a run spends from its
+// session's envelope. When that runs out the run pauses, its work kept,
+// and puts a top-up to the person; the top-up carries it on.
+func TestASpentPoolPausesTheRunAndATopUpCarriesItOn(t *testing.T) {
+	wf := newWFFake()
+	wf.on("first", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o600)
+		return wfReply{text: "wrote it", credits: 200}
+	})
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	if err := e.RaiseEnvelope(ctx, f.ID, 150); err != nil {
+		t.Fatal(err)
+	}
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: two\nsteps:\n" +
+		"  - { id: first, role: implementer, envelope: 20, prompt: write }\n  - { id: second, role: scout, envelope: 20, prompt: read }\n"})
+	r := tickRuns(t, e, f.ID, run.N, "paused for money", func(r *domain.Run) bool {
+		return r.State == domain.RunPaused && r.Pending != nil && r.Pending.Kind == domain.RunDecideBudget
+	})
+	if !r.OutOfBudget || r.Pending.Amount <= 0 {
+		t.Fatalf("paused run %+v", r)
+	}
+	if _, ran := stepPaths(t, e, f.ID, run.N)["second"]; ran {
+		t.Fatal("a step started on a spent pool")
+	}
+	sess, _ := store.GetFeature(ctx, f.ID)
+	if left, _ := e.sessionPoolLeft(ctx, sess); left > 0 {
+		t.Fatalf("the session has %.0f left after its run overspent it", left)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowTopUp); err != nil {
+		t.Fatal(err)
+	}
+	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone {
+		t.Fatalf("ended %s: %s", r.State, r.Reason)
+	}
+	if sess, _ = store.GetFeature(ctx, f.ID); sess.Budget.Envelope <= 150 {
+		t.Errorf("the envelope is still %d", sess.Budget.Envelope)
+	}
+}
+
+// TestStoppingARunRevertsNothing: a stop interrupts the running step and
+// ends the run stopped, its changes left in the tree; Revert is refused
+// while the step runs.
+func TestStoppingARunRevertsNothing(t *testing.T) {
+	wf := newWFFake()
+	g := newGate(t)
+	wf.on("slow", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "half.txt"), []byte("half\n"), 0o600)
+		<-g.ch
+		return wfReply{text: "late", credits: 1}
+	})
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: slow\nsteps:\n  - { id: slow, role: implementer, prompt: write }\n"})
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	tickRuns(t, e, f.ID, run.N, "wrote half", func(*domain.Run) bool {
+		_, err := os.Stat(filepath.Join(tree, "half.txt"))
+		return err == nil
+	})
+	if _, err := e.WorkflowRevert(ctx, f.ID, run.N); err == nil || !strings.Contains(err.Error(), "running") {
+		t.Fatalf("revert while a step runs: %v", err)
+	}
+	if err := e.WorkflowStop(ctx, f.ID, "changed my mind"); err != nil {
+		t.Fatal(err)
+	}
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	g.open()
+	if r.State != domain.RunStopped || !strings.Contains(r.Reason, "changed my mind") {
+		t.Fatalf("ended %s: %s", r.State, r.Reason)
+	}
+	if s := stepPaths(t, e, f.ID, run.N)["slow"]; s.State != domain.StepStopped {
+		t.Fatalf("step %+v", s)
+	}
+	if _, err := os.Stat(filepath.Join(tree, "half.txt")); err != nil {
+		t.Fatal("the stop reverted the step's work")
+	}
+}
+
+// TestRevertRunPutsTheTreeBack: Revert run restores what the run changed
+// and deletes what it created.
+func TestRevertRunPutsTheTreeBack(t *testing.T) {
+	wf := newWFFake()
+	wf.on("edit", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed\n"), 0o600)
+		_ = os.MkdirAll(filepath.Join(dir, "new"), 0o700)
+		_ = os.WriteFile(filepath.Join(dir, "new", "file.txt"), []byte("new\n"), 0o600)
+		return wfReply{text: "edited", credits: 1}
+	})
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: edit\nsteps:\n  - { id: edit, role: implementer, prompt: edit }\n"})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	pre, err := e.WorkflowRevertPreview(ctx, f.ID, run.N)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(pre.Paths, ",") != "README.md,new/file.txt" || pre.Note == "" {
+		t.Fatalf("preview %+v", pre)
+	}
+	paths, err := e.WorkflowRevert(ctx, f.ID, run.N)
+	if err != nil || len(paths) != 2 {
+		t.Fatalf("revert %v %v", paths, err)
+	}
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	if raw, _ := os.ReadFile(filepath.Join(tree, "README.md")); string(raw) != "x\n" {
+		t.Errorf("README.md reads %q", raw)
+	}
+	if _, err := os.Stat(filepath.Join(tree, "new")); !os.IsNotExist(err) {
+		t.Errorf("the created file is still there: %v", err)
+	}
+}
+
+// TestTheValidatedMarkSurvivesACommitOfTheSameTree: committing the tree a
+// run validated keeps the mark; a change moves it off, and a re-check
+// moves it to the new tree.
+func TestTheValidatedMarkSurvivesACommitOfTheSameTree(t *testing.T) {
+	wf := newWFFake()
+	wf.on("make", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o600)
+		return wfReply{text: "made\nMET: DW-2", credits: 1}
+	})
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: make\nsteps:\n  - { id: make, role: implementer, prompt: make }\n"})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone || r.ValidatedTree == "" {
+		t.Fatalf("ended %s validated %q", r.State, r.ValidatedTree)
+	}
+	m, ok := e.ValidatedMark(ctx, f.ID)
+	if !ok || !m.Current || !strings.HasPrefix(m.Text(), "validated at tree ") {
+		t.Fatalf("mark %+v %v", m, ok)
+	}
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	gitOut(t, tree, "add", "-A")
+	gitOut(t, tree, "commit", "-q", "-m", "keep it")
+	if m, _ = e.ValidatedMark(ctx, f.ID); !m.Current {
+		t.Fatalf("a commit of the validated tree lost the mark: %+v", m)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "out.txt"), []byte("edited\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ = e.ValidatedMark(ctx, f.ID); m.Current || m.Text() != "changed since validation" {
+		t.Fatalf("a changed tree kept the mark: %+v", m)
+	}
+	out, err := e.WorkflowRecheck(ctx, f.ID)
+	if err != nil || !strings.Contains(out, "validated at tree") {
+		t.Fatalf("recheck %q %v", out, err)
+	}
+	if m, _ = e.ValidatedMark(ctx, f.ID); !m.Current {
+		t.Fatalf("the re-check did not move the mark: %+v", m)
+	}
+}
+
+// TestARunAllowedWhileAnotherIsOpenWaitsQueued: the queue is one deep, and
+// a queued run starts when the open one ends.
+func TestARunAllowedWhileAnotherIsOpenWaitsQueued(t *testing.T) {
+	wf := newWFFake()
+	g := newGate(t)
+	wf.on("slow", func(string, string, int) wfReply {
+		<-g.ch
+		return wfReply{text: "done", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	first := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: slow\nsteps:\n  - { id: slow, role: scout, prompt: wait }\n"})
+	tickRuns(t, e, f.ID, first.N, "started its step", func(*domain.Run) bool { return wf.count("slow") > 0 })
+	second := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: quick\nsteps:\n  - { id: quick, role: scout, prompt: look }\n"})
+	if r, _ := e.cfg.Store.Run(ctx, f.ID, second.N); r.State != domain.RunQueued || r.SpecRev != 0 {
+		t.Fatalf("second run %s, revision %d", r.State, r.SpecRev)
+	}
+	if _, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: "investigate"}); err == nil || !strings.Contains(err.Error(), "queued") {
+		t.Fatalf("a third run behind the queue: %v", err)
+	}
+	g.open()
+	tickRuns(t, e, f.ID, first.N, "ended", ended)
+	r := tickRuns(t, e, f.ID, second.N, "ended", ended)
+	if r.SpecRev == 0 || wf.count("quick") != 1 {
+		t.Fatalf("the queued run %+v", r)
+	}
+}
+
+// TestPreAuthorisationAllowsARunWithoutAsking: "Always allow up to N"
+// allows this run and every later one estimated within N; one beyond it
+// still asks.
+func TestPreAuthorisationAllowsARunWithoutAsking(t *testing.T) {
+	wf := newWFFake()
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	recipe := "name: one\nsteps:\n  - { id: one, role: scout, envelope: 40, prompt: look }\n"
+	run, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: recipe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowAlwaysAnswer(100)); err != nil {
+		t.Fatal(err)
+	}
+	if pre, _ := store.WorkflowPreauth(ctx, f.ID); pre != 100 {
+		t.Fatalf("pre-authorised %d", pre)
+	}
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	again, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: recipe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.State != domain.RunRunning || again.Pending != nil {
+		t.Fatalf("a pre-authorised run asked: %+v", again)
+	}
+	tickRuns(t, e, f.ID, again.N, "ended", ended)
+	big, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: strings.Replace(recipe, "envelope: 40", "envelope: 400", 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if big.State != domain.RunProposed || big.Pending == nil {
+		t.Fatalf("a run beyond the pre-authorisation did not ask: %+v", big)
+	}
+}
+
+// TestFeedbackOnAProposalReachesTheSession: the person's own words close
+// the proposal and go to the session agent as a turn.
+func TestFeedbackOnAProposalReachesTheSession(t *testing.T) {
+	wf := newWFFake()
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: "deliver"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"design · contractor", "build ↺ up to 3", "DW-1: test -f out.txt", "Estimated"} {
+		if !strings.Contains(run.Pending.Question, want) {
+			t.Errorf("the proposal does not show %q:\n%s", want, run.Pending.Question)
+		}
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, "use investigate first"); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := e.cfg.Store.Run(ctx, f.ID, run.N)
+	if r.State != domain.RunDenied || r.Feedback != "use investigate first" || r.Pending != nil {
+		t.Fatalf("run %+v", r)
+	}
+	waitUntil(t, "the session heard the feedback", func() bool {
+		for _, m := range wf.sessionTurns() {
+			if strings.Contains(m, "use investigate first") {
+				return true
+			}
+		}
+		return false
+	})
+	// the session may propose again
+	if _, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: "investigate"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAPersonTalksToAStepAfterItEnded: a message to an ended step resumes
+// its conversation; the step stays done and nothing after it re-runs.
+func TestAPersonTalksToAStepAfterItEnded(t *testing.T) {
+	wf := newWFFake()
+	wf.on("one#", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "after.txt"), []byte("later\n"), 0o600)
+		return wfReply{text: "added after.txt", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: one\nsteps:\n  - { id: one, role: implementer, prompt: do }\n  - { id: two, role: scout, prompt: look }\n"})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	one := stepPaths(t, e, f.ID, run.N)["one"]
+	if err := e.StepSend(ctx, one.Card, "also add after.txt"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the step answered", func() bool { return wf.count("one#") == 1 })
+	ff := e.Freeform(one.Card)
+	waitFreeformIdle(t, ff)
+	_, paths, err := e.RunDiff(ctx, f.ID, run.N)
+	if err != nil || !strings.Contains(strings.Join(paths, ","), "after.txt") {
+		t.Fatalf("the run's diff %v %v", paths, err)
+	}
+	steps := stepPaths(t, e, f.ID, run.N)
+	if steps["one"].State != domain.StepDone || steps["one"].Output != "done" || wf.count("two") != 1 {
+		t.Fatalf("the follow-up re-ran something: %+v, two ran %d", steps["one"], wf.count("two"))
+	}
+	if err := e.StepSend(ctx, f.ID, "hi"); err == nil {
+		t.Fatal("the session's own card was taken for a step's")
+	}
+}
+
+// TestAPlannerReplacesTheRemainingSteps: a planner's gummi-workflow block
+// goes to the person as a revised plan; allowed, its steps replace the
+// run's remaining ones.
+func TestAPlannerReplacesTheRemainingSteps(t *testing.T) {
+	wf := newWFFake()
+	wf.on("plan", func(string, string, int) wfReply {
+		return wfReply{text: "Here is the plan.\n\n```gummi-workflow\n- id: fresh\n  role: scribe\n  prompt: write it\n```\n", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: planned\nsteps:\n" +
+		"  - { id: plan, role: planner, prompt: plan it }\n  - { id: stale, role: scribe, prompt: old }\n"})
+	r := tickRuns(t, e, f.ID, run.N, "asked about the plan", pendingOf(domain.RunDecidePlan))
+	if r.Pending.Step != "plan" || !strings.Contains(r.Pending.RecipeYAML, "fresh") {
+		t.Fatalf("decision %+v", r.Pending)
+	}
+	if s := stepPaths(t, e, f.ID, run.N)["plan"]; s.State != domain.StepAsking {
+		t.Fatalf("the planner %+v", s)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, WorkflowAllowPlan); err != nil {
+		t.Fatal(err)
+	}
+	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
+	paths := stepPaths(t, e, f.ID, run.N)
+	if _, ran := paths["stale"]; ran || paths["fresh"].State != domain.StepDone || paths["plan"].State != domain.StepDone {
+		t.Fatalf("steps %+v", paths)
+	}
+	if len(r.Recipe.Steps) != 2 || r.Recipe.Steps[1].ID() != "fresh" || !strings.Contains(r.RecipeYAML, "fresh") {
+		t.Fatalf("the run's recipe %+v", r.Recipe)
+	}
+}
+
+// TestAQuitParksTheRun: a run that was running when gummi stopped is
+// parked by the next engine's first tick, and resumes only when a person
+// resumes it.
+func TestAQuitParksTheRun(t *testing.T) {
+	wf := newWFFake()
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := &domain.Run{
+		Session: f.ID, RecipeName: "x", State: domain.RunRunning, Spec: 1, SpecRev: 1,
+		Recipe: domain.Recipe{Name: "x", Steps: []domain.Entry{{Step: &domain.Step{ID: "one", Role: domain.RoleScout, Prompt: "look"}}}},
+	}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	e.wfRT().boot = time.Now().Add(time.Hour)
+	res, err := e.WorkflowTick(ctx)
+	if err != nil || len(res.Actions) != 1 || res.Actions[0] != "park" {
+		t.Fatalf("tick %+v %v", res, err)
+	}
+	r, _ := store.Run(ctx, f.ID, run.N)
+	if r.State != domain.RunPaused {
+		t.Fatalf("run %s", r.State)
+	}
+	if _, err := e.WorkflowTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if steps := stepPaths(t, e, f.ID, run.N); len(steps) != 0 {
+		t.Fatalf("a parked run started steps: %+v", steps)
+	}
+}
+
+// TestTheSessionProposesThroughItsTool: workflow_run is a session's tool,
+// and what it proposes waits on the person.
+func TestTheSessionProposesThroughItsTool(t *testing.T) {
+	wf := newWFFake()
+	e, _, f, ff := wfEngine(t, wf)
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			if msg != "run deliver" {
+				return base(opts, msg)
+			}
+			return []agent.Event{
+				toolCall("w1", workflowRunToolName, map[string]any{"recipe": "deliver"}),
+				{Kind: agent.EventMessage, Text: "proposed"},
+				{Kind: agent.EventIdle},
+			}
+		}
+	}(wf.Responder)
+	ctx := context.Background()
+	if err := ff.Send(ctx, "run deliver"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	r := tickRuns(t, e, f.ID, 1, "proposed", pendingOf(domain.RunDecideProposal))
+	if r.RecipeName != "deliver" || r.Spec != 1 || r.State != domain.RunProposed {
+		t.Fatalf("run %+v", r)
+	}
+	if run, d := e.WorkflowDecision(ctx, f.ID); run == nil || d == nil || d.ID != r.Pending.ID {
+		t.Fatalf("decision %+v", d)
+	}
+}
+
+// TestAStepsQuestionWaitsOnThePerson: a step's ask_user is a question on
+// the step's card; the step waits, asking, until the person answers.
+func TestAStepsQuestionWaitsOnThePerson(t *testing.T) {
+	wf := newWFFake()
+	e, _, f, _ := wfEngine(t, wf)
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			if !strings.Contains(msg, "You are step ask ") {
+				return base(opts, msg)
+			}
+			wf.mu.Lock()
+			wf.cardStep[opts.FeatureID] = "ask"
+			wf.mu.Unlock()
+			return []agent.Event{
+				toolCall("q1", askToolName, map[string]any{"question": "Blue or green?", "options": []map[string]string{{"label": "blue"}, {"label": "green"}}}),
+				{Kind: agent.EventIdle},
+			}
+		}
+	}(wf.Responder)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: ask\nsteps:\n  - { id: ask, role: implementer, prompt: choose }\n"})
+	tickRuns(t, e, f.ID, run.N, "asking", func(*domain.Run) bool {
+		return stepPaths(t, e, f.ID, run.N)["ask"].State == domain.StepAsking
+	})
+	card := stepPaths(t, e, f.ID, run.N)["ask"].Card
+	if err := e.AnswerAs(ctx, card, "blue", state.ActorUser); err != nil {
+		t.Fatal(err)
+	}
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if s := stepPaths(t, e, f.ID, run.N)["ask"]; s.State != domain.StepDone || wf.count("ask#") != 1 {
+		t.Fatalf("ended %s; step %+v; answered turns %d", r.State, s, wf.count("ask#"))
+	}
+}

@@ -353,6 +353,8 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleSpecList(s, tc)
 	case crewStartToolName, crewStatusToolName, crewSteerToolName, crewStopToolName, crewLandToolName:
 		e.handleCrewTool(s, tc)
+	case workflowRecipesToolName, workflowRunToolName, workflowStatusToolName, workflowSteerToolName, workflowStopToolName:
+		e.handleWorkflowTool(s, tc)
 	case skillReadTool, skillManageTool:
 		e.handleSkillTool(s, tc)
 	default:
@@ -495,6 +497,13 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	}
 	if reason, ok := askChangesSomething(s, ask); !ok {
 		e.bounceAsk(s, tc.ID, reason)
+		return
+	}
+	// a workflow step's question is the person's, on the step's card, and
+	// the faces draw it under the step (DESIGN §25.7)
+	if st := e.stepOf(context.Background(), s.Feature); st != nil {
+		e.installAsk(s, tc.ID, ask)
+		e.workflowEvent(st.Session)
 		return
 	}
 	// a crew node's question goes to its planner first (DESIGN §24.6)

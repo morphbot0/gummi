@@ -27,12 +27,16 @@ const capHeadroom = 0.90
 // Exhaustion semantics are unchanged: an envelope with nothing left
 // still returns 0 and gates.
 func (e *Engine) sessionBudget(f domain.Feature, creditRate float64) float64 {
+	if e.stepOf(context.Background(), f) != nil {
+		// a step spends from its session's pool (§25.7)
+		return e.stepBudget(context.Background(), f)
+	}
 	if f.Budget.Envelope > 0 {
 		cur := e.currentFeature(f)
 		spent := cur.Spend.CreditEquivalentAt(creditRate)
 		if cur.IsFreeform() && !cur.InCrew() {
 			// a session and its crews draw from one envelope (§24.7a)
-			spent += e.sessionCrewsSpent(context.Background(), cur.ID)
+			spent += e.sessionCrewsSpent(context.Background(), cur.ID) + e.sessionRunsSpent(context.Background(), cur.ID)
 		}
 		b := cur.Budget.Remaining(spent)
 		if reserve := e.turnReserve(); b > 0 && b < reserve {

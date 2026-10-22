@@ -178,6 +178,8 @@ type Engine struct {
 	// crews is the crews' runtime state (crew.go), made on first use.
 	crewOnce sync.Once
 	crews    *crewRuntime
+	// workflows is the workflow runs' runtime state (workflow.go).
+	workflows *workflowRuntime
 	// freeformClosed keeps the conversation of each freeform card whose
 	// session ended (FreeformHistory), so a closed card still shows what
 	// was said on it.
@@ -327,6 +329,7 @@ func New(cfg Config) *Engine {
 		cancel:         cancel,
 		cfg:            cfg,
 		now:            time.Now,
+		workflows:      newWorkflowRuntime(),
 		raw:            make(chan Event, 256),
 		events:         make(chan Event),
 		stopped:        make(chan struct{}),
@@ -607,6 +610,11 @@ func (e *Engine) locateFor(ctx context.Context, f domain.Feature, allowDrift boo
 	// tree the card was minted to do without.
 	if f.IsFreeform() && f.MainCheckout {
 		return wt.RepoRoot(), "", nil
+	}
+	// A workflow step's card has no tree of its own: it works in its
+	// session's checkout, beside the run's other steps (DESIGN §25.6).
+	if dir, isStep, err := e.stepTreeDir(ctx, f); isStep {
+		return dir, "", err
 	}
 	// Every feature and bug stage — design and work alike — runs in the
 	// card's own branch worktree, allocated here on its first stage run
@@ -962,6 +970,7 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 func (e *Engine) envelopeRaised(ctx context.Context, f domain.Feature) {
 	if f.IsFreeform() && !f.InCrew() {
 		e.crewEnvelopeRaised(ctx, f.ID)
+		e.workflowEnvelopeRaised(ctx, f.ID)
 	}
 }
 

@@ -310,6 +310,9 @@ func (e *Engine) WriteSessionSpec(ctx context.Context, f domain.Feature, n int, 
 	if err == nil && n == crewSpec {
 		e.crewSpecEdited(ctx, f, rev)
 	}
+	if err == nil {
+		e.workflowSpecEdited(ctx, f, n, rev)
+	}
 	return rev, err
 }
 
@@ -338,8 +341,11 @@ func (e *Engine) noteSessionSpecWrite(s *Session, n int, path string) {
 		return
 	}
 	ctx := context.Background()
-	if rev, err := e.recordSpecRevision(ctx, f.ID, n, string(raw), ActorAgent); err == nil && n == crewSpec {
-		e.crewSpecEdited(ctx, f, rev)
+	if rev, err := e.recordSpecRevision(ctx, f.ID, n, string(raw), ActorAgent); err == nil {
+		if n == crewSpec {
+			e.crewSpecEdited(ctx, f, rev)
+		}
+		e.workflowSpecEdited(ctx, f, n, rev)
 	}
 }
 

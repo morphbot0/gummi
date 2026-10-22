@@ -88,6 +88,10 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 		if why := o.Eng.CrewHolds(ctx, id); why != "" {
 			return o.fail(ctx, string(id), fmt.Errorf("%s: %s", id, why))
 		}
+		// a workflow run is still changing its tree (DESIGN §25.8)
+		if why := o.Eng.RunHolds(ctx, id); why != "" {
+			return o.fail(ctx, string(id), fmt.Errorf("%s: %s", id, why))
+		}
 	}
 	// The floor is a person's read of the diff (domain.Feature.MayLand
 	// says which cards have no landing at all); the unresolved-comment

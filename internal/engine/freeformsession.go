@@ -357,10 +357,10 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// A session's spec and crew tools (DESIGN §24): every session
 		// has them; a crew's own nodes do not.
 		if !f.InCrew() {
-			own := append(sessionSpecTools(), crewTools()...)
+			own := append(append(sessionSpecTools(), crewTools()...), workflowTools()...)
 			extra = append(extra, own...)
 			tools = append(tools, own...)
-			hints = append(hints, sessionCrewHint)
+			hints = append(hints, sessionCrewHint, sessionWorkflowHint)
 		}
 		path, teardown, merr := e.startMCPEndpoint(ctx, f, extra...)
 		if merr != nil {
@@ -387,6 +387,9 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// and backgrounded commands have somewhere to report back to.
 		Watch:      true,
 		ScratchDir: e.scratchFilesDirFor(ff.id),
+		// a workflow step of a reading role changes nothing, where the
+		// backend can be held to that (DESIGN §25.4)
+		ReadOnly: e.stepReadOnly(ctx, f, ag.Capabilities()),
 		// Image bytes a backend returns are kept in the workspace's
 		// attachment store, which the page already draws.
 		ImageSink: func(data []byte, name string) string {
@@ -636,8 +639,12 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 	ff.armIdleTimer()
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
 	// the transcript keeps the line as typed; the agent hears what a
-	// "/name" in it stands for
+	// "/name" in it stands for — and, while a workflow run is changing the
+	// tree, that it must not touch files (DESIGN §25.8)
 	wire := expandProjectCommands(cmds, ff.WorkDir(), msg)
+	if note := ff.engine.workflowTurnNote(ctx, ff.id); note != "" {
+		wire = note + "\n\n" + wire
+	}
 	ff.mu.Lock()
 	compacts := ff.compacts
 	ff.mu.Unlock()
@@ -872,7 +879,9 @@ func (ff *FreeformSession) drainQueue(sess *Session) {
 		// running, decides whether gummi sends the next turn — and a
 		// crew's node hands its turn to its checks and review
 		ff.advanceObjective(sess)
-		ff.crewNodeTurnEnded(sess)
+		if !ff.workflowStepTurnEnded(sess) {
+			ff.crewNodeTurnEnded(sess)
+		}
 		return
 	}
 	go func() {
@@ -1247,6 +1256,7 @@ func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session) {
 					sess.clearResolversWaiting()
 					sess.setError(errSessionDied)
 					ff.settleObjective(domain.ObjectiveFailed, "the backend died: "+errSessionDied.Error())
+					ff.workflowStepErrored(sess, errSessionDied)
 					e.send(Event{Feature: ff.id, Kind: EventError, Err: errSessionDied})
 					sess.stop()
 				}
@@ -1357,6 +1367,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		sess.setError(ev.Err)
 		if ev.Err != nil {
 			ff.settleObjective(domain.ObjectiveFailed, "the backend errored: "+ev.Err.Error())
+			ff.workflowStepErrored(sess, ev.Err)
 		}
 	case agent.EventBudgetExhausted:
 		// The BACKEND's own cap, not gummi's envelope (handleBoard's
@@ -1381,7 +1392,7 @@ func (e *Engine) exhaustFreeform(ff *FreeformSession, sess *Session) {
 	if !sess.markExhausted() {
 		return
 	}
-	if sess.Feature.Crew.Node != "" {
+	if sess.Feature.Crew.Node != "" && e.stepOf(context.Background(), sess.Feature) == nil {
 		e.crewNodeExhausted(sess.Feature)
 	}
 	sess.appendSystem("this card has spent its envelope — its work is left as it is in its worktree; " +
