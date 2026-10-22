@@ -117,7 +117,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	if err != nil {
 		return err
 	}
-	startTree, err := e.snapshotSession(ctx, session)
+	startTree, err := e.snapshotRun(ctx, session, n)
 	if err != nil {
 		return fmt.Errorf("snapshotting the tree: %w", err)
 	}
@@ -363,7 +363,7 @@ func (e *Engine) afterStepTurn(ctx context.Context, card domain.Feature, reply s
 	if err != nil || run == nil {
 		return
 	}
-	endTree, _ := e.snapshotSession(ctx, inst.Session)
+	endTree, _ := e.snapshotRun(ctx, inst.Session, inst.Run)
 	if inst.Role == domain.RolePlanner {
 		if handled := e.plannerEnded(ctx, run, inst, reply, endTree); handled {
 			return
@@ -476,7 +476,7 @@ func (e *Engine) settleStepLocked(ctx context.Context, session domain.FeatureID,
 	}
 	cur.State, cur.Reason, cur.EndedAt = st, why, e.now()
 	if cur.EndTree == "" {
-		cur.EndTree, _ = e.snapshotSession(ctx, session)
+		cur.EndTree, _ = e.snapshotRun(ctx, session, n)
 	}
 	if err := e.cfg.Store.UpdateRunStep(ctx, cur); err != nil {
 		return

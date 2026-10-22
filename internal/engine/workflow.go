@@ -654,7 +654,11 @@ func (e *Engine) startRunLocked(ctx context.Context, run *domain.Run) error {
 	if err != nil {
 		return err
 	}
-	tree, err := worktree.Snapshot(ctx, dir)
+	ignored, err := e.recordRunIgnored(ctx, run.Session, run.N, dir)
+	if err != nil {
+		return fmt.Errorf("listing the tree's ignored files: %w", err)
+	}
+	tree, err := worktree.Snapshot(ctx, dir, ignored...)
 	if err != nil {
 		return fmt.Errorf("snapshotting the tree: %w", err)
 	}
@@ -1613,7 +1617,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	if err != nil {
 		return
 	}
-	endTree, err := worktree.Snapshot(ctx, dir)
+	endTree, err := worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...)
 	if err != nil {
 		return
 	}

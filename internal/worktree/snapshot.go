@@ -24,7 +24,12 @@ import (
 // tree's hash. It works on a copy of the index through GIT_INDEX_FILE (or
 // on HEAD's tree read into a fresh one when the checkout has no index yet),
 // so the real index, HEAD and the files are left exactly as they were.
-func Snapshot(ctx context.Context, dir string) (string, error) {
+//
+// keepOut names paths the snapshot never takes in, whatever .gitignore
+// says now: a run passes the paths Ignored listed when it started, so an
+// edit of .gitignore under it cannot pull an ignored file (a .env, a
+// build directory) into the run's snapshots, its diff or a revert.
+func Snapshot(ctx context.Context, dir string, keepOut ...string) (string, error) {
 	own, err := runGit(ctx, dir, "rev-parse", "--git-path", "index")
 	if err != nil {
 		return "", err
@@ -59,7 +64,49 @@ func Snapshot(ctx context.Context, dir string) (string, error) {
 	if _, err := runGitEnv(ctx, dir, env, "add", "-A"); err != nil {
 		return "", err
 	}
+	if len(keepOut) > 0 {
+		// what .gitignore no longer keeps out, taken back out of the copy
+		// of the index; each is a literal path, and one not there is fine
+		specs := filepath.Join(tmp, "pathspecs")
+		if err := os.WriteFile(specs, []byte(strings.Join(keepOut, "\x00")+"\x00"), 0o600); err != nil { // #nosec G703 -- specs is in a directory MkdirTemp just made
+			return "", err
+		}
+		rm := append(append([]string(nil), env...), "GIT_LITERAL_PATHSPECS=1")
+		if _, err := runGitEnv(ctx, dir, rm, "rm", "-r", "-q", "--cached", "--ignore-unmatch",
+			"--pathspec-from-file="+specs, "--pathspec-file-nul"); err != nil {
+			return "", err
+		}
+	}
 	return runGitEnv(ctx, dir, env, "write-tree")
+}
+
+// Ignored lists the paths in the tree at dir that git ignores and does
+// not track, as they are on disk now: a directory ignored whole is one
+// entry. A run records them when it starts (Snapshot's keepOut), so they
+// stay out of everything it reads and are never deleted by its revert.
+func Ignored(ctx context.Context, dir string) ([]string, error) {
+	raw, err := runGitRaw(ctx, dir, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, p := range strings.Split(raw, "\x00") {
+		if p = strings.TrimSuffix(p, "/"); p != "" {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// under reports whether path is one of roots or inside one of them.
+func under(path string, roots []string) bool {
+	for _, r := range roots {
+		if path == r || strings.HasPrefix(path, r+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // DiffTrees is the diff between two snapshots of the tree at dir: the
@@ -88,8 +135,10 @@ func DiffTrees(ctx context.Context, dir, a, b string) (patch string, paths []str
 // (`git restore --source=<tree> --worktree`), and one it does not hold is
 // deleted, with any directory left empty by that. Only the files change:
 // the index and HEAD are left alone. A path outside dir is refused before
-// anything is touched.
-func RevertTo(ctx context.Context, dir, tree string, paths []string) error {
+// anything is touched. A path at or under one of keep — what was on disk,
+// ignored, when the run started — is never deleted: the snapshot did not
+// hold it because it was kept out, not because it was not there.
+func RevertTo(ctx context.Context, dir, tree string, paths []string, keep ...string) error {
 	for _, p := range paths {
 		if !filepath.IsLocal(filepath.FromSlash(p)) {
 			return fmt.Errorf("revert: %q is not a path inside the tree", p)
@@ -116,6 +165,9 @@ func RevertTo(ctx context.Context, dir, tree string, paths []string) error {
 	for _, p := range paths {
 		if held[p] {
 			restore = append(restore, p)
+			continue
+		}
+		if under(p, keep) {
 			continue
 		}
 		if err := removeFile(dir, p); err != nil {

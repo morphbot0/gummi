@@ -275,3 +275,69 @@ func TestRevertToRefusesAPathOutsideTheTree(t *testing.T) {
 		t.Errorf("no paths: %v", err)
 	}
 }
+
+// An ignored file on disk when a run starts stays out of the run's reading
+// of the tree, whatever .gitignore says later: a step that un-ignores it
+// neither puts its contents into the diff nor makes it look created, and a
+// revert never deletes it.
+func TestAnIgnoredFileStaysOutOfTheRunsSnapshotsAndIsNeverReverted(t *testing.T) {
+	root := newRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".env\nbuild/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", ".gitignore")
+	mustGit(t, root, "commit", "-q", "-m", "ignore")
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "build"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "build", "out.o"), []byte("obj\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keep, err := Ignored(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(keep, []string{".env", "build"}) {
+		t.Fatalf("ignored = %q", keep)
+	}
+	start, err := Snapshot(ctx, root, keep...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a step un-ignores both, and edits a tracked file
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := observe(t, root)
+	end, err := Snapshot(ctx, root, keep...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before.same(t, root)
+	patch, paths, err := DiffTrees(ctx, root, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(paths, []string{".gitignore"}) {
+		t.Errorf("paths = %q, want only .gitignore", paths)
+	}
+	if strings.Contains(patch, "s3cret") || strings.Contains(patch, "obj") {
+		t.Errorf("an ignored file's contents leaked into the diff:\n%s", patch)
+	}
+	// even handed the paths, a revert keeps what was on disk at the start
+	if err := RevertTo(ctx, root, start, []string{".env", ".gitignore", "build/out.o"}, keep...); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(root, ".env")); err != nil || string(raw) != "TOKEN=s3cret\n" {
+		t.Errorf(".env after the revert: %q %v", raw, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "build", "out.o")); err != nil {
+		t.Errorf("build/out.o after the revert: %v", err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(root, ".gitignore")); string(raw) != ".env\nbuild/\n" {
+		t.Errorf(".gitignore was not put back: %q", raw)
+	}
+}

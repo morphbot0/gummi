@@ -66,13 +66,49 @@ func (e *Engine) sessionTree(ctx context.Context, session domain.FeatureID) (str
 	return dir, nil
 }
 
-// snapshotSession records the session's tree as it is now.
-func (e *Engine) snapshotSession(ctx context.Context, session domain.FeatureID) (string, error) {
+// snapshotRun records the session's tree as it is now, as run n reads
+// it: without the ignored paths that were on disk when the run started.
+func (e *Engine) snapshotRun(ctx context.Context, session domain.FeatureID, n int) (string, error) {
 	dir, err := e.sessionTree(ctx, session)
 	if err != nil {
 		return "", err
 	}
-	return worktree.Snapshot(ctx, dir)
+	return worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...)
+}
+
+// runIgnoredFile is the file in a run's directory that lists the ignored
+// paths on disk when the run started (worktree.Ignored), NUL-separated.
+const runIgnoredFile = "ignored"
+
+// recordRunIgnored lists the ignored paths in dir now as run n's: they
+// stay out of every snapshot the run takes, so an edit of .gitignore
+// under the run neither shows their contents in its diff nor lets a
+// revert delete them.
+func (e *Engine) recordRunIgnored(ctx context.Context, session domain.FeatureID, n int, dir string) ([]string, error) {
+	paths, err := worktree.Ignored(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := e.writeRunFile(session, n, runIgnoredFile, strings.Join(paths, "\x00")); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
+// runKeepOut is what recordRunIgnored listed for run n, nil for a run
+// that recorded nothing.
+func (e *Engine) runKeepOut(session domain.FeatureID, n int) []string {
+	raw, err := os.ReadFile(filepath.Join(e.RunDir(session, n), runIgnoredFile)) // #nosec G304 -- the run's own directory
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(string(raw), "\x00") {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // writeRunDiff writes the diff from the run's starting tree to now (the
@@ -105,7 +141,7 @@ func (e *Engine) StepDiff(ctx context.Context, st domain.RunStep) (string, []str
 	}
 	end := st.EndTree
 	if end == "" {
-		if end, err = worktree.Snapshot(ctx, dir); err != nil {
+		if end, err = worktree.Snapshot(ctx, dir, e.runKeepOut(st.Session, st.Run)...); err != nil {
 			return "", nil, err
 		}
 	}
@@ -126,7 +162,7 @@ func (e *Engine) RunDiff(ctx context.Context, session domain.FeatureID, n int) (
 	if err != nil {
 		return "", nil, err
 	}
-	now, err := worktree.Snapshot(ctx, dir)
+	now, err := worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...)
 	if err != nil {
 		return "", nil, err
 	}
@@ -253,7 +289,7 @@ func (e *Engine) ValidatedMark(ctx context.Context, session domain.FeatureID) (V
 			continue
 		}
 		m := ValidatedMark{Run: r.N, Tree: r.ValidatedTree}
-		if now, err := e.snapshotSession(ctx, session); err == nil {
+		if now, err := e.snapshotRun(ctx, session, r.N); err == nil {
 			m.Current = now == r.ValidatedTree
 		}
 		return m, true
@@ -292,7 +328,7 @@ func (e *Engine) WorkflowRecheck(ctx context.Context, session domain.FeatureID) 
 	if err != nil {
 		return "", err
 	}
-	tree, err := worktree.Snapshot(ctx, dir)
+	tree, err := worktree.Snapshot(ctx, dir, e.runKeepOut(session, run.N)...)
 	if err != nil {
 		return "", err
 	}
@@ -399,7 +435,8 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 	if err != nil {
 		return nil, err
 	}
-	now, err := worktree.Snapshot(ctx, dir)
+	keep := e.runKeepOut(session, n)
+	now, err := worktree.Snapshot(ctx, dir, keep...)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +444,7 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 	if err != nil {
 		return nil, err
 	}
-	if err := worktree.RevertTo(ctx, dir, run.StartTree, paths); err != nil {
+	if err := worktree.RevertTo(ctx, dir, run.StartTree, paths, keep...); err != nil {
 		return nil, err
 	}
 	e.runNote(session, fmt.Sprintf("run %d reverted: %d path%s put back", n, len(paths), plural(len(paths))))

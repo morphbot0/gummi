@@ -1039,3 +1039,49 @@ func TestAProcessConductsOnlyTheRunsItHolds(t *testing.T) {
 		return true
 	})
 }
+
+// TestARevertNeverDeletesWhatWasOnDiskAtTheStart: an ignored file on disk
+// when a run starts is not the run's. A step that edits .gitignore so the
+// file is no longer ignored does not make it look created: its contents
+// stay out of the run's diff, and Revert run leaves it where it was.
+func TestARevertNeverDeletesWhatWasOnDiskAtTheStart(t *testing.T) {
+	wf := newWFFake()
+	wf.on("edit", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("# nothing ignored\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o600)
+		return wfReply{text: "edited", credits: 1}
+	})
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	if err := os.WriteFile(filepath.Join(tree, ".gitignore"), []byte(".env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitOut(t, tree, "add", ".gitignore")
+	gitOut(t, tree, "commit", "-q", "-m", "ignore .env")
+	if err := os.WriteFile(filepath.Join(tree, ".env"), []byte("TOKEN=s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: edit\nsteps:\n  - { id: edit, role: implementer, prompt: edit }\n"})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	patch, paths, err := e.RunDiff(ctx, f.ID, run.N)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != ".gitignore,out.txt" {
+		t.Errorf("the run's paths %q", paths)
+	}
+	if strings.Contains(patch, "s3cret") {
+		t.Errorf("an ignored file's contents are in the run's diff:\n%s", patch)
+	}
+	if _, err := e.WorkflowRevert(ctx, f.ID, run.N); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(tree, ".env")); err != nil || string(raw) != "TOKEN=s3cret\n" {
+		t.Fatalf("Revert run took .env, which was on disk before the run: %q %v", raw, err)
+	}
+	if _, err := os.Stat(filepath.Join(tree, "out.txt")); !os.IsNotExist(err) {
+		t.Errorf("the file the run created is still there: %v", err)
+	}
+}
