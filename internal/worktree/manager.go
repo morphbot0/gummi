@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -723,13 +725,40 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 		args = append(args, "--force")
 	}
 	args = append(args, "--", p)
-	if _, err := runGit(ctx, m.repo, args...); err != nil {
+	if _, err := runGit(ctx, m.repo, args...); err != nil && !m.removedButAdmin(ctx, p) {
 		return err
 	}
 	// The worktree is gone, so its recorded fork is meaningless. Clear it so
 	// a recreate re-anchors to main's then-current head instead of keeping a
 	// stale SHA that would trip the drift guard forever.
 	return m.forkStore.ClearForkPoint(ctx, f.ID)
+}
+
+// removedButAdmin finishes a removal git got halfway through: the
+// checkout at p is gone but its admin directory under .git/worktrees is
+// not, because a git command reading the tree at that moment (the board
+// refreshing what a card shows) still had a file in it. Once that reader
+// is done, prune takes the directory. It reports whether git no longer
+// knows a worktree at p; a checkout still on disk is a real failure, and
+// is left to the caller's error.
+func (m *Manager) removedButAdmin(ctx context.Context, p string) bool {
+	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	for range 10 {
+		if _, err := runGit(ctx, m.repo, "worktree", "prune"); err == nil {
+			out, err := runGit(ctx, m.repo, "worktree", "list", "--porcelain")
+			if err == nil && !slices.Contains(strings.Split(out, "\n"), "worktree "+p) {
+				return true
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return false
 }
 
 // DiskSize is how many bytes the feature's worktree occupies, walking
