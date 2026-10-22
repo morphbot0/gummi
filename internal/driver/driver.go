@@ -453,8 +453,9 @@ func crewState(s domain.RunState) string {
 
 func (d *Driver) done(ctx context.Context, id domain.FeatureID) Outcome {
 	f, _ := d.store.GetFeature(ctx, id)
+	// the session's spend is its pool's: its own turns and its runs' steps
 	d.out.Emit(doneEvent{
-		Event: "done", ID: string(id), Branch: f.BranchName(), Spent: f.Spend.Credits,
+		Event: "done", ID: string(id), Branch: f.BranchName(), Spent: d.eng.SessionPoolSpent(ctx, f),
 		PullRequest: f.PullRequest.StatusPayload(),
 	})
 	return Outcome{Status: StatusDone, ID: string(id)}
@@ -575,12 +576,13 @@ func (d *Driver) exhausted(ctx context.Context, id domain.FeatureID) Outcome {
 	f, _ := d.store.GetFeature(ctx, id)
 	// a raise that clears what is already spent, with headroom: doubling
 	// alone can land below recorded spend, and buy nothing
+	spent := d.eng.SessionPoolSpent(ctx, f)
 	suggested := f.Budget.Envelope * 2
-	if bySpend := int(math.Ceil(f.Spend.Credits * 1.2)); bySpend > suggested {
+	if bySpend := int(math.Ceil(spent * 1.2)); bySpend > suggested {
 		suggested = bySpend
 	}
 	d.out.Emit(exhaustedEvent{
-		Event: "exhausted", ID: string(id), Spent: f.Spend.Credits, Envelope: f.Budget.Envelope,
+		Event: "exhausted", ID: string(id), Spent: spent, Envelope: f.Budget.Envelope,
 		Resume:        string(id),
 		Next:          resumeCmd(string(id), "--envelope", domain.DollarsInput(suggested)),
 		Preconditions: d.resumePreconditions(id),

@@ -151,6 +151,32 @@ func TestAPreauthorisedRunRunsToItsReport(t *testing.T) {
 	}
 }
 
+// The done line's spend is the session's pool (§24.7a): the session's own
+// turns and every step its run took, not the session's turns alone.
+func TestTheDoneLineCountsTheStepsSpend(t *testing.T) {
+	h := newHarness(t, newSessionFake("workflow"))
+	out, f := h.run(Options{Envelope: 2000}, "make the file")
+	if out.Status != StatusDone {
+		t.Fatalf("outcome %+v, want done; stream %v", out, h.eventKinds())
+	}
+	ctx := context.Background()
+	sess, _ := h.store.GetFeature(ctx, f.ID)
+	steps, _ := h.store.RunSteps(ctx, f.ID, 1)
+	stepsSpent := 0.0
+	for _, s := range steps {
+		if card, err := h.store.GetFeature(ctx, s.Card); s.Card != "" && err == nil {
+			stepsSpent += card.Spend.Credits
+		}
+	}
+	if stepsSpent == 0 {
+		t.Fatalf("the run's steps spent nothing: %+v", steps)
+	}
+	want := sess.Spend.Credits + stepsSpent
+	if done := h.last("done"); done == nil || done["spent_credits"] != want {
+		t.Fatalf("done event %v, want spent_credits %v (session %v + steps %v)", done, want, sess.Spend.Credits, stepsSpent)
+	}
+}
+
 // A proposal over the pre-authorisation is the person's: the driver stops
 // on it, offering the run's own answers under the workflow's kind and the
 // crew's beside it. A resume in another process answers it — in the

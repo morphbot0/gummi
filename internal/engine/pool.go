@@ -18,7 +18,15 @@ func (e *Engine) sessionPoolLeft(ctx context.Context, sess domain.Feature) (floa
 	if sess.Budget.Envelope <= 0 {
 		return 0, false
 	}
-	return float64(sess.Budget.Envelope) - sess.Spend.CreditEquivalent() - e.legacyCrewsSpent(ctx, sess.ID) - e.sessionRunsSpent(ctx, sess.ID), true
+	return float64(sess.Budget.Envelope) - e.SessionPoolSpent(ctx, sess), true
+}
+
+// SessionPoolSpent is what the session's envelope has paid for: the
+// session's own turns, every step of its workflow runs, and what crews of
+// an old database spent. It is the session's spend wherever a reader
+// reports one against its envelope (the driver's done and exhausted lines).
+func (e *Engine) SessionPoolSpent(ctx context.Context, sess domain.Feature) float64 {
+	return sess.Spend.CreditEquivalent() + e.legacyCrewsSpent(ctx, sess.ID) + e.sessionRunsSpent(ctx, sess.ID)
 }
 
 // legacyCrewsSpent is what the crews a session ran before workflows
