@@ -1,0 +1,102 @@
+{
+  "asks": {
+    "name": "deliver · run 2",
+    "mood": "asking",
+    "steps": [
+      {
+        "id": "implement",
+        "path": "build/2/implement",
+        "card": "FF-1bu",
+        "state": "asking"
+      }
+    ],
+    "who": "implement",
+    "card": "FF-1bu",
+    "question": "Resume a pruned v40 session, or refuse it?"
+  },
+  "decides": {
+    "name": "deliver · run 2",
+    "mood": "deciding",
+    "steps": [
+      {
+        "id": "implement",
+        "path": "build/2/implement",
+        "card": "FF-1bu",
+        "state": "asking"
+      }
+    ],
+    "who": "implement",
+    "action": "Edit internal/state/migrate_turns.go",
+    "card": "FF-1bu",
+    "line": "waits on you · Run 2: the loop can't judge after build/2."
+  },
+  "one": {
+    "name": "deliver · run 2",
+    "mood": "running",
+    "steps": [
+      {
+        "id": "implement",
+        "path": "build/2/implement",
+        "card": "FF-1bu",
+        "state": "running"
+      }
+    ],
+    "who": "implement",
+    "action": "Edit internal/state/migrate_turns.go",
+    "card": "FF-1bu"
+  },
+  "paused": {
+    "name": "deliver · run 2",
+    "mood": "paused",
+    "steps": [
+      {
+        "id": "implement",
+        "path": "build/2/implement",
+        "card": "FF-1bu",
+        "state": "running"
+      }
+    ],
+    "who": "implement",
+    "action": "Edit internal/state/migrate_turns.go",
+    "card": "FF-1bu",
+    "line": "paused · paused by the person · resume to carry on",
+    "canResume": true
+  },
+  "spent": {
+    "name": "deliver · run 2",
+    "mood": "budget",
+    "steps": [
+      {
+        "id": "implement",
+        "path": "build/2/implement",
+        "card": "FF-1bu",
+        "state": "running"
+      }
+    ],
+    "who": "implement",
+    "action": "Edit internal/state/migrate_turns.go",
+    "card": "FF-1bu",
+    "line": "paused · the session's $25.00 is spent · top up to carry on",
+    "canTopUp": true
+  },
+  "two": {
+    "name": "deliver · run 2",
+    "mood": "running",
+    "steps": [
+      {
+        "id": "review-a",
+        "path": "build/2/reviews/review-a",
+        "card": "FF-1bu",
+        "state": "running"
+      },
+      {
+        "id": "review-b",
+        "path": "build/2/reviews/review-b",
+        "card": "FF-1bu",
+        "state": "running"
+      }
+    ],
+    "who": "review-a ∥ review-b",
+    "action": "Bash go test ./internal/engine -run Migrate"
+  }
+}

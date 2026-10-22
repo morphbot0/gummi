@@ -38,6 +38,9 @@ type RunInput struct {
 	// Live is each live step's session, by its path, and the session of
 	// an ended step that is working again (a person's follow-up).
 	Live map[string]StepLive
+	// Envelope is the session's envelope, in credits (0 uncapped): what a
+	// strip paused on a spent pool says is spent.
+	Envelope float64
 }
 
 // StepLive is what a step's own session says while it works.
@@ -102,6 +105,9 @@ type Run struct {
 	CanResume bool `json:"canResume,omitempty"`
 	CanStop   bool `json:"canStop,omitempty"`
 	CanRevert bool `json:"canRevert,omitempty"`
+	// Live is the open run's live strip, drawn above the composer; nil
+	// for a run that is not running or paused.
+	Live *RunStrip `json:"live,omitempty"`
 }
 
 // StripEntry is one top-level entry of the recipe.
@@ -289,6 +295,7 @@ func FoldRun(in RunInput) Run {
 	r.CanResume = run.State == domain.RunPaused && !run.Stopping
 	r.CanStop = run.State.Open() && !run.Stopping
 	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0
+	r.Live = liveStrip(in, r, now)
 	r.Rev = runRev(r)
 	return r
 }
