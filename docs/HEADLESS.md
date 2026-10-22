@@ -59,7 +59,7 @@ carry the full id. One flag still wants the id itself:
 | `gummi status <id\|ref> [--json]` | where a card is: blockers, spend, branch state |
 | `gummi status <id\|ref> --stats [--json]` | how the card ran: each pass and what it cost, and the share of its life spent waiting on a person |
 | `gummi watch <id\|ref> [--json] [--wait] [--once]` | follow the live agent stream of a card another gummi is driving |
-| `gummi spec <id\|ref>` | the card's spec markdown |
+| `gummi spec <id\|ref> [--spec <n>] [--list]` | a session's spec markdown: `--spec` picks one of its specs by number (needed once it has more than one), `--list` lists them with each one's state, revision and title |
 | `gummi diff <id\|ref>` | the worktree diff against its base |
 | `gummi merge <id\|ref> -m <message\|-> [--no-squash] [--keep-branch]` | land a branch as one squash commit, or with `--no-squash` as a merge commit keeping its commits, where `-m` is optional and git's own merge message is used |
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
@@ -109,6 +109,10 @@ report of an ended run rides its line, and the same report reaches the
 session as a turn; the driver is not done until that turn has been answered.
 `--verbose` adds one `activity` line per tool call of the session's agent,
 run notes included.
+
+`spent_credits` on the `done` and `exhausted` lines is what the session's
+envelope has paid for: the session's own turns and every step of its
+workflow runs, since they all draw from one pool (DESIGN §24.7a).
 
 Each `workflow` line is followed by the `crew` line that crews wrote, for one
 release (DESIGN §25.11): `crew` is the run's number, `budget` its estimate,

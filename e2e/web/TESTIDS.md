@@ -118,7 +118,7 @@ branch would be removed).
 | `decision-carry` | "+ N diff comments" on an answer that takes them |
 | `nextup-slot`, `nextup` | "X also needs you" chip after an answer (on a phone's document tab, in the docked bar) |
 | `dock`, `composer`, `composer-input`, `composer-says`, `composer-send` | composer; `composer-says` is the enter line (the server's reading of the line, or the decision's answer) |
-| `composer-model`, `model-picker-btn` | a session's model beside Send (a draft's, or an open session's); absent on a card in the workflow |
+| `composer-model`, `model-picker-btn` | a session's model beside Send (a draft's, or an open session's); absent on a card of the retired kinds |
 | `model-picker`, `model-search`, `model-<agent>-<model>`, `model-typed-<agent>`, `model-recent-<agent>-<model>` | the picker: search or type an id; a suggested model (`default` for the agent's own), a typed id, a recent pair |
 | `composer-draft`, `draft-where` (an agent's draft: where it will run), `draft-repo`, `draft-base`, `draft-budget`, `draft-budget-pop`, `draft-budget-<n>`, `draft-budget-input`, `draft-budget-set`, `draft-budget-error` | a session draft's row above the line: repository, base, budget (`0` is uncapped) |
 | `draft-hero`, `draft-starter`, `draft-cancel` | a session draft's empty conversation, its starter lines, and leaving the draft |
@@ -199,7 +199,7 @@ A run's proposal on its pinned decision (§25.5): `run-proposal` with
 Memory: `memory`, `memory-src` (where the files live), `memory-global`,
 `memory-plan`, `memory-dead-ends` (a document's title and its rendered
 markdown; nothing written yet reads as a placeholder), `memory-none`
-(why a card has none — the workflow-card answer).
+(why a card has none — the answer for a card of the retired kinds).
 
 Request changes that sends a card back to an earlier stage asks first:
 `changes-confirm` (the dialog), `changes-question`, `changes-go`,

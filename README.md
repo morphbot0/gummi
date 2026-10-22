@@ -1,7 +1,7 @@
 # gummi
 
 > A meta-harness for coding agents. Run a fleet of agent sessions across
-> git worktrees, call on a planned, reviewed crew when the work is worth
+> git worktrees, run a workflow of fresh agents when the work is worth
 > one, from one board or headlessly from your own agents and CI.
 
 ![the gummi board](docs/assets/demo.gif)
@@ -12,48 +12,52 @@ that has been silently waiting on a question for twenty minutes.
 
 gummi replaces the pile of terminals with one board. Every piece of work
 is a **session**: a coding agent on its own git worktree and branch,
-that you talk to in its thread. When a piece of work is big enough to
-split, the session can call on a **crew**:
+that you talk to in its thread. When a piece of work deserves more than
+one agent, the session can run a **workflow**:
 
 ```
-session ──▶ spec (optional) ──▶ crew plan ──you approve──▶ run ──▶ report
+session ──▶ spec ──▶ workflow proposed ──you allow──▶ run ──▶ report
 ```
 
-A planner turns the session's spec into a plan of nodes — scouts,
-contractors, implementers, testers, scribes — each owning its own paths,
-running on its own branch, checked and reviewed by a fresh agent before
-it lands. You approve the plan and anything that widens it; the crew's
-report comes back to the session. Landing a session on main is always
-your read of its diff and your keypress.
+A workflow is a recipe of steps — design, build, review, validate, or
+whatever the recipe says — and each step is a fresh agent working in the
+session's own tree, one after another, side by side, or round a loop
+until a check passes. You allow the run (and any plan a step revises);
+gummi snapshots the tree at every step, so each step has a diff of its
+own and you can revert the run. The report comes back to the session,
+the changes stay in its tree for it (or you) to commit, and landing a
+session on main is always your read of its diff and your keypress.
 
 ## Features
 
 - **One board for many agents** — every session runs in parallel on its
   own worktree and branch; anything that needs you lands in a single inbox.
-- **Crews when the work divides** — a planner proposes a plan of nodes
-  against the spec's "done when" items; gummi checks the plan (every item
-  served, one writer per path, the budget fits) before you see it, then
-  checks, reviews and reworks every node. Nothing widens the plan without
-  you.
-- **A spec when you want one** — a session can keep a markdown spec of its
-  own, with numbered revisions, that you read and annotate beside the
-  thread. A crew is judged against it, not a transcript.
-- **Pick the model per role** — the session, the planner, each node tier
+- **Workflows when the work deserves them** — recipes kept as YAML in
+  `.gummi/workflows/`, beside the bundled `deliver`, `investigate` and
+  `fix-until-green`. A run is one block in the session's thread: open any
+  step to read its transcript, its own diff and its brief, or to talk to
+  it. At the end gummi runs the spec's "done when" checks and marks the
+  tree it validated.
+- **Specs when you want them** — a session can keep markdown specs, one
+  per piece of work, with numbered revisions, that you read and annotate
+  beside the thread. A run is judged against the spec it froze, not a
+  transcript.
+- **Pick the model per role** — the session, the planner, each step tier
   and the reviewer map to models through profiles: strong ones where they
   earn it, cheap or local ones elsewhere. Each session spends from a
-  budget in dollars, and its crews spend from the same budget: you are
-  warned before it runs out, and a crew that runs out pauses for a top-up
-  rather than throwing work away.
+  budget in dollars, and its workflow runs spend from the same budget: you
+  are warned before it runs out, and a run that runs out pauses for a
+  top-up rather than throwing work away.
 - **Agents, schedules and heartbeats** — an agent is a session with a home
   of its own instead of a repository; a session can come back on a clock.
 - **Stacks and PRs** — slice work into stacked branches; push a branch
   and open its pull request when you choose to.
 - **Headless** — `gummi run` starts a session from a prompt and drives it
-  and its crew from scripts, CI or another agent, with NDJSON output and
+  and its workflow runs from scripts, CI or another agent, with NDJSON output and
   typed exit statuses.
 - **In the browser** — `gummi web` serves the same board to a browser,
-  over loopback or your tailnet, with a Crew tab that draws the plan as it
-  runs.
+  over loopback or your tailnet, with each workflow run drawn in the
+  thread as it goes.
 - **Many backends** — Copilot CLI (default), Claude Code, Codex, opencode,
   pi, Antigravity, or any binary speaking a small stdio protocol.
 
@@ -98,7 +102,7 @@ The first run creates a gitignored `.gummi/` with state, a starter
 1. `n` — start a new session. The first line is the title.
 2. `enter` — open it and talk to the agent in its thread, in the
    session's own worktree. For bigger work, ask it to write a spec and
-   start a crew; the crew's plan comes back to you as a decision.
+   run a workflow; the proposal comes back to you as a decision.
 3. `d` — read the diff and leave line comments the agent picks up.
 4. `m` — squash-merge it into main once you are happy with the diff (or
    `h` to hand the branch off).

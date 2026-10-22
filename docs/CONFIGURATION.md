@@ -5,10 +5,10 @@ files, and the full environment table. Design rationale lives in `DESIGN.md` §4
 
 ## Agent backends
 
-Sessions and a crew's roles are run by a pluggable agent layer.
+Sessions and a workflow run's steps are run by a pluggable agent layer.
 `GUMMI_AGENT` selects the default backend, and a role's `backend:` field in
 `profiles.yaml` overrides it, so one profile can mix providers: copilot for
-a crew's nodes, claude for its planner and reviews.
+a run's writing steps, claude for its planner and reviews.
 
 - **copilot** *(default)*: the official Copilot SDK for Go, driving the
   `copilot` CLI in server mode. Full duplex: streaming, tool-call
@@ -64,8 +64,8 @@ a crew's nodes, claude for its planner and reviews.
   built-in default). Conversations carry across gummi processes through
   `--session <id>`, with the same fallback the other CLI adapters have: a
   session pi cannot confirm is dropped and the turn re-runs on a fresh
-  one. `--tools` gives pi's read-only sessions (a consult, a crew's
-  planner or reviewer) a structural allowlist (bash/edit/write are absent, not merely unapproved). pi has
+  one. `--tools` gives pi's read-only sessions (a consult, a workflow
+  step of a reading role) a structural allowlist (bash/edit/write are absent, not merely unapproved). pi has
   no native MCP client, so gummi's tools reach it through a generated
   `--extension` (a per-session artifact): the session's tool descriptors
   register at load, and a spawned `gummi __mcp` child serves the actual
@@ -137,6 +137,21 @@ the architect's) to a confining backend to avoid that.
 No usable agent leaves the board static. Creating sessions, their
 worktrees and specs all still work.
 
+## Workflows and their runs
+
+A workflow recipe (DESIGN §25.4) is a YAML file. gummi reads
+`.gummi/workflows/<name>.yaml` first, then its bundled recipes
+(`deliver`, `investigate` and `fix-until-green`), so a workspace file of
+the same name overrides a bundled one. A session agent may also hand a
+recipe over inline. `.gummi/workflows/` is never created for you; make it
+when you keep a recipe of your own.
+
+Each run keeps a directory of its own, `.gummi/runs/<session>/<n>/`: the
+recipe as allowed, the artifacts its steps write, the diff files a step
+reads as `{{run.diff}}`, each step's output and the run's report. It sits
+in the workspace, not the session's tree, so none of it shows in the
+session's diff.
+
 ## `.gummi/config.yaml`
 
 Scaffolded on first run. Every key is optional.
@@ -161,11 +176,12 @@ for opencode and pi, OpenAI ids for codex, and `agy models` ids for
 antigravity. An existing file is never rewritten.
 
 A `default:` name plus a `profiles:` map. Each profile maps roles to
-`{backend, model}`. A crew reads `planner` (falling back to `architect`),
-`crew-cheap`, `crew-standard` and `crew-strong` for its nodes' tiers
-(each falling back to `implementer`), and `reviewer` for its reviews;
-`consult` falls back to `architect`, and `scribe` drafts landing
-messages:
+`{backend, model}`. A workflow run's step takes its model from its
+tier's slot — `step-cheap`, `step-standard` or `step-strong` (falling back
+to `crew-<tier>`, the name an older file used, then `implementer`). A
+`planner` step reads `planner` first (falling back to `architect`), and a
+`reviewer` step reads `reviewer` first. `consult` falls back to
+`architect`, and `scribe` drafts landing messages:
 
 ```yaml
 default: thrifty
@@ -182,9 +198,9 @@ profiles:
     scribe:      { backend: antigravity, model: gemini-3.1-pro-low }
 ```
 
-Planner turns are many and short — one per plan, steer, node handoff
-worth a look and node question — and each is booked to the crew's
-budget. A mid-size model is usually enough for it:
+A recipe's planner step reads the work and may revise the run's
+remaining steps; its turns are paid from the session's envelope like
+every step's. A mid-size model is usually enough for it:
 `planner: { backend: claude, model: claude-sonnet-5 }` under an Opus
 architect, for example.
 
@@ -206,7 +222,7 @@ which backends start". A session picks its own agent and model in the web
 face, and the board starts an installed agent CLI the first time a
 session asks for it, even if no profile names it. The engine closes the
 agents it started. `headless` needs `GUMMI_AGENT_CMD` for this, as it does
-everywhere. A session's crew still takes its agents from the session's
+everywhere. A session's workflow steps still take their agents from the session's
 profile.
 
 Model ids are forwarded verbatim, so their spelling is the backend's: the
@@ -248,7 +264,7 @@ The event vocabulary (closed; a config typo is rejected at load):
 
 | event | fires when |
 |---|---|
-| `card.created` | a card was minted (the new-card form, a schedule, a crew) |
+| `card.created` | a card was minted (the new-card form, a schedule) |
 | `card.parked` | the card stopped and waits (`reason`: needs-you, gave-up, blocked, quit) |
 | `card.merged` | the branch was squash-merged onto its base (`commit` is the sha) |
 | `question.waiting` | the card's agent asked and awaits an answer |

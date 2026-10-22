@@ -7,8 +7,9 @@ Guidance for AI agents working on **gummi**. Read this first, then
 
 gummi is a **meta-harness for coding agents**: a single binary that
 runs a fleet of coding agent sessions, each on its own git worktree and
-branch, and lets a session call on a planned, reviewed **crew** of
-agents when the work is worth one. It orchestrates other agents — it is
+branch, and lets a session run a **workflow** — a recipe of
+fresh-context steps working in its own tree — when the work is worth
+one. It orchestrates other agents — it is
 not itself a coding agent. Two ways drive the same engine: a human at
 the keyboard in the TUI (or its web face, `gummi web`); and an agent,
 script, or CI driving a *fresh* gummi from *outside*, via the headless
@@ -23,42 +24,47 @@ reaches gummi's tools only through that card's own session MCP endpoint
 - **Storage:** SQLite (`modernc.org/sqlite`, pure-Go, no cgo).
 - **Runtime workspace:** a `.gummi/` dir created lazily in the target
   repo (state DB, `config.yaml`, `profiles.yaml`, `worktrees/`, `specs/`,
-  `crews/`, `homes/`). Gitignored.
+  `workflows/`, `runs/`, `homes/`). Gitignored.
 
-The mental model (DESIGN §24, decision 27): every unit of work is a
-**session** — a freeform card (`FF`, `KindFreeform`) holding
-`StageOpen` until it is closed at `StageDone`, a coding agent on a
-branch and worktree of its own. There is no workflow graph and no gate
+The mental model (DESIGN §24 and §25, decisions 27 and 28): every unit
+of work is a **session** — a freeform card (`FF`, `KindFreeform`)
+holding `StageOpen` until it is closed at `StageDone`, a coding agent on
+a branch and worktree of its own. There is no stage graph and no gate
 the session must cross. An **agent** is a session with a home of its
 own instead of a repository (`Feature.Home`).
 
 ```
-session ──talk──▶ spec (optional) ──crew_start──▶ plan ──you approve──▶ run ──▶ report
-   ▲                                                                              │
-   └──────────── the session carries on from the report, and may start another ───┘
+session ──talk──▶ spec n ──workflow_run──▶ proposal ──you allow──▶ run ──▶ report
+   ▲                          (steps work in the session's own tree)        │
+   └──── the session reads the report and the diff, commits what it keeps ──┘
    lands on a person's read of its diff
 ```
 
-- A session may keep **one spec of its own** (`engine/sessionspec.go`:
-  `spec_start`, `spec_view`, `spec_replace_section`, `spec_annotate`),
+- A session may keep **specs, one per piece of work**
+  (`engine/sessionspec.go`: `spec_start`, `spec_list`, `spec_view`,
+  `spec_replace_section`, `spec_annotate`, each taking the spec's number),
   stored under `.gummi/specs/`, never on the branch; every write is a
-  numbered revision in the store.
-- A session may run a **crew** (`engine/crew.go`): a **planner** writes
-  a plan of nodes as a `gummi-crew` block, judged against the spec's
-  `gummi-done-when` items; the person approves it (or has
-  pre-authorised crews up to an amount); nodes in a fixed catalogue of
-  roles (`domain.CrewRoles`: `scout`, `contractor`, `implementer`,
-  `tester`, `scribe`) run as hidden child cards on branches of their own
-  forked from the crew's (`crew/<slug>/<n>`, a node's
-  `crew/<slug>/<n>.<node>`), each checked against what it
-  owns and its checks, reviewed by a fresh-context `reviewer`, reworked,
-  and squashed onto the crew branch; a node whose landing conflicts
-  integrates the crew branch itself. A final review and a report turn
-  end the crew; `crew_land` squashes it onto the session's branch and
-  pins a "crew verified at `<sha>`" mark.
+  numbered revision of that spec in the store. A spec's state (`draft`,
+  `running`, `met`, `partial`) comes from its runs.
+- A session may run a **workflow** (`engine/workflow.go`): a **recipe**
+  of steps kept as YAML (`.gummi/workflows/<name>.yaml`, else the
+  bundled `deliver`, `investigate` and `fix-until-green`, or handed over
+  inline), run against one of its specs. `workflow_run` proposes the
+  run; the person allows it (or has pre-authorised runs up to an
+  amount). Each step is a fresh-context agent of a role (`scout`,
+  `planner`, `contractor`, `implementer`, `tester`, `scribe`,
+  `reviewer`) on a hidden child card whose working directory is the
+  session's own checkout — one after another, side by side in a
+  `parallel`, or round a `repeat` until its condition holds. Nothing is
+  branched, landed or committed by gummi: it snapshots the tree at every
+  step boundary, so each step has a diff of its own and a person can
+  **Revert run**. At the end gummi runs the frozen spec's done-when
+  checks, writes the report into the spec and sends it to the session,
+  and sets the "validated at tree `<hash>`" mark when every checked
+  item passes. The session (or the person) reads the diff and commits.
 - A **profile** maps roles to concrete models: `planner` (falling back
-  to `architect`), a node's tier as `crew-<tier>` (falling back to
-  `implementer`), and `reviewer`.
+  to `architect`), a step's tier as `step-<tier>` (falling back to
+  `crew-<tier>`, then `implementer`), and `reviewer`.
 
 Cards of the retired workflow kinds (feature, bug, research, goal) may
 still sit in an old database: they are read-only, and gummi refuses to
@@ -71,21 +77,21 @@ in the TUI.
 
 Each package has a real doc comment at the top of its lead file — read it
 before touching the package. Dependency flow is roughly
-domain → state/spec/crewplan/crewpolicy → engine → ui, with
+domain → state/spec/workflowrecipe/workflowpolicy → engine → ui, with
 agent/worktree/verify as leaf services.
 
 | package | responsibility |
 |---|---|
-| `domain` | Core types: cards (sessions and agents, plus the read-only rows of the retired workflow kinds), stages, crews, their plans and nodes (`crew.go`), done-when items. No I/O. |
-| `spec` | The markdown artifacts and their blocks: a session's spec template (`session.go`), the crew document and its `gummi-crew` block (`crew.go`), `gummi-done-when` and `gummi-checks`, and the `%%` marker grammar for anchored comments. |
-| `state` | SQLite store: cards, sessions, crews and their nodes, crew pre-authorisation, session spec revisions (`crew.go`), diff annotations, card events, sequences, workspace. |
-| `crewplan` | Pure rules a crew's plan answers to (DESIGN §24.5): `Problems` (may this plan be put to a person at all — ids, cycles, done-when coverage, ownership, the one-writer rule, budget) and `Compare` (whether a revision of an approved plan widens it, so goes to the person). A failing plan goes back to the planner before anyone sees it. |
-| `crewpolicy` | Pure conductor of a running crew (DESIGN §24.7): `Decide` takes a snapshot and returns the actions — wind down, land one ready node, send an exhausted or stuck node to the planner, wake the planner, start ready nodes up to the lanes, run the final review. `Engine.CrewTick` builds the snapshot and executes them. |
-| `engine` | The orchestrator. Runs sessions on agent backends, routes turns, streams activity, and conducts crews. Start here to trace behavior. The crew is `crew.go` (lifecycle, the session's `crew_*` tools, `CrewTick`, `CrewLand`, the verified mark), `crewplanner.go` (the planner's turn and tools), `crewnode.go` (a node's run, owns check, checks, rework, landing) and `crewreview.go` (node and final reviews, the report); the session's spec is `sessionspec.go`. |
+| `domain` | Core types: cards (sessions and agents, plus the read-only rows of the retired workflow kinds), stages, a session's specs, workflow recipes, runs, their steps and decisions (`workflow.go`), a session's hidden children — a step's card, and an old crew's (`child.go`: `ChildLink`, `StepLink`, `IsChild`, step tiers) — and done-when items. No I/O. |
+| `spec` | The markdown artifacts and their blocks: a session's spec template (`session.go`), the `gummi-done-when` block (`donewhen.go`) and `gummi-checks`, and the `%%` marker grammar for anchored comments. |
+| `state` | SQLite store: cards, sessions, a session's specs and their revisions (`sessionspecs.go`), workflow runs and their steps (`workflow.go`), the run pre-authorisation and an old database's crews, read only (`legacycrew.go`, `workflowmigrate.go`), diff annotations, card events, sequences, workspace. |
+| `workflowrecipe` | Pure rules for a workflow recipe (DESIGN §25.4): `Parse` the YAML, `Check` it (ids, roles, tiers, templates, `repeat` and `parallel` shapes; a warning for two writers side by side), `Estimate` it (each step's envelope or its role's default, a `repeat` counted `max` times), `Fill` a step's templates, `Load`/`List` the workspace's recipes and the bundled ones (`bundled/`), and read the lines a step's output may carry (a planner's `gummi-workflow` block, `FAILED:`, `MET:`/`UNMET:`, `DECISION:`, `OPEN:`). |
+| `workflowpolicy` | Pure conductor of a running run (DESIGN §25.7): `Decide` takes a snapshot and returns the actions — start ready steps, interrupt, judge a `repeat`'s `until`, ask at its max, put a runaway step to the person, pause on a spent pool, warn on the forecast, end. `Engine.WorkflowTick` builds the snapshot and executes them. |
+| `engine` | The orchestrator. Runs sessions on agent backends, routes turns, streams activity, and conducts workflow runs. Start here to trace behavior. A run is `workflow.go` (lifecycle, the session's `workflow_*` tools, the person's answers, pause/resume/stop/steer, `WorkflowTick`, a run's end and report), `workflowproposal.go` (what a proposal shows), `workflowstep.go` (a step's card, brief, snapshots and the person's messages to it), `workflowtree.go` (the run's directory, snapshots and diffs, end checks, the validated mark, Revert run) and `workflowfaces.go` (what the faces read); `pool.go` is the session's pool and the helpers they share; the session's specs are `sessionspec.go`. |
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
 | `cardmint` | The one recipe for minting a card: a session, or an agent in a home of its own. Refuses the retired kinds. |
-| `worktree` | Per-card git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, squash landing, cleanup. An agent's home is `home.go`. A branch gummi did **not** cut — a legacy adopted card's — keeps its custody rules here (`Feature.Adopted`, `Manager.Attach`, `ErrAdoptedBranch`, `branchmove.go`). `tree.go` is a person working a card's tree by hand — stage, hunk and line staging, discard, commit, the branch's own stashes (DESIGN §22.13); `ui/webtree.go` refuses every write while an agent is mid-turn. |
-| `verify` | Runs check commands in a tree and reports pass/fail: a crew node's checks and the crew's done-when checks. |
+| `worktree` | Per-card git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, squash landing, cleanup. An agent's home is `home.go`. A branch gummi did **not** cut — a legacy adopted card's — keeps its custody rules here (`Feature.Adopted`, `Manager.Attach`, `ErrAdoptedBranch`, `branchmove.go`). `tree.go` is a person working a card's tree by hand — stage, hunk and line staging, discard, commit, the branch's own stashes (DESIGN §22.13); `ui/webtree.go` refuses every write while an agent is mid-turn. `snapshot.go` is a workflow run's view of the tree: `Snapshot` (a tree hash through a temporary index, touching nothing), `DiffTrees` and `RevertTo`. |
+| `verify` | Runs check commands in a tree and reports pass/fail: a workflow run's done-when checks, at its end, a `repeat`'s `until: checks` and a re-check of the validated mark. |
 | `stack` | Pure policy for a **stack** — a chain of cards whose branches fork from one another. Answers what each card forks from, which are sitting on commits that have moved, and whether one may land yet. No git, no store, no clock. Read by `Engine.StackTick`, the worktree base seam and the board alike. |
 | `schedule` | Pure policy for **schedules and heartbeats** — freeform sessions that come back on a clock. Cron parse, compile, `Due`, `Next` and `Advance` (missed fires coalesce). No clock, no IO, no store. Read by the store's write boundary (`Check`), `Engine.ScheduleTick` and the faces. |
 | `cardrun` | Pure read model: one card's record → how it ran (its passes, what each cost, how much was rework, how long it waited). Shared by the card's run tab, `status --stats` and the week view. |
@@ -102,16 +108,16 @@ agent/worktree/verify as leaf services.
 | `childproc` | How gummi starts a process it supervises: `Group` (own process group, killed whole on cancel) and `Start` (on Linux, dies with gummi even when gummi is killed outright). Use both for any agent backend, probe or watch you spawn. |
 | `term` | A person's own shell on a pty in a card's worktree, for the web face's Terminal tab (`gummi web --terminal`): one session per card, bounded scrollback replayed on reattach, a cap and an idle sweep. Not an agent surface and not sandboxed; `web/routes_term.go` decides who may open one (DESIGN §20.5). |
 | `gittest` | Blank-imported by every test package that builds a git repository in a `t.TempDir`: switches off git's detached auto-maintenance, which otherwise outlives the command a test ran and fails the TempDir cleanup. A bare remote a test pushes to sets `maintenance.auto false` itself — git does not pass the switch to the receiving end. |
-| `ui` | The Bubbletea TUI: board, card thread, diff/spec views, inbox, dialogs. `crewloop.go` ticks every session's open crew; `webcrew.go` and `websessionspec.go` are what the web page's Crew and Spec tabs are told. |
+| `ui` | The Bubbletea TUI: board, card thread, diff/spec views, inbox, dialogs. `workflowloop.go` ticks every session's live run; `runblock.go` and `runkeys.go` draw a run's block in the thread and what a person does to it (alt+w), `stepview.go` a step opened from it; `webrun.go` and `websessionspec.go` are what the web page's run block, step panel and Specs tab are told. |
 | `cardops` | The card operations every face runs the same way: Merge, HandOff, Squash, Commit, Clean, and a linked PR's open-thread count, with the NDJSON emitter and the typed `Status`/`Outcome` exit table. `cmd/gummi`'s landing verbs call it directly. |
-| `driver` | The headless session loop behind `gummi run`/`resume`: mints a session from a prompt, pre-authorises its crew up to the envelope, ticks the crew and waits; stops `done`, or `needs_you` on a question or a crew decision the pre-authorisation does not cover. Emits NDJSON + typed exit statuses (`docs/HEADLESS.md`). |
+| `driver` | The headless session loop behind `gummi run`/`resume`: mints a session from a prompt, pre-authorises its workflow runs up to the envelope, ticks its run and waits; stops `done`, or `needs_you` on a question or a run decision the pre-authorisation does not cover. Emits NDJSON + typed exit statuses (`docs/HEADLESS.md`), with the `crew` names beside the `workflow` ones for older readers. |
 | `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
 | `engine/freeformsession.go` | A session's whole working life — its worktree, its per-card lock and its envelope. It never commits for the agent: every commit on its branch is one the agent made on purpose. Built from `consultsession.go`'s lifecycle; read the two together. `engine/sessionmodel.go` holds the agent and model a session picks for itself, starting a backend the board did not launch, and switching mid-conversation, and `ui/websession.go` holds the picker's catalog (DESIGN §19.8). |
-| `web` | `gummi web`: serves the board to a browser as a page of its own (DESIGN §20). Holds no board: it asks the TUI's model, run headless behind `ui.Bridge`, for every read and write. Pairing and device tokens (`pair.go`), same-origin and auth (`auth.go`), the SSE hub (`hub.go`), one `routes_*.go` per area, and the page itself under `assets/` (plain ES modules, no build step, strict CSP — no inline script or style). |
+| `web` | `gummi web`: serves the board to a browser as a page of its own (DESIGN §20). Holds no board: it asks the TUI's model, run headless behind `ui.Bridge`, for every read and write. Pairing and device tokens (`pair.go`), same-origin and auth (`auth.go`), the SSE hub (`hub.go`), one `routes_*.go` per area (a session's runs, steps and specs are `routes_runs.go`), and the page itself under `assets/` (plain ES modules, no build step, strict CSP — no inline script or style; a run's block and the step panel are `workflow.js`). |
 | `web/push` | Web Push from the host with the standard library alone: VAPID identity, RFC 8291 encryption, the per-device subscription store, and the fan-out notifier the board's attention hook posts to. |
 | `webapi` | The JSON contract between `internal/web` and its page: types only, golden-tested shapes. Change a shape here first. |
-| `threadfold` | Pure fold of a card's event log into what a thread draws — its sessions, answered decisions, and the structured `Items` the web page renders — in the words the TUI thread uses. Both faces read it. |
-| `decisions` | Pure rules for a card's open decisions: which one a card shows (`Rank`), its attention lane, how an `ask_user` question is offered as options, and what an answer says. Both faces read it. |
+| `threadfold` | Pure fold of a card's event log into what a thread draws — its sessions, answered decisions, and the structured `Items` the web page renders — in the words the TUI thread uses. A session's workflow runs fold into one item each (`runs.go`: `Options.Runs`, `FoldRun`, keyed `run:<n>` with a content-hash `Rev`). Both faces read it. |
+| `decisions` | Pure rules for a card's open decisions: which one a card shows (`Rank`), its attention lane, how an `ask_user` question is offered as options, a run's decision too (`RunOptions`), and what an answer says. Both faces read it. |
 | `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to a live session's tools (`--feature <id>`). |
 
 `cmd/gummi` holds `main.go` plus the board's supporting subcommands and the
@@ -191,26 +197,30 @@ worktrees and specs still work — the board just stays static. Key env vars are
 ## Conventions & guardrails
 
 - **gummi offers the process; it no longer enforces it** (decision 27,
-  DESIGN §24). There is no workflow graph, no stage gate and no
+  DESIGN §24). There is no stage graph, no stage gate and no
   configuration that adds one back. A session lands on a **person's read
   of its diff**: `domain.Feature.MayLand` refuses only a card with no
   landing of its own, unresolved diff comments hold a landing through
-  the open-comment check every landing crosses, an open crew holds its
-  session's (`Engine.CrewHolds`), and a stacked card waits for the cards
+  the open-comment check every landing crosses, an open workflow run
+  holds its session's (`Engine.RunHolds`), and a stacked card waits for the cards
   below it. Read `MayLand` and `cardops` before touching any landing
   path, and do not add a gate there.
-- **Inside a crew the floor is the crew's, and it does not bend.** A
-  plan passes `crewplan.Problems` before a person sees it; the person
-  approves the plan (or has pre-authorised crews up to an amount) and
-  every widening of it (`crewplan.Compare`) — no agent approves its own
-  crew; two nodes never write the same path unordered, and what a node
-  owns is enforced when it lands; every writing node is checked and
-  reviewed by a fresh context; the final review runs the done-when
-  checks; a node's question goes to the planner and on to the person
-  when the frozen spec does not answer it; the session's envelope is a
-  ceiling no agent raises, and a crew is never stopped over money but
-  paused for a person's top-up (DESIGN §24.7a). The crew's review and checks are evidence for the
-  person's read of the diff, never a gate on it.
+- **A run answers to three rules, and they do not bend** (decision 28,
+  DESIGN §25.12):
+  - **a person allows the run and every revision of its plan** — the
+    proposal and a planner's revised plan are the person's decisions, or
+    fall inside the pre-authorisation a person set; no agent allows its
+    own run;
+  - **money is a ceiling no agent raises** — one pool, the session's
+    envelope; a run is never stopped over money but paused for a
+    person's top-up (DESIGN §24.7a);
+  - **a question the run cannot settle reaches the person** — a step's
+    `ask_user`, a `repeat` at its max, a runaway step.
+
+  Review, checks and design are what a recipe chooses, never a floor
+  gummi imposes; a run's review and its end checks are evidence for the
+  person's read of the diff, never a gate on it. gummi never commits for
+  a run: it leaves its changes in the session's tree.
 - **The retired kinds are read-only.** A feature, bug, research or goal
   card left in an old database is shown but never run, minted or copied
   again; gummi refuses with a sentence naming it as retired. Do not add
@@ -231,9 +241,9 @@ worktrees and specs still work — the board just stays static. Key env vars are
   anything else bound for GitHub — `#178` is an issue there — or in a
   printed shell command, where `#` starts a comment.
 - **The spec is the context carrier between agents**, not chat
-  transcripts. A crew is judged against the session spec revision it
-  froze; a node is sent its brief, that spec and the handoffs of the
-  nodes it needs, never another agent's transcript.
+  transcripts. A workflow run is judged against the spec revision it
+  froze; a step is sent its filled prompt — that spec, the artifacts and
+  the outputs of the steps it names — never another agent's transcript.
 - **gummi's job ends at a branch a person can land — and a person may publish it.**
   It does not release, merge on GitHub, retarget a PR unasked or resolve
   a thread. Pushing a card's own branch and opening, updating or readying
@@ -243,7 +253,7 @@ worktrees and specs still work — the board just stays static. Key env vars are
   (`internal/credentials`: lent to gummi's own `gh` and push commands,
   never put in an agent's environment). It is optional, detected rather
   than switched on, and absent where `gh`/push access is not set up. No
-  session, crew, schedule, MCP tool or `run`/`resume` may reach the
+  session, workflow run, schedule, MCP tool or `run`/`resume` may reach the
   publish code (decision 25, DESIGN §22).
   Stacks (§18) still replay branches locally and print the `git push
   --force-with-lease` they need; publishing a stacked card is refused
@@ -279,14 +289,18 @@ worktrees and specs still work — the board just stays static. Key env vars are
 ## Where to look first
 
 - What a session does → `internal/engine/freeformsession.go`, then
-  `engine.go`; its spec → `internal/engine/sessionspec.go` and
-  `internal/spec/session.go`.
-- What a crew does next, or why a plan was refused → `internal/crewpolicy`
-  and `internal/crewplan` for the rules, then `internal/engine/crew.go`
-  (`CrewTick`) and its three siblings (`crewplanner.go`, `crewnode.go`,
-  `crewreview.go`); the faces are `internal/ui/webcrew.go`,
-  `internal/web/assets/crew.js` and `internal/ui/crewloop.go`; the
-  headless loop is `internal/driver`.
+  `engine.go`; its specs → `internal/engine/sessionspec.go`,
+  `internal/state/sessionspecs.go` and `internal/spec/session.go`.
+- What a workflow run does next, or why a recipe was refused →
+  `internal/workflowpolicy` and `internal/workflowrecipe` for the rules,
+  then `internal/engine/workflow.go` (`WorkflowTick`) and its siblings
+  (`workflowstep.go`, `workflowtree.go`, `workflowproposal.go`, `pool.go`).
+  How a run is drawn is `internal/threadfold/runs.go`; the faces are
+  `internal/ui/runblock.go`, `runkeys.go` and `stepview.go` in the
+  terminal, `internal/ui/webrun.go`, `internal/web/routes_runs.go` and
+  `internal/web/assets/workflow.js` on the page, and
+  `internal/ui/workflowloop.go` ticks it; the headless loop is
+  `internal/driver`.
 - "why did this card's branch move" / stacks → `internal/stack` for the
   rules, `internal/engine/stack.go` for the tick, `worktree.Manager.baseRev`
   for what a card forks from (and read its comment before touching any
@@ -323,8 +337,11 @@ worktrees and specs still work — the board just stays static. Key env vars are
 - Agent/model wiring → `internal/agent` + `internal/engine/profiles.go`.
 - "why may (or may not) this card land" → `domain.Feature.MayLand`, then
   `internal/cardops/ops.go` for every check a landing crosses (an open
-  crew, a stack below it, unresolved diff comments), and `docs/DESIGN.md`
-  §19.1 and §24.8 for why the floor is a person's read of the diff.
+  workflow run, a stack below it, unresolved diff comments), and
+  `docs/DESIGN.md` §19.1 and §24.8 for why the floor is a person's read
+  of the diff.
 - Anything architectural or a "why is it this way" question →
   `docs/DESIGN.md` (its **Decisions** list in §10 is binding; §24 and
-  decision 27 supersede the workflow sections, which are kept as history).
+  decision 27 supersede the old stage-workflow sections, and §25 and
+  decision 28 supersede §24's crews; the superseded sections are kept as
+  history).

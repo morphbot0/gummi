@@ -38,7 +38,7 @@ git -C "$repo" clean -qfd -e .gummi
 # fetch it once here so the workflow run's checks do not stall on it.
 export GOTOOLCHAIN=auto
 (cd "$repo" && go build ./lxc/... >/dev/null 2>&1) || \
-    echo "warning: go build ./lxc/... did not succeed; verify may fail" >&2
+    echo "warning: go build ./lxc/... did not succeed; the run's checks may fail" >&2
 
 # --- a fresh gummi workspace -------------------------------------------
 # Drop any previous run's worktrees and branches before wiping the state

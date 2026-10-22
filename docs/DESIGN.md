@@ -2081,7 +2081,8 @@ Decided in the design interview (2026-07-03):
     a person allows the run, money is a ceiling no agent raises, and a
     question the run cannot settle reaches the person. Review, checks
     and design become steps a recipe chooses. The crew branch, node
-    landing and the owns check (§24.3–24.6) are retired.
+    landing and the owns check (§24.3–24.6) are retired. Built
+    2026-10-22; §25.14 records where the build departed from §25.
 
 Still open:
 
@@ -6435,10 +6436,11 @@ as written:
 
 ## 25. Workflows — recipes a session runs in its own tree
 
-*Decided 2026-10-22 (decision 28).* This section replaces crews (§24.3–§24.9),
-the session's single spec (§24.2) and the Crew tab. Where it and §24
-disagree, this section wins. §24 is kept as the history of how crews
-worked.
+*Decided and built 2026-10-22 (decision 28).* This section replaces crews
+(§24.3–§24.9), the session's single spec (§24.2) and the Crew tab. Where
+it and §24 disagree, this section wins. §24 is kept as the history of
+how crews worked. Where the build settled something this section left
+open, or departed from it, §25.14 says so.
 
 A **workflow** is a recipe of steps, kept as a file. A session **runs**
 one workflow at a time, against one of the **specs** it holds.
@@ -6946,3 +6948,60 @@ Review, checks and design are what a recipe chooses, and the bundled
 - **Saving an inline recipe** to `.gummi/workflows/` from the thread.
 - **Isolated parallel writers**, as an option a recipe asks for: §24's
   branches and owns check, kept in history.
+
+### 25.14 As built
+
+The build follows §25, with these differences.
+
+**Specs and proposals.**
+- **A proposal needs a spec.** `workflow_run` is refused while the
+  session has no spec, even for a recipe whose prompts never name
+  `{{spec}}`: the run is judged against a frozen spec revision, and
+  there is none to freeze.
+- **A spec judged only by agents never validates.** A run sets the
+  validated tree only when at least one done-when item has a check and
+  every checked item passes, so a spec whose items are all judged by
+  `MET:` lines stays `partial` after every run (§25.3, §25.6).
+- **"Always allow up to" names dollars**, as `Always allow up to $5`,
+  like every amount a person reads. The pre-authorisation it sets is
+  kept in credits.
+- **Every run decision has a words row**, as an `ask_user` question
+  does, named for what the words do: **Feedback** on a proposal, to the
+  session agent; **Talk it over** on a revised plan, to its planner;
+  **Another amount** on a paused budget, the credits to top up by. A
+  `repeat` at its max offers one more iteration, continue or stop; a
+  runaway step offers carry on or drop; a spent pool offers a top-up.
+
+**Recipes.**
+- **Ids are unique across the whole recipe**, not only among siblings,
+  so `{{<id>.output}}` always names one step.
+- **A `repeat` without `onMax` pauses** at its max.
+- **A step without an `envelope` takes its role's default**: scout,
+  planner and reviewer 30 credits, scribe 40, contractor and tester 60,
+  implementer 100.
+- **A step's path names its `parallel` too**: a branch of `reviews` in
+  iteration 1 of `build` is `build/1/reviews/review-a`.
+
+**Running.**
+- **The person's Pause stops the steps' backends**, as a quit does.
+  Resume starts them again, each with a turn saying the run carries on.
+- **A step's card stays open after its run ends**, so a person can go on
+  talking to the step's agent (§25.10). It stays hidden from the board.
+- **Revert run is offered from the faces only.** There is no
+  `gummi workflow revert`.
+- **Revert run stays offered after a revert.** The block's files are
+  what the run left changed, which a revert does not rewrite. A second
+  revert lists whatever differs from the run's start at that moment.
+
+**In the thread.**
+- **A run item's `Rev` is a hash of what the block draws**, not a
+  counter, so two folds that draw the same block carry the same `Rev`.
+- **A step's row names the step by its id.** A recipe gives a step no
+  title.
+- **The terminal has no new-spec action.** There a spec is started by
+  the session agent's `spec_start`; the web page's Specs tab has
+  **+ New spec**. `[` and `]` switch between a session's specs in the
+  terminal's spec view.
+- **The terminal's step view has no Terminal tab.** It shows the
+  transcript, the diff and the brief. The web page opens the session's
+  terminal from the step's panel.
