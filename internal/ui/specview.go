@@ -663,7 +663,12 @@ func (m *Shell) specViewRender(w, h int) string {
 	// opens over a bug's report as often as over a feature's spec, and
 	// calling both "spec" renamed the document between the line that
 	// pointed at it and the header of the thing it opened.
-	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· "+artifactNoun(sv.f.Kind))
+	noun := artifactNoun(sv.f.Kind)
+	if sv.n > 0 {
+		// a session's spec, one of its list
+		noun = fmt.Sprintf("spec S%d", sv.n)
+	}
+	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· "+noun)
 	if open := sv.needsAttentionCount(); open > 0 {
 		head += " " + s.Warning.Render(fmt.Sprintf("✎ %d open", open))
 	}

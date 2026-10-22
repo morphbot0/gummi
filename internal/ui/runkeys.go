@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/threadfold"
@@ -220,6 +221,32 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 	return nil
 }
 
+// scrollToRunCursor pages the thread so the row the cursor is on in the
+// run blocks is in the window: the blocks' own rows are the body's only
+// ones that open on the cursor's mark, with no indent before it.
+func (m *Shell) scrollToRunCursor(body []string, budget int) {
+	at := -1
+	for i, l := range body {
+		if strings.HasPrefix(ansi.Strip(l), "▸ ") {
+			at = i
+		}
+	}
+	if at < 0 || budget <= 0 {
+		return
+	}
+	maxUp := max(len(body)-budget, 0)
+	up := clamp(m.threadScroll, 0, maxUp)
+	start, end := len(body)-up-budget, len(body)-up
+	switch {
+	case at < start+1:
+		// a row of context above it, when there is one
+		up = len(body) - budget - max(at-1, 0)
+	case at >= end:
+		up = len(body) - at - 1
+	}
+	m.threadScroll = clamp(up, 0, maxUp)
+}
+
 // runBindings is the table while the keyboard is on the blocks.
 func (m *Shell) runBindings() []binding {
 	bs := []binding{
@@ -313,7 +340,11 @@ func revertConfirm(p revertPreviewMsg, revert func(domain.FeatureID, int) tea.Cm
 	if len(p.paths) == 0 {
 		b.WriteString("Nothing differs from where the run started.")
 	} else {
-		fmt.Fprintf(&b, "%d path%s go back to how they were when run %d started:\n", len(p.paths), plural(len(p.paths)), p.run)
+		goes := "goes back to how it was"
+		if len(p.paths) > 1 {
+			goes = "go back to how they were"
+		}
+		fmt.Fprintf(&b, "%d path%s %s when run %d started:\n", len(p.paths), plural(len(p.paths)), goes, p.run)
 		const shown = 12
 		for i, path := range p.paths {
 			if i == shown {

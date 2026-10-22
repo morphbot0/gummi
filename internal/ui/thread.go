@@ -401,6 +401,9 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// as "at the top", which is never what a scrolled-back reader sees.
 	if !measure {
 		bodyBudget := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, len(body), h)
+		if m.wf.focus {
+			m.scrollToRunCursor(body, bodyBudget)
+		}
 		if m.pendingScrollAnchor && m.pendingScrollAnchorCard == f.ID {
 			m.pendingScrollAnchor = false
 			if target := m.pendingScrollAnchorEvent; target >= 0 {

@@ -112,7 +112,13 @@ func (m *Shell) openRunsChanged(ev engine.Event) tea.Cmd {
 		// does to it comes as one of these
 		switch ev.Kind {
 		case engine.EventWorkflow, engine.EventIdle, engine.EventStopped, engine.EventQuestion:
-			return m.loadRuns(open)
+			// a step's state is settled by its run, after its own turn
+			// ended: an open step is read again with its blocks
+			var step tea.Cmd
+			if m.stepv != nil {
+				step = m.reloadStep(m.stepv.card)
+			}
+			return tea.Batch(m.loadRuns(open), step)
 		}
 		return nil
 	}
