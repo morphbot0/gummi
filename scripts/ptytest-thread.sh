@@ -335,6 +335,71 @@ expect "at h=5 the layout survives"            'FF-001'
 size 120 40
 alive "still alive after the resize matrix"
 
+section "12. a workflow run in the thread"
+# expect_long <name> <regex> <seconds> — expect, for something that takes
+# a run's worth of turns.
+expect_long() {
+  local name="$1" re="$2" secs="$3" i
+  for i in $(seq 1 $((secs * 4))); do
+    pane | grep -qE -- "$re" && { PASS=$((PASS+1)); printf '  ok    %s\n' "$name"; return 0; }
+    sleep 0.25
+  done
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
+  printf '  FAIL  %s   (no match for: %s)\n' "$name" "$re"; dump; return 1
+}
+for i in 1 2 3 4; do
+  pane | grep -qE 'BOARD  [0-9]+ cards' && break
+  send Escape
+done
+# the scripted session writes a spec and proposes the bundled deliver on
+# it; its implementer asks its person before it writes
+send n
+lit 'Workflow drive [workflow] [step-asks]'
+send Enter
+expect_long "the proposal is the pinned decision"  'workflow run 1 · allow run' 20
+expect "it draws the recipe's step tree"       'build ↺ ≤3'
+expect "…the checks it will run"               'test -f made\.txt'
+expect "…and what it costs against the pool"   'left in the session'
+expect "Allow is the first answer"             '▸ 1\. Allow'
+expect "Always allow up to \$N"               '2\. Always allow up to \$'
+expect "Deny"                                  '3\. Deny'
+expect "Feedback takes the person's words"     '4\. Feedback'
+send Enter
+expect_long "the run is one block in the thread" '┌ workflow deliver · run 1' 20
+expect_long "the implementer's question is drawn under its step" 'implement asks: Keep made\.txt plain' 30
+expect "the step's row asks"                   '\? ↺ 1 +implement +implementer'
+refute "the run's notes stay out of the transcript" 'workflow: run 1'
+tmux send-keys -t $S M-w; sleep 0.6
+expect "alt+w puts the cursor on the asking step" '▸ \? ↺ 1 +implement'
+expect "the bar names the run's keys"          'p pause/resume'
+send Enter
+expect "enter opens the step, with its crumb"  'Session › deliver run 1 › build ↺ 1 › implement'
+expect "the step's head names its role and state" 'implementer +implement +build/1/implement'
+expect "its question is answerable there"      '▸ 1\. Keep it plain \(recommended\)'
+send Enter
+expect "the answer reaches the step"           'answered implement: Keep it plain'
+send d
+expect_long "the step's own diff"              '\+made by step build/1/implement' 15
+send b
+expect "its brief is the prompt as filled in"  'prompt'
+send Escape
+expect_long "the run ends validated"           'done · validated [0-9a-f]{7}' 60
+expect "an ended run folds to its results"     '✓ DW-1  ✓ DW-2'
+expect "…and the files it left"                '1 file left changed in the tree: made\.txt'
+expect "the head carries the validated mark"   'validated at tree [0-9a-f]{7} · alt\+v re-check'
+send v
+expect "v asks before it reverts"              'Revert run 1\?'
+expect "…listing every path it puts back"      '^.*│ +made\.txt'
+send n
+refute "n leaves the tree alone"               'Revert run 1\?'
+tmux send-keys -t $S M-v; sleep 1.5
+expect_long "alt+v re-checks the mark"         're-checked: the done-when checks pass' 15
+send Escape
+tmux send-keys -t $S M-s; sleep 1
+expect "the spec view lists the session's specs" '▸ S1 Make the workflow file +met'
+send Escape
+alive "still alive after the run"
+
 # ----------------------------------------------------------------- report
 printf '\n============ %d passed, %d failed, %d known defects ============\n' "$PASS" "$FAIL" "$KNOWN"
 if [ "$FAIL" -gt 0 ]; then printf 'failed:\n'; printf '  - %s\n' "${FAILED_NAMES[@]}"; fi
