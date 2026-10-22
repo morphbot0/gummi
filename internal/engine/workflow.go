@@ -12,7 +12,7 @@ package engine
 // answers to a run's decisions, pause, resume, stop and steer, the
 // conductor's tick (workflowpolicy.Decide, executed) and a run's end. A
 // step's own run is workflowstep.go; the tree, its snapshots, the end
-// checks, the validated mark and Revert run are workflowtree.go.
+// checks and Revert run are workflowtree.go.
 
 import (
 	"context"
@@ -1605,8 +1605,7 @@ func (e *Engine) endRunAsync(session domain.FeatureID, n int, end domain.RunStat
 }
 
 // endRun ends a run (§25.6): the done-when checks in the tree, each item's
-// result, the validated tree when every checked item passes, and the
-// report — into the spec's Report section, the run's directory, and the
+// result, and the report — into the spec's Report section, the run's directory, and the
 // session as a turn under the workflow's actor. A queued run starts on
 // the next tick.
 func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, end domain.RunState, why string) {
@@ -1632,7 +1631,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 		}
 	}
 	results := itemResults(items, doneWhenChecks(ctx, dir, items), last)
-	pass, checked := checkedPass(results)
+	pass := checkedPass(results)
 	switch {
 	case end == domain.RunDone && !pass && vacuous(results):
 		end, why = domain.RunPartial, "a done-when check ran no tests"
@@ -1641,10 +1640,6 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	case end == domain.RunStopped && why == "" || end == domain.RunStopped && why == "stopped":
 		why = run.Reason
 	}
-	validated := ""
-	if end != domain.RunStopped && checked > 0 && pass {
-		validated = endTree
-	}
 	_, paths, _ := worktree.DiffTrees(ctx, dir, run.StartTree, endTree)
 	var commits []string
 	if run.StartHead != "" {
@@ -1652,7 +1647,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 			commits = strings.Split(out, "\n")
 		}
 	}
-	report := runReport(run, end, why, items, results, steps, paths, commits, validated)
+	report := runReport(run, end, why, items, results, steps, paths, commits)
 
 	unlock := e.lockRuns(session)
 	cur, err := st.Run(ctx, session, n)
@@ -1661,7 +1656,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 		return
 	}
 	cur.State, cur.Reason, cur.EndedAt = end, why, e.now()
-	cur.EndTree, cur.ValidatedTree, cur.Results, cur.Report, cur.Commits = endTree, validated, results, report, commits
+	cur.EndTree, cur.Results, cur.Report, cur.Commits = endTree, results, report, commits
 	cur.Stopping, cur.Pending, cur.OutOfBudget = false, nil, false
 	err = st.UpdateRun(ctx, cur)
 	unlock()
@@ -1680,7 +1675,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 // DECISION: and OPEN: lines its steps wrote, the files it changed, the
 // commits made while it ran, and what it spent.
 func runReport(run *domain.Run, end domain.RunState, why string, items []domain.DoneWhen, results []domain.ItemResult,
-	steps []domain.RunStep, paths, commits []string, validated string,
+	steps []domain.RunStep, paths, commits []string,
 ) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Run %d (%s) on spec S%d, revision %d: %s", run.N, recipeLabel(run), run.Spec, run.SpecRev, end)
@@ -1708,9 +1703,6 @@ func runReport(run *domain.Run, end domain.RunState, why string, items []domain.
 			}
 			b.WriteString("\n")
 		}
-	}
-	if validated != "" {
-		fmt.Fprintf(&b, "\nValidated at tree %s.\n", short(validated))
 	}
 	var decisions, open, failed, strayed []string
 	for _, s := range steps {

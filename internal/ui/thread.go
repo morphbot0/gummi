@@ -686,32 +686,7 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	}
 	room := max(inner-idWidth-badgeWidth, 0)
 	strip := stageStrip(s, f, inner)
-	if mark := validatedMarkText(r.Validated); mark != "" {
-		style := s.Success
-		if !r.Validated.Current {
-			style = s.Warning
-		}
-		withMark := strip + s.Faint.Render(" · ") + style.Render(mark)
-		// the mark's re-check key rides beside it, when there is room
-		recheck := withMark + s.Faint.Render(" · ") + s.KeyHint.Render("alt+v") + s.Faint.Render(" re-check")
-		switch {
-		case ansi.StringWidth(recheck) <= inner:
-			strip = recheck
-		case ansi.StringWidth(withMark) <= inner:
-			strip = withMark
-		}
-	}
 	return []string{id + " " + ansi.Truncate(title, room, "…") + badges(), strip}
-}
-
-// validatedMarkText is the head's word for a session's validated mark
-// (DESIGN §25.6): the tree a workflow run's checks all passed on, or that
-// the tree has changed since.
-func validatedMarkText(mk *engine.ValidatedMark) string {
-	if mk == nil {
-		return ""
-	}
-	return mk.Text()
 }
 
 // stageStrip renders every stage of this card's own workflow in order,

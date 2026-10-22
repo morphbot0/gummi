@@ -45,12 +45,11 @@ type RunBlock struct {
 	// ended run left changed).
 	Files []string `json:"files,omitempty"`
 	// An ended run's result per done-when item, the commits made while it
-	// ran, the validated tree's short hash, and whether its report is in
-	// its spec (the link opens the spec on the Specs tab).
-	Results   []RunResult `json:"results,omitempty"`
-	Commits   []string    `json:"commits,omitempty"`
-	Validated string      `json:"validated,omitempty"`
-	Report    bool        `json:"report,omitempty"`
+	// ran, and whether its report is in its spec (the link opens the spec
+	// on the Specs tab).
+	Results []RunResult `json:"results,omitempty"`
+	Commits []string    `json:"commits,omitempty"`
+	Report  bool        `json:"report,omitempty"`
 	// What the head and footer offer now.
 	CanPause  bool `json:"canPause,omitempty"`
 	CanResume bool `json:"canResume,omitempty"`
@@ -217,11 +216,10 @@ type SpecEntry struct {
 
 // SpecRun is one run on a spec, newest last.
 type SpecRun struct {
-	N         int     `json:"n"`
-	Recipe    string  `json:"recipe"`
-	State     string  `json:"state"`
-	Spent     float64 `json:"spent,omitempty"`
-	Validated bool    `json:"validated,omitempty"`
+	N      int     `json:"n"`
+	Recipe string  `json:"recipe"`
+	State  string  `json:"state"`
+	Spent  float64 `json:"spent,omitempty"`
 }
 
 // RevertPreview is GET /api/cards/{id}/runs/{n}/revert: every path that
@@ -248,13 +246,6 @@ type RevertRequest struct {
 type RevertDone struct {
 	Run   int      `json:"run"`
 	Paths []string `json:"paths"`
-}
-
-// Recheck is POST /api/cards/{id}/recheck: the done-when checks of the
-// session's last run, run again in the tree as it is, in the engine's
-// words; the head's validated mark moves when they all pass.
-type Recheck struct {
-	Text string `json:"text"`
 }
 
 // RunProposal is a run's proposal (or a revised plan) on its pinned

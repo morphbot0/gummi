@@ -62,12 +62,12 @@ func TestSessionSpecsAndTheirRevisions(t *testing.T) {
 	if specs[0].State != domain.SpecDraft || specs[1].State != domain.SpecRunning {
 		t.Fatalf("states: %s %s", specs[0].State, specs[1].State)
 	}
-	r.State, r.ValidatedTree = domain.RunDone, "abc"
+	r.State, r.Results = domain.RunDone, []domain.ItemResult{{Item: "DW-1", Checked: true, Verdict: domain.ItemMet}}
 	if err := s.UpdateRun(ctx, r); err != nil {
 		t.Fatal(err)
 	}
 	if specs, _ := s.SessionSpecs(ctx, f.ID); specs[1].State != domain.SpecMet {
-		t.Fatalf("spec 2 after a validated run: %s", specs[1].State)
+		t.Fatalf("spec 2 after a run that met it: %s", specs[1].State)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	got.StartTree, got.StartedAt, got.Spent, got.Steers = "t0", started, 12.5, []string{"mind the tests"}
 	got.Results = []domain.ItemResult{{Item: "DW-1", Checked: true, Verdict: domain.ItemMet}}
 	got.OutOfBudget, got.Stopping = true, true
-	got.EndTree, got.ValidatedTree, got.Report, got.Reason = "t1", "t1", "all met", "why"
+	got.EndTree, got.Report, got.Reason = "t1", "all met", "why"
 	got.StartHead = "abc"
 	got.Until = map[string]domain.UntilJudgement{"build/1": {Met: true, Detail: "verdict APPROVED"}}
 	got.OnMax = map[string]string{"build/3": "more"}
@@ -127,7 +127,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	back, _ := s.Run(ctx, sess.ID, 1)
 	if back.Revision != 2 || back.Pending != nil || back.Feedback != "go ahead" || back.SpecRev != 4 ||
 		!back.StartedAt.Equal(started) || back.Steers[0] != "mind the tests" || back.Results[0].Verdict != domain.ItemMet ||
-		!back.OutOfBudget || !back.Stopping || back.ValidatedTree != "t1" || back.Report != "all met" || back.Spent != 12.5 ||
+		!back.OutOfBudget || !back.Stopping || back.EndTree != "t1" || back.Report != "all met" || back.Spent != 12.5 ||
 		back.StartHead != "abc" || !back.Until["build/1"].Met || back.OnMax["build/3"] != "more" {
 		t.Fatalf("updated run came back as %+v", back)
 	}

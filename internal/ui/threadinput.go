@@ -289,12 +289,6 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		// the run blocks take the keyboard (runkeys.go)
 		m.focusRuns(r)
 		return nil
-	case "alt+v":
-		if r.Validated == nil {
-			m.notice = noticeMsg{text: r.F.Name() + ": no run has validated this session's tree yet"}
-			return nil
-		}
-		return m.recheckRun(r)
 	case "pgup", "pgdown":
 		// scrolling the conversation is never text, so it works mid-draft
 		m.scrollThread(msg.String() == "pgup")

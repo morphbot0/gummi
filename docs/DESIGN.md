@@ -6550,7 +6550,7 @@ as a turn.
 |---|---|
 | `draft` | never run |
 | `running` | a run on it is open |
-| `met` | its last run's validation passed every item with a check |
+| `met` | its last run passed every item with a check, and left none unjudged |
 | `partial` | anything else |
 
 A spec may be run again.
@@ -6800,14 +6800,11 @@ call returns at once, saying the run is proposed.
   - An item whose check passed but ran no tests — a `go test` with
     `-run` whose output says "no tests to run" — is unjudged too, "the
     check ran no tests", never ✓: it proves nothing.
-  - When every checked item passes, the run's end snapshot becomes its
-    **validated tree**.
-- **The validated mark** replaces the crew-verified mark (§24.8). It
-  reads "**validated at tree `<short hash>`**" while a snapshot of the
-  session's tree equals the latest validated tree, and "**changed since
-  validation**" once it does not. Committing that exact tree changes
-  nothing, so the mark survives the session's commit. Re-check re-runs
-  the checks and moves the mark.
+  - The results are the run's evidence: they are in its report and its
+    block, and they set its spec's state (§25.3).
+- **No validated mark.** The crew-verified mark (§24.8) has no
+  successor: gummi pins no tree as validated and the head carries no
+  mark, and there is no Re-check (§25.14).
 
 ### 25.7 Conducting a run
 
@@ -6989,10 +6986,20 @@ The build follows §25, with these differences.
   session has no spec, even for a recipe whose prompts never name
   `{{spec}}`: the run is judged against a frozen spec revision, and
   there is none to freeze.
-- **A spec judged only by agents never validates.** A run sets the
-  validated tree only when at least one done-when item has a check and
-  every checked item passes, so a spec whose items are all judged by
-  `MET:` lines stays `partial` after every run (§25.3, §25.6).
+- **A spec judged only by agents is never met.** A run meets its spec
+  only when at least one done-when item has a check, every checked item
+  passes and no item is unjudged, so a spec whose items are all judged
+  by `MET:` lines stays `partial` after every run (§25.3, §25.6).
+- **The validated mark was dropped.** It was built — a run whose checked
+  items all passed pinned its end snapshot as the session's validated
+  tree; the head read "validated at tree `<hash>`" or "changed since
+  validation"; Re-check (`alt+v`, the web head's button) ran the checks
+  again and moved it — and then removed: it restated what the run's
+  results already say, while a person's read of the diff is the floor
+  (decision 27). A run's end checks and their per-item results stay, in
+  its report and its block, and a spec's `met` reads them
+  (`domain.ResultsMet`). The store's `validated_tree` column is left in
+  place, unread and unwritten.
 - **Every run decision has a words row**, as an `ask_user` question
   does, named for what the words do: **Feedback** on a proposal, to the
   session agent; **Talk it over** on a revised plan, to its planner;
@@ -7058,12 +7065,12 @@ The build follows §25, with these differences.
 - **A loop that cannot judge asks** (`RunDecideUnjudged`, the
   driver's `workflow_unjudged`). The run starts nothing while it waits,
   as at a loop's max; its block's folded iteration says "can't judge".
-- **A check that ran no tests is unjudged**, at a run's end, on a
-  re-check and in `until: checks` (where it makes the loop unable to
+- **A check that ran no tests is unjudged**, at a run's end and in
+  `until: checks` (where it makes the loop unable to
   judge). Detection is deliberately narrow (`verify.RanNoTests`): a
   passing `go test` naming `-run`, whose output says "no tests to run"
-  and shows no package or test that ran. Such an item fails the
-  validated mark, and a run that would have been done ends partial: "a
+  and shows no package or test that ran. Such an item keeps the spec
+  from `met`, and a run that would have been done ends partial: "a
   done-when check ran no tests".
 
 **Running.**

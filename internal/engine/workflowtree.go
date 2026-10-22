@@ -5,8 +5,7 @@ package engine
 // run's start and at each step's start and end; the diffs come from those.
 // This file is that half of a run: the run's directory in the workspace,
 // the snapshots and the diff files written into it, the done-when checks
-// at a run's end, the validated mark and its re-check, and a person's
-// Revert run.
+// at a run's end, and a person's Revert run.
 
 import (
 	"context"
@@ -233,21 +232,15 @@ func itemResults(items []domain.DoneWhen, checks map[string]verify.Result, lastO
 // ranNoTests is a vacuous check's detail.
 const ranNoTests = "the check ran no tests"
 
-// checkedPass reports whether every checked result passed, and how many
-// were checked. A checked item left unjudged — its check ran no tests —
-// did not pass.
-func checkedPass(rs []domain.ItemResult) (bool, int) {
-	n := 0
+// checkedPass reports whether every checked result passed. A checked item
+// left unjudged — its check ran no tests — did not pass.
+func checkedPass(rs []domain.ItemResult) bool {
 	for _, r := range rs {
-		if !r.Checked {
-			continue
-		}
-		n++
-		if r.Verdict != domain.ItemMet {
-			return false, n
+		if r.Checked && r.Verdict != domain.ItemMet {
+			return false
 		}
 	}
-	return true, n
+	return true
 }
 
 func verdictMark(v domain.ItemVerdict) string {
@@ -258,139 +251,6 @@ func verdictMark(v domain.ItemVerdict) string {
 		return "✗"
 	}
 	return "–"
-}
-
-// --- the validated mark -----------------------------------------------------
-
-// ValidatedMark is a session's validated mark (§25.6): the latest
-// validated tree, and whether the session's tree is still that tree.
-type ValidatedMark struct {
-	// Run is the run that validated the tree.
-	Run int
-	// Tree is the validated tree's hash.
-	Tree string
-	// Current is true while a snapshot of the session's tree equals Tree;
-	// committing that exact tree keeps it true.
-	Current bool
-}
-
-// Text is the mark in the words both faces use.
-func (m ValidatedMark) Text() string {
-	if m.Current {
-		return "validated at tree " + short(m.Tree)
-	}
-	return "changed since validation"
-}
-
-// ValidatedMark reads the session's mark; ok is false when no run has
-// validated a tree.
-func (e *Engine) ValidatedMark(ctx context.Context, session domain.FeatureID) (ValidatedMark, bool) {
-	if e.cfg.Store == nil {
-		return ValidatedMark{}, false
-	}
-	runs, err := e.cfg.Store.SessionRuns(ctx, session)
-	if err != nil {
-		return ValidatedMark{}, false
-	}
-	for i := len(runs) - 1; i >= 0; i-- {
-		r := runs[i]
-		if r.ValidatedTree == "" {
-			continue
-		}
-		m := ValidatedMark{Run: r.N, Tree: r.ValidatedTree}
-		if now, err := e.snapshotRun(ctx, session, r.N); err == nil {
-			m.Current = now == r.ValidatedTree
-		}
-		return m, true
-	}
-	return ValidatedMark{}, false
-}
-
-// WorkflowRecheck re-runs the done-when checks of the session's last ended
-// run in the session's tree, as it is now, and when every checked item
-// passes moves the validated mark to that tree.
-func (e *Engine) WorkflowRecheck(ctx context.Context, session domain.FeatureID) (string, error) {
-	st := e.cfg.Store
-	if st == nil {
-		return "", errors.New("workflows need the store")
-	}
-	if open, err := st.OpenRun(ctx, session); err != nil {
-		return "", err
-	} else if open != nil {
-		return "", fmt.Errorf("run %d is still open: re-check once it has ended", open.N)
-	}
-	runs, err := st.SessionRuns(ctx, session)
-	if err != nil {
-		return "", err
-	}
-	var run *domain.Run
-	for i := len(runs) - 1; i >= 0; i-- {
-		if runs[i].State.Ended() {
-			run = &runs[i]
-			break
-		}
-	}
-	if run == nil {
-		return "", errors.New("no run has ended on this session")
-	}
-	dir, err := e.sessionTree(ctx, session)
-	if err != nil {
-		return "", err
-	}
-	tree, err := worktree.Snapshot(ctx, dir, e.runKeepOut(session, run.N)...)
-	if err != nil {
-		return "", err
-	}
-	_, items := e.frozenSpec(ctx, run)
-	checks := doneWhenChecks(ctx, dir, items)
-	if len(checks) == 0 {
-		return "", fmt.Errorf("spec %d has no done-when checks to run", run.Spec)
-	}
-	var b strings.Builder
-	pass := true
-	for _, it := range items {
-		c, has := checks[it.ID]
-		if !has {
-			continue
-		}
-		mark, note := "✓", ""
-		switch {
-		case !c.OK:
-			mark, pass = "✗", false
-		case c.RanNoTests:
-			mark, note, pass = "–", " ("+ranNoTests+")", false
-		}
-		fmt.Fprintf(&b, "%s %s: %s%s\n", mark, it.ID, c.Cmd, note)
-	}
-	unlock := e.lockRuns(session)
-	defer unlock()
-	cur, err := st.Run(ctx, session, run.N)
-	if err != nil || cur == nil {
-		return "", fmt.Errorf("run %d: %w", run.N, err)
-	}
-	for i, r := range cur.Results {
-		if c, has := checks[r.Item]; has && r.Checked {
-			switch {
-			case c.OK && c.RanNoTests:
-				cur.Results[i].Verdict, cur.Results[i].Detail = domain.ItemUnjudged, ranNoTests
-			case c.OK:
-				cur.Results[i].Verdict, cur.Results[i].Detail = domain.ItemMet, ""
-			default:
-				cur.Results[i].Verdict, cur.Results[i].Detail = domain.ItemUnmet, strings.TrimSpace(tail(c.Output, 600))
-			}
-		}
-	}
-	if pass {
-		cur.ValidatedTree = tree
-	}
-	if err := st.UpdateRun(ctx, cur); err != nil {
-		return "", err
-	}
-	e.workflowEvent(session)
-	if pass {
-		return "the done-when checks pass: validated at tree " + short(tree) + "\n" + strings.TrimRight(b.String(), "\n"), nil
-	}
-	return "the done-when checks do not all pass in the tree (a check that ran no tests is no pass):\n" + strings.TrimRight(b.String(), "\n"), nil
 }
 
 // --- Revert run ------------------------------------------------------------

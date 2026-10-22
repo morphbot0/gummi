@@ -151,7 +151,7 @@ func TestAnAlwaysAllowedRunRunsToItsReport(t *testing.T) {
 		t.Fatalf("the last reply is not the session's answer to the report: %v\n%s", r, h.buf.String())
 	}
 	run, _ := h.store.Run(context.Background(), f.ID, 1)
-	if run == nil || run.State != domain.RunDone || run.ValidatedTree == "" {
+	if run == nil || run.State != domain.RunDone || !domain.ResultsMet(run.Results) {
 		t.Fatalf("run %+v", run)
 	}
 	if _, err := os.Stat(filepath.Join(h.root, ".gummi", "worktrees", string(f.ID), "out.txt")); err != nil {

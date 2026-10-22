@@ -1,6 +1,6 @@
 {
   "n": 2,
-  "rev": "3aw379k5nyp7t",
+  "rev": "306y4mmaxwkqk",
   "recipe": "deliver",
   "spec": 2,
   "specTitle": "Resume pre-migration sessions",
@@ -96,7 +96,6 @@
   "commits": [
     "9f8e7d6 feat(state): keep the turns"
   ],
-  "validated": "0123456",
   "report": true,
   "canRevert": true
 }

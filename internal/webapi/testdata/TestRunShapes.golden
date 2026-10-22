@@ -120,7 +120,6 @@
       "commits": [
         "9f8e7d6 feat(state): keep the turns"
       ],
-      "validated": "0123456",
       "report": true,
       "canPause": true,
       "canStop": true,
@@ -182,8 +181,7 @@
             "n": 1,
             "recipe": "deliver",
             "state": "done",
-            "spent": 810,
-            "validated": true
+            "spent": 810
           }
         ]
       },
@@ -231,9 +229,6 @@
       "a.go",
       "b.go"
     ]
-  },
-  "recheck": {
-    "text": "the done-when checks pass: validated at tree 0123456"
   },
   "decision": {
     "ref": "ask:run:FF-12:2:1",

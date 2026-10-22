@@ -3,7 +3,7 @@ package ui
 // A session's workflow runs on the web face (DESIGN §25): the run's block
 // in the thread (threadfold's fold, fed the session's runs from the
 // store), a step opened beside the thread, the session's specs, and what
-// a person does to a run — pause, resume, stop, revert, re-check, a
+// a person does to a run — pause, resume, stop, revert, a
 // message to a step and the answer to a step's question. Every one is the
 // engine's own call, and every word the block says is threadfold's: the
 // web face decides nothing about a run.
@@ -90,7 +90,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 		N: r.N, Rev: r.Rev, Recipe: r.Recipe, Spec: r.Spec, SpecTitle: r.SpecTitle, SpecRev: r.SpecRev,
 		State: r.State, Reason: r.Reason, Stopping: r.Stopping, Spent: r.Spent,
 		Started: r.Started, Ended: r.Ended, Strip: []webapi.RunStripEntry{}, Rows: []webapi.RunStepRow{},
-		Files: r.Files, Commits: r.Commits, Validated: r.Validated, Report: r.Report,
+		Files: r.Files, Commits: r.Commits, Report: r.Report,
 		CanPause: r.CanPause, CanResume: r.CanResume, CanStop: r.CanStop, CanRevert: r.CanRevert,
 	}
 	var strip func(e threadfold.StripEntry) webapi.RunStripEntry
@@ -169,7 +169,7 @@ func (d *WebDocs) Specs(ctx context.Context) (webapi.SpecList, error) {
 					spent += s.Spent
 				}
 			}
-			e.Runs = append(e.Runs, webapi.SpecRun{N: r.N, Recipe: runRecipeName(*r), State: string(r.State), Spent: spent, Validated: r.ValidatedTree != ""})
+			e.Runs = append(e.Runs, webapi.SpecRun{N: r.N, Recipe: runRecipeName(*r), State: string(r.State), Spent: spent})
 			if r.State.Open() {
 				e.Frozen = r.SpecRev
 			}
@@ -411,22 +411,6 @@ func (d *WebDocs) Revert(ctx context.Context, n int, tree string) (webapi.Revert
 		return webapi.RevertDone{}, engineRefusal(err)
 	}
 	return webapi.RevertDone{Run: n, Paths: nonNil(paths)}, nil
-}
-
-// Recheck is POST /api/cards/{id}/recheck: the last run's done-when checks
-// again, in the tree as it is; the validated mark moves when they pass.
-func (d *WebDocs) Recheck(ctx context.Context) (webapi.Recheck, error) {
-	if !isRunSession(d.f) {
-		return webapi.Recheck{}, ErrNoCard
-	}
-	if d.eng == nil {
-		return webapi.Recheck{}, ErrDetached
-	}
-	text, err := d.eng.WorkflowRecheck(ctx, d.f.ID)
-	if err != nil {
-		return webapi.Recheck{}, engineRefusal(err)
-	}
-	return webapi.Recheck{Text: threadfold.Sanitize(text)}, nil
 }
 
 func nonNil(s []string) []string {

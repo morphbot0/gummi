@@ -220,11 +220,10 @@ cues() {
     chapter "6 · The run reports to the session" "and the session carries on"
     say "The report comes back to the session, which tells you what it means." 3.4
     say "Nothing was committed: the run left its changes in the tree." 3.2
-    typeline "commit it" "Tell it to commit what the run validated."
+    typeline "commit it" "Tell it to commit what the run left in the tree."
     press Enter "enter" "Send it." 2.0
-    await "validated at" 60
-    say "One commit, and the head says the tree is the one the run validated." 3.8
-    say "Change the tree later and the head says it changed since validation." 3.6
+    await "Committed the run" 60
+    say "One commit, made by the session on purpose: gummi commits nothing." 3.8
     press M-d "alt+d" "alt+d reads the diff: the column, its guard, its test." 3.2
     t 2.4
 

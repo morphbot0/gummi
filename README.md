@@ -36,8 +36,8 @@ session on main is always your read of its diff and your keypress.
   `.gummi/workflows/`, beside the bundled `deliver`, `investigate` and
   `fix-until-green`. A run is one block in the session's thread: open any
   step to read its transcript, its own diff and its brief, or to talk to
-  it. At the end gummi runs the spec's "done when" checks and marks the
-  tree it validated.
+  it. At the end gummi runs the spec's "done when" checks and reports
+  each item's result, in the run's block and in its report.
 - **Specs when you want them** — a session can keep markdown specs, one
   per piece of work, with numbered revisions, that you read and annotate
   beside the thread. A run is judged against the spec it froze, not a

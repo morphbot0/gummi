@@ -11,8 +11,7 @@ package ui
 // alt+w steps into the blocks: ↑↓ walk a run's head and its step rows,
 // enter opens a step (stepview.go) or unfolds an ended run's steps, p
 // pauses or resumes the run, x stops it and v reverts it, behind a
-// confirm that lists every path it puts back. alt+v re-checks the
-// session's validated mark.
+// confirm that lists every path it puts back.
 
 import (
 	"context"
@@ -296,9 +295,6 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 		left += s.Faint.Render("  spec ") + s.Subtle.Render(r.SpecTitle)
 	}
 	right := []string{runStateStyle(s, r).Render(threadfold.RunStateWord(r))}
-	if r.Validated != "" {
-		right = append(right, s.Success.Render("validated "+r.Validated))
-	}
 	if r.State != string(domain.RunProposed) && r.State != string(domain.RunDenied) {
 		right = append(right, s.Muted.Render(domain.FormatDollars(r.Spent)))
 	}

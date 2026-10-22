@@ -90,14 +90,12 @@ type Run struct {
 	// Files are the paths the run has changed so far, uncommitted, or
 	// those an ended run left changed.
 	Files []string `json:"files,omitempty"`
-	// Results, Commits, Validated and Report close an ended run: its
-	// result per done-when item, the commits made while it ran, the
-	// validated tree's short hash when every checked item passed, and
-	// whether its report was written into its spec.
-	Results   []RunResult `json:"results,omitempty"`
-	Commits   []string    `json:"commits,omitempty"`
-	Validated string      `json:"validated,omitempty"`
-	Report    bool        `json:"report,omitempty"`
+	// Results, Commits and Report close an ended run: its result per
+	// done-when item, the commits made while it ran, and whether its
+	// report was written into its spec.
+	Results []RunResult `json:"results,omitempty"`
+	Commits []string    `json:"commits,omitempty"`
+	Report  bool        `json:"report,omitempty"`
 	// What a person may do to the run now: Pause, Resume and Stop it, and
 	// Revert it (a run that started, with no step running).
 	CanPause  bool `json:"canPause,omitempty"`
@@ -284,9 +282,6 @@ func FoldRun(in RunInput) Run {
 		}
 		for _, c := range run.Commits {
 			r.Commits = append(r.Commits, Sanitize(c))
-		}
-		if run.ValidatedTree != "" {
-			r.Validated = shortHash(run.ValidatedTree)
 		}
 		r.Report = run.Report != ""
 	}
@@ -715,13 +710,6 @@ func cut(s string, n int) string {
 		return string(r[:n-1]) + "…"
 	}
 	return s
-}
-
-func shortHash(h string) string {
-	if len(h) > 7 {
-		return h[:7]
-	}
-	return h
 }
 
 // RunLine is a run in one line, the words a list of runs (a spec's, the

@@ -46,8 +46,8 @@ async function backToThread(page: Page): Promise<void> {
 // A session runs a workflow (DESIGN §25): its proposal is the pinned
 // decision, drawn as the recipe's steps, the checks and the money; allowed,
 // the run is one block in the thread that updates in place; a step's
-// question is answered from its row; the run ends with its results, its
-// report and the validated mark, which Re-check reads again; a step opens
+// question is answered from its row; the run ends with its results and its
+// report, and the head carries no validated mark; a step opens
 // beside the thread with its transcript and its own diff, and takes a
 // message; Revert run puts back what its preview listed. The board is
 // served with --terminal, so the session has a Terminal tab and the step,
@@ -95,17 +95,15 @@ test.describe('a board served with --terminal', () => {
     await shot(page, info, 'workflow-asks');
     await ask.getByTestId('run-question-option-0').click();
 
-    // the run ends: each done-when item's result, the validated tree, the
-    // report as the workflow's turn, and the mark on the head
+    // the run ends: each done-when item's result and the report as the
+    // workflow's turn; nothing on the head or the block names a validated
+    // tree
     await expect(block).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
     await expect(block.getByTestId('run-result-DW-1')).toBeVisible();
-    await expect(block.getByTestId('run-validated')).toBeVisible();
     await expect(block.getByTestId('run-files')).toContainText('1 file');
     await expect(page.getByTestId('thread-workflow').last()).toContainText('has reported', { timeout: 30_000 });
-    const mark = page.getByTestId('validated-mark');
-    await expect(mark).toContainText('validated at tree', { timeout: 15_000 });
-    await mark.getByTestId('validated-recheck').click();
-    await expect(page.getByTestId('toast').filter({ hasText: 'the done-when checks pass' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('card-head')).not.toContainText('validated');
+    await expect(block.getByTestId('run-head')).not.toContainText('validated');
 
     // a step opens beside the thread: its transcript, its own diff
     await block.getByTestId('run-steps').locator('summary').click();
@@ -164,7 +162,6 @@ test.describe('a board served with --terminal', () => {
     await dialog.getByTestId('revert-confirm').click();
     await expect(page.getByTestId('toast').filter({ hasText: 'Run 1 reverted' })).toBeVisible();
     expect(fs.existsSync(path.join(workspace.worktree(id), 'made.txt'))).toBe(false);
-    await expect(mark).toContainText('changed since validation', { timeout: 15_000 });
     // reverted, the run has nothing left to put back
     await block.getByTestId('run-revert').click();
     await expect(page.getByTestId('revert-dialog')).toContainText('Nothing differs');

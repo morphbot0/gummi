@@ -81,13 +81,6 @@ func lastAssistant(s *Session) string {
 	return ""
 }
 
-func short(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
-}
-
 func tail(s string, n int) string {
 	if len(s) <= n {
 		return s

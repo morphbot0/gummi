@@ -89,7 +89,7 @@ func tuiEndedRun() threadfold.RunInput {
 	return threadfold.RunInput{
 		Run: domain.Run{
 			Session: "FF-001", N: 1, RecipeName: "deliver", Recipe: tuiDeliver(), Spec: 1, SpecRev: 4,
-			State: domain.RunDone, StartTree: "aaaa", EndTree: "bbbbbbbbbb", ValidatedTree: "bbbbbbbbbb",
+			State: domain.RunDone, StartTree: "aaaa", EndTree: "bbbbbbbbbb",
 			CreatedAt: tuiRunAt, StartedAt: tuiRunAt, EndedAt: tuiRunAt.Add(72 * time.Minute),
 			Until:   map[string]domain.UntilJudgement{"build/1": {Met: true, Detail: "APPROVED"}},
 			Results: []domain.ItemResult{{Item: "DW-1", Verdict: domain.ItemMet, Checked: true}, {Item: "DW-2", Verdict: domain.ItemUnjudged}},
@@ -269,8 +269,7 @@ func shellDriver(t *testing.T, b *Bridge) (do func(func(*Shell) tea.Cmd), view f
 // A run in the terminal (DESIGN §25.9, §25.10, §25.6): the block stands in
 // the session's thread; alt+w steps into it; enter opens the step with its
 // crumb, transcript, own diff and brief; a line goes to the step's agent;
-// alt+v re-checks the validated mark; v reverts the run behind a confirm
-// that lists the paths.
+// v reverts the run behind a confirm that lists the paths.
 func TestARunInTheTerminal(t *testing.T) {
 	b, eng, _, ff := terminalRun(t, nil)
 	do, view, key := shellDriver(t, b)
@@ -281,7 +280,7 @@ func TestARunInTheTerminal(t *testing.T) {
 			strings.Contains(view(func(m *Shell) string { return m.threadView(137, 46) }), "workflow one · run 1")
 	})
 	th := view(func(m *Shell) string { return m.threadView(137, 46) })
-	for _, want := range []string{"done · validated", "✓ DW-1", "1 step · write", "1 file left changed in the tree: out.txt", "alt+w steps in"} {
+	for _, want := range []string{"done", "✓ DW-1", "1 step · write", "1 file left changed in the tree: out.txt", "alt+w steps in"} {
 		if !strings.Contains(th, want) {
 			t.Errorf("the run's block does not say %q:\n%s", want, th)
 		}
@@ -289,11 +288,11 @@ func TestARunInTheTerminal(t *testing.T) {
 	if strings.Contains(th, "workflow: run 1") {
 		t.Errorf("the run's notes are drawn beside its block:\n%s", th)
 	}
-	if !strings.Contains(th, "alt+v re-check") {
-		t.Errorf("the head offers no re-check of the validated mark:\n%s", th)
+	if strings.Contains(th, "validated") || strings.Contains(th, "re-check") {
+		t.Errorf("the thread still draws a validated mark:\n%s", th)
 	}
 
-	// the composer's table names the two chords, and neither is taken
+	// the composer's table names the runs' chord
 	keys := view(func(m *Shell) string {
 		_, bs := m.activeSurface()
 		var out []string
@@ -302,8 +301,8 @@ func TestARunInTheTerminal(t *testing.T) {
 		}
 		return strings.Join(out, " ")
 	})
-	if !strings.Contains(keys, "alt+w") || !strings.Contains(keys, "alt+v") {
-		t.Errorf("the card's key table does not name alt+w and alt+v: %s", keys)
+	if !strings.Contains(keys, "alt+w") {
+		t.Errorf("the card's key table does not name alt+w: %s", keys)
 	}
 
 	// alt+w steps in; enter on the ended run's head unfolds its steps,
@@ -360,12 +359,6 @@ func TestARunInTheTerminal(t *testing.T) {
 	if surface := view(func(m *Shell) string { s, _ := m.activeSurface(); return s }); surface != "runs" {
 		t.Fatalf("esc from the step went to %q, not back to the runs", surface)
 	}
-
-	// alt+v re-checks the mark
-	key("alt+v")
-	waitUntilTrue(t, "the re-check", func() bool {
-		return strings.Contains(view(func(m *Shell) string { return m.notice.text }), "re-checked")
-	})
 
 	// v reverts the run, behind a confirm that lists its paths
 	// (a headless board keeps no dialog a web intent does not own, so the

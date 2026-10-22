@@ -113,7 +113,7 @@ func TestARunningRunFoldsToOneBlock(t *testing.T) {
 	if r.Pending == nil || r.Pending.Kind != "max" {
 		t.Fatalf("pending %+v", r.Pending)
 	}
-	if r.Results != nil || r.Validated != "" {
+	if r.Results != nil {
 		t.Fatalf("an open run has no results: %+v", r)
 	}
 }
@@ -134,7 +134,7 @@ func TestARunsRevMovesWithItsBlock(t *testing.T) {
 func TestAnEndedRunFoldsToItsResults(t *testing.T) {
 	in := runningRun()
 	in.Run.State, in.Run.Pending, in.Run.EndedAt = domain.RunDone, nil, runAt.Add(72*time.Minute)
-	in.Run.ValidatedTree, in.Run.Report = "0123456789abcdef", "Run 2 (deliver) …"
+	in.Run.Report = "Run 2 (deliver) …"
 	in.Run.Commits = []string{"9f8e7d6 feat(state): keep the turns"}
 	in.Run.Results = []domain.ItemResult{{Item: "DW-1", Checked: true, Verdict: domain.ItemMet}, {Item: "DW-2", Verdict: domain.ItemUnjudged}}
 	in.Run.Until["build/2"] = domain.UntilJudgement{Met: true, Detail: "APPROVED"}
@@ -151,7 +151,7 @@ func TestAnEndedRunFoldsToItsResults(t *testing.T) {
 	if r.CanPause || r.CanStop || r.CanResume || !r.CanRevert {
 		t.Fatalf("an ended run offers %+v", r)
 	}
-	if r.Validated != "0123456" || !r.Report || len(r.Commits) != 1 || len(r.Results) != 2 || r.Results[0].Verdict != "met" {
+	if !r.Report || len(r.Commits) != 1 || len(r.Results) != 2 || r.Results[0].Verdict != "met" {
 		t.Fatalf("ended %+v", r)
 	}
 	keys := []string{}

@@ -384,17 +384,15 @@ expect_long "the step's own diff"              '\+made by step build/1/implement
 send b
 expect "its brief is the prompt as filled in"  'prompt'
 send Escape
-expect_long "the run ends validated"           'done · validated [0-9a-f]{7}' 60
+expect_long "the run ends done"               'deliver · run 1 .*done · \$' 60
 expect "an ended run folds to its results"     '✓ DW-1  ✓ DW-2'
 expect "…and the files it left"                '1 file left changed in the tree: made\.txt'
-expect "the head carries the validated mark"   'validated at tree [0-9a-f]{7} · alt\+v re-check'
+refute "the head carries no validated mark"    'validated at tree|re-check'
 send v
 expect "v asks before it reverts"              'Revert run 1\?'
 expect "…listing every path it puts back"      '^.*│ +made\.txt'
 send n
 refute "n leaves the tree alone"               'Revert run 1\?'
-tmux send-keys -t $S M-v; sleep 1.5
-expect_long "alt+v re-checks the mark"         're-checked: the done-when checks pass' 15
 send Escape
 tmux send-keys -t $S M-s; sleep 1
 expect "the spec view lists the session's specs" '▸ S1 Make the workflow file +met'
@@ -424,10 +422,10 @@ done
 if [ "$both" = 1 ]; then PASS=$((PASS+1)); printf '  ok    %s\n' "both reviews read as at work, side by side"
 else FAIL=$((FAIL+1)); FAILED_NAMES+=("both reviews at work"); printf '  FAIL  %s\n' "both reviews read as at work, side by side"; dump; fi
 expect "…while the step before them reads done"  '│ ✓ ↺ 1 +implement +implementer'
-expect_long "the run ends validated"             'validated at tree [0-9a-f]{7}' 90
+expect_long "the run reports to the session"     'has reported' 90
 # its report has pushed the block up the thread: alt+w brings it back
 tmux send-keys -t $S M-w; sleep 0.6
-expect "the ended run's block"                   'done · validated [0-9a-f]{7}'
+expect "the ended run's block"                   'deliver · run 1 .*done · \$'
 send Enter
 expect "its steps unfolded"                      '│ ✓ +validate +reviewer'
 refute "and nothing reads as at work after it"   '┃ [^ ] .*(reviewer|contractor|implementer)'

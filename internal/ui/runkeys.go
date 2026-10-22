@@ -2,9 +2,9 @@ package ui
 
 // What a person does to a session's runs from the terminal (DESIGN §25.6,
 // §25.9): pause, resume and stop the open run, revert one behind a confirm
-// listing every path it puts back, open a step, and re-check the
-// validated mark. Each is the web face's own call (WebDocs), so the two
-// faces cannot do different things to a run.
+// listing every path it puts back, and open a step. Each is the web face's
+// own call (WebDocs), so the two faces cannot do different things to a
+// run.
 
 import (
 	"context"
@@ -138,8 +138,6 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 	case "esc", "alt+w", "q":
 		m.wf.focus = false
 		return nil
-	case "alt+v":
-		return m.recheckRun(r)
 	case "alt+o":
 		m.threadOutputs = !m.threadOutputs
 		return nil
@@ -255,7 +253,6 @@ func (m *Shell) runBindings() []binding {
 		{key: "p", label: "pause/resume", help: "pause the open run (its steps' backends stop), or resume a paused one", bar: true},
 		{key: "x", label: "stop", help: "stop the run: its steps are interrupted, nothing is reverted", bar: true},
 		{key: "v", label: "revert", help: "put back every path the run changed, to how it was when the run started — a confirm lists them first", bar: true},
-		{key: "alt+v", label: "re-check", help: "re-run the last run's done-when checks in the tree as it is; the validated mark moves when they pass"},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread"},
 		m.threadOutputsBinding(),
 		{key: "esc", label: "composer", help: "back to the composer (also alt+w)", bar: true},
@@ -264,14 +261,11 @@ func (m *Shell) runBindings() []binding {
 }
 
 // runKeyBindings are the composer's rows for the blocks, on a card that has
-// any, and for the validated mark's re-check.
+// any.
 func (m *Shell) runKeyBindings(r featureRow) []binding {
 	var bs []binding
 	if len(m.wf.byCard[r.F.ID]) > 0 {
 		bs = append(bs, binding{key: "alt+w", label: "runs", help: "step into the workflow runs' blocks: open a step, pause, stop or revert a run"})
-	}
-	if r.Validated != nil {
-		bs = append(bs, binding{key: "alt+v", label: "re-check", help: "re-run the last run's done-when checks in the tree as it is; the validated mark moves when they pass"})
 	}
 	return bs
 }
@@ -390,28 +384,6 @@ func (m *Shell) revertRun(id domain.FeatureID, n int, tree string) tea.Cmd {
 				return noticeMsg{text: fmt.Sprintf("run %d reverted: %d path%s put back", n, len(done.Paths), plural(len(done.Paths)))}
 			},
 			func() tea.Msg { return runsReloadMsg{id: id} },
-			m.loadRows,
-		}
-	}
-}
-
-// recheckRun re-runs the last run's done-when checks: the validated mark
-// moves when they pass.
-func (m *Shell) recheckRun(r featureRow) tea.Cmd {
-	if !isRunSession(r.F) {
-		return nil
-	}
-	d, err := m.webDocsFor(r)
-	if err != nil {
-		return errNoticeCmd(err.Error())
-	}
-	return func() tea.Msg {
-		rc, err := d.Recheck(context.Background())
-		if err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		return tea.BatchMsg{
-			func() tea.Msg { return noticeMsg{text: "re-checked: " + firstLine(rc.Text)} },
 			m.loadRows,
 		}
 	}

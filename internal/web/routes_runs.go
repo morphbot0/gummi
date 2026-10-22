@@ -10,7 +10,7 @@ import (
 // A session's workflow runs (DESIGN §25): its specs, a step opened beside
 // the thread — its head and brief, its own diff, a person's message to it
 // and the answer to its question — and what a person does to a run:
-// pause, resume, stop, revert and re-check. The reads and writes are the
+// pause, resume, stop and revert. The reads and writes are the
 // engine's, through ui.WebDocs, off the board's loop; every write tells
 // the pages the session moved.
 
@@ -23,7 +23,6 @@ func (s *Server) runRoutes() {
 	s.api("POST /api/cards/{id}/runs/{n}/{act}", s.handleRunAct)
 	s.api("GET /api/cards/{id}/runs/{n}/revert", s.handleRevertPreview)
 	s.api("POST /api/cards/{id}/runs/{n}/revert", s.handleRevert)
-	s.api("POST /api/cards/{id}/recheck", s.handleRecheck)
 }
 
 // runN reads the {n} of a run route, answering the request itself when it
@@ -176,21 +175,6 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := d.Revert(r.Context(), n, body.Tree)
-	if err != nil {
-		writeDocsError(w, err, r.PathValue("id"))
-		return
-	}
-	s.changed(r.PathValue("id"))
-	writeJSON(w, http.StatusOK, out)
-}
-
-// handleRecheck is POST /api/cards/{id}/recheck.
-func (s *Server) handleRecheck(w http.ResponseWriter, r *http.Request) {
-	d, ok := s.docs(w, r)
-	if !ok {
-		return
-	}
-	out, err := d.Recheck(r.Context())
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return

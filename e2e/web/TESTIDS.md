@@ -162,13 +162,12 @@ from the template, on `spec-none`), `spec-session` (its bar), `spec-rev`,
 `spec-cancel`, `spec-stale` (the spec changed while it was being edited),
 `spec-revisions`, `spec-revision-<n>`.
 
-A session's workflow runs (DESIGN §25): on the head, `validated-mark` and its
-`validated-recheck`; in the thread, a turn a run sent (its report):
-`thread-workflow`.
+A session's workflow runs (DESIGN §25): in the thread, a turn a run sent (its
+report): `thread-workflow`.
 
 A run's block, among the session's turns (§25.9, `workflow.js`): `run-<n>`
 (`data-state`, `data-rev`), its `run-head` with `run-title`, `run-state`,
-`run-validated`, `run-spent`, `run-elapsed`, `run-reason` and the acts
+`run-spent`, `run-elapsed`, `run-reason` and the acts
 `run-pause`, `run-resume`, `run-stop`; `run-strip` with one `run-strip-<id>`
 per top-level entry of the recipe; `run-pending` (the run waits on the pinned
 decision); `run-rows` with one `run-row-<key>` per step or folded iteration

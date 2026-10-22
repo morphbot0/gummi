@@ -27,13 +27,13 @@ func TestRunShapes(t *testing.T) {
 				Question: &StepQuestion{Question: "Resume a pruned session?", Options: []QuestionOption{{Label: "Resume (recommended)", Recommended: true}, {Label: "Refuse", Detail: "with a sentence"}}},
 			},
 		},
-		Pending:   &RunPending{Kind: "max", Question: "Run one more iteration?", Options: []string{"Run one more iteration", "Continue", "Stop the run"}, Step: "build/2/implement"},
-		Files:     []string{"internal/state/migrate_turns.go"},
-		CanPause:  true,
-		CanStop:   true,
-		Results:   []RunResult{{Item: "DW-1", Verdict: "met", Checked: true}, {Item: "DW-2", Verdict: "unmet", Detail: "no v40 test"}},
-		Commits:   []string{"9f8e7d6 feat(state): keep the turns"},
-		Validated: "0123456", Report: true, CanRevert: true,
+		Pending:  &RunPending{Kind: "max", Question: "Run one more iteration?", Options: []string{"Run one more iteration", "Continue", "Stop the run"}, Step: "build/2/implement"},
+		Files:    []string{"internal/state/migrate_turns.go"},
+		CanPause: true,
+		CanStop:  true,
+		Results:  []RunResult{{Item: "DW-1", Verdict: "met", Checked: true}, {Item: "DW-2", Verdict: "unmet", Detail: "no v40 test"}},
+		Commits:  []string{"9f8e7d6 feat(state): keep the turns"},
+		Report:   true, CanRevert: true,
 	}
 	golden.RequireEqual(t, marshal(t, struct {
 		Item     Item              `json:"item"`
@@ -44,7 +44,6 @@ func TestRunShapes(t *testing.T) {
 		Revert   RevertPreview     `json:"revert"`
 		Confirm  RevertRequest     `json:"confirm"`
 		Reverted RevertDone        `json:"reverted"`
-		Recheck  Recheck           `json:"recheck"`
 		Decision Decision          `json:"decision"`
 	}{
 		Item: Item{Key: "run:2", Seq: 41, T: ItemRun, Time: at, Stage: "open", Run: &block},
@@ -59,14 +58,13 @@ func TestRunShapes(t *testing.T) {
 		Send:   StepSendRequest{Text: "Keep the migration idempotent."},
 		Answer: StepAnswerRequest{Answer: "Resume (recommended)"},
 		Specs: SpecList{CanStart: true, Specs: []SpecEntry{
-			{N: 1, Title: "Persist turns", State: "met", Rev: 4, DoneWhen: 3, Met: 3, Runs: []SpecRun{{N: 1, Recipe: "deliver", State: "done", Spent: 810, Validated: true}}},
+			{N: 1, Title: "Persist turns", State: "met", Rev: 4, DoneWhen: 3, Met: 3, Runs: []SpecRun{{N: 1, Recipe: "deliver", State: "done", Spent: 810}}},
 			{N: 2, Title: "Resume pre-migration sessions", State: "running", Rev: 2, Frozen: 2, DoneWhen: 1, Runs: []SpecRun{{N: 2, Recipe: "deliver", State: "running", Spent: 310}}},
 			{N: 3, Title: "Trim replay", State: "draft", Rev: 1},
 		}},
 		Revert:   RevertPreview{Run: 2, Paths: []string{"a.go", "b.go"}, Tree: "4b825dc", Note: "This also undoes anything the session changed in these paths since then."},
 		Confirm:  RevertRequest{Tree: "4b825dc"},
 		Reverted: RevertDone{Run: 2, Paths: []string{"a.go", "b.go"}},
-		Recheck:  Recheck{Text: "the done-when checks pass: validated at tree 0123456"},
 		Decision: Decision{
 			Ref: "ask:run:FF-12:2:1", Kind: DecisionAsk, Question: "Run the deliver workflow on spec S2?", Word: "allow run", Tone: "info", Anchor: AnchorThread,
 			Against: Against{Token: "ask:run:FF-12:2:1", Label: "workflow run 2's allow run"},

@@ -117,6 +117,9 @@ func TestPaths(t *testing.T) {
 }
 
 func TestSpecStateOf(t *testing.T) {
+	met := []ItemResult{{Item: "DW-1", Checked: true, Verdict: ItemMet}, {Item: "DW-2", Verdict: ItemMet}}
+	unmet := []ItemResult{{Item: "DW-1", Checked: true, Verdict: ItemUnmet}}
+	unjudged := []ItemResult{{Item: "DW-1", Checked: true, Verdict: ItemMet}, {Item: "DW-2", Checked: true, Verdict: ItemUnjudged}}
 	for _, tc := range []struct {
 		name string
 		runs []Run
@@ -124,11 +127,13 @@ func TestSpecStateOf(t *testing.T) {
 	}{
 		{"no runs", nil, SpecDraft},
 		{"only proposed and denied", []Run{{N: 1, State: RunDenied}, {N: 2, State: RunProposed}, {N: 3, State: RunQueued}}, SpecDraft},
-		{"one running", []Run{{N: 1, State: RunDone, ValidatedTree: "t"}, {N: 2, State: RunRunning}}, SpecRunning},
+		{"one running", []Run{{N: 1, State: RunDone, Results: met}, {N: 2, State: RunRunning}}, SpecRunning},
 		{"one paused", []Run{{N: 1, State: RunPaused}}, SpecRunning},
-		{"last validated", []Run{{N: 2, State: RunDone, ValidatedTree: "t"}, {N: 1, State: RunPartial}}, SpecMet},
-		{"last not validated", []Run{{N: 1, State: RunDone, ValidatedTree: "t"}, {N: 2, State: RunDone}}, SpecPartial},
-		{"stopped", []Run{{N: 1, State: RunStopped}}, SpecPartial},
+		{"last met", []Run{{N: 2, State: RunDone, Results: met}, {N: 1, State: RunPartial}}, SpecMet},
+		{"last not met", []Run{{N: 1, State: RunDone, Results: met}, {N: 2, State: RunPartial, Results: unmet}}, SpecPartial},
+		{"last unjudged", []Run{{N: 1, State: RunPartial, Results: unjudged}}, SpecPartial},
+		{"nothing checked", []Run{{N: 1, State: RunDone, Results: []ItemResult{{Item: "DW-1", Verdict: ItemMet}}}}, SpecPartial},
+		{"stopped", []Run{{N: 1, State: RunStopped, Results: met}}, SpecPartial},
 	} {
 		if got := SpecStateOf(tc.runs); got != tc.want {
 			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)

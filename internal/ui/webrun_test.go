@@ -100,7 +100,7 @@ func TestARunOnTheWebFace(t *testing.T) {
 			block = it.Run
 		}
 	}
-	if block == nil || block.State != "done" || block.Validated == "" || len(block.Rows) != 1 || block.Rows[0].Card == "" ||
+	if block == nil || block.State != "done" || len(block.Rows) != 1 || block.Rows[0].Card == "" ||
 		len(block.Files) != 1 || block.Files[0] != "out.txt" || !block.CanRevert {
 		t.Fatalf("the run's block: %+v", block)
 	}

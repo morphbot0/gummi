@@ -61,7 +61,7 @@ func TestSessionSpecRoutes(t *testing.T) {
 }
 
 // A session's run routes: its specs list, a run's acts and its revert,
-// re-check and a step's face. A run the session lacks is refused, a run
+// and a step's face. A run the session lacks is refused, a run
 // number that is none is malformed, and a card that is no session has no
 // specs.
 func TestSessionRunRoutes(t *testing.T) {
@@ -106,9 +106,6 @@ func TestSessionRunRoutes(t *testing.T) {
 	}
 	if st := b.get(path+"/runs/1/revert", nil); st != http.StatusConflict {
 		t.Fatalf("a revert preview of a run the session lacks answered %d", st)
-	}
-	if st := b.send(http.MethodPost, path+"/recheck", "", nil); st != http.StatusConflict {
-		t.Fatalf("a re-check with no run answered %d", st)
 	}
 	if st := b.get(path+"/steps/FF-999", nil); st != http.StatusNotFound {
 		t.Fatalf("a step the session lacks answered %d", st)

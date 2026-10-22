@@ -353,8 +353,8 @@ def hero_commit(ctx):
     git(wd, "add", "-A", "lxc")
     git(wd, "commit", "-qm", "lxc/list: add a DISK USAGE% column under -c U")
     tool("bash", "git commit")
-    say("Committed the run's change on this session's branch, as it was\n"
-        "validated: the head still says so.")
+    say("Committed the run's change on this session's branch, with every\n"
+        "done-when item met.")
     usage(ctx, 6, 2000, 80)
 
 

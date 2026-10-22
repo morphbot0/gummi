@@ -310,11 +310,9 @@ type Run struct {
 	// that is spent.
 	Spent float64
 	// StartTree is the tree snapshot when the run started; EndTree the one
-	// when its last step settled; ValidatedTree is EndTree when every
-	// checked done-when item passed, and empty otherwise.
-	StartTree     string
-	EndTree       string
-	ValidatedTree string
+	// when its last step settled.
+	StartTree string
+	EndTree   string
 	// StartHead is the session's HEAD when the run started: the commits
 	// made while it ran are the ones after it, which its report names.
 	StartHead string
@@ -489,7 +487,8 @@ type SessionSpec struct {
 
 // SpecStateOf derives a spec's state from the runs on it, in any order:
 // running while one is open, draft until one has ended, then met when the
-// latest ended run validated its tree and partial otherwise.
+// latest ended run's results are all met (ResultsMet) and partial
+// otherwise.
 func SpecStateOf(runs []Run) SpecState {
 	var last *Run
 	for i := range runs {
@@ -504,10 +503,26 @@ func SpecStateOf(runs []Run) SpecState {
 	switch {
 	case last == nil:
 		return SpecDraft
-	case last.ValidatedTree != "":
+	case last.State != RunStopped && ResultsMet(last.Results):
 		return SpecMet
 	}
 	return SpecPartial
+}
+
+// ResultsMet reports whether a run's end found its spec met: at least one
+// item was checked, every checked item passed, and no item is unjudged —
+// a check that ran no tests is no pass.
+func ResultsMet(rs []ItemResult) bool {
+	checked := 0
+	for _, r := range rs {
+		if r.Verdict == ItemUnjudged || r.Checked && r.Verdict != ItemMet {
+			return false
+		}
+		if r.Checked {
+			checked++
+		}
+	}
+	return checked > 0
 }
 
 // QualifiedItem names a done-when item by its spec as well, as in S2/DW-1,

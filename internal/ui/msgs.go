@@ -23,10 +23,6 @@ import (
 // derived filesystem state the board displays.
 type featureRow struct {
 	F domain.Feature
-	// Validated is the session's validated mark (DESIGN §25.6), read at
-	// load for an open session a workflow run validated: it snapshots the
-	// tree, so never at render. Nil on every other card.
-	Validated *engine.ValidatedMark
 	// OpenRun is the session's open workflow run (running or paused), read
 	// at load; it holds the session's landing (Engine.RunHolds). Nil when
 	// none is open.
@@ -268,9 +264,6 @@ func (m *Shell) loadRows() tea.Msg {
 					if p, err := m.engine.WorkflowProposal(ctx, f.ID, d.N); err == nil {
 						row.Proposal = &p
 					}
-				}
-				if mk, ok := m.engine.ValidatedMark(ctx, f.ID); ok {
-					row.Validated = &mk
 				}
 			}
 		}

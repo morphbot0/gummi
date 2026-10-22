@@ -293,8 +293,8 @@ func TestADeliverRunIteratesUntilApproved(t *testing.T) {
 	if r.Until["build/1"].Met || !r.Until["build/2"].Met {
 		t.Errorf("untils %+v", r.Until)
 	}
-	if r.ValidatedTree == "" || r.ValidatedTree != r.EndTree {
-		t.Errorf("validated %q end %q", r.ValidatedTree, r.EndTree)
+	if r.EndTree == "" || !domain.ResultsMet(r.Results) {
+		t.Errorf("end %q results %+v", r.EndTree, r.Results)
 	}
 	want := map[string]domain.ItemResult{
 		"DW-1": {Item: "DW-1", Checked: true, Verdict: domain.ItemMet},
@@ -394,8 +394,8 @@ func TestAParallelSettlesUnderItsJoin(t *testing.T) {
 			t.Fatalf("steps %+v", paths)
 		}
 		// out.txt is missing, so the checked item fails the run
-		if r.State != domain.RunPartial || r.ValidatedTree != "" {
-			t.Fatalf("ended %s validated %q", r.State, r.ValidatedTree)
+		if r.State != domain.RunPartial || domain.ResultsMet(r.Results) {
+			t.Fatalf("ended %s results %+v", r.State, r.Results)
 		}
 	})
 	t.Run("any", func(t *testing.T) {
@@ -633,45 +633,38 @@ func TestRevertRunPutsTheTreeBack(t *testing.T) {
 	}
 }
 
-// TestTheValidatedMarkSurvivesACommitOfTheSameTree: committing the tree a
-// run validated keeps the mark; a change moves it off, and a re-check
-// moves it to the new tree.
-func TestTheValidatedMarkSurvivesACommitOfTheSameTree(t *testing.T) {
+// TestARunThatMeetsItsSpecMarksItMet: a run whose checked items all pass
+// leaves its spec met, read from the run's results; a later run that
+// leaves an item unmet makes it partial again.
+func TestARunThatMeetsItsSpecMarksItMet(t *testing.T) {
 	wf := newWFFake()
 	wf.on("make", func(dir, _ string, _ int) wfReply {
 		_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o600)
 		return wfReply{text: "made\nMET: DW-2", credits: 1}
 	})
+	wf.on("unmake", func(dir, _ string, _ int) wfReply {
+		_ = os.Remove(filepath.Join(dir, "out.txt"))
+		return wfReply{text: "unmade", credits: 1}
+	})
 	e, store, f, _ := wfEngine(t, wf)
 	ctx := context.Background()
 	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: make\nsteps:\n  - { id: make, role: implementer, prompt: make }\n"})
 	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
-	if r.State != domain.RunDone || r.ValidatedTree == "" {
-		t.Fatalf("ended %s validated %q", r.State, r.ValidatedTree)
+	if r.State != domain.RunDone || !domain.ResultsMet(r.Results) {
+		t.Fatalf("ended %s results %+v", r.State, r.Results)
 	}
-	m, ok := e.ValidatedMark(ctx, f.ID)
-	if !ok || !m.Current || !strings.HasPrefix(m.Text(), "validated at tree ") {
-		t.Fatalf("mark %+v %v", m, ok)
+	if strings.Contains(r.Report, "Validated") {
+		t.Errorf("the report still names a validated tree:\n%s", r.Report)
 	}
-	sess, _ := store.GetFeature(ctx, f.ID)
-	tree := e.treeOf(ctx, sess)
-	gitOut(t, tree, "add", "-A")
-	gitOut(t, tree, "commit", "-q", "-m", "keep it")
-	if m, _ = e.ValidatedMark(ctx, f.ID); !m.Current {
-		t.Fatalf("a commit of the validated tree lost the mark: %+v", m)
+	if specs, _ := store.SessionSpecs(ctx, f.ID); specs[0].State != domain.SpecMet {
+		t.Fatalf("spec 1 after a run that met it: %s", specs[0].State)
 	}
-	if err := os.WriteFile(filepath.Join(tree, "out.txt"), []byte("edited\n"), 0o600); err != nil {
-		t.Fatal(err)
+	run = proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: unmake\nsteps:\n  - { id: unmake, role: implementer, prompt: unmake }\n"})
+	if r = tickRuns(t, e, f.ID, run.N, "ended", ended); r.State != domain.RunPartial {
+		t.Fatalf("ended %s", r.State)
 	}
-	if m, _ = e.ValidatedMark(ctx, f.ID); m.Current || m.Text() != "changed since validation" {
-		t.Fatalf("a changed tree kept the mark: %+v", m)
-	}
-	out, err := e.WorkflowRecheck(ctx, f.ID)
-	if err != nil || !strings.Contains(out, "validated at tree") {
-		t.Fatalf("recheck %q %v", out, err)
-	}
-	if m, _ = e.ValidatedMark(ctx, f.ID); !m.Current {
-		t.Fatalf("the re-check did not move the mark: %+v", m)
+	if specs, _ := store.SessionSpecs(ctx, f.ID); specs[0].State != domain.SpecPartial {
+		t.Fatalf("spec 1 after a run that left it unmet: %s", specs[0].State)
 	}
 }
 
@@ -1626,7 +1619,7 @@ var emptyCheckSpec = strings.Replace(wfTestSpec, "check: test -f out.txt",
 
 // TestACheckThatRanNoTestsIsUnjudged: a done-when check that passed while
 // running no tests proves nothing. At a run's end its item is unjudged
-// (–), saying so, never ✓; the run validates no tree and ends partial.
+// (–), saying so, never ✓; the run ends partial and its spec is not met.
 func TestACheckThatRanNoTestsIsUnjudged(t *testing.T) {
 	wf := newWFFake()
 	e, _, f, _ := wfEngine(t, wf)
@@ -1640,19 +1633,14 @@ func TestACheckThatRanNoTestsIsUnjudged(t *testing.T) {
 		!r.Results[0].Checked || r.Results[0].Detail != "the check ran no tests" {
 		t.Fatalf("DW-1 = %+v", r.Results)
 	}
-	if r.State != domain.RunPartial || r.ValidatedTree != "" || r.Reason != "a done-when check ran no tests" {
-		t.Fatalf("ended %s (%s), validated %q", r.State, r.Reason, r.ValidatedTree)
+	if r.State != domain.RunPartial || domain.ResultsMet(r.Results) || r.Reason != "a done-when check ran no tests" {
+		t.Fatalf("ended %s (%s), results %+v", r.State, r.Reason, r.Results)
 	}
 	if !strings.Contains(r.Report, "– DW-1 out.txt exists (check): the check ran no tests") {
 		t.Fatalf("the report:\n%s", r.Report)
 	}
-	// a re-check says the same, and moves no mark
-	out, err := e.WorkflowRecheck(ctx, f.ID)
-	if err != nil || !strings.Contains(out, "– DW-1") || !strings.Contains(out, "ran no tests") {
-		t.Fatalf("re-check = %q, %v", out, err)
-	}
-	if _, ok := e.ValidatedMark(ctx, f.ID); ok {
-		t.Fatal("a check that ran no tests validated the tree")
+	if specs, _ := e.cfg.Store.SessionSpecs(ctx, f.ID); specs[0].State == domain.SpecMet {
+		t.Fatal("a check that ran no tests met the spec")
 	}
 }
 

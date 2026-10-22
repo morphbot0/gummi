@@ -106,7 +106,7 @@ export function runBlock (it) {
   const ended = ['done', 'partial', 'stopped'].includes(r.state)
   const live = ['running', 'paused'].includes(r.state)
   const block = h('section', {
-    class: ['rb', `rb-${r.state}`, live && 'rb-on', r.validated && 'rb-ok'],
+    class: ['rb', `rb-${r.state}`, live && 'rb-on'],
     testid: `run-${r.n}`,
     data: { run: String(r.n), state: r.state, rev: r.rev },
     'aria-label': `${r.recipe} run ${r.n}, ${STATE_WORD[r.state] || r.state}`
@@ -137,7 +137,6 @@ function head (id, r) {
     r.specTitle ? h('span', { class: 'rb-spec', title: `spec ${r.spec}${r.specRev ? `, revision ${r.specRev}` : ''}` }, h('span', { class: 'k' }, 'spec'), ' ', r.specTitle) : null,
     h('span', { class: 'rb-r' },
       h('span', { class: ['rb-state', `s-${r.state}`], testid: 'run-state' }, r.stopping ? 'stopping' : (STATE_WORD[r.state] || r.state)),
-      r.validated ? h('span', { class: 'rb-val', testid: 'run-validated', title: `validated at tree ${r.validated}` }, 'validated') : null,
       r.state === 'proposed' || r.state === 'denied' ? null : h('span', { class: 'mono', testid: 'run-spent' }, money),
       r.started ? h('span', { class: 'mono rb-el', testid: 'run-elapsed', data: { elapsedRun: String(r.n) } }, elapsed(r)) : null,
       r.canPause ? act('pause', 'Pause') : null,

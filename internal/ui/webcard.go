@@ -293,9 +293,6 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 	m.webActionDefaults(ctx, st.f, c.Actions)
 	m.webClosePush(ctx, st.f, &c)
 	c.Actions = m.webDropCleanCommit(ctx, st.f, c.Actions)
-	if r, ok := m.rowByID(st.f.ID); ok && r.Validated != nil {
-		c.Validated = r.Validated.Text()
-	}
 	if c.Decision != nil {
 		c.Decision.Proposal = m.webProposal(ctx, st.f)
 	}
