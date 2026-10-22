@@ -34,7 +34,8 @@ export const state = {
   railShow: storage.get('railShow', ['stack', 'spend']), // what a row's second line adds
   repo: 'all', // the rail's repo filter: 'all', or a repo's name ('' is the default)
   doneAll: false,
-  draft: '' // composer text, so decision code can read it
+  draft: '', // composer text, so decision code can read it
+  step: null // a workflow step's card, open beside its session's thread (workflow.js)
 }
 
 const subs = new Map()

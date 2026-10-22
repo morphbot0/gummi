@@ -20,6 +20,7 @@ import { draftHero } from './session.js?v=__ASSET_V__'
 import { attachmentURL, get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { restoreComposer } from './composer.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
+import { runBlock, runSig, markStep, setTranscriptDrawer } from './workflow.js?v=__ASSET_V__'
 
 const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
@@ -35,8 +36,14 @@ let following = true
 
 export function initThread () {
   on(['thread', 'sel', 'card', 'sessionDraft'], render)
-  on(['live'], () => { if (state.thread && !state.thread.items.length) render() })
-  on(['live', 'card', 'board'], renderLive)
+  on(['live'], () => { if (state.thread && !threadItems(state.thread).length) render() })
+  // a session's workflow runs are drawn among its turns (runsAt), so the
+  // live block is drawn again when the thread brings a run that moved
+  on(['live', 'card', 'board', 'thread'], renderLive)
+  on(['step'], () => markStep($('#thread-live')))
+  // a step opened beside the thread is drawn the way a session's
+  // conversation is (DESIGN §25.10)
+  setTranscriptDrawer(stepTranscript, reconcile)
   const sc = $('#thread')
   const follow = () => { following = atEnd(sc) }
   // a row the person opened or unclamped near the bottom grew under them:
@@ -118,13 +125,14 @@ function render () {
     setTimeout(() => { if (shownFor === filled && state.thread) box.setAttribute('aria-live', 'polite') }, 300)
   }
   const t = state.thread
+  const items = threadItems(t)
   if (!state.sel && state.sessionDraft) { placeholder(box, draftHero()); return }
   if (!state.sel) {
     placeholder(box, h('div', { class: 'empty', testid: 'thread-none' }, h('b', null, 'Nothing open'), 'Start a session, or pick a card from the list.'))
     return
   }
   if (!t) { placeholder(box, h('div', { class: 'empty', testid: 'thread-loading' }, h('span', { class: 'spinner' }))); return }
-  if (!t.items.length) {
+  if (!items.length) {
     if (t.gone) {
       placeholder(box, h('div', { class: 'empty', testid: 'thread-gone' }, h('b', null, `${ref(state.sel)} was deleted`),
         state.draft.trim() ? 'What you were writing is still in the composer. Pick another card from the list.' : 'Pick another card from the list.'))
@@ -132,7 +140,7 @@ function render () {
       placeholder(box, h('div', { class: 'empty', testid: 'thread-unavailable' }, h('b', null, 'The thread is not available yet'), 'This board’s server does not serve a card’s conversation yet. The head, the decision and the panel still work.'))
     } else if (t.err) {
       placeholder(box, h('div', { class: 'empty err', testid: 'thread-error' }, h('b', null, 'The thread did not load'), t.err.message))
-    } else if (talking(state.live)) {
+    } else if (talking(state.live) || items.length !== t.items.length) {
       // a conversation with no stage history (a freeform card, a consult)
       // is the live block's to draw; "nothing has happened" would be wrong
       placeholder(box, null)
@@ -148,7 +156,7 @@ function render () {
   // group items under the stage divider before them
   const gs = []
   let g = { key: '__pre', stage: null, items: [] }
-  for (const it of t.items) {
+  for (const it of items) {
     if (it.t === 'stage') {
       if (g.stage || g.items.length) gs.push(g)
       g = { key: it.key, stage: it, items: [] }
@@ -197,6 +205,27 @@ function render () {
   for (const k of [...groups.keys()]) if (!keepGroups.has(k)) groups.delete(k)
   for (const k of [...nodes.keys()]) if (!keepItems.has(k)) nodes.delete(k)
   stickToEnd(sc)
+}
+
+// threadItems is what the thread's own list draws: every item but a
+// workflow run's block, which sits among the session's turns (renderLive).
+function threadItems (t) { return (t?.items || []).filter(it => it.t !== 'run') }
+
+// runsAt places each of the session's runs after the turn it was proposed
+// in: before the first line a person (or the run's own report) sent after
+// it. It answers a map of turn index to the blocks that go before it, the
+// ones after every turn under the last index.
+function runsAt (turns) {
+  const runs = (state.thread?.items || []).filter(it => it.t === 'run')
+  const at = new Map()
+  for (const it of runs) {
+    const t = new Date(it.time).getTime()
+    let i = turns.findIndex(x => x.author === 'you' && x.time && new Date(x.time).getTime() > t)
+    if (i < 0) i = turns.length
+    if (!at.has(i)) at.set(i, [])
+    at.get(i).push(cached(`run:${it.run.n}`, runSig(it), () => runBlock(it)))
+  }
+  return at
 }
 
 function talking (l) {
@@ -590,6 +619,9 @@ function renderLive () {
   const l = state.live
   if (turnsFor !== state.sel) { turnNodes.clear(); earlier.clear(); turnsFor = state.sel }
   const parts = []
+  // the session's runs, placed among its turns; drawn after everything
+  // when there is no conversation to place them in
+  let runs = null
   if (r) {
     const pausing = r.running?.pausing
     const role = l?.role || ROLE[l?.stage || r.stage] || 'agent'
@@ -622,7 +654,8 @@ function renderLive () {
         parts.push(cached(`${k}:head`, `${label}|${role}`, () => h('div', { class: ['ev-stage', k === 'freeform' ? 'st-open' : 'st-todo'], testid: `live-${k}-head` }, h('b', null, label),
           k === 'freeform' ? h('span', { class: 'sum' }, role) : null)))
         if (c.notice) parts.push(cached(`${k}:notice`, c.notice, () => h('div', { class: 'live warnc', testid: `live-${k}-notice` }, c.notice)))
-        parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null))
+        if (k === 'freeform') runs = runsAt(c.turns || [])
+        parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null, k === 'freeform' ? runs : null))
         if (c.sending) parts.push(cached(`${k}:sending`, c.sending, () => you({ text: c.sending, via: 'sending' })))
         if (c.tasks?.length) parts.push(cached(`${k}:tasks`, JSON.stringify(c.tasks), () => tasks(c.tasks, k)))
         if (k === 'freeform' && c.watches?.length) parts.push(cached(`${k}:watches`, JSON.stringify(c.watches), () => watches(c.watches)))
@@ -641,9 +674,28 @@ function renderLive () {
       parts.push(busyLine('live', 'run', `${ROLE[r.stage] || 'agent'} is ${r.running?.verb || 'working'}${pausing ? ' · pauses after this turn' : ''}`, null))
     }
   }
+  if (!runs && r) for (const els of runsAt([]).values()) parts.push(...els)
   const sc = $('#thread')
   reconcile(box, parts)
+  markStep(box)
   stickToEnd(sc)
+}
+
+// stepTranscript is a workflow step's own conversation as the step panel
+// draws it: its turns, the activity between them, the message still
+// streaming and what it is doing now.
+function stepTranscript (card, l) {
+  const c = l?.freeform
+  if (!c) return []
+  const key = `step:${card}`
+  const parts = conversation(key, c, c.role || 'step', 'open')
+  if (c.sending) parts.push(cached(`${key}:sending`, c.sending, () => you({ text: c.sending, via: 'sending' })))
+  if (c.busy) {
+    const words = [c.verb || 'working', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
+    parts.push(busyLine('step-busy', `${key}:busy`, words, c.spent ? cr(c.spent) : null))
+  }
+  if (c.err) parts.push(cached(`${key}:err`, c.err, () => h('div', { class: 'live badc' }, c.err)))
+  return parts
 }
 
 // reconcile makes parent's children els, in order, moving or taking out
@@ -817,7 +869,7 @@ async function loadEarlier (kind, before, asked = false) {
   if (grew && !following) sc.scrollTop = sc.scrollHeight - below
 }
 
-function conversation (kind, c, role, stage) {
+function conversation (kind, c, role, stage, inserts = null) {
   const out = []
   const head = earlierFor(kind, c)
   const turns = head ? head.turns.concat(c.turns || []) : (c.turns || [])
@@ -825,6 +877,9 @@ function conversation (kind, c, role, stage) {
   // its nodes: a key that moved with the block's window redrew every turn
   // on every one it slid
   const first = head ? head.from : (c.omitted || 0)
+  // inserts are keyed by a turn's place in the live window (c.turns): the
+  // earlier turns a person loaded sit in front of it
+  const off = head ? head.turns.length : 0
   if (first > 0) {
     const busy = fetching.has(kind)
     out.push(cached(`${kind}:earlier`, `${first}|${busy}`, () => h('div', { class: 'earlier-turns' }, h('button', {
@@ -846,6 +901,7 @@ function conversation (kind, c, role, stage) {
     run = []
   }
   turns.forEach((t, i) => {
+    if (inserts?.has(i - off)) { flush(); out.push(...inserts.get(i - off)) }
     if (t.tool || t.author === 'thinking') {
       if (!run.length) start = i
       run.push(t)
@@ -875,6 +931,7 @@ function conversation (kind, c, role, stage) {
     out.push(el)
   })
   flush(!!c.busy && !c.streaming)
+  if (inserts?.has(turns.length - off)) out.push(...inserts.get(turns.length - off))
   if (c.streaming) {
     out.push(h('div', { class: ['msg reply live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
       // a message left half-written when its session stopped (paused,

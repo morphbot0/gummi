@@ -21,18 +21,22 @@ import { treeTab } from './tree.js?v=__ASSET_V__'
 import { prTab } from './pr.js?v=__ASSET_V__'
 import { statsTab } from './stats.js?v=__ASSET_V__'
 import { terminalTab } from './terminal.js?v=__ASSET_V__'
+import { stepTab } from './workflow.js?v=__ASSET_V__'
 
-const TABS = [memoryTab, specTab, diffTab, logTab, treeTab, prTab, statsTab, terminalTab]
+const TABS = [memoryTab, specTab, diffTab, logTab, treeTab, prTab, statsTab, terminalTab, stepTab]
 const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 
 // SURFACES is what the icons open. One with several tabs shows a switch
 // between them in its header; `as` is what a tab is called there.
 const SURFACES = [
   { name: 'memory', label: 'Memory', icon: 'memory', tabs: [memoryTab] },
-  { name: 'spec', label: 'Spec', icon: 'doc', tabs: [specTab] },
+  { name: 'spec', label: 'Specs', icon: 'doc', tabs: [specTab] },
   { name: 'changes', label: 'Changes', icon: 'branch', tabs: [diffTab, logTab, treeTab, prTab], as: { diff: 'Files', log: 'Commits', tree: 'Working tree', pr: 'Pull request' } },
   { name: 'run', label: 'Run', icon: 'fleet', tabs: [statsTab] },
-  { name: 'terminal', label: 'Terminal', icon: 'terminal', tabs: [terminalTab] }
+  { name: 'terminal', label: 'Terminal', icon: 'terminal', tabs: [terminalTab] },
+  // a workflow step opened from its run's block (DESIGN §25.10): there only
+  // while one is open
+  { name: 'step', label: 'Step', icon: 'step', tabs: [stepTab] }
 ]
 const surfaceOf = (tab) => SURFACES.find(s => s.tabs.some(t => t.name === tab))
 
@@ -95,6 +99,14 @@ export function initPanel (c) {
     if (drawnClosed !== null && drawnKey !== paneKey(state.card)) renderPane(true)
   })
   on(['rightHidden'], applyHidden)
+  // another step opened (or the one open closed): its own read, not the
+  // last step's
+  on(['step'], () => {
+    delete cache.step
+    if (state.tab === 'step' && state.step) load('step')
+    renderTabs()
+    if (state.tab === 'step') renderPane(false)
+  })
   // on a phone the row holds the card's Thread too, and says which is shown
   on(['view'], renderTabs)
   // a window that crossed a phone's width shows a different thing beside
@@ -114,6 +126,14 @@ export function setTab (t) {
   set({ tab: t })
   writeHash(state.sel, t)
   rememberTab(state.sel, t)
+}
+
+// refreshTab reads a tab again, as a change to the card would: a page
+// that chose what the tab shows (a spec, from a run's report) asks for it.
+export function refreshTab (name) {
+  const e = cache[name]
+  if (e) e.stale = true
+  if (state.tab === name) load(name, true)
 }
 
 // openSurface is a press of a surface's icon: it opens the surface on the
@@ -414,7 +434,7 @@ function renderPane (keepScroll) {
   }
   pane.scrollTop = keepScroll ? top : 0
   if (typing) {
-    const ta = [...pane.querySelectorAll('[data-draft]')].find(el => el.dataset.draft === typing.key)?.querySelector('textarea')
+    const ta = [...pane.querySelectorAll('[data-draft]')].find(el => el.dataset.draft === typing.key)?.querySelector('textarea, input[type=text]')
     if (ta) {
       ta.focus({ preventScroll: true })
       try { ta.setSelectionRange(typing.from, typing.to) } catch {}

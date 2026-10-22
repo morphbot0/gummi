@@ -5,10 +5,12 @@
 // writer (POST …/spec/changes), and the gummi-checks block drawn as a table with each
 // check's last outcome on this branch.
 //
-// A session's spec (DESIGN §25.3) is optional and lives with the
-// workspace: the tab offers to start one, and edits it whole (PUT …/spec,
-// each save a numbered revision listed under it, with the workflow runs
-// that froze it).
+// A session's specs (DESIGN §25.3) are optional, one per piece of work,
+// and live with the workspace: the tab is Specs, a list of them with each
+// one's state, revision, runs and done-when count (GET …/specs), and the
+// one chosen beneath it (GET …/spec?spec=<n>), edited whole (PUT, each save
+// a numbered revision listed under it, with the workflow runs that froze
+// it) and annotated as any spec. "+ New spec" starts another.
 
 import { h, append, clock, plural, clear, cardName } from './dom.js?v=__ASSET_V__'
 import { get, post, put, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
@@ -19,21 +21,137 @@ import { openMenu } from './views.js?v=__ASSET_V__'
 
 export const specTab = {
   name: 'spec',
-  label: 'Spec',
+  label: 'Specs',
   key: 'g s',
-  fetch: (id) => get(cardPath(id, 'spec')),
-  empty: (s) => !s || s.none,
+  fetch,
+  empty: (d) => !d || (!d.list?.specs?.length && (!d.spec || d.spec.none)),
+  count: (d) => d?.list?.specs?.length || 0,
   // an agent in a home of its own keeps memory, not a spec; a session may
-  // keep one (DESIGN §24.2)
+  // keep several (DESIGN §25.3)
   hidden: (c) => !!c?.home,
   render
 }
 
-// noteDrafts are the notes being written, per card: section line → the
-// draft's text and attachments. The panel redraws the tab whenever the
-// card changes (a running card changes often), and a half-written note
-// must come back from that redraw as it was.
-const noteDrafts = new Map() // card id -> Map(line -> { text, attachments })
+// chosen is the spec a person picked on each card, by its number; the
+// word 'newest' picks the one just started.
+const chosen = new Map()
+
+// chooseSpec shows spec n of card id the next time the tab reads.
+export function chooseSpec (id, n) { chosen.set(id, n) }
+
+// fetch reads a session's specs and the one shown: the one picked, else
+// the one a run is open on, else the newest. A card that keeps no list
+// (a retired kind's) reads its one document.
+async function fetch (id) {
+  let list = null
+  try {
+    list = await get(cardPath(id, 'specs'))
+  } catch (err) {
+    if (err.status !== 404) throw err
+  }
+  if (!list) return { spec: await get(cardPath(id, 'spec')) }
+  const specs = list.specs || []
+  const want = chosen.get(id)
+  const newest = specs.length ? specs[specs.length - 1].n : 0
+  let n = want === 'newest' ? newest : specs.find(x => x.n === want)?.n
+  if (!n) n = specs.find(x => x.state === 'running')?.n || newest
+  if (want === 'newest' && n) chosen.set(id, n)
+  const spec = await get(cardPath(id, 'spec') + (n ? `?spec=${n}` : ''))
+  return { list, n, spec }
+}
+
+// specPath is a route of the spec shown.
+function specPath (ctx, rest) { return cardPath(ctx.id, rest) + (ctx.specN ? `?spec=${ctx.specN}` : '') }
+
+// keyOf is what a spec's edits and drafts are kept by: the card and the
+// spec, so a draft in one spec never comes back in another.
+function keyOf (ctx) { return ctx.specN ? `${ctx.id}#${ctx.specN}` : ctx.id }
+
+const STATE_TIP = {
+  draft: 'never run',
+  running: 'a run on it is open',
+  met: 'its last run passed every checked item',
+  partial: 'its last run did not pass every checked item'
+}
+
+function render (pane, entry, ctx) {
+  const d = entry.data
+  // a write answers with the spec it wrote; a session's list moves with
+  // it (a revision, a new spec), so the tab reads both again
+  if (!d?.list?.specs?.length) {
+    renderSpec(pane, { data: d?.spec }, { ...ctx, swap: (spec) => ctx.swap(spec && !d?.list ? { ...d, spec } : null) })
+    return
+  }
+  const sctx = { ...ctx, specN: d.n, swap: () => ctx.swap(null) }
+  const main = h('div', { class: 'specs-main' })
+  pane.append(h('div', { class: 'specs', testid: 'specs' }, specList(d, ctx), main))
+  renderSpec(main, { data: d.spec }, sctx)
+}
+
+// specList is the session's specs, the one shown marked.
+function specList (d, ctx) {
+  const pick = (n) => { chosen.set(ctx.id, n); ctx.swap(null) }
+  const items = d.list.specs.map(sp => {
+    const last = sp.runs?.length ? sp.runs[sp.runs.length - 1] : null
+    const meta = [
+      `rev ${sp.rev}${sp.frozen ? ` · frozen at ${sp.frozen}` : ''}`,
+      last ? `${last.recipe} · run ${last.n}` : 'no run yet',
+      sp.doneWhen ? `DW ${sp.met}/${sp.doneWhen}` : 'no done-when yet'
+    ]
+    return h('button', {
+      class: ['specs-it', sp.n === d.n && 'sel'], type: 'button', testid: `specs-item-${sp.n}`,
+      'aria-current': sp.n === d.n ? 'true' : null, onclick: () => { if (sp.n !== d.n) pick(sp.n) }
+    },
+    h('b', null, sp.title),
+    h('span', { class: 'm' }, h('span', { class: ['sst', `sst-${sp.state}`], testid: `specs-state-${sp.n}`, title: STATE_TIP[sp.state] || '' }, sp.state), meta.join(' · ')))
+  })
+  return h('nav', { class: 'specs-list', testid: 'specs-list', 'aria-label': 'The session’s specs' }, items,
+    d.list.canStart && !ctx.closed ? newSpec(ctx) : null)
+}
+
+// newSpecs is the "+ New spec" form as a person left it, per card: the
+// list is drawn again on every change to the session, and an open form
+// with a title half-typed must come back from that as it was.
+const newSpecs = new Map() // card id -> { open, title }
+
+// newSpec is the list's last row: a title, and the spec is started from
+// the template as its first revision.
+function newSpec (ctx) {
+  const st = newSpecs.get(ctx.id) || { open: false, title: '' }
+  const form = h('form', { class: 'specs-new', testid: 'specs-new-form', hidden: !st.open, data: { draft: 'specs-new' } })
+  const input = h('input', { type: 'text', testid: 'specs-new-title', placeholder: 'What the spec is about', 'aria-label': 'The new spec’s title', value: st.title })
+  input.addEventListener('input', () => newSpecs.set(ctx.id, { open: true, title: input.value }))
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); newSpecs.delete(ctx.id); ctx.rerender() } })
+  form.append(input, h('button', { class: 'btn pri', type: 'submit', testid: 'specs-new-start' }, 'Start'))
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const title = input.value.trim()
+    if (!title) { input.focus(); return }
+    const btn = form.querySelector('button')
+    btn.disabled = true
+    try {
+      await post(cardPath(ctx.id, 'spec/start'), { title })
+      newSpecs.delete(ctx.id)
+      chosen.set(ctx.id, 'newest')
+      toast(`Spec “${title}” started from the template`)
+      ctx.swap(null)
+    } catch (err) {
+      btn.disabled = false
+      toast(err.data?.error || err.message, { err: true })
+    }
+  })
+  const open = h('button', {
+    class: 'specs-add', type: 'button', testid: 'specs-new', hidden: st.open,
+    onclick: () => { newSpecs.set(ctx.id, { open: true, title: '' }); open.hidden = true; form.hidden = false; input.focus() }
+  }, '+ New spec')
+  return [open, form]
+}
+
+// noteDrafts are the notes being written, per card and spec: section line
+// → the draft's text and attachments. The panel redraws the tab whenever
+// the card changes (a running card changes often), and a half-written
+// note must come back from that redraw as it was.
+const noteDrafts = new Map() // keyOf -> Map(line -> { text, attachments })
 function draftsOf (id) {
   if (!noteDrafts.has(id)) noteDrafts.set(id, new Map())
   return noteDrafts.get(id)
@@ -41,10 +159,11 @@ function draftsOf (id) {
 
 const slug = (name, i) => `sec-${i}-` + String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
-function render (pane, entry, ctx) {
+// renderSpec draws one spec, or the card's one document.
+function renderSpec (pane, entry, ctx) {
   const s = entry.data
   if (s?.session) {
-    const ed = editing.get(ctx.id)
+    const ed = editing.get(keyOf(ctx))
     if (s.none) {
       pane.append(h('div', { class: 'empty', testid: 'spec-none' }, h('b', null, 'No spec'), s.why || '',
         ctx.closed ? null : h('button', { class: 'btn pri', type: 'button', testid: 'spec-start-session', onclick: (e) => startSpec(e.currentTarget, ctx) }, 'Start a spec')))
@@ -96,7 +215,7 @@ function render (pane, entry, ctx) {
   })
   // the notes being written come back where they were, unfocused (the
   // panel puts the caret back in the one that had it)
-  for (const [line, dr] of draftsOf(ctx.id)) {
+  for (const [line, dr] of draftsOf(keyOf(ctx))) {
     const at = headings.get(line)
     if (at && !ctx.closed) openNote(at.heading, at.sec, ctx, dr)
   }
@@ -150,7 +269,7 @@ function sessionBar (s, ctx) {
       ? `${plural(items.length, 'done-when item')}${checked < items.length ? `, ${items.length - checked} without a check` : ''}`
       : 'no done-when item yet: a workflow run is judged against them'),
     h('span', { class: 'sp' }),
-    ctx.closed ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-edit', onclick: () => { editing.set(ctx.id, { text: s.markdown || '', rev: s.rev }); ctx.rerender() } }, 'Edit'))
+    ctx.closed ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-edit', onclick: () => { editing.set(keyOf(ctx), { text: s.markdown || '', rev: s.rev }); ctx.rerender() } }, 'Edit'))
 }
 
 function revisionsEl (s) {
@@ -172,8 +291,8 @@ function editor (s, ed, ctx) {
   const save = async (btn) => {
     btn.disabled = true
     try {
-      const spec = await put(cardPath(ctx.id, 'spec'), { markdown: ta.value, rev: ed.rev })
-      editing.delete(ctx.id)
+      const spec = await put(specPath(ctx, 'spec'), { markdown: ta.value, rev: ed.rev })
+      editing.delete(keyOf(ctx))
       toast(`Saved as revision ${spec?.revisions?.[0]?.rev ?? ''}`.trim())
       ctx.swap(spec && spec.markdown !== undefined ? spec : null)
     } catch (err) {
@@ -183,7 +302,7 @@ function editor (s, ed, ctx) {
   }
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(box.querySelector('[data-testid="spec-save"]')) }
-    if (e.key === 'Escape') { e.stopPropagation(); editing.delete(ctx.id); ctx.rerender() }
+    if (e.key === 'Escape') { e.stopPropagation(); editing.delete(keyOf(ctx)); ctx.rerender() }
   })
   const box = h('div', { class: 'spec spec-editing', testid: 'spec', data: { draft: 'spec-edit' } },
     h('div', { class: 'spec-sbar' },
@@ -191,7 +310,7 @@ function editor (s, ed, ctx) {
       h('span', { class: 'mono' }, `from revision ${s.revisions?.[0]?.rev ?? ''}`),
       stale ? h('span', { class: 'badc', testid: 'spec-stale' }, 'the spec changed since you opened it') : null,
       h('span', { class: 'sp' }),
-      h('button', { class: 'btn', type: 'button', testid: 'spec-cancel', onclick: () => { editing.delete(ctx.id); ctx.rerender() } }, 'Cancel'),
+      h('button', { class: 'btn', type: 'button', testid: 'spec-cancel', onclick: () => { editing.delete(keyOf(ctx)); ctx.rerender() } }, 'Cancel'),
       h('button', { class: 'btn pri', type: 'button', testid: 'spec-save', onclick: (e) => save(e.currentTarget) }, 'Save')),
     ta)
   return box
@@ -201,6 +320,7 @@ async function startSpec (btn, ctx) {
   btn.disabled = true
   try {
     const spec = await post(cardPath(ctx.id, 'spec/start'), { title: ctx.card?.title || '' })
+    chosen.set(ctx.id, 'newest')
     toast('Spec started from the template')
     ctx.swap(spec && spec.markdown !== undefined ? spec : null)
   } catch (err) {
@@ -270,7 +390,7 @@ function checksTable (checks) {
 function openNote (h2, sec, ctx, saved = null) {
   const next = h2.nextElementSibling
   if (next?.classList.contains('draft')) { next.querySelector('textarea')?.focus(); return }
-  const drafts = draftsOf(ctx.id)
+  const drafts = draftsOf(keyOf(ctx))
   // attachments are stored by reference (internal/attachment.Link), so —
   // unlike the composer's turn — every backend can take one: the note
   // form always offers the control, never gated on Composer.Images.
@@ -332,7 +452,7 @@ function openNote (h2, sec, ctx, saved = null) {
           try {
             const body = { line: sec.line, text }
             if (dr.attachments.length) body.attachments = dr.attachments.map((a) => a.id)
-            const spec = await post(cardPath(ctx.id, 'spec/notes'), body)
+            const spec = await post(specPath(ctx, 'spec/notes'), body)
             drafts.delete(sec.line)
             toast('Note written into the spec')
             ctx.swap(spec && spec.markdown !== undefined ? spec : null)
@@ -353,7 +473,7 @@ function openNote (h2, sec, ctx, saved = null) {
 
 async function resolve (n, ctx) {
   try {
-    await post(cardPath(ctx.id, 'spec/notes/resolve'), { line: n.line, author: n.author, date: n.date })
+    await post(specPath(ctx, 'spec/notes/resolve'), { line: n.line, author: n.author, date: n.date })
     toast('Note resolved')
     ctx.swap(null)
   } catch (err) {

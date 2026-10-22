@@ -9,6 +9,8 @@ import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
 import { draftHead } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
+import { post, cardPath } from './api.js?v=__ASSET_V__'
+import { toast } from './toast.js?v=__ASSET_V__'
 
 let ctx = {}
 
@@ -91,10 +93,25 @@ function render () {
 
 // validatedEl is a session's validated mark (DESIGN §25.6): the tree a
 // workflow run's checks all passed on, or that the tree has changed since.
+// Re-check runs the last run's checks again in the tree as it is, and
+// moves the mark when they pass.
 function validatedEl (card) {
   const v = card?.validated
   if (!v) return null
-  return h('span', { class: ['validated-mark', v.startsWith('changed') && 'stale'], testid: 'validated-mark' }, v)
+  const recheck = async (e) => {
+    const b = e.currentTarget
+    b.disabled = true
+    try {
+      const r = await post(cardPath(card.id, 'recheck'))
+      toast(r.text.split('\n')[0])
+    } catch (err) {
+      toast(err.data?.error || err.message, { err: true })
+    } finally {
+      b.disabled = false
+    }
+  }
+  return h('span', { class: ['validated-mark', v.startsWith('changed') && 'stale'], testid: 'validated-mark' }, v,
+    card.stage === 'open' ? h('button', { class: 'link', type: 'button', testid: 'validated-recheck', title: 'Run the last workflow run’s done-when checks again in the tree as it is', onclick: recheck }, 'Re-check') : null)
 }
 
 // foldAt ranks a head button for fit: the lower, the sooner it folds.
