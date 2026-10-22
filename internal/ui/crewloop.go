@@ -69,7 +69,7 @@ func (m *Shell) updateCrew(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case crewPollMsg:
-		cmds := []tea.Cmd{crewPollTick()}
+		cmds := []tea.Cmd{crewPollTick(), m.workflowTickCmd()}
 		for _, r := range m.rows {
 			if r.Crew != nil && r.Crew.State.Open() {
 				cmds = append(cmds, m.crewTickCmd(r.F.ID))

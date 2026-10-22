@@ -57,6 +57,8 @@ func specRevisionBy(by string) string {
 		return "agent"
 	case state.ActorCrew:
 		return "crew"
+	case state.ActorWorkflow:
+		return "workflow"
 	}
 	if n := threadfold.TurnBy(by); n != "" {
 		return n

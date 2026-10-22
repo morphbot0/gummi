@@ -173,6 +173,9 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	if _, err := d.eng.CrewTick(ctx, id); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
+	if _, err := d.eng.WorkflowTick(ctx); err != nil {
+		return d.fail(ctx, string(id), err)
+	}
 	// one paused because the money ran out waits for a raise instead: its
 	// budget decision says so
 	if c, _ := d.store.OpenCrew(ctx, id); c != nil && c.State == domain.CrewPaused && !c.OutOfBudget {
@@ -226,6 +229,9 @@ func (d *Driver) loop(ctx context.Context, id domain.FeatureID) (Outcome, error)
 			if _, err := d.eng.CrewTick(ctx, id); err != nil {
 				d.out.Activity(string(id), "crew", "crew tick failed: "+err.Error())
 			}
+			if _, err := d.eng.WorkflowTick(ctx); err != nil {
+				d.out.Activity(string(id), "workflow", "workflow tick failed: "+err.Error())
+			}
 			tick = false
 		}
 		select {
@@ -248,7 +254,7 @@ func (d *Driver) loop(ctx context.Context, id domain.FeatureID) (Outcome, error)
 				}
 				timer.Reset(d.opts.Timeout)
 			}
-			if ev.Feature == id && ev.Kind == engine.EventCrew {
+			if ev.Feature == id && (ev.Kind == engine.EventCrew || ev.Kind == engine.EventWorkflow) {
 				tick = true
 			}
 		}

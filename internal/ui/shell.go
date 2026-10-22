@@ -199,6 +199,10 @@ type Shell struct {
 	// crewTicking and crewTickAgain coalesce crew ticks (crewloop.go).
 	crewTicking   map[domain.FeatureID]bool
 	crewTickAgain map[domain.FeatureID]bool
+	// workflowTicking and workflowTickAgain coalesce workflow ticks
+	// (workflowloop.go).
+	workflowTicking   bool
+	workflowTickAgain bool
 	// sizedFor is how many landed rows worktreeSizeText was measured
 	// against, so a reload that did not change the set does not re-walk
 	// every worktree on disk. -1 until the first measurement.
@@ -1213,6 +1217,10 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// something a session's crew conducts on changed: tick it, and
 		// reload so the squares and its decision are current
 		return tea.Batch(m.crewTickCmd(ev.Feature), m.loadRows)
+	case engine.EventWorkflow:
+		// something a workflow run's conductor reads changed: tick the
+		// runs, and reload so the session's decisions are current
+		return tea.Batch(m.workflowTickCmd(), m.loadRows)
 	case engine.EventCardCreated:
 		// a card was minted or filed onto the open board by a caller that
 		// touches no session machinery — a goal's lead — the only
@@ -1446,6 +1454,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.statsLoaded(msg)
 	}
 	if cmd, ok := m.updateCrew(msg); ok {
+		return m, cmd
+	}
+	if cmd, ok := m.updateWorkflow(msg); ok {
 		return m, cmd
 	}
 	if cmd, ok := m.updateStack(msg); ok {
