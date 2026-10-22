@@ -93,6 +93,10 @@ for; a reviewer writes {"verdict": "APPROVED"} into review.json where its
 task names it, answers MET: for every done-when item where it is asked to
 validate, and APPROVED otherwise; a scout reports; a planner keeps the plan.
 The session acknowledges the run's report without touching its tree. A
+[workflow] turn that also says [step-asks] marks its spec so, and the run's
+implementer asks its person with ask_user (keep made.txt plain, or add a
+header) before it writes, naming the answer in its output. A person's
+message to a step after it ended is answered "Noted: <its first line>". A
 message opening with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
@@ -772,7 +776,8 @@ def workflow_session(turn, text):
     started = call_tool("spec_start", args={"title": "Make the workflow file"})
     n = re.search(r"\bspec (\d+)\b", started)
     spec = int(n.group(1)) if n else 1
-    for section, body in (("Problem", "made.txt is missing.\n"),
+    asks = " [step-asks]" if "[step-asks]" in text else ""
+    for section, body in (("Problem", "made.txt is missing.%s\n" % asks),
                           ("Approach", "The workflow's steps write it.\n"),
                           ("Done when", WORKFLOW_DONE_WHEN)):
         call_tool("spec_replace_section", args={"spec": spec, "section": section, "body": body})
@@ -823,6 +828,15 @@ def workflow_step(turn, brief):
         with open(p, "w", encoding="utf-8") as fh:
             fh.write("# %s\n\nWritten by step %s.\n" % (sid, path))
         wrote.append(os.path.basename(p))
+    answer = ""
+    if role == "implementer" and "[step-asks]" in task and not STEP.get("asked"):
+        # blocks until the person answers the step's question
+        STEP["asked"] = True
+        answer = call_tool("ask_user", args={
+            "question": "Keep made.txt plain, or give it a header?",
+            "options": [{"label": "Keep it plain (recommended)", "detail": "one line per step"},
+                        {"label": "Give it a header"}],
+        }).strip()
     if role in ("implementer", "tester"):
         files = re.findall(r"check:\s*\"?test -f (\S+?)\"?\s*$", task, re.M) or ["WORKFLOW.md"]
         for f in files:
@@ -833,7 +847,8 @@ def workflow_step(turn, brief):
             wrote.append(f)
     turn.tool("edit", ", ".join(wrote) or "nothing", "step-edit")
     turn.tool_result("step-edit", "edit")
-    turn.say("Wrote %s.\nDECISION: plain text, one line" % (", ".join(wrote) or "nothing"))
+    told = " The person said: %s." % answer if answer else ""
+    turn.say("Wrote %s.%s\nDECISION: plain text, one line" % (", ".join(wrote) or "nothing", told))
 
 
 def step_followup(turn, text):

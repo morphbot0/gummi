@@ -129,7 +129,7 @@ branch would be removed).
 | id | what |
 |---|---|
 | `panel` | the right landmark |
-| `panel-tabs`, `tab-memory`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats` | tabs (`aria-selected`) |
+| `panel-tabs`, `tab-memory`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats`, `tab-step` | tabs (`aria-selected`; `tab-step` only while a workflow step is open) |
 | `tab-terminal` | the Terminal tab (a board served with `--terminal`, a card with a worktree); a phone reaches it from the card's menu, `action-terminal`, and shows the tab only while it is open |
 | `terminal`, `terminal-screen`, `terminal-note`, `terminal-again`, `terminal-off` | the shell (`data-state` = `open` \| `closed`), xterm's screen, the note over it (opening, reconnecting, exited), its retry / new-shell button, and the pane on a card with no worktree |
 | `terminal-end` | end the shell (a second press confirms) |
@@ -151,14 +151,50 @@ the note above it: "resolved by" when it closes it, "answered by" when an
 agent answered a person's note that only a person can close), `spec-checks`, `spec-check-<name>`, `spec-pending` (how many notes hold the
 gate), `spec-request-changes` (sends them to the stage that owns them: the TUI's R), `spec-none`.
 
-A session's spec (DESIGN §25.3): `spec-start-session` (start one from the
-template, on `spec-none`), `spec-session` (its bar), `spec-rev`, `spec-ready`
-(its done-when items), `spec-edit`, `spec-editor`, `spec-save`, `spec-cancel`,
-`spec-stale` (the spec changed while it was being edited), `spec-revisions`,
-`spec-revision-<n>`.
+A session's specs (DESIGN §25.3): the tab (`tab-spec`) is Specs. With a spec
+or more, `specs` holds `specs-list` — one `specs-item-<n>` per spec
+(`aria-current` on the one shown) with its state `specs-state-<n>` (draft,
+running, met, partial) — then `specs-new` (+ New spec), which opens
+`specs-new-form`, `specs-new-title`, `specs-new-start`; the spec shown is
+drawn beneath with the ids below. `spec-start-session` (start the first one
+from the template, on `spec-none`), `spec-session` (its bar), `spec-rev`,
+`spec-ready` (its done-when items), `spec-edit`, `spec-editor`, `spec-save`,
+`spec-cancel`, `spec-stale` (the spec changed while it was being edited),
+`spec-revisions`, `spec-revision-<n>`.
 
-A session's workflow runs (DESIGN §25): on the head, `validated-mark`; in the
-thread, a turn a run sent (its report): `thread-workflow`.
+A session's workflow runs (DESIGN §25): on the head, `validated-mark` and its
+`validated-recheck`; in the thread, a turn a run sent (its report):
+`thread-workflow`.
+
+A run's block, among the session's turns (§25.9, `workflow.js`): `run-<n>`
+(`data-state`, `data-rev`), its `run-head` with `run-title`, `run-state`,
+`run-validated`, `run-spent`, `run-elapsed`, `run-reason` and the acts
+`run-pause`, `run-resume`, `run-stop`; `run-strip` with one `run-strip-<id>`
+per top-level entry of the recipe; `run-pending` (the run waits on the pinned
+decision); `run-rows` with one `run-row-<key>` per step or folded iteration
+(`data-card`, `data-state`; `sel` when open beside the thread), its
+`run-row-line` and `run-open`; a step's question `run-question` under its row,
+with `run-question-option-<i>` (the recommended first), `run-question-reply`
+and `run-question-send`; an ended run's `run-results` (`run-result-<DW-n>`),
+`run-steps` (its rows, folded), `run-commits`, `run-report`; and `run-files`
+with `run-revert`, which opens `revert-dialog` (`revert-paths`, `revert-note`,
+`revert-cancel`, `revert-confirm`).
+
+A step opened beside the thread (§25.10): the `tab-step` surface holds
+`step-panel` with `step-head` (`step-crumb`, whose first entry `step-close`
+goes back to the session, `step-title`, `step-live` or `step-state`,
+`step-spent`), the tabs `step-tab-transcript`, `step-tab-diff`,
+`step-tab-brief`, `step-tab-terminal` (with `--terminal`), their bodies
+`step-transcript` (`step-transcript-empty`), `step-diff` (`step-diff-file`,
+`step-diff-none`), `step-brief` (`step-artifacts`), `step-terminal`
+(`step-terminal-open`), and the composer `step-composer` (`step-input`,
+`step-send`).
+
+A run's proposal on its pinned decision (§25.5): `run-proposal` with
+`proposal-tree` (the tree it runs in, and whether it holds uncommitted work),
+`proposal-spec`, `proposal-step-<id>`, `proposal-checks`, `proposal-warnings`,
+`proposal-money`; under its answers, `decision-feedback` and
+`decision-feedback-send`.
 
 Memory: `memory`, `memory-src` (where the files live), `memory-global`,
 `memory-plan`, `memory-dead-ends` (a document's title and its rendered
