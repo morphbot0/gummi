@@ -1849,6 +1849,53 @@ func (e *Engine) RunHolds(ctx context.Context, session domain.FeatureID) string 
 	return fmt.Sprintf("its workflow run %d is still %s — let it finish or stop it first", r.N, r.State)
 }
 
+// RunHoldsClose says why a session may not be closed without landing
+// (a hand-off) yet, "" when it may: a workflow run is open or queued on
+// its tree. A run is refused a close as an agent mid-turn is — the hand-off
+// is not offered while either writes the branch it keeps — so the run's
+// report reaches the session it was for (§25.14). A run still proposed is
+// the person's to answer; the close withdraws it.
+func (e *Engine) RunHoldsClose(ctx context.Context, session domain.FeatureID) string {
+	if e.cfg.Store == nil {
+		return ""
+	}
+	r, err := e.cfg.Store.OpenRun(ctx, session)
+	if err == nil && r == nil {
+		r, err = e.cfg.Store.QueuedRun(ctx, session)
+	}
+	if err != nil || r == nil {
+		return ""
+	}
+	return fmt.Sprintf("its workflow run %d is still %s, and a session is not closed under a run, as it is not under its agent mid-turn — "+
+		"let the run finish, or stop it, first", r.N, r.State)
+}
+
+// withdrawProposals withdraws the session's runs still waiting on the
+// person, as the session closes.
+func (e *Engine) withdrawProposals(ctx context.Context, session domain.FeatureID, why string) error {
+	if e.cfg.Store == nil {
+		return nil
+	}
+	unlock := e.lockRuns(session)
+	defer unlock()
+	runs, err := e.cfg.Store.SessionRuns(ctx, session)
+	if err != nil {
+		return err
+	}
+	for i := range runs {
+		r := runs[i]
+		if r.State != domain.RunProposed {
+			continue
+		}
+		r.State, r.Pending, r.Reason = domain.RunDenied, nil, "withdrawn: "+why
+		if err := e.cfg.Store.UpdateRun(ctx, &r); err != nil {
+			return err
+		}
+		e.workflowEvent(session)
+	}
+	return nil
+}
+
 // workflowTurnNote is the note a session's turn begins with while a run
 // is open on its tree (§25.8), "" when none is.
 func (e *Engine) workflowTurnNote(ctx context.Context, session domain.FeatureID) string {

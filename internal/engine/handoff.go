@@ -24,9 +24,9 @@ import (
 // Nothing is committed for the agent (DESIGN §19.3): what a session left
 // loose stays in the worktree, which `Remove` refuses to delete while it
 // is dirty. Waiving the landing waives no floor: unresolved diff comments
-// hold the card open, checked before the stamp, because a refused
-// hand-off of a card that stays open must not leave it badged as handed
-// off. A legacy workflow card closes the same way — it is never run
+// and a session's open workflow run hold the card open, checked before
+// the stamp, because a refused hand-off of a card that stays open must
+// not leave it badged as handed off. A legacy workflow card closes the same way — it is never run
 // again, and this is how a person puts it away with its branch kept.
 func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string) (HandOffResult, error) {
 	f, err := e.cfg.Store.GetFeature(ctx, id)
@@ -70,6 +70,16 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 		return HandOffResult{}, err
 	} else if diffOpen > 0 {
 		return HandOffResult{Feature: f, Status: HandOffBlockedDiff, Blockers: diffOpen}, nil
+	}
+	// a workflow run still changing the tree holds the close, as an agent
+	// mid-turn does (DESIGN §25.14); a proposal nobody answered goes with it
+	if isSession(f) {
+		if why := e.RunHoldsClose(ctx, id); why != "" {
+			return HandOffResult{}, fmt.Errorf("%s cannot be handed off: %s", f.Name(), why)
+		}
+		if err := e.withdrawProposals(ctx, id, "the session was handed off"); err != nil {
+			return HandOffResult{}, err
+		}
 	}
 
 	now := time.Now().UTC()

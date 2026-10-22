@@ -320,13 +320,14 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			// Only the person can say when a card's work is finished, and
-			// saying so IS the ending (DESIGN §19). Never while a turn is
-			// writing the branch it keeps. A main-checkout session has no
+			// saying so IS the ending (DESIGN §19). Never while a turn, or
+			// a workflow run, is writing the branch it keeps
+			// (Engine.RunHoldsClose). A main-checkout session has no
 			// worktree row to require: the work it keeps is loose in the
 			// checkout, and that is what the confirm names.
 			"handoff", "h", "hand off", handOffHelp, false,
 			((needsWT && r.HasWorktree) || in.mainCheckout) &&
-				!r.Landed && !in.freeformBusy && !closed,
+				!r.Landed && !in.freeformBusy && r.OpenRun == nil && !closed,
 		},
 		{
 			// never on a card linked to a pull request, which lands there

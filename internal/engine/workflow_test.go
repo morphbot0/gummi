@@ -1358,3 +1358,48 @@ func TestAnAnswerIsToTheDecisionItWasGivenTo(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestASessionIsNotHandedOffUnderItsRun: a hand-off closes the session,
+// and a session is not closed under its open run, as it is not under its
+// agent mid-turn: the refusal says so, and the card stays open with its
+// run. Once the run has ended the hand-off goes through, withdrawing a
+// proposal nobody answered.
+func TestASessionIsNotHandedOffUnderItsRun(t *testing.T) {
+	wf := newWFFake()
+	g := newGate(t)
+	wf.on("slow", func(string, string, int) wfReply {
+		<-g.ch
+		return wfReply{text: "done", credits: 1}
+	})
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	if err := os.WriteFile(filepath.Join(tree, "kept.txt"), []byte("kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitOut(t, tree, "add", "kept.txt")
+	gitOut(t, tree, "commit", "-q", "-m", "keep a file")
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: slow\nsteps:\n  - { id: slow, role: scout, prompt: wait }\n"})
+	tickRuns(t, e, f.ID, run.N, "started its step", func(*domain.Run) bool { return wf.count("slow") > 0 })
+	if _, err := e.HandOff(ctx, f.ID, "user"); err == nil || !strings.Contains(err.Error(), "workflow run 1") ||
+		!strings.Contains(err.Error(), "mid-turn") {
+		t.Fatalf("a hand-off under an open run: %v", err)
+	}
+	if cur, _ := store.GetFeature(ctx, f.ID); cur.Stage == domain.StageDone || cur.HandedOff() {
+		t.Fatalf("the refused hand-off closed the session: %+v", cur)
+	}
+	g.open()
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	later, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: "investigate"})
+	if err != nil || later.State != domain.RunProposed {
+		t.Fatalf("a later proposal %+v %v", later, err)
+	}
+	res, err := e.HandOff(ctx, f.ID, "user")
+	if err != nil || res.Status != HandOffClosed {
+		t.Fatalf("the hand-off once the run ended: %+v %v", res, err)
+	}
+	if r, _ := store.Run(ctx, f.ID, later.N); r.State != domain.RunDenied || r.Pending != nil {
+		t.Fatalf("the proposal outlived its session: %+v", r)
+	}
+}
