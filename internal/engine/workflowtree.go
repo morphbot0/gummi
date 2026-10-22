@@ -384,27 +384,82 @@ func (e *Engine) WorkflowRecheck(ctx context.Context, session domain.FeatureID) 
 type RevertPreview struct {
 	Run   int
 	Paths []string
+	// Tree is the snapshot of the session's tree the preview was read
+	// from: the revert it is confirmed for names it, and is refused when
+	// the tree has changed since (WorkflowRevert).
+	Tree string
 	// Note says what reverting also undoes.
 	Note string
 }
 
 // WorkflowRevertPreview lists what reverting run n would put back.
 func (e *Engine) WorkflowRevertPreview(ctx context.Context, session domain.FeatureID, n int) (RevertPreview, error) {
-	_, paths, err := e.RunDiff(ctx, session, n)
+	run, err := e.cfg.Store.Run(ctx, session, n)
+	if err != nil {
+		return RevertPreview{}, err
+	}
+	if run == nil || run.StartTree == "" {
+		return RevertPreview{}, fmt.Errorf("run %d has not started", n)
+	}
+	dir, err := e.sessionTree(ctx, session)
+	if err != nil {
+		return RevertPreview{}, err
+	}
+	now, err := worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...)
+	if err != nil {
+		return RevertPreview{}, err
+	}
+	_, paths, err := worktree.DiffTrees(ctx, dir, run.StartTree, now)
 	if err != nil {
 		return RevertPreview{}, err
 	}
 	return RevertPreview{
-		Run: n, Paths: paths,
+		Run: n, Paths: paths, Tree: now,
 		Note: "Each path goes back to how it was when the run started, and a path the run created is deleted. " +
 			"This also undoes anything the session or a person changed in these paths since then.",
 	}, nil
 }
 
+// WorkflowTreeBusy says why a workflow run is still writing the session's
+// tree, "" when none is: its open run has a step under way (running,
+// asking or paused mid-step), or a step's agent of any of its runs is
+// mid-turn — a follow-up a person sent an ended step. A person's own
+// writes to the tree (the Tree tab, Revert run) wait for it.
+func (e *Engine) WorkflowTreeBusy(ctx context.Context, session domain.FeatureID) string {
+	st := e.cfg.Store
+	if st == nil {
+		return ""
+	}
+	runs, err := st.SessionRuns(ctx, session)
+	if err != nil {
+		return ""
+	}
+	for _, r := range runs {
+		steps, err := st.RunSteps(ctx, session, r.N)
+		if err != nil {
+			continue
+		}
+		for _, s := range steps {
+			switch {
+			case r.State == domain.RunPaused && s.State.Live():
+				return fmt.Sprintf("step %s of workflow run %d is paused mid-step in this tree", s.Path, r.N)
+			case r.State.Open() && s.State.Live():
+				return fmt.Sprintf("step %s of workflow run %d is running in this tree", s.Path, r.N)
+			case s.Card != "" && e.freeformBusy(s.Card):
+				return fmt.Sprintf("step %s of workflow run %d is running in this tree, answering a message", s.Path, r.N)
+			}
+		}
+	}
+	return ""
+}
+
 // WorkflowRevert puts the session's tree back to run n's starting tree:
 // each path that differs is restored, and one the run created is deleted.
-// The branch and the index are left alone. Refused while a step runs.
-func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n int) ([]string, error) {
+// The branch and the index are left alone. seen is the preview's Tree: a
+// revert is confirmed against what its preview listed, so it is refused
+// when the tree has changed since. Refused while a step, or the session's
+// own agent, is working in the tree.
+func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n int, seen string) ([]string, error) {
 	st := e.cfg.Store
 	if st == nil {
 		return nil, errors.New("workflows need the store")
@@ -418,18 +473,14 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 	if run == nil || run.StartTree == "" {
 		return nil, fmt.Errorf("run %d has not started", n)
 	}
-	if open, err := st.OpenRun(ctx, session); err != nil {
-		return nil, err
-	} else if open != nil {
-		steps, err := st.RunSteps(ctx, session, open.N)
-		if err != nil {
-			return nil, err
-		}
-		for _, s := range steps {
-			if s.State.Live() || s.Card != "" && e.freeformBusy(s.Card) {
-				return nil, fmt.Errorf("step %s of run %d is running: revert once it has stopped", s.Path, open.N)
-			}
-		}
+	if why := e.WorkflowTreeBusy(ctx, session); why != "" {
+		return nil, fmt.Errorf("%s: revert once it has stopped", why)
+	}
+	if e.freeformBusy(session) {
+		return nil, errors.New("the session's agent is working in this tree: revert once its turn ends")
+	}
+	if seen == "" {
+		return nil, errors.New("a revert is confirmed against its preview: read what it would put back first")
 	}
 	dir, err := e.sessionTree(ctx, session)
 	if err != nil {
@@ -439,6 +490,9 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 	now, err := worktree.Snapshot(ctx, dir, keep...)
 	if err != nil {
 		return nil, err
+	}
+	if now != seen {
+		return nil, errors.New("the tree has changed since the revert was previewed: read what it would put back again")
 	}
 	_, paths, err := worktree.DiffTrees(ctx, dir, run.StartTree, now)
 	if err != nil {

@@ -49,7 +49,7 @@ async function backToThread(page: Page): Promise<void> {
 // question is answered from its row; the run ends with its results, its
 // report and the validated mark, which Re-check reads again; a step opens
 // beside the thread with its transcript and its own diff, and takes a
-// message; Revert run puts the tree back.
+// message; Revert run puts back what its preview listed.
 test('a session runs a workflow, from its proposal to Revert run', async ({ pairedPage: page, server, api, workspace }, info) => {
   test.setTimeout(180_000);
   fs.mkdirSync(path.join(workspace.repo, '.gummi', 'workflows'), { recursive: true });
@@ -140,10 +140,19 @@ test('a session runs a workflow, from its proposal to Revert run', async ({ pair
   await expect(page.getByTestId('tab-spec')).toContainText('2');
   await expect(page.locator('[data-testid="run-1"][data-kept="yes"]')).toHaveCount(1);
 
-  // Revert run lists what it puts back, and puts it back
+  // Revert run lists what it puts back, and puts back what it listed: a
+  // tree that moved after the preview is refused, and once it reads as
+  // previewed again the revert goes through
   await block.getByTestId('run-revert').click();
   const dialog = page.getByTestId('revert-dialog');
   await expect(dialog.getByTestId('revert-paths')).toContainText('made.txt');
+  const later = path.join(workspace.worktree(id), 'later.txt');
+  fs.writeFileSync(later, 'later\n');
+  await dialog.getByTestId('revert-confirm').click();
+  await expect(page.getByTestId('toast').filter({ hasText: 'changed since the revert was previewed' })).toBeVisible();
+  await expect(dialog).toBeVisible();
+  expect(fs.existsSync(path.join(workspace.worktree(id), 'made.txt'))).toBe(true);
+  fs.rmSync(later);
   await dialog.getByTestId('revert-confirm').click();
   await expect(page.getByTestId('toast').filter({ hasText: 'Run 1 reverted' })).toBeVisible();
   expect(fs.existsSync(path.join(workspace.worktree(id), 'made.txt'))).toBe(false);

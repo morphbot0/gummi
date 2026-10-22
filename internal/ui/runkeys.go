@@ -315,8 +315,11 @@ type revertPreviewMsg struct {
 	card  domain.FeatureID
 	run   int
 	paths []string
-	note  string
-	err   error
+	// tree is the tree the preview was read from: the confirm reverts
+	// against it, and is refused if the tree has changed since
+	tree string
+	note string
+	err  error
 }
 
 // previewRevert reads what reverting run n would put back, for its
@@ -329,13 +332,13 @@ func (m *Shell) previewRevert(r featureRow, n int) tea.Cmd {
 	id := r.F.ID
 	return func() tea.Msg {
 		p, err := d.RevertPreview(context.Background(), n)
-		return revertPreviewMsg{card: id, run: n, paths: p.Paths, note: p.Note, err: err}
+		return revertPreviewMsg{card: id, run: n, paths: p.Paths, tree: p.Tree, note: p.Note, err: err}
 	}
 }
 
 // revertConfirm is the confirm a revert waits on: every path it puts back,
 // and what that also undoes.
-func revertConfirm(p revertPreviewMsg, revert func(domain.FeatureID, int) tea.Cmd) *confirmDialog {
+func revertConfirm(p revertPreviewMsg, revert func(domain.FeatureID, int, string) tea.Cmd) *confirmDialog {
 	var b strings.Builder
 	if len(p.paths) == 0 {
 		b.WriteString("Nothing differs from where the run started.")
@@ -362,12 +365,13 @@ func revertConfirm(p revertPreviewMsg, revert func(domain.FeatureID, int) tea.Cm
 		question:     fmt.Sprintf("Revert run %d?", p.run),
 		detail:       strings.TrimRight(b.String(), "\n"),
 		confirmLabel: "Revert",
-		onConfirm:    func() tea.Cmd { return revert(p.card, p.run) },
+		onConfirm:    func() tea.Cmd { return revert(p.card, p.run, p.tree) },
 	}
 }
 
-// revertRun is the confirmed revert of run n.
-func (m *Shell) revertRun(id domain.FeatureID, n int) tea.Cmd {
+// revertRun is the confirmed revert of run n, against the tree its
+// preview was read from.
+func (m *Shell) revertRun(id domain.FeatureID, n int, tree string) tea.Cmd {
 	r, ok := m.rowByID(id)
 	if !ok {
 		return nil
@@ -377,7 +381,7 @@ func (m *Shell) revertRun(id domain.FeatureID, n int) tea.Cmd {
 		return errNoticeCmd(err.Error())
 	}
 	return func() tea.Msg {
-		done, err := d.Revert(context.Background(), n)
+		done, err := d.Revert(context.Background(), n, tree)
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}

@@ -42,6 +42,7 @@ func TestRunShapes(t *testing.T) {
 		Answer   StepAnswerRequest `json:"answer"`
 		Specs    SpecList          `json:"specs"`
 		Revert   RevertPreview     `json:"revert"`
+		Confirm  RevertRequest     `json:"confirm"`
 		Reverted RevertDone        `json:"reverted"`
 		Recheck  Recheck           `json:"recheck"`
 		Decision Decision          `json:"decision"`
@@ -62,7 +63,8 @@ func TestRunShapes(t *testing.T) {
 			{N: 2, Title: "Resume pre-migration sessions", State: "running", Rev: 2, Frozen: 2, DoneWhen: 1, Runs: []SpecRun{{N: 2, Recipe: "deliver", State: "running", Spent: 310}}},
 			{N: 3, Title: "Trim replay", State: "draft", Rev: 1},
 		}},
-		Revert:   RevertPreview{Run: 2, Paths: []string{"a.go", "b.go"}, Note: "This also undoes anything the session changed in these paths since then."},
+		Revert:   RevertPreview{Run: 2, Paths: []string{"a.go", "b.go"}, Tree: "4b825dc", Note: "This also undoes anything the session changed in these paths since then."},
+		Confirm:  RevertRequest{Tree: "4b825dc"},
 		Reverted: RevertDone{Run: 2, Paths: []string{"a.go", "b.go"}},
 		Recheck:  Recheck{Text: "the done-when checks pass: validated at tree 0123456"},
 		Decision: Decision{

@@ -230,8 +230,18 @@ type SpecRun struct {
 type RevertPreview struct {
 	Run   int      `json:"run"`
 	Paths []string `json:"paths"`
+	// Tree names the tree the preview was read from: the confirmed revert
+	// sends it back (RevertRequest), and is refused when the tree has
+	// changed since, so what is reverted is what the person was shown.
+	Tree string `json:"tree"`
 	// Note says what reverting also undoes.
 	Note string `json:"note"`
+}
+
+// RevertRequest is POST /api/cards/{id}/runs/{n}/revert: the confirmed
+// revert, naming the preview's Tree.
+type RevertRequest struct {
+	Tree string `json:"tree"`
 }
 
 // RevertDone is a confirmed revert: the paths put back.

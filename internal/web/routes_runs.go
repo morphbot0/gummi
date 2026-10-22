@@ -159,17 +159,23 @@ func (s *Server) handleRevertPreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleRevert is POST /api/cards/{id}/runs/{n}/revert: the confirmed revert.
+// handleRevert is POST /api/cards/{id}/runs/{n}/revert: the confirmed
+// revert, naming the tree its preview was read from.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	n, ok := runN(w, r)
 	if !ok {
+		return
+	}
+	var body webapi.RevertRequest
+	if err := readJSON(w, r, &body); err != nil || body.Tree == "" {
+		writeError(w, http.StatusBadRequest, "expected {\"tree\": …}, the tree the revert's preview was read from")
 		return
 	}
 	d, ok := s.docs(w, r)
 	if !ok {
 		return
 	}
-	out, err := d.Revert(r.Context(), n)
+	out, err := d.Revert(r.Context(), n, body.Tree)
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return

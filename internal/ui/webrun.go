@@ -388,12 +388,12 @@ func (d *WebDocs) RevertPreview(ctx context.Context, n int) (webapi.RevertPrevie
 	if err != nil {
 		return webapi.RevertPreview{}, engineRefusal(err)
 	}
-	return webapi.RevertPreview{Run: p.Run, Paths: nonNil(p.Paths), Note: p.Note}, nil
+	return webapi.RevertPreview{Run: p.Run, Paths: nonNil(p.Paths), Tree: p.Tree, Note: p.Note}, nil
 }
 
 // Revert is POST /api/cards/{id}/runs/{n}/revert: the person's confirmed
-// revert of run n.
-func (d *WebDocs) Revert(ctx context.Context, n int) (webapi.RevertDone, error) {
+// revert of run n, against the tree its preview was read from (tree).
+func (d *WebDocs) Revert(ctx context.Context, n int, tree string) (webapi.RevertDone, error) {
 	if !isRunSession(d.f) {
 		return webapi.RevertDone{}, ErrNoCard
 	}
@@ -403,7 +403,7 @@ func (d *WebDocs) Revert(ctx context.Context, n int) (webapi.RevertDone, error) 
 	if err := closedToReview(d.f, "its tree is no run's to put back"); err != nil {
 		return webapi.RevertDone{}, err
 	}
-	paths, err := d.eng.WorkflowRevert(ctx, d.f.ID, n)
+	paths, err := d.eng.WorkflowRevert(ctx, d.f.ID, n, tree)
 	if err != nil {
 		return webapi.RevertDone{}, engineRefusal(err)
 	}

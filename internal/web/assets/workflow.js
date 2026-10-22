@@ -280,7 +280,8 @@ async function openRevert (id, n) {
         disabled: !paths.length,
         onClick: async () => {
           try {
-            const done = await post(cardPath(id, `runs/${n}/revert`))
+            // the revert is of what this preview listed: the server refuses it if the tree has moved since
+            const done = await post(cardPath(id, `runs/${n}/revert`), { tree: pre.tree })
             toast(`Run ${n} reverted: ${plural((done.paths || []).length, 'path')} put back`)
             ctx.refresh(id)
           } catch (err) {

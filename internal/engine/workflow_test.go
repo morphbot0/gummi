@@ -567,7 +567,7 @@ func TestStoppingARunRevertsNothing(t *testing.T) {
 		_, err := os.Stat(filepath.Join(tree, "half.txt"))
 		return err == nil
 	})
-	if _, err := e.WorkflowRevert(ctx, f.ID, run.N); err == nil || !strings.Contains(err.Error(), "running") {
+	if _, err := e.WorkflowRevert(ctx, f.ID, run.N, "any"); err == nil || !strings.Contains(err.Error(), "running") {
 		t.Fatalf("revert while a step runs: %v", err)
 	}
 	if err := e.WorkflowStop(ctx, f.ID, "changed my mind"); err != nil {
@@ -607,7 +607,7 @@ func TestRevertRunPutsTheTreeBack(t *testing.T) {
 	if strings.Join(pre.Paths, ",") != "README.md,new/file.txt" || pre.Note == "" {
 		t.Fatalf("preview %+v", pre)
 	}
-	paths, err := e.WorkflowRevert(ctx, f.ID, run.N)
+	paths, err := e.WorkflowRevert(ctx, f.ID, run.N, pre.Tree)
 	if err != nil || len(paths) != 2 {
 		t.Fatalf("revert %v %v", paths, err)
 	}
@@ -1075,7 +1075,11 @@ func TestARevertNeverDeletesWhatWasOnDiskAtTheStart(t *testing.T) {
 	if strings.Contains(patch, "s3cret") {
 		t.Errorf("an ignored file's contents are in the run's diff:\n%s", patch)
 	}
-	if _, err := e.WorkflowRevert(ctx, f.ID, run.N); err != nil {
+	pre, err := e.WorkflowRevertPreview(ctx, f.ID, run.N)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.WorkflowRevert(ctx, f.ID, run.N, pre.Tree); err != nil {
 		t.Fatal(err)
 	}
 	if raw, err := os.ReadFile(filepath.Join(tree, ".env")); err != nil || string(raw) != "TOKEN=s3cret\n" {
@@ -1083,5 +1087,89 @@ func TestARevertNeverDeletesWhatWasOnDiskAtTheStart(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tree, "out.txt")); !os.IsNotExist(err) {
 		t.Errorf("the file the run created is still there: %v", err)
+	}
+}
+
+// TestARevertIsOfWhatItsPreviewShowed: a revert is confirmed against its
+// preview's tree, so a tree that changed since — the session or a person
+// wrote a file after the confirm went up — is refused, not reverted
+// unseen; and a revert waits while the session's own agent, or a step's
+// agent answering a follow-up after its run ended, works in the tree.
+func TestARevertIsOfWhatItsPreviewShowed(t *testing.T) {
+	wf := newWFFake()
+	wf.on("edit", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o600)
+		return wfReply{text: "edited", credits: 1}
+	})
+	g := newGate(t)
+	wf.on("edit#", func(string, string, int) wfReply {
+		<-g.ch
+		return wfReply{text: "also done", credits: 1}
+	})
+	e, store, f, ff := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: edit\nsteps:\n  - { id: edit, role: implementer, prompt: edit }\n"})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	pre, err := e.WorkflowRevertPreview(ctx, f.ID, run.N)
+	if err != nil || pre.Tree == "" || strings.Join(pre.Paths, ",") != "out.txt" {
+		t.Fatalf("preview %+v %v", pre, err)
+	}
+	// the tree moves after the preview
+	if err := os.WriteFile(filepath.Join(tree, "later.txt"), []byte("later\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.WorkflowRevert(ctx, f.ID, run.N, pre.Tree); err == nil || !strings.Contains(err.Error(), "changed since") {
+		t.Fatalf("a revert against a stale preview: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tree, "later.txt")); err != nil {
+		t.Fatalf("the refused revert touched the tree: %v", err)
+	}
+	if _, err := e.WorkflowRevert(ctx, f.ID, run.N, ""); err == nil {
+		t.Fatal("a revert with no preview went through")
+	}
+	// a follow-up to the ended step is working in the tree
+	card := stepPaths(t, e, f.ID, run.N)["edit"].Card
+	if err := e.StepSend(ctx, card, "also tidy"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the step is answering", func() bool { return e.freeformBusy(card) })
+	pre, _ = e.WorkflowRevertPreview(ctx, f.ID, run.N)
+	if _, err := e.WorkflowRevert(ctx, f.ID, run.N, pre.Tree); err == nil || !strings.Contains(err.Error(), "step edit") {
+		t.Fatalf("a revert while a step answers a follow-up: %v", err)
+	}
+	g.open()
+	waitUntil(t, "the step answered", func() bool { return !e.freeformBusy(card) })
+	// the session's own agent is mid-turn
+	sg := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-sg:
+		default:
+			close(sg)
+		}
+	})
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			if strings.Contains(msg, "hold on") {
+				<-sg
+			}
+			return base(opts, msg)
+		}
+	}(wf.Responder)
+	if err := ff.Send(ctx, "hold on"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the session is mid-turn", ff.Busy)
+	pre, _ = e.WorkflowRevertPreview(ctx, f.ID, run.N)
+	if _, err := e.WorkflowRevert(ctx, f.ID, run.N, pre.Tree); err == nil || !strings.Contains(err.Error(), "session's agent") {
+		t.Fatalf("a revert while the session's agent works: %v", err)
+	}
+	close(sg)
+	waitFreeformIdle(t, ff)
+	pre, _ = e.WorkflowRevertPreview(ctx, f.ID, run.N)
+	if paths, err := e.WorkflowRevert(ctx, f.ID, run.N, pre.Tree); err != nil || len(paths) == 0 {
+		t.Fatalf("the revert against a fresh preview: %v %v", paths, err)
 	}
 }

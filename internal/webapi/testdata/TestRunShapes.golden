@@ -222,7 +222,11 @@
       "a.go",
       "b.go"
     ],
+    "tree": "4b825dc",
     "note": "This also undoes anything the session changed in these paths since then."
+  },
+  "confirm": {
+    "tree": "4b825dc"
   },
   "reverted": {
     "run": 2,

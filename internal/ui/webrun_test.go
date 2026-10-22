@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,7 +137,20 @@ func TestARunOnTheWebFace(t *testing.T) {
 	if err != nil || len(pre.Paths) != 1 || pre.Paths[0] != "out.txt" || pre.Note == "" {
 		t.Fatalf("revert preview %+v %v", pre, err)
 	}
-	if done, err := d.Revert(ctx, run.N); err != nil || len(done.Paths) != 1 {
+	if pre.Tree == "" {
+		t.Fatalf("the preview names no tree: %+v", pre)
+	}
+	// a tree that moved after the preview is not reverted unseen
+	if err := os.WriteFile(filepath.Join(ff.WorkDir(), "later.txt"), []byte("later\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Revert(ctx, run.N, pre.Tree); err == nil || !strings.Contains(err.Error(), "changed since") {
+		t.Fatalf("a revert against a stale preview: %v", err)
+	}
+	if err := os.Remove(filepath.Join(ff.WorkDir(), "later.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := d.Revert(ctx, run.N, pre.Tree); err != nil || len(done.Paths) != 1 {
 		t.Fatalf("revert %+v %v", done, err)
 	}
 	if _, err := os.Stat(filepath.Join(ff.WorkDir(), "out.txt")); !os.IsNotExist(err) {
@@ -178,5 +192,86 @@ func waitUntilTrue(t *testing.T, what string, cond func() bool) {
 			t.Fatalf("never %s", what)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// The Tree tab is the session's tree, which a run's steps share: while a
+// step works in it the tab says so and refuses a write, as it does while
+// the session's own agent is mid-turn; once the run ends the write goes
+// through.
+func TestTheTreeTabWaitsWhileAStepWorksInTheTree(t *testing.T) {
+	now := time.Now()
+	f := domain.Feature{
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Out file", Slug: "out-file",
+		Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind, CreatedAt: now, UpdatedAt: now,
+		Budget: domain.Budget{Envelope: 5000},
+	}
+	gate := make(chan struct{})
+	var once sync.Once
+	open := func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(open)
+	fake := agent.NewFake("ok")
+	fake.Caps = agent.Capabilities{ClientTools: true, UsageEvents: true, Interrupt: true}
+	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		if strings.Contains(msg, "of workflow run") {
+			_ = os.WriteFile(filepath.Join(opts.WorkDir, "out.txt"), []byte("hi\n"), 0o600)
+			<-gate
+		}
+		return []agent.Event{
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 2, Model: "m"}},
+			{Kind: agent.EventMessage, Text: "wrote out.txt"},
+			{Kind: agent.EventIdle},
+		}
+	}
+	b, _, eng, _ := headlessBoardWith(t, fake, []domain.Feature{f}, nil)
+	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
+	ctx := context.Background()
+	ff, err := eng.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntilTrue(t, "the session's first turn", func() bool { return !ff.Busy() && len(ff.Snapshot().Transcript) > 1 })
+	if _, _, err := eng.StartSessionSpec(ctx, f, "Out file", "user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.WriteSessionSpec(ctx, f, 1, webRunSpec, "user"); err != nil {
+		t.Fatal(err)
+	}
+	run, err := eng.WorkflowPropose(ctx, f.ID, engine.WorkflowRequest{RecipeYAML: webRunRecipe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.WorkflowAnswer(ctx, f.ID, run.N, engine.WorkflowAllow); err != nil {
+		t.Fatal(err)
+	}
+	waitUntilTrue(t, "the step is writing", func() bool {
+		_, _ = eng.WorkflowTick(ctx)
+		_, err := os.Stat(filepath.Join(ff.WorkDir(), "out.txt"))
+		return err == nil
+	})
+	reloadRows(t, b)
+	d := webDocsThread(t, b, string(f.ID))
+	tree, err := d.Tree(ctx)
+	if err != nil || !strings.Contains(tree.Why, "workflow run 1") {
+		t.Fatalf("the Tree tab while a step works: why %q, %v", tree.Why, err)
+	}
+	stage := webapi.TreeRequest{Op: webapi.TreeStage, Paths: []string{"out.txt"}}
+	if _, err := d.TreeWrite(ctx, stage, "pat"); err == nil || !strings.Contains(err.Error(), "workflow run 1") {
+		t.Fatalf("a Tree tab write while a step works: %v", err)
+	}
+	open()
+	waitUntilTrue(t, "the run to end", func() bool {
+		_, _ = eng.WorkflowTick(ctx)
+		var r *domain.Run
+		_ = b.Do(ctx, func(m *Shell) tea.Cmd { r, _ = m.store.Run(ctx, f.ID, run.N); return nil })
+		return r != nil && r.State.Ended()
+	})
+	waitUntilTrue(t, "the session answered the report", func() bool { return !ff.Busy() })
+	d = webDocsThread(t, b, string(f.ID))
+	if _, err := d.TreeWrite(ctx, stage, "pat"); err != nil {
+		t.Fatalf("a Tree tab write once the run ended: %v", err)
 	}
 }
