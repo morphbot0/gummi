@@ -330,3 +330,58 @@ func webDocsFor(t *testing.T, b *Bridge, id string) *WebDocs {
 	}
 	return d
 }
+
+// A session with two specs: the spec view lists them with each one's
+// state, revision and done-when count, ] and [ switch between them, and a
+// write to the second is a revision of the second.
+func TestTheSpecViewSwitchesBetweenASessionsSpecs(t *testing.T) {
+	b, eng, f := sessionSpecBoard(t, domain.StageOpen)
+	ctx := context.Background()
+	if _, _, err := eng.StartSessionSpec(ctx, f, "Trim replay", "Simon"); err != nil {
+		t.Fatal(err)
+	}
+	sv := mountSessionSpec(t, b)
+	if sv.n != 1 || len(sv.specs) != 2 {
+		t.Fatalf("the view opened spec %d with a list of %d, want spec 1 of 2", sv.n, len(sv.specs))
+	}
+	var out string
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { out = ansi.Strip(m.specViewRender(120, 40)); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"▸ S1 Dark mode", "S2 Trim replay", "draft", "rev 1", "[ ] switch spec"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the specs list does not say %q:\n%s", want, out)
+		}
+	}
+	var cmd tea.Cmd
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { cmd = m.handleSpecKey("]"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil {
+		t.Fatal("] switched to no spec")
+	}
+	msg := cmd()
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { m.Update(msg); sv = m.spec; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if sv.n != 2 || sv.path != eng.SessionSpecPath(f, 2) || !strings.Contains(sv.content, "# Trim replay") {
+		t.Fatalf("] opened spec %d at %s, want spec 2", sv.n, sv.path)
+	}
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { cmd = m.addSpecComment(1, "which window"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := cmd().(noticeMsg); ok && n.isErr {
+		t.Fatal(n.text)
+	}
+	var one, two []domain.SpecRevision
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		one, _ = m.store.SpecRevisions(ctx, f.ID, 1)
+		two, _ = m.store.SpecRevisions(ctx, f.ID, 2)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(one) != 1 || len(two) != 2 {
+		t.Fatalf("a comment on spec 2 made revisions %d of spec 1 and %d of spec 2, want 1 and 2", len(one), len(two))
+	}
+}

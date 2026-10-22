@@ -1880,7 +1880,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}
 			return m, nil
 		}
-		sv := &specView{f: msg.f, path: msg.path, content: msg.content, doc: spec.Parse(msg.content), cursor: 1}
+		sv := &specView{f: msg.f, path: msg.path, content: msg.content, doc: spec.Parse(msg.content), cursor: 1, n: msg.n, specs: msg.specs}
 		// Open where the card is. The thread pins the artifact with the
 		// section this stage is about — "⌄ spec · Implementation notes"
 		// and the key that opens it — and the decision's own rows name it

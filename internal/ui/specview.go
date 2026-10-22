@@ -18,6 +18,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/webapi"
 )
 
 // specView is the spec surface state: one feature's design doc, shown as
@@ -37,6 +38,11 @@ type specView struct {
 	content string
 	doc     spec.Doc
 	cursor  int // 1-based source line
+	// n is which of a session's specs is open, and specs the list of them
+	// to switch between (DESIGN §25.3), each with its state, revision,
+	// runs and done-when count; both zero on any other card's document.
+	n     int
+	specs []webapi.SpecEntry
 }
 
 // specLoadedMsg delivers a (re)loaded spec document.
@@ -45,6 +51,9 @@ type specLoadedMsg struct {
 	path    string
 	content string
 	err     error
+	// n and specs are a session's: the spec loaded, and its list.
+	n     int
+	specs []webapi.SpecEntry
 }
 
 // openSpec resolves the feature's spec file — a session's own spec file
@@ -82,16 +91,6 @@ func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
 	}
 }
 
-// sessionSpecFilePath is where f's spec 1 lives on disk, as the store
-// records it, "" when f has none — read the same with or without an
-// engine (a session's spec still reads and writes without an agent,
-// AGENTS.md). The view opens spec 1; a session's other specs are the
-// Specs list's.
-func (m *Shell) sessionSpecFilePath(f domain.Feature) string {
-	path, _ := m.store.SessionSpecFile(context.Background(), m.wt.Root(), f.ID, 1)
-	return path
-}
-
 // sessionSpecAt is which of f's specs lives at path, 1 when none is
 // found: the view is mounted on one spec's file.
 func (m *Shell) sessionSpecAt(f domain.Feature, path string) int {
@@ -108,16 +107,57 @@ func (m *Shell) sessionSpecAt(f domain.Feature, path string) int {
 // migrateDraft, no EnsureDraft: those exist to seed a retired workflow
 // card's artifact, and a person does not start a session's spec from the
 // TUI (spec_start, the agent's own tool, and the web page's start button
-// remain the ways in).
+// remain the ways in). It opens spec 1, or the spec already open on f.
 func (m *Shell) openSessionSpec(f domain.Feature) tea.Cmd {
-	path := m.sessionSpecFilePath(f)
+	n := 1
+	if m.spec != nil && m.spec.f.ID == f.ID && m.spec.n > 0 {
+		n = m.spec.n
+	}
+	return m.loadSessionSpec(f, n)
+}
+
+// loadSessionSpec reads f's spec n and the list of f's specs.
+func (m *Shell) loadSessionSpec(f domain.Feature, n int) tea.Cmd {
+	path, _ := m.store.SessionSpecFile(context.Background(), m.wt.Root(), f.ID, n)
+	var docs *WebDocs
+	if r, ok := m.rowByID(f.ID); ok {
+		docs, _ = m.webDocsFor(r)
+	}
 	return func() tea.Msg {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return specLoadedMsg{err: err}
 		}
-		return specLoadedMsg{f: f, path: path, content: string(raw)}
+		msg := specLoadedMsg{f: f, path: path, content: string(raw), n: n}
+		if docs != nil {
+			if list, err := docs.Specs(context.Background()); err == nil {
+				msg.specs = list.Specs
+			}
+		}
+		return msg
 	}
+}
+
+// switchSpec opens the session's spec delta places along its list.
+func (m *Shell) switchSpec(delta int) tea.Cmd {
+	sv := m.spec
+	if sv == nil || len(sv.specs) < 2 {
+		if sv != nil && sv.n > 0 {
+			m.notice = noticeMsg{text: sv.f.Name() + " keeps one spec"}
+		}
+		return nil
+	}
+	at := 0
+	for i, e := range sv.specs {
+		if e.N == sv.n {
+			at = i
+		}
+	}
+	next := sv.specs[clamp(at+delta, 0, len(sv.specs)-1)].N
+	if next == sv.n {
+		return nil
+	}
+	return m.loadSessionSpec(sv.f, next)
 }
 
 // reloadSpec re-reads the currently open spec from disk.
@@ -125,6 +165,9 @@ func (m *Shell) reloadSpec() tea.Cmd {
 	sv := m.spec
 	if sv == nil {
 		return nil
+	}
+	if sv.n > 0 {
+		return m.loadSessionSpec(sv.f, sv.n)
 	}
 	return func() tea.Msg {
 		raw, err := os.ReadFile(sv.path)
@@ -499,9 +542,14 @@ func (sv *specView) bindings() []binding {
 		{key: "x", label: "resolve", help: "resolve the comment thread at the cursor", bar: true},
 		{key: "n/p", label: "comments", help: "jump between comments", bar: true},
 		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
+	}
+	if len(sv.specs) > 1 {
+		bs = append(bs, binding{key: "[ ]", label: "specs", help: "the session's previous / next spec", bar: true})
+	}
+	bs = append(bs, []binding{
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
-	}
+	}...)
 	return bs
 }
 
@@ -513,6 +561,10 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		m.spec = nil
 	case "e":
 		return m.editSpec()
+	case "[":
+		return m.switchSpec(-1)
+	case "]":
+		return m.switchSpec(1)
 	case "j", "down":
 		sv.setCursor(sv.cursor + 1)
 	case "k", "up":
@@ -629,6 +681,10 @@ func (m *Shell) specViewRender(w, h int) string {
 		b.WriteString(s.Warning.Render("  every open comment has already been answered — x resolves one that the answer addressed; R sends them back again") + "\n")
 	}
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
+	if lines := specListLines(m, sv, w); len(lines) > 0 {
+		b.WriteString(strings.Join(lines, "\n") + "\n")
+		b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
+	}
 
 	// the status header used to belong to read mode alone, which meant
 	// the mode you could actually act in was the one that never told you
@@ -641,6 +697,56 @@ func (m *Shell) specViewRender(w, h int) string {
 	used := strings.Count(b.String(), "\n")
 	b.WriteString(sv.renderSource(m, w, max(h-used-1, 3)))
 	return b.String()
+}
+
+// specListLines is a session's specs, one row each, the open one marked:
+// its title, its state, its newest revision (and the one an open run
+// froze), its runs and its done-when count (DESIGN §25.3).
+func specListLines(m *Shell, sv *specView, w int) []string {
+	if len(sv.specs) == 0 {
+		return nil
+	}
+	s := m.styles
+	out := make([]string, 0, len(sv.specs))
+	for _, e := range sv.specs {
+		lead := "  "
+		title := s.Subtle
+		if e.N == sv.n {
+			lead, title = s.Cursor.Render("▸ "), s.Title
+		}
+		state := s.Faint
+		switch e.State {
+		case "met":
+			state = s.Success
+		case "running":
+			state = s.Info
+		case "partial":
+			state = s.Warning
+		}
+		facts := []string{fmt.Sprintf("rev %d", e.Rev)}
+		if e.Frozen > 0 {
+			facts[0] += fmt.Sprintf(" (run froze rev %d)", e.Frozen)
+		}
+		switch len(e.Runs) {
+		case 0:
+		case 1:
+			facts = append(facts, fmt.Sprintf("%s · run %d", e.Runs[0].Recipe, e.Runs[0].N))
+		default:
+			facts = append(facts, fmt.Sprintf("%d runs", len(e.Runs)))
+		}
+		if e.DoneWhen > 0 {
+			facts = append(facts, fmt.Sprintf("DW %d/%d", e.Met, e.DoneWhen))
+		} else {
+			facts = append(facts, "no done-when yet")
+		}
+		row := lead + s.Faint.Render(fmt.Sprintf("S%d ", e.N)) + title.Render(padTo(sanitize(e.Title), 34)) + " " +
+			state.Render(padTo(e.State, 8)) + " " + s.Faint.Render(strings.Join(facts, " · "))
+		out = append(out, ansi.Truncate(row, max(w, 8), "…"))
+	}
+	if len(sv.specs) > 1 {
+		out = append(out, s.Faint.Render("  [ ] switch spec"))
+	}
+	return out
 }
 
 // reviewerMarker returns the last unresolved `@reviewer` marker in a
