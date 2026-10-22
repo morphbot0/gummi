@@ -20,6 +20,15 @@
 // The proposal's card (§25.5): the pinned decision that asks to allow a
 // run draws its step tree, the checks it will run and what it costs
 // against the session's pool, with a box for feedback.
+//
+// The live strip (§25.9): while a run is open, one line directly above the
+// composer says what it is doing — the step at work and its action, a
+// step's question, a spent pool, a pause — with Jump to the run's block
+// and what the moment offers (Open, Answer, Top up…, Resume). Its words
+// are the run item's Live, folded on the server; the strip is updated in
+// place, part by part, and never redrawn whole. A pill at the top of the
+// thread says the open run's block is above while it is scrolled out of
+// view (an IntersectionObserver), and jumps to it too.
 
 import { $, h, clear, cr, dur, plural, isMobile } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
@@ -28,6 +37,7 @@ import { toast } from './toast.js?v=__ASSET_V__'
 import { openModal } from './views.js?v=__ASSET_V__'
 import { onEvent } from './events.js?v=__ASSET_V__'
 import { hl } from './diff.js?v=__ASSET_V__'
+import { runAction } from './actions.js?v=__ASSET_V__'
 
 let ctx = {}
 
@@ -50,6 +60,11 @@ export function initWorkflow (c) {
   }, { passive: true })
   // an open run's elapsed time is counted in place, never by a redraw
   setInterval(tickElapsed, 15000)
+  // the live strip and the pill follow the thread's open run; the block
+  // they point at is placed by the thread's own redraw, read after it
+  on(['thread', 'sel', 'card', 'view'], () => { renderStrip(); requestAnimationFrame(watchBlock) })
+  document.addEventListener('click', (e) => { if (pickOpen && !e.target.closest?.('.rls-pick, [data-testid="run-live-open"]')) closePick() })
+  $('#run-above').addEventListener('click', () => { if (stripRun) jumpToRun(stripRun.n) })
 }
 
 // ---------------------------------------------------------------- words
@@ -106,7 +121,7 @@ export function runBlock (it) {
   const ended = ['done', 'partial', 'stopped'].includes(r.state)
   const live = ['running', 'paused'].includes(r.state)
   const block = h('section', {
-    class: ['rb', `rb-${r.state}`, live && 'rb-on'],
+    class: ['rb', `rb-${r.state}`, live && 'rb-on', (flashing.get(`${id} ${r.n}`) || 0) > Date.now() && 'rb-flash'],
     testid: `run-${r.n}`,
     data: { run: String(r.n), state: r.state, rev: r.rev },
     'aria-label': `${r.recipe} run ${r.n}, ${STATE_WORD[r.state] || r.state}`
@@ -406,7 +421,9 @@ function renderStep (pane, entry, pctx) {
   const bar = h('div', { class: 'seg stp-tabs', role: 'tablist', 'aria-label': 'The step' }, tabs.map(([k, l]) => h('button', {
     class: tab === k && 'on', type: 'button', role: 'tab', 'aria-selected': String(tab === k), testid: `step-tab-${k}`, onclick: () => setInner(k)
   }, l)))
-  pane.append(h('div', { class: 'stp', testid: 'step-panel', data: { card: s.card } }, head, bar, innerBody(tab, s), composer(s, pctx)))
+  // a step that asks is answered here too: the strip's Answer opens it
+  const ask = s.question ? question(s.session, { card: s.card, id: s.id, question: s.question }) : null
+  pane.append(h('div', { class: 'stp', testid: 'step-panel', data: { card: s.card } }, head, ask, bar, innerBody(tab, s), composer(s, pctx)))
 }
 
 // backToSession closes the step: the surface it was shown on closes with
@@ -525,4 +542,194 @@ export function proposalEl (p) {
         : h('span', { class: 'okc' }, '✓ recipe checks pass'),
       h('span', { class: p.bounded && p.poolLeft <= 0 ? 'warnc' : 'okc', testid: 'proposal-money' }, `${left}; the run spends from it`)),
     h('div', { class: 'hint' }, 'Changes stay uncommitted in the tree · a snapshot at every step'))
+}
+
+// ---------------------------------------------------------------- the live strip
+
+// openRunItem is the thread's open run, the one the strip is about.
+function openRunItem () {
+  const runs = (state.thread?.items || []).filter(it => it.t === 'run' && it.run.live)
+  return runs.length ? runs[runs.length - 1].run : null
+}
+
+let stripRun = null // the run the strip draws, as last drawn
+let stripEl = null // the strip's root, kept while a run is open
+const stripParts = new Map() // part name -> { sig, el }
+let pickOpen = false
+
+// renderStrip draws the open run's strip into its slot, part by part: a
+// part whose words have not moved keeps its node.
+function renderStrip () {
+  const slot = $('#run-live-slot')
+  const r = state.sel ? openRunItem() : null
+  stripRun = r
+  if (!r) {
+    if (stripEl) { stripEl.remove(); stripEl = null; stripParts.clear(); closePick() }
+    $('#run-above').hidden = true
+    return
+  }
+  const l = r.live
+  if (!stripEl || stripEl.dataset.run !== String(r.n) || stripEl.dataset.card !== state.sel) {
+    stripEl?.remove()
+    stripParts.clear()
+    closePick()
+    stripEl = h('div', { class: 'rls', testid: 'run-live', role: 'status', 'aria-live': 'off', data: { run: String(r.n), card: state.sel } })
+    slot.append(stripEl)
+  }
+  stripEl.className = ['rls', `rls-${l.mood}`].join(' ')
+  stripEl.dataset.mood = l.mood
+  const running = l.mood === 'running'
+  const parts = [
+    ['dot', l.mood, () => h('span', { class: 'pd', 'aria-hidden': 'true' })],
+    ['name', l.name, () => h('b', { class: 'nm', testid: 'run-live-name' }, l.name)],
+    ['sp', running ? JSON.stringify(r.strip) : '', () => running ? liveEntries(r.strip) : null],
+    ['now', JSON.stringify([l.mood, l.who, l.action, l.question, l.line]), () => liveNow(l)],
+    ['m', `${l.mood}|${r.spent}|${r.started}`, () => l.mood === 'asking' || l.mood === 'deciding' ? null
+      : h('span', { class: 'm', testid: 'run-live-money' }, cr(r.spent),
+        running && r.started ? [' · ', h('span', { data: { elapsedRun: String(r.n) } }, elapsed(r))] : null)],
+    ['acts', JSON.stringify([state.sel, r.n, l.mood, l.card, l.steps, l.canTopUp, l.canResume, !!state.card?.actions?.some(a => a.id === 'envelope')]), () => h('span', { class: 'acts' }, liveActs(r, l))]
+  ]
+  let i = 0
+  for (const [name, sig, make] of parts) {
+    let p = stripParts.get(name)
+    if (!p || p.sig !== sig) {
+      const el = make()
+      p?.el?.remove()
+      p = { sig, el }
+      stripParts.set(name, p)
+    }
+    if (p.el) {
+      if (stripEl.children[i] !== p.el) stripEl.insertBefore(p.el, stripEl.children[i] || null)
+      i++
+    }
+  }
+}
+
+// liveEntries is the recipe's top-level entries as the strip says them.
+function liveEntries (strip) {
+  return h('span', { class: 'sp', testid: 'run-live-strip' }, (strip || []).map((e, i) => {
+    const word = e.kind === 'repeat'
+      ? `${e.id} ↺ ${e.iter || 0}/${e.max}`
+      : e.kind === 'parallel' ? (e.branches || []).map(b => b.id).join(' ∥ ') : e.id
+    return [i ? h('i', { 'aria-hidden': 'true' }, '›') : null,
+      h('span', { class: `s-${e.state}` }, word, MARK[e.state] ? ' ' + MARK[e.state] : '')]
+  }))
+}
+
+// liveNow is what the run is doing now: its step and that step's action,
+// a step's question, or what a run that is not running says.
+function liveNow (l) {
+  switch (l.mood) {
+    case 'running':
+      return h('span', { class: 'now', testid: 'run-live-now', title: [l.who, l.action].filter(Boolean).join(' · ') },
+        l.who ? [h('b', null, l.who), ' · '] : null, l.action)
+    case 'asking':
+      return h('span', { class: 'now', testid: 'run-live-now', title: l.question }, h('b', null, `${l.who} asks:`), ' ', l.question)
+  }
+  return h('span', { class: 'now', testid: 'run-live-now', title: l.line }, l.line)
+}
+
+// liveActs is what the strip offers: Jump always, and beside it Open (a
+// pick of the live steps when several work side by side), Answer, Top up…
+// or Resume.
+function liveActs (r, l) {
+  const id = state.sel
+  const btn = (testid, label, onclick, pri) => h('button', { class: ['bt', pri && 'pri'], type: 'button', testid, onclick }, label)
+  const jump = (pri) => btn('run-live-jump', '↑ Jump to run', () => jumpToRun(r.n), pri)
+  const steps = l.steps || []
+  switch (l.mood) {
+    case 'running':
+      if (steps.length > 1) {
+        return [jump(true), h('span', { class: 'rls-pickwrap' },
+          btn('run-live-open', 'Open… ▾', (e) => { e.stopPropagation(); pickOpen ? closePick() : openPick(e.currentTarget, steps) }))]
+      }
+      return [jump(true), l.card ? btn('run-live-open', `Open ${l.who}`, () => openStep(l.card)) : null]
+    case 'asking':
+      return [btn('run-live-answer', 'Answer', () => openStep(l.card), true), jump(false)]
+    case 'budget': {
+      const raise = state.card?.actions?.find(a => a.id === 'envelope')
+      return [raise ? btn('run-live-topup', 'Top up…', () => runAction(state.card, raise), true) : null, jump(!raise)]
+    }
+    case 'paused':
+      return [l.canResume ? btn('run-live-resume', 'Resume', async (e) => {
+        const b = e.currentTarget
+        b.disabled = true
+        try {
+          await post(cardPath(id, `runs/${r.n}/resume`))
+          toast(`Run ${r.n}: resumed`)
+          ctx.refresh(id)
+        } catch (err) {
+          b.disabled = false
+          toast(err.data?.error || err.message, { err: true })
+        }
+      }, true) : null, jump(!l.canResume)]
+  }
+  return [jump(true)]
+}
+
+// openPick offers the live steps to open, under (or over) the strip.
+function openPick (anchor, steps) {
+  closePick()
+  const menu = h('div', { class: 'rls-pick', testid: 'run-live-pick', role: 'menu' }, steps.map(st => h('button', {
+    type: 'button', role: 'menuitem', testid: `run-live-pick-${st.id}`, onclick: () => { closePick(); openStep(st.card) }
+  }, h('b', null, st.id), h('span', { class: 'mono' }, st.path))))
+  anchor.parentElement.append(menu)
+  pickOpen = true
+}
+
+function closePick () {
+  document.querySelector('.rls-pick')?.remove()
+  pickOpen = false
+}
+
+// flashing holds, per card and run, until when a block jumped to flashes:
+// a block redrawn meanwhile (its run moved) keeps the flash.
+const flashing = new Map()
+
+// jumpToRun scrolls the thread to run n's block and flashes it.
+export function jumpToRun (n) {
+  if (isMobile() && state.view !== 'thread') set({ view: 'thread' })
+  const go = () => {
+    const el = document.querySelector(`#thread-live [data-testid="run-${n}"]`)
+    if (!el) return
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' })
+    const key = `${state.sel} ${n}`
+    flashing.set(key, Date.now() + 1800)
+    el.classList.remove('rb-flash')
+    void el.offsetWidth // restart the flash when it is already lit
+    el.classList.add('rb-flash')
+    setTimeout(() => {
+      if ((flashing.get(key) || 0) > Date.now()) return // jumped to again since
+      flashing.delete(key)
+      document.querySelector(`#thread-live [data-testid="run-${n}"]`)?.classList.remove('rb-flash')
+    }, 1850)
+  }
+  requestAnimationFrame(go)
+}
+
+// ---- the pill: the open run's block is above
+
+let watched = null // the block observed
+let observer = null
+
+// watchBlock observes the open run's block where the thread placed it: a
+// block redrawn when its run moved is a new node, observed in its turn.
+function watchBlock () {
+  const pill = $('#run-above')
+  const r = stripRun
+  const el = r ? document.querySelector(`#thread-live [data-testid="run-${r.n}"]`) : null
+  if (el === watched) return
+  observer?.disconnect()
+  watched = el
+  if (!el) { pill.hidden = true; return }
+  observer = new IntersectionObserver((entries) => {
+    const e = entries[entries.length - 1]
+    if (!stripRun || e.target !== watched) return
+    const above = !e.isIntersecting && e.boundingClientRect.bottom <= (e.rootBounds?.top ?? 0) + 1
+    const text = `↑ ${stripRun.live.name} is above`
+    if (pill.textContent !== text) pill.textContent = text
+    pill.hidden = !above
+  }, { root: $('#thread') })
+  observer.observe(el)
 }

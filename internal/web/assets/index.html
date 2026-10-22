@@ -71,6 +71,7 @@
     <main class="center" aria-label="Conversation" data-testid="conversation">
       <div class="head" id="head" data-testid="card-head"></div>
       <div class="thread" id="thread" data-testid="thread" tabindex="-1">
+        <div class="run-above-bar"><button class="run-above" id="run-above" data-testid="run-above" type="button" title="Jump to the open run's block" hidden></button></div>
         <div class="thread-inner">
           <div class="thread-items" id="thread-items" data-testid="thread-items" role="log" aria-live="polite" aria-relevant="additions" aria-label="Card thread"></div>
           <div id="thread-live" data-testid="thread-live"></div>
@@ -80,6 +81,7 @@
         <button class="to-bottom" id="to-bottom" data-testid="to-bottom" type="button" title="Scroll to the newest" aria-label="Scroll to the newest" hidden>↓</button>
         <div id="decision" data-testid="decision-slot"></div>
         <div id="nextup" data-testid="nextup-slot"></div>
+        <div id="run-live-slot" data-testid="run-live-slot"></div>
         <div class="composer" id="composer" data-testid="composer">
           <div class="draftrow" id="composer-draft" data-testid="composer-draft" hidden></div>
           <label class="sr-only" for="composer-input">Message</label>

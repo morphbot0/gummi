@@ -55,6 +55,43 @@ type RunBlock struct {
 	CanResume bool `json:"canResume,omitempty"`
 	CanStop   bool `json:"canStop,omitempty"`
 	CanRevert bool `json:"canRevert,omitempty"`
+	// Live is the open run's live strip, drawn above the composer while
+	// the run is running or paused; absent otherwise.
+	Live *RunLive `json:"live,omitempty"`
+}
+
+// RunLive is an open run's live strip (DESIGN §25.9): one line above the
+// composer, with Jump to the run's block beside what it offers.
+type RunLive struct {
+	// Name is the run in a line: "deliver · run 2".
+	Name string `json:"name"`
+	// Mood is running, asking (a step asks: Answer opens it), deciding
+	// (the run's own decision is pinned above the composer), budget
+	// (paused on a spent pool: Top up…) or paused (Resume).
+	Mood string `json:"mood"`
+	// Steps are the live steps: Open opens the one, or picks among
+	// several.
+	Steps []RunLiveStep `json:"steps,omitempty"`
+	// Who names the active steps (joined by ∥); Action is the active
+	// step's last action.
+	Who    string `json:"who,omitempty"`
+	Action string `json:"action,omitempty"`
+	// Card is the step Open or Answer goes to, when there is one.
+	Card string `json:"card,omitempty"`
+	// Question is the asking step's question; Line what a strip that is
+	// not running says.
+	Question  string `json:"question,omitempty"`
+	Line      string `json:"line,omitempty"`
+	CanTopUp  bool   `json:"canTopUp,omitempty"`
+	CanResume bool   `json:"canResume,omitempty"`
+}
+
+// RunLiveStep is one live step the strip names.
+type RunLiveStep struct {
+	ID    string `json:"id"`
+	Path  string `json:"path"`
+	Card  string `json:"card,omitempty"`
+	State string `json:"state"`
 }
 
 // RunStripEntry is a top-level entry of the recipe: a step, a parallel
@@ -166,6 +203,10 @@ type StepFace struct {
 	// Says is what a message to the step does now: a turn while it runs,
 	// a follow-up once it has ended.
 	Says string `json:"says"`
+	// Question is the step's open question while it asks, answered with
+	// POST /api/cards/{id}/steps/{card}/answer (the strip's Answer opens
+	// the step on it).
+	Question *StepQuestion `json:"question,omitempty"`
 }
 
 // StepArtifact is one artifact a step's brief names: its name, its path

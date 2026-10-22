@@ -1449,3 +1449,47 @@ button.tr-path:disabled{opacity:1;cursor:default}
   .wfp-step{grid-template-columns:minmax(70px,auto) minmax(0,1fr)}
   .wfp-step .wrole{display:none}
 }
+
+/* the live strip: an open run's line above the composer (workflow.js) */
+#run-live-slot:empty{display:none}
+.rls{position:relative;display:flex;align-items:center;gap:10px;min-width:0;padding:6px 8px 6px 12px;border:1px solid color-mix(in srgb,var(--q-run) 50%,var(--line));border-radius:10px;background:color-mix(in srgb,var(--q-run) 6%,var(--panel));font-size:12.5px;color:var(--fg2)}
+.rls .pd{width:8px;height:8px;border-radius:50%;flex:none;background:var(--q-run);box-shadow:0 0 0 4px color-mix(in srgb,var(--q-run) 22%,transparent)}
+.rls-running .pd{animation:rb-live 1.6s ease-in-out infinite}
+.rls .nm{color:var(--fg);white-space:nowrap}
+.rls .sp{display:flex;gap:4px;align-items:center;white-space:nowrap;color:var(--fg3)}
+.rls .sp i{font-style:normal;color:var(--fg4)}
+.rls .sp .s-running,.rls .sp .s-asking{color:var(--q-run);font-weight:600}
+.rls .sp .s-asking{color:var(--q-needs)}
+.rls .sp .s-done{color:var(--ok)}
+.rls .sp .s-failed{color:var(--q-fail)}
+.rls .now{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);font-size:11.5px;color:var(--fg3)}
+.rls .now b{font-family:var(--ui);font-size:12.5px;color:var(--fg)}
+.rls .m{font-family:var(--mono);font-size:11.5px;color:var(--fg3);white-space:nowrap}
+.rls .bt{height:24px;padding:0 9px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);font-size:12px;display:inline-flex;align-items:center;white-space:nowrap;color:var(--fg2);flex:none}
+.rls .bt.pri{border-color:var(--accent);color:var(--accent);font-weight:600}
+.rls .bt:hover{color:var(--fg)}
+.rls-asking,.rls-deciding{border-color:color-mix(in srgb,var(--q-needs) 55%,var(--line));background:color-mix(in srgb,var(--q-needs) 8%,var(--panel))}
+.rls-asking .pd,.rls-deciding .pd{background:var(--q-needs);box-shadow:0 0 0 4px color-mix(in srgb,var(--q-needs) 22%,transparent)}
+.rls-budget,.rls-paused{border-color:var(--line2);background:var(--sunk)}
+.rls-budget .pd,.rls-paused .pd{background:var(--fg4);box-shadow:none}
+.rls .acts{display:flex;gap:6px;align-items:center;flex:none}
+.rls-pickwrap{position:relative;flex:none}
+.rls-pick{position:absolute;right:0;bottom:calc(100% + 6px);z-index:5;display:flex;flex-direction:column;min-width:200px;padding:4px;border:1px solid var(--line2);border-radius:8px;background:var(--panel);box-shadow:0 6px 18px rgb(0 0 0 / .18)}
+.rls-pick button{display:flex;gap:10px;align-items:baseline;text-align:left;padding:5px 8px;border-radius:6px;font-size:12.5px}
+.rls-pick button:hover{background:var(--line)}
+.rls-pick .mono{color:var(--fg3);font-size:11px}
+/* narrower: the recipe's entries go first, then the money and the time */
+@container (max-width:720px){.rls .sp{display:none}}
+@container (max-width:520px){.rls .m{display:none}.rls{gap:7px;padding:5px 6px 5px 10px}.rls .bt{padding:0 7px}}
+/* the pill at the top of the thread: the open run's block is above */
+.run-above-bar{position:sticky;top:6px;height:0;z-index:3;display:flex;justify-content:center;align-items:flex-start;overflow:visible}
+.run-above{font-size:12px;color:var(--fg2);border:1px dashed var(--line2);border-radius:999px;padding:3px 12px;background:var(--panel);box-shadow:0 2px 8px rgb(0 0 0 / .08);white-space:nowrap}
+.run-above:hover{color:var(--fg);border-style:solid}
+.run-above[hidden]{display:none}
+/* a run's block jumped to flashes once */
+.rb.rb-flash{animation:rb-flash 1.6s ease-out}
+@keyframes rb-flash{0%,30%{box-shadow:0 0 0 3px var(--accent)}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion:reduce){
+  .rls-running .pd{animation:none}
+  .rb.rb-flash{animation:none;box-shadow:0 0 0 3px var(--accent)}
+}

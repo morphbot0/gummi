@@ -123,7 +123,22 @@
       "report": true,
       "canPause": true,
       "canStop": true,
-      "canRevert": true
+      "canRevert": true,
+      "live": {
+        "name": "deliver · run 2",
+        "mood": "asking",
+        "steps": [
+          {
+            "id": "implement",
+            "path": "build/2/implement",
+            "card": "FF-14",
+            "state": "asking"
+          }
+        ],
+        "who": "implement",
+        "card": "FF-14",
+        "question": "Resume a pruned session?"
+      }
     }
   },
   "step": {
@@ -159,7 +174,16 @@
         "writes": true
       }
     ],
-    "says": "a turn to the step while it runs"
+    "says": "a turn to the step while it runs",
+    "question": {
+      "question": "Resume a pruned session?",
+      "options": [
+        {
+          "label": "Resume (recommended)",
+          "recommended": true
+        }
+      ]
+    }
   },
   "send": {
     "text": "Keep the migration idempotent."

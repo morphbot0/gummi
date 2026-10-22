@@ -313,3 +313,122 @@ test.describe('a run whose steps take a while', () => {
     await expect(design).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
   });
 });
+
+// While a run is open a live strip stands above the composer (DESIGN
+// §25.9): the run, the step at work and its action, the money and the
+// time; Jump scrolls the thread to the run's block and flashes it, Open
+// opens the step at work; a pill at the top of the thread says the block
+// is above while it is scrolled out of view, and jumps to it too. The
+// strip is updated in place and goes when the run ends.
+test.describe('a run that takes a while, under a conversation', () => {
+  test.use({ workspaceEnv: { GUMMI_E2E_STEP_SECONDS: '10' } });
+
+  test('the live strip follows the open run, and Jump and the pill go to its block', async ({ pairedPage: page, server, api }, info) => {
+    test.setTimeout(240_000);
+    const id = await openSession(page, server, api, 'Watch the run from below');
+    const input = page.getByTestId('composer-input');
+    await input.click();
+    await input.fill('[workflow] [step-slow] make the workflow file');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('decision-option-0')).toContainText('Allow', { timeout: 45_000 });
+    // no strip while the run is only proposed
+    await expect(page.getByTestId('run-live')).toHaveCount(0);
+    await page.getByTestId('decision-option-0').click();
+
+    const block = page.getByTestId('run-1');
+    const strip = page.getByTestId('run-live');
+    await expect(strip).toBeVisible({ timeout: 30_000 });
+    await expect(strip).toHaveAttribute('data-mood', 'running');
+    await expect(strip.getByTestId('run-live-name')).toHaveText('deliver · run 1');
+    await expect(strip.getByTestId('run-live-now')).toContainText('design', { timeout: 30_000 });
+    await expect(strip.getByTestId('run-live-jump')).toBeVisible();
+    const wide = (page.viewportSize()?.width ?? 1440) > 760;
+    if (wide) await expect(strip.getByTestId('run-live-strip')).toContainText('build ↺');
+
+    // the strip sits directly on the composer
+    const sb = await strip.boundingBox();
+    const cb = await page.getByTestId('composer').boundingBox();
+    expect(sb && cb && sb.y + sb.height <= cb.y + 1 && cb.y - (sb.y + sb.height) < 16).toBe(true);
+    // updated in place: its node outlives the run's next moves
+    await strip.evaluate((el) => { el.dataset.kept = 'yes'; });
+
+    // a conversation under the run pushes its block up out of view
+    for (let i = 1; i <= 8; i++) {
+      const r = await api('POST', `/api/cards/${id}/send`, { text: `While that runs, note ${i}: a long enough line to take some room in the thread, so the run's block scrolls up and away.` });
+      expect(r.status, r.text).toBeLessThan(300);
+      await expect(page.getByTestId('thread-live')).toContainText(`note ${i}`, { timeout: 30_000 });
+    }
+    const thread = page.getByTestId('thread');
+    await thread.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    const pill = page.getByTestId('run-above');
+    await expect(pill).toBeVisible({ timeout: 10_000 });
+    await expect(pill).toHaveText('↑ deliver · run 1 is above');
+    await shot(page, info, 'workflow-live-strip');
+    await pill.click();
+    await expect(block).toBeInViewport();
+    await expect(block).toHaveClass(/rb-flash/);
+    await expect(pill).toBeHidden();
+
+    // Jump from the strip does the same
+    await thread.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await expect(pill).toBeVisible();
+    await strip.getByTestId('run-live-jump').click();
+    await expect(block).toBeInViewport();
+    await expect(block).toHaveClass(/rb-flash/);
+    await expect(page.locator('[data-testid="run-live"][data-kept="yes"]')).toHaveCount(1);
+
+    // Open goes to the step at work (a pick when several work side by side)
+    await expect(strip).toHaveAttribute('data-mood', 'running');
+    const open = strip.getByTestId('run-live-open');
+    await expect(open).toBeVisible({ timeout: 30_000 });
+    if ((await open.textContent())?.startsWith('Open…')) {
+      await open.click();
+      await page.getByTestId('run-live-pick').locator('button').first().click();
+    } else {
+      await open.click();
+    }
+    await expect(page.getByTestId('step-panel')).toBeVisible();
+    await page.getByTestId('step-close').click();
+    await backToThread(page);
+
+    // the run ends: the strip goes, and so does the pill
+    await expect(block).toHaveAttribute('data-state', 'done', { timeout: 150_000 });
+    await expect(strip).toHaveCount(0);
+    await thread.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await page.waitForTimeout(300);
+    await expect(pill).toBeHidden();
+  });
+});
+
+// A step that asks turns the strip amber with its question; Answer opens
+// the step on that question, answered there.
+test('the live strip says a step asks, and Answer opens it on its question', async ({ pairedPage: page, server, api, workspace }, info) => {
+  test.setTimeout(180_000);
+  fs.mkdirSync(path.join(workspace.repo, '.gummi', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(workspace.repo, '.gummi', 'workflows', 'make-and-read.yaml'), RECIPE);
+  await openSession(page, server, api, 'Answer from the strip');
+  const input = page.getByTestId('composer-input');
+  await input.click();
+  await input.fill('[workflow=make-and-read] [step-asks] make the workflow file');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('decision-option-0')).toContainText('Allow', { timeout: 45_000 });
+  await page.getByTestId('decision-option-0').click();
+
+  const strip = page.getByTestId('run-live');
+  await expect(strip).toHaveAttribute('data-mood', 'asking', { timeout: 45_000 });
+  await expect(strip.getByTestId('run-live-now')).toContainText('make asks:');
+  await expect(strip.getByTestId('run-live-now')).toContainText('Keep made.txt plain');
+  await expect(strip.getByTestId('run-live-jump')).toBeVisible();
+  await shot(page, info, 'workflow-live-strip-asks');
+  await strip.getByTestId('run-live-answer').click();
+  const panel = page.getByTestId('step-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId('step-title')).toHaveText('make');
+  const ask = panel.getByTestId('run-question');
+  await expect(ask).toContainText('Keep made.txt plain');
+  await ask.getByTestId('run-question-option-0').click();
+  await page.getByTestId('step-close').click();
+  await backToThread(page);
+  await expect(page.getByTestId('run-1')).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
+  await expect(strip).toHaveCount(0);
+});

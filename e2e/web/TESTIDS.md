@@ -180,6 +180,19 @@ and `run-question-send`; an ended run's `run-results` (`run-result-<DW-n>`),
 with `run-revert`, which opens `revert-dialog` (`revert-paths`, `revert-note`,
 `revert-cancel`, `revert-confirm`).
 
+An open run's live strip above the composer (§25.9, `workflow.js`), in
+`run-live-slot`: `run-live` (`data-run`, `data-mood`: running, asking,
+deciding, budget or paused) with `run-live-name`, `run-live-strip` (the
+recipe's entries; dropped first on a narrow page), `run-live-now` (the step
+at work and its action, a step's question, or what a paused strip says),
+`run-live-money`, and its acts `run-live-jump` (scrolls the thread to the
+block, which flashes), `run-live-open` (the step at work; with several,
+`Open… ▾` opens `run-live-pick` with one `run-live-pick-<id>` each),
+`run-live-answer` (opens the asking step on its question),
+`run-live-topup` and `run-live-resume`. At the top of the thread,
+`run-above` says the open run's block is scrolled out of view above, and
+jumps to it.
+
 A step opened beside the thread (§25.10): the `tab-step` surface holds
 `step-panel` with `step-head` (`step-crumb`, whose first entry `step-close`
 goes back to the session, `step-title`, `step-live` or `step-state`,
@@ -187,7 +200,8 @@ goes back to the session, `step-title`, `step-live` or `step-state`,
 `step-tab-brief` (a step has no terminal tab: its tree is the session's),
 their bodies `step-transcript` (`step-transcript-empty`), `step-diff`
 (`step-diff-file`, `step-diff-none`), `step-brief` (`step-artifacts`), and
-the composer `step-composer` (`step-input`, `step-send`).
+the composer `step-composer` (`step-input`, `step-send`). A step that asks
+carries its question in the panel as `run-question`, as under its row.
 
 A run's proposal on its pinned decision (§25.5): `run-proposal` with
 `proposal-tree` (the tree it runs in, and whether it holds uncommitted work),

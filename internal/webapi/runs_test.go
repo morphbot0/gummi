@@ -34,6 +34,10 @@ func TestRunShapes(t *testing.T) {
 		Results:  []RunResult{{Item: "DW-1", Verdict: "met", Checked: true}, {Item: "DW-2", Verdict: "unmet", Detail: "no v40 test"}},
 		Commits:  []string{"9f8e7d6 feat(state): keep the turns"},
 		Report:   true, CanRevert: true,
+		Live: &RunLive{
+			Name: "deliver · run 2", Mood: "asking", Who: "implement", Card: "FF-14", Question: "Resume a pruned session?",
+			Steps: []RunLiveStep{{ID: "implement", Path: "build/2/implement", Card: "FF-14", State: "asking"}},
+		},
 	}
 	golden.RequireEqual(t, marshal(t, struct {
 		Item     Item              `json:"item"`
@@ -54,6 +58,7 @@ func TestRunShapes(t *testing.T) {
 			Brief:     "You are step build/2/implement of workflow run 2…",
 			Artifacts: []StepArtifact{{Name: "design", Path: ".gummi/runs/FF-12/2/design.md", Exists: true}, {Name: "review", Path: ".gummi/runs/FF-12/2/review.json", Writes: true}},
 			Says:      "a turn to the step while it runs",
+			Question:  &StepQuestion{Question: "Resume a pruned session?", Options: []QuestionOption{{Label: "Resume (recommended)", Recommended: true}}},
 		},
 		Send:   StepSendRequest{Text: "Keep the migration idempotent."},
 		Answer: StepAnswerRequest{Answer: "Resume (recommended)"},

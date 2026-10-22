@@ -110,19 +110,35 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 			Spent: row.Spent, Line: row.Line, Flag: row.Flag, Card: row.Card, Folded: row.Folded, Steps: row.Steps,
 			Verdict: row.Verdict, Waiting: row.Waiting,
 		}
-		if q := row.Question; q != nil {
-			w.Question = &webapi.StepQuestion{Question: q.Question, Multi: q.Multi}
-			for _, o := range q.Options {
-				w.Question.Options = append(w.Question.Options, webapi.QuestionOption{Label: o.Label, Detail: o.Detail, Recommended: o.Recommended})
-			}
-		}
+		w.Question = webQuestion(row.Question)
 		out.Rows = append(out.Rows, w)
 	}
 	if p := r.Pending; p != nil {
 		out.Pending = &webapi.RunPending{Kind: p.Kind, Question: p.Question, Options: p.Options, Step: p.Step}
 	}
+	if l := r.Live; l != nil {
+		out.Live = &webapi.RunLive{
+			Name: l.Name, Mood: l.Mood, Who: l.Who, Action: l.Action, Card: l.Card,
+			Question: l.Question, Line: l.Line, CanTopUp: l.CanTopUp, CanResume: l.CanResume,
+		}
+		for _, st := range l.Steps {
+			out.Live.Steps = append(out.Live.Steps, webapi.RunLiveStep{ID: st.ID, Path: st.Path, Card: st.Card, State: st.State})
+		}
+	}
 	for _, res := range r.Results {
 		out.Results = append(out.Results, webapi.RunResult{Item: res.Item, Verdict: res.Verdict, Checked: res.Checked, Detail: res.Detail})
+	}
+	return out
+}
+
+// webQuestion maps a step's question onto the wire, nil for none.
+func webQuestion(q *threadfold.StepQuestion) *webapi.StepQuestion {
+	if q == nil {
+		return nil
+	}
+	out := &webapi.StepQuestion{Question: q.Question, Multi: q.Multi}
+	for _, o := range q.Options {
+		out.Options = append(out.Options, webapi.QuestionOption{Label: o.Label, Detail: o.Detail, Recommended: o.Recommended})
 	}
 	return out
 }
@@ -240,6 +256,9 @@ func (d *WebDocs) Step(ctx context.Context, card string) (webapi.StepFace, error
 			}
 			if st.State.Live() && now.Spent > out.Spent {
 				out.Spent = now.Spent
+			}
+			if st.State.Live() && now.Ask != nil {
+				out.Question = webQuestion(threadfold.AskQuestion(now.Ask))
 			}
 		}
 		for _, a := range d.eng.StepArtifacts(run, st) {
