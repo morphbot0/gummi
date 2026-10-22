@@ -269,7 +269,20 @@ func TestTheTreeTabWaitsWhileAStepWorksInTheTree(t *testing.T) {
 		_ = b.Do(ctx, func(m *Shell) tea.Cmd { r, _ = m.store.Run(ctx, f.ID, run.N); return nil })
 		return r != nil && r.State.Ended()
 	})
-	waitUntilTrue(t, "the session answered the report", func() bool { return !ff.Busy() })
+	// the report reaches the session as a turn of its own, sent after the
+	// run ends: wait for that turn to arrive and be answered, or a write
+	// can land while the session is busy with it and be refused, rightly.
+	waitUntilTrue(t, "the session answered the report", func() bool {
+		if ff.Busy() {
+			return false
+		}
+		for _, msg := range ff.Snapshot().Transcript {
+			if strings.Contains(msg.Content, "Run 1 (") {
+				return true
+			}
+		}
+		return false
+	})
 	d = webDocsThread(t, b, string(f.ID))
 	if _, err := d.TreeWrite(ctx, stage, "pat"); err != nil {
 		t.Fatalf("a Tree tab write once the run ended: %v", err)
