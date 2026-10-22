@@ -6971,6 +6971,14 @@ The build follows §25, with these differences.
   **Another amount** on a paused budget, the credits to top up by. A
   `repeat` at its max offers one more iteration, continue or stop; a
   runaway step offers carry on or drop; a spent pool offers a top-up.
+- **An answer names the decision it answers.** A run raises one decision
+  after another, so `WorkflowAnswer` takes the decision's id, and an
+  answer to a decision the run has since replaced is refused, saying
+  what the run asks now. The board's picker, the web page (through it)
+  and the headless driver pass the id of the decision they read.
+- **In the headless driver a number is always an option**, on every
+  decision; another amount to top up by is spelt with its unit, `300cr`
+  or `$3`, and a bare number past the options is refused.
 
 **Recipes.**
 - **Ids are unique across the whole recipe**, not only among siblings,
@@ -6983,8 +6991,34 @@ The build follows §25, with these differences.
   iteration 1 of `build` is `build/1/reviews/review-a`.
 
 **Running.**
+- **A process conducts only the runs it holds.** A tick conducts a
+  session's run only while its process holds the session's card lock,
+  which it keeps while a run is open or queued, so two gummis never
+  conduct one run and a quit's parking never reaches a run another gummi
+  is conducting. The headless driver conducts its own session's run
+  alone.
 - **The person's Pause stops the steps' backends**, as a quit does.
   Resume starts them again, each with a turn saying the run carries on.
+- **The envelope is a ceiling across a run's steps.** A step's own cap is
+  what the pool had left when its backend spawned, so every step's spend
+  re-checks the session's pool: once it is spent the run pauses at once
+  and every live step's backend stops, as a Pause does. On a spent pool a
+  step's cap is nothing, and no step backend spawns.
+- **A step is briefed only into a running run.** Its brief goes under the
+  run lock, once its backend is up, and only while the step is live and
+  the run running and not stopping; a stop, pause, drop or join that came
+  while the backend spawned leaves the step unbriefed, and a paused run
+  briefs it when it carries on. A message to a live step of a paused run
+  is refused until the run is resumed.
+- **A session is not closed under its run.** A hand-off is refused while
+  a run is open or queued, as it is while the session's agent is
+  mid-turn, so a run's report always reaches the session it was for; a
+  run still only proposed is withdrawn by the hand-off. Landing was
+  already held (§25.8).
+- **The run's tree is a person's to write only between its steps.** The
+  Tree tab refuses a write, and says why, while the open run has a step
+  under way or any step's agent is answering a follow-up; Revert run
+  waits on the same, and on the session's own agent mid-turn.
 - **A step's card stays open after its run ends**, so a person can go on
   talking to the step's agent (§25.10). It stays hidden from the board.
 - **Revert run is offered from the faces only.** There is no
@@ -6992,6 +7026,19 @@ The build follows §25, with these differences.
 - **Revert run stays offered after a revert.** The block's files are
   what the run left changed, which a revert does not rewrite. A second
   revert lists whatever differs from the run's start at that moment.
+- **A revert is of what its preview listed.** The preview names the
+  snapshot it was read from, and the confirm — on the page and in the
+  terminal — sends it back; a tree that has changed since is refused,
+  and the person reads the preview again.
+- **Ignored files on disk at a run's start are not the run's.** A run
+  lists them when it starts (`worktree.Ignored`, kept in its directory)
+  and every snapshot it takes keeps them out whatever `.gitignore` says
+  later: an edit of `.gitignore` under the run neither puts their
+  contents in its diff nor lets a revert delete them.
+- **A session's spec revisions with no spec file move to spec 0** on the
+  upgrade to workflows, which no spec is, so a spec started later begins
+  at revision 1. The upgrade reads the version inside its own
+  transaction, so two gummis opening an old database run it once.
 
 **In the thread.**
 - **A run item's `Rev` is a hash of what the block draws**, not a

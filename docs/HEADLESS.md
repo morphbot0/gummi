@@ -79,9 +79,16 @@ the length of the command — not a lock on the whole `.gummi` workspace.
 Headless runs on different cards, and a run beside an open board, proceed side
 by side; two writers on the same card never do: the second is refused
 ("another gummi process is already driving this card"). The board holds the
-lock of every session whose agent is running the same way, and takes the
-workspace's one exclusive lock only against a second board. A board open
-beside a headless run shows the session as driven elsewhere and follows it.
+lock of every session whose agent is running the same way, and of every
+session whose workflow run it conducts, for as long as that run is open or
+queued; it takes the workspace's one exclusive lock only against a second
+board. A board open beside a headless run shows the session as driven
+elsewhere and follows it.
+
+A process conducts only the workflow runs of the sessions whose lock it
+holds. `run` and `resume` conduct their own session's run and no other: a
+run another session has open, which a board or another headless run is
+conducting, is left to it — neither parked nor ticked.
 
 Cards of the retired workflow kinds (FD, BG, RS) stay readable — `status`,
 `spec`, `diff`, `merge` of one already verified — but nothing drives them:
@@ -148,12 +155,16 @@ A `question` event's `kind` says whose question it is:
 | `workflow_plan` | a planner step revised the run's remaining steps — always a person's call (`step` names it) | `--answer "Allow the revised plan"` or `"Keep the plan"`; other words go to the planner step |
 | `workflow_max` | a `repeat` reached its `max` without its `until`, and its `onMax` is `pause` (`step` names it) | `--answer "Run one more iteration"`, `"Continue"` or `"Stop the run"` |
 | `workflow_runaway` | a step ran past three times its estimate (`step` names it) | `--answer "Let it carry on"` (three estimates more) or `"Drop it"` (the step fails) |
-| `workflow_budget` | the session's pool is spent and the run paused, or the forecast says it will be before the run finishes (the run keeps going) | `--envelope <dollars>` (the `next` line suggests one) tops up and carries a paused run on; or `--answer "Top up the session"` (by the amount it names), a number of credits to top up by, `"Continue"` (a forecast only) or `"Stop the run"` |
+| `workflow_budget` | the session's pool is spent and the run paused, or the forecast says it will be before the run finishes (the run keeps going) | `--envelope <dollars>` (the `next` line suggests one) tops up and carries a paused run on; or `--answer "Top up the session"` (by the amount it names), another amount to top up by with its unit — `300cr` in credits or `$3` in dollars — `"Continue"` (a forecast only) or `"Stop the run"` |
 | `workflow_ask` | a step's own `ask_user` (`step` names it); the step waits | `--answer "<text>"`: one of `options`, or your own words |
-| `workflow_paused` | the session's run is paused (a person paused it, or the process running it stopped) | a bare `resume <id>` resumes it |
+| `workflow_paused` | the session's run is paused (a person paused it, or the process running it stopped) | a bare `resume <id>` resumes it; `--answer` is refused, since nothing asks anything |
 
 A run's decision may also be answered by an option's number (`--answer 1`),
-and an option's label in any case. Every `workflow_*` question also carries
+on every kind of decision, and an option's label in any case. A number is
+always an option, never an amount: a bare number past the options is
+refused, and an amount on `workflow_budget` is spelt with its unit (`300cr`,
+`$3`). An answer is to the decision the resume read: one the run has
+replaced since is refused, saying what the run asks now. Every `workflow_*` question also carries
 `run` (the run's number) and, beside it for one release, the kind a crew's
 stop of the same sort had as `crew_kind` (`crew_plan`, `crew_widen`,
 `crew_question`, `crew_budget`, `crew_node`, `crew_paused`), with `crew` and
@@ -178,7 +189,10 @@ from the store. Then:
 - `--answer "<text>"` answers the open question — the session's own
   (through the same round trip the board's picker rides, and the card's
   history records who answered), or else the run's open decision, or else a
-  step's question. With nothing open it is refused.
+  step's question. With nothing open it is refused before anything moves —
+  a paused run included, which a bare `resume` runs again. A run decision
+  answered on a run the process before left running carries the run on,
+  unless something else still holds it (the money, or another decision).
 - `"<message>"` — a second argument — is the session's next turn. Refused
   while a question is open.
 - `--envelope N` raises the session's envelope, and the workflow
@@ -233,8 +247,10 @@ gummi handoff FF-042
 ```
 
 It stamps `handed_off` and closes the card with the landing waived and
-**every other floor intact**: an open workflow run and open diff annotations still
-refuse it. A session's loose work is not committed for it — commit what you
+**every other floor intact**: an open diff annotation still refuses it, and so
+does a workflow run open or queued on the session — a session is not closed
+under its run, as it is not under its agent mid-turn; let the run finish or
+stop it first. A run still only proposed is withdrawn. A session's loose work is not committed for it — commit what you
 mean to keep first (`gummi commit`).
 
 What happens to the branch depends on whether it is the only copy of the

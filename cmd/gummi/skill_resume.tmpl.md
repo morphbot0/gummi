@@ -13,7 +13,9 @@ need to choose yourself.
   `workflow_budget`), or a step's own question (`workflow_ask`). For a run
   decision, one of the event's `options` (or its number) decides it; other
   words to a proposal reach the session as feedback, and to a revised plan
-  the planner step.
+  the planner step. A number is always an option: a top-up of another
+  amount is spelt with its unit, `300cr` or `$3`. With nothing open — a
+  `workflow_paused` stop included — `--answer` is refused.
 - `"<message>"` (a second argument) — the session's next turn. Refused while a
   question is open: answer it with `--answer` instead.
 - `--envelope <dollars>` — clears an **`exhausted`** stop; it must exceed the
