@@ -369,6 +369,7 @@ send Enter
 expect_long "the run is one block in the thread" '┌ workflow deliver · run 1' 20
 expect_long "the implementer's question is drawn under its step" 'implement asks: Keep made\.txt plain' 30
 expect "the step's row asks"                   '\? ↺ 1 +implement +implementer'
+expect "the live strip says the step asks"     '\? deliver · run 1 +implement asks: Keep made\.txt plain.*alt\+w jump'
 refute "the run's notes stay out of the transcript" 'workflow: run 1'
 tmux send-keys -t $S M-w; sleep 0.6
 expect "alt+w puts the cursor on the asking step" '▸ \? ↺ 1 +implement'
@@ -412,6 +413,11 @@ send Enter
 expect_long "its proposal is the pinned decision"  'workflow run 1 · allow run' 20
 send Enter
 expect_long "a step at work is lit and spins"      '┃ [^ ] +design +contractor' 30
+# the live strip stands on the composer while the run is open
+expect "the live strip names the run and its step" '[^ ] deliver · run 1 +design ✓? ?›.*· design .*alt\+w jump'
+tmux send-keys -t $S M-w; sleep 0.6
+expect "alt+w jumps to the block, the cursor on the step at work" '▸ [^ ] +design +contractor'
+send Escape
 # both reviews at once: two lit rows, one each
 both=0
 for i in $(seq 1 200); do
@@ -423,6 +429,7 @@ if [ "$both" = 1 ]; then PASS=$((PASS+1)); printf '  ok    %s\n' "both reviews r
 else FAIL=$((FAIL+1)); FAILED_NAMES+=("both reviews at work"); printf '  FAIL  %s\n' "both reviews read as at work, side by side"; dump; fi
 expect "…while the step before them reads done"  '│ ✓ ↺ 1 +implement +implementer'
 expect_long "the run reports to the session"     'has reported' 90
+refute "the live strip goes with the run"       'alt\+w jump$|alt\+w jump '
 # its report has pushed the block up the thread: alt+w brings it back
 tmux send-keys -t $S M-w; sleep 0.6
 expect "the ended run's block"                   'deliver · run 1 .*done · \$'
