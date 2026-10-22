@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,8 +11,9 @@ import (
 )
 
 // A run mints a session, sends the prompt as its first turn, and is done
-// as soon as the session is idle with no crew open — with the session's
-// reply on the stream and its crew pre-authorised up to the envelope.
+// as soon as the session is idle with no workflow run open — with the
+// session's reply on the stream and its runs pre-authorised up to the
+// envelope.
 func TestRunIsDoneWhenTheSessionIsIdle(t *testing.T) {
 	h := newHarness(t, newSessionFake("reply"))
 	out, f := h.run(Options{Envelope: 500, Ref: "JIRA-7"}, "tidy the README")
@@ -25,8 +27,8 @@ func TestRunIsDoneWhenTheSessionIsIdle(t *testing.T) {
 	if created == nil || created["preauth"] != float64(500) || created["ref"] != "JIRA-7" {
 		t.Fatalf("created event %v", created)
 	}
-	if pre, _ := h.store.CrewPreauth(context.Background(), f.ID); pre != 500 {
-		t.Fatalf("crew pre-authorisation = %d, want the envelope", pre)
+	if pre, _ := h.store.WorkflowPreauth(context.Background(), f.ID); pre != 500 {
+		t.Fatalf("workflow pre-authorisation = %d, want the envelope", pre)
 	}
 	if r := h.last("reply"); r == nil || r["text"] != "done: tidy the README" {
 		t.Fatalf("reply event %v; stream %v", r, h.eventKinds())
@@ -107,61 +109,69 @@ func TestResumeSendsAMessageAsTheNextTurn(t *testing.T) {
 	}
 }
 
-// A session that starts a crew whose plan fits the pre-authorisation runs
-// it without asking anyone: the crew plans, runs, reviews and reports to
-// the session, and the run is done once the session has answered the
-// report — not in the moment between the crew ending and its report
-// arriving.
-func TestAPreauthorisedCrewRunsToItsReport(t *testing.T) {
-	h := newHarness(t, newSessionFake("crew"))
-	out, f := h.run(Options{Envelope: 2000}, "make the crew file")
+// A session that proposes a workflow run estimated within the
+// pre-authorisation runs it without asking anyone: the steps run and the
+// run reports to the session, and the driver is done once the session has
+// answered the report — not in the moment between the run ending and its
+// report arriving. The stream carries each state as a workflow event and,
+// beside it, as the crew event it replaces.
+func TestAPreauthorisedRunRunsToItsReport(t *testing.T) {
+	h := newHarness(t, newSessionFake("workflow"))
+	out, f := h.run(Options{Envelope: 2000}, "make the file")
 	if out.Status != StatusDone {
 		t.Fatalf("outcome %+v, want done; stream %v", out, h.eventKinds())
 	}
 	if q := h.last("question"); q != nil {
-		t.Fatalf("a plan inside the pre-authorisation asked: %v", q)
+		t.Fatalf("a run inside the pre-authorisation asked: %v", q)
 	}
-	states := strings.Join(h.crewStates(), " ")
-	for _, want := range []string{"proposed", "running", "finished"} {
-		if !strings.Contains(states, want) {
-			t.Fatalf("crew states %q lack %s", states, want)
-		}
+	if states := strings.Join(h.runStates(), " "); !strings.Contains(states, "running") || !strings.HasSuffix(states, "done") {
+		t.Fatalf("workflow states %q", states)
+	}
+	if states := strings.Join(h.crewStates(), " "); !strings.Contains(states, "running") || !strings.HasSuffix(states, "finished") {
+		t.Fatalf("the crew events beside them read %q", states)
+	}
+	if ev := h.last("workflow"); ev["run"] != float64(1) || ev["recipe"] != "make-file" || ev["estimate"] != float64(150) || ev["report"] == "" {
+		t.Fatalf("the ended run's event %v", ev)
 	}
 	h.fake.mu.Lock()
 	got := strings.Join(h.fake.session, "\n---\n")
 	h.fake.mu.Unlock()
-	if !strings.Contains(got, "The crew has reported") {
-		t.Fatalf("the session never got the crew's report:\n%s", got)
+	if !strings.Contains(got, "Workflow run 1 has reported") {
+		t.Fatalf("the session never got the run's report:\n%s", got)
 	}
-	if r := h.last("reply"); r == nil || !strings.HasPrefix(r["text"].(string), "ok: The crew has reported") {
+	if r := h.last("reply"); r == nil || !strings.HasPrefix(r["text"].(string), "ok: Workflow run 1 has reported") {
 		t.Fatalf("the last reply is not the session's answer to the report: %v\n%s", r, h.buf.String())
 	}
-	c, _ := h.store.SessionCrews(context.Background(), f.ID)
-	if len(c) != 1 || c[0].State != domain.CrewFinished {
-		t.Fatalf("crews %+v", c)
+	run, _ := h.store.Run(context.Background(), f.ID, 1)
+	if run == nil || run.State != domain.RunDone || run.ValidatedTree == "" {
+		t.Fatalf("run %+v", run)
+	}
+	if _, err := os.Stat(filepath.Join(h.root, ".gummi", "worktrees", string(f.ID), "out.txt")); err != nil {
+		t.Fatalf("the run's change is not in the session's tree: %v", err)
 	}
 }
 
-// A plan over the pre-authorisation is the person's: the run stops on it
-// and offers the crew's own answers. A run sets the pre-authorisation to
-// the envelope, which bounds every crew it can start, so this is the case
-// where a person lowered it on the board while the session ran.
-func TestAPlanOverThePreauthorisationNeedsYou(t *testing.T) {
-	h := newHarness(t, newSessionFake("crew"))
+// A proposal over the pre-authorisation is the person's: the driver stops
+// on it, offering the run's own answers under the workflow's kind and the
+// crew's beside it. A resume in another process answers it — in the
+// caller's case, which is mapped onto the option's — and the run goes on
+// to its report.
+func TestAProposalOverThePreauthorisationNeedsYou(t *testing.T) {
+	h := newHarness(t, newSessionFake("workflow"))
 	ctx := context.Background()
 	d := h.driver(Options{Envelope: 2000})
-	f, err := d.Create(ctx, "make the crew file")
+	f, err := d.Create(ctx, "make the file")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.eng.SetCrewPreauth(ctx, f.ID, 100); err != nil {
+	if err := h.store.SetWorkflowPreauth(ctx, f.ID, 100); err != nil {
 		t.Fatal(err)
 	}
 	ff, err := h.eng.OpenFreeform(ctx, f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ff.KickoffWith(ctx, "make the crew file"); err != nil {
+	if err := ff.KickoffWith(ctx, "make the file"); err != nil {
 		t.Fatal(err)
 	}
 	out, err := d.loop(ctx, f.ID)
@@ -169,50 +179,73 @@ func TestAPlanOverThePreauthorisationNeedsYou(t *testing.T) {
 		t.Fatalf("outcome %+v, %v; want needs_you; stream %v", out, err, h.eventKinds())
 	}
 	q := h.last("question")
-	if q == nil || q["kind"] != "crew_plan" || q["recommended"] != "Run the crew" || q["crew"] != float64(1) {
+	if q == nil || q["kind"] != "workflow_proposal" || q["crew_kind"] != "crew_plan" || q["recommended"] != "Allow" ||
+		q["run"] != float64(1) || q["crew"] != float64(1) {
 		t.Fatalf("question %v", q)
 	}
 	h.reopen()
-	answer := "Run the crew"
+	answer := "allow"
 	out, err = h.driver(Options{}).Resume(ctx, f.ID, ResumeInput{Answer: &answer})
 	if err != nil || out.Status != StatusDone {
 		t.Fatalf("resume = %+v, %v; want done; stream %v", out, err, h.eventKinds())
 	}
+	if run, _ := h.store.Run(ctx, f.ID, 1); run == nil || run.State != domain.RunDone {
+		t.Fatalf("run %+v", run)
+	}
 }
 
-// A widening of an approved plan always goes to the person, whatever the
-// pre-authorisation: the run stops on it while the crew is running, and a
-// resume — another process, which first resumes the crew the dead one left
-// running — approves it, and the crew carries the widened plan to its
-// report.
-func TestAWideningNeedsYouAndAResumeApprovesIt(t *testing.T) {
-	sf := newSessionFake("crew")
-	sf.widen = true
+// A step's own question stops the driver with the step named; a resume in
+// another process — which first runs again the run the dead one left
+// parked — answers it on the step's card, and the run goes on.
+func TestAStepsQuestionNeedsYouAndAResumeAnswersIt(t *testing.T) {
+	sf := newSessionFake("workflow")
+	sf.stepAsks = true
 	h := newHarness(t, sf)
-	out, f := h.run(Options{Envelope: 2000}, "make the crew file")
+	out, f := h.run(Options{Envelope: 2000}, "make the file")
 	if out.Status != StatusNeedsYou {
 		t.Fatalf("outcome %+v, want needs_you; stream %v", out, h.eventKinds())
 	}
 	q := h.last("question")
-	if q == nil || q["kind"] != "crew_widen" || !strings.Contains(q["q"].(string), "Widen the plan?") {
+	if q == nil || q["kind"] != "workflow_ask" || q["step"] != "make" || q["q"] != "Plain text or markdown?" {
 		t.Fatalf("question %v", q)
 	}
 
 	h.reopen()
-	answer := "Widen the plan"
+	answer := "plain"
 	out, err := h.driver(Options{}).Resume(context.Background(), f.ID, ResumeInput{Answer: &answer})
 	if err != nil || out.Status != StatusDone {
 		t.Fatalf("resume = %+v, %v; want done; stream %v", out, err, h.eventKinds())
 	}
-	crews, _ := h.store.SessionCrews(context.Background(), f.ID)
-	if len(crews) != 1 || crews[0].State != domain.CrewFinished || crews[0].Approved.Budget != 600 {
-		t.Fatalf("crew after the widening %+v", crews)
+	if run, _ := h.store.Run(context.Background(), f.ID, 1); run == nil || run.State != domain.RunDone {
+		t.Fatalf("run %+v", run)
+	}
+}
+
+// The caller's answer is put in the decision's own words: a number picks
+// an option, a label matches whatever its case, and anything else — an
+// "always allow", feedback — is passed on as given.
+func TestAnAnswerIsMappedOntoTheDecisionsWords(t *testing.T) {
+	dec := &domain.RunDecision{Kind: domain.RunDecideProposal, Options: []string{"Allow", "Always allow up to 500", "Deny"}}
+	for in, want := range map[string]string{
+		"2":                     "Always allow up to 500",
+		"deny":                  "Deny",
+		"always allow up to $3": "Always allow up to $3",
+		"run only the tests":    "run only the tests",
+		"  ALLOW ":              "Allow",
+	} {
+		if got := workflowAnswer(dec, in); got != want {
+			t.Errorf("workflowAnswer(%q) = %q, want %q", in, got, want)
+		}
+	}
+	budget := &domain.RunDecision{Kind: domain.RunDecideBudget, Options: []string{"Top up the session", "Continue"}}
+	if got := workflowAnswer(budget, "2"); got != "2" {
+		t.Errorf("a budget decision's number is a top-up, not an option: %q", got)
 	}
 }
 
 // A run that spends its envelope stops as exhausted, with a raise in its
 // next command; a resume with a higher envelope tells the session to carry
-// on and raises the crew pre-authorisation with it.
+// on and raises the workflow pre-authorisation with it.
 func TestExhaustionStopsTheRunAndARaiseCarriesOn(t *testing.T) {
 	h := newHarness(t, newSessionFake("spend"))
 	// the first turn spends ten times the envelope
@@ -232,7 +265,7 @@ func TestExhaustionStopsTheRunAndARaiseCarriesOn(t *testing.T) {
 	if raised := h.last("envelope"); raised == nil || raised["to"] != float64(20000) {
 		t.Fatalf("envelope event %v", raised)
 	}
-	if pre, _ := h.store.CrewPreauth(context.Background(), f.ID); pre != 20000 {
+	if pre, _ := h.store.WorkflowPreauth(context.Background(), f.ID); pre != 20000 {
 		t.Fatalf("pre-authorisation = %d after the raise, want 20000", pre)
 	}
 	if r := h.last("reply"); r == nil || !strings.HasPrefix(r["text"].(string), "ok: Your envelope was raised") {

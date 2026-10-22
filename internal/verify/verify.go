@@ -1,8 +1,8 @@
 // Package verify runs check commands in a worktree and reports pass/fail
-// with output. Its caller is a session's crew: a node's own checks before
-// it lands, and the plan's done-when checks at the final review and on a
-// re-run from the card's head (DESIGN §24). The commands come from the
-// crew's plan, which a person approved.
+// with output. Its caller is a session's workflow run: the done-when
+// checks of the spec it froze, at the run's end, at a repeat's
+// `until: checks`, and on a person's re-check (DESIGN §25.6). The commands
+// come from the spec, which the person allowed the run on.
 package verify
 
 import (

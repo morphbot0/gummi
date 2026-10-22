@@ -27,7 +27,7 @@ func ParseLandMethod(s string) (LandMethod, error) {
 }
 
 // LandMethods lists the methods a local landing of f may use. A card with a
-// parent session (a crew's) lands on the session's branch as a squash only.
+// parent session (a legacy delegated card) lands on the session's branch as a squash only.
 func (f *Feature) LandMethods() []LandMethod {
 	if f.ParentID != "" {
 		return []LandMethod{LandSquash}

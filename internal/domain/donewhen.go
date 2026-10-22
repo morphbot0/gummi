@@ -6,17 +6,17 @@ import (
 	"strings"
 )
 
-// DoneWhen is one item of a done-when list — a session spec's, copied
-// into the crew doc a crew is judged against (DESIGN §24.4): a statement
+// DoneWhen is one item of a session spec's done-when list, what a
+// workflow run on that spec is judged against (DESIGN §25.6): a statement
 // that must be true for the work to be met, and how it is checked.
 // Exactly one of Check (a command run in the session's tree) or Judge (a
-// statement the crew's final review reads against the combined diff)
-// says how.
+// statement a step reads against the run's diff, answering MET: or
+// UNMET:) says how.
 type DoneWhen struct {
-	ID    string `yaml:"id"`              // DW-1, DW-2, …; stable once the plan is approved
+	ID    string `yaml:"id"`              // DW-1, DW-2, …; stable once a run has frozen the spec
 	Says  string `yaml:"says"`            // the statement, in the reader's words
 	Check string `yaml:"check,omitempty"` // a shell command that exits 0 when met
-	Judge bool   `yaml:"judge,omitempty"` // judged by the final review against the combined diff
+	Judge bool   `yaml:"judge,omitempty"` // judged by a step against the run's diff
 }
 
 // Means names how the item is shown to hold: "check" or "judge".

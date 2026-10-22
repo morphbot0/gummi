@@ -84,8 +84,12 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 			case "gummi":
 				// a turn gummi sent for the session's objective, never the person's
 				label = s.Faint.Render("gummi · objective")
+			case "workflow":
+				// a workflow run's turn — the report a session gets, a
+				// step's brief — never the person's
+				label = s.Faint.Render("workflow")
 			case "crew":
-				// the session's crew reporting back, never the person's
+				// an old crew reporting back, never the person's
 				label = s.Faint.Render("crew · report")
 			}
 			// EVERY answer to an ask carries its outcome, not just the

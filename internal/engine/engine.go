@@ -1,7 +1,7 @@
 // Package engine is gummi's orchestrator: it runs each session's agent in
-// its card's worktree (freeformsession.go), conducts a session's crew —
-// its planner, its nodes on their own branches, their reviews and the
-// report (crew*.go, DESIGN §24) — fires schedules and heartbeats, ticks
+// its card's worktree (freeformsession.go), conducts a session's workflow
+// runs — their steps in the session's own tree, the end checks and the
+// report (workflow*.go, DESIGN §25) — fires schedules and heartbeats, ticks
 // stacks, runs the skill curator, routes turns and streams typed
 // activity to the faces.
 //
@@ -175,9 +175,6 @@ type Engine struct {
 	// holds its card's worktree, its per-card lock and its envelope (see
 	// freeformsession.go).
 	freeform map[domain.FeatureID]*FreeformSession
-	// crews is the crews' runtime state (crew.go), made on first use.
-	crewOnce sync.Once
-	crews    *crewRuntime
 	// workflows is the workflow runs' runtime state (workflow.go).
 	workflows *workflowRuntime
 	// freeformClosed keeps the conversation of each freeform card whose
@@ -228,7 +225,7 @@ type Engine struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	// briefs joins the detached one-shot turns (goBrief: an objective's
-	// audit, a crew's planner, node and review turns), so Close waits for
+	// audit, a workflow run's end), so Close waits for
 	// every one before the freeform teardown saves the conversation and
 	// drops the card lock.
 	briefs sync.WaitGroup
@@ -966,10 +963,9 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 	return nil
 }
 
-// envelopeRaised tells a session's crew its pool grew (§24.7a).
+// envelopeRaised tells a session's workflow run its pool grew (§24.7a).
 func (e *Engine) envelopeRaised(ctx context.Context, f domain.Feature) {
-	if f.IsFreeform() && !f.InCrew() {
-		e.crewEnvelopeRaised(ctx, f.ID)
+	if f.IsFreeform() && !f.IsChild() {
 		e.workflowEnvelopeRaised(ctx, f.ID)
 	}
 }

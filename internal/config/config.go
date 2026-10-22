@@ -1,7 +1,8 @@
 // Package config loads .gummi/config.yaml — the repo-controlled gummi
 // settings: the permission and sandbox modes, the managed repositories,
 // environment probes, instructions, hooks, co-authors and the skill
-// curator. A crew's checks live in its plan's done-when items, not here.
+// curator. A workflow run's checks live in its spec's done-when items, not
+// here.
 package config
 
 import (

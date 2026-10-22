@@ -84,10 +84,6 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 		return o.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
 	}
 	if !f.HandedOff() {
-		// a session's open crew is still working on its branch
-		if why := o.Eng.CrewHolds(ctx, id); why != "" {
-			return o.fail(ctx, string(id), fmt.Errorf("%s: %s", id, why))
-		}
 		// a workflow run is still changing its tree (DESIGN §25.8)
 		if why := o.Eng.RunHolds(ctx, id); why != "" {
 			return o.fail(ctx, string(id), fmt.Errorf("%s: %s", id, why))
@@ -125,9 +121,9 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 	// reason before any git mutation.
 	// the branch this card actually lands on, read off the manager it
 	// resolved to rather than written as the literal "main": a `master`
-	// repo is one case, and a crew's card — whose manager is rooted at its
-	// session's worktree, so it lands on the session's branch — is the
-	// other.
+	// repo is one case, and a legacy delegated card — whose manager is
+	// rooted at its session's worktree, so it lands on the session's
+	// branch — is the other.
 	base := wt.BaseBranch(ctx)
 	if dirty, err := wt.MainTrackedDirty(ctx); err != nil {
 		return o.fail(ctx, string(id), err)

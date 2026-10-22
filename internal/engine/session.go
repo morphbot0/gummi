@@ -49,10 +49,6 @@ const (
 	// the session machinery — a goal's lead — so no other Event would
 	// ever cover it. A UI surface should reload rows.
 	EventCardCreated EventKind = "card_created"
-	// EventCrew fires when something a crew's conductor reads changed: a
-	// node's turn ended, a decision was answered, the planner finished.
-	// The driving loop ticks the session's crew on it (Engine.CrewTick).
-	EventCrew EventKind = "crew"
 	// EventWorkflow fires when something a workflow run's conductor reads
 	// changed: a step's turn ended, a decision was answered, a run was
 	// proposed or allowed. The driving loop ticks the runs on it

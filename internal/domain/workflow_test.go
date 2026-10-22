@@ -169,14 +169,14 @@ func TestStepCardLink(t *testing.T) {
 	sess, _ := NewID(KindFreeform, 1)
 	card, _ := NewID(KindFreeform, 2)
 	f := Feature{ID: card, Num: 2, Kind: KindFreeform, Title: "x", Slug: "x", Stage: StageOpen, ParentID: sess}
-	f.Crew = StepLink{Session: sess, Run: 3, Path: "build/2/implement"}.Link()
+	f.Child = StepLink{Session: sess, Run: 3, Path: "build/2/implement"}.Link()
 	if err := f.Validate(); err != nil {
 		t.Fatalf("a step's card does not validate: %v", err)
 	}
-	if l := f.Step(); l.Session != sess || l.Run != 3 || l.Path != "build/2/implement" || !f.InRun() || !f.InCrew() {
+	if l := f.Step(); l.Session != sess || l.Run != 3 || l.Path != "build/2/implement" || !f.IsChild() || f.BranchName() != "" {
 		t.Errorf("step link = %+v", l)
 	}
-	f.Crew.Node = "has space"
+	f.Child.Node = "has space"
 	if err := f.Validate(); err == nil {
 		t.Error("a step path with a space validated")
 	}

@@ -2507,9 +2507,8 @@ func trackedChanges(ctx context.Context, dir string) ([]string, error) {
 
 // ErrNothingToLand is what a landing returns, through errors.Is, when the
 // branch brings nothing: no commits of its own, or content already on the
-// base. A caller for whom that is no failure — a crew node that wrote
-// nothing, a crew whose work was already there — tests for it instead of
-// reading the sentence.
+// base. A caller for whom that is no failure — a branch whose work was
+// already there — tests for it instead of reading the sentence.
 var ErrNothingToLand = errors.New("nothing to land")
 
 type nothingToLandError string

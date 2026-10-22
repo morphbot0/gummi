@@ -26,9 +26,10 @@ const (
 	// answers that remain — but the thing it reports has already
 	// happened, so its head is a statement rather than a question.
 	decisionClosed decisionKind = "closed"
-	// decisionCrew is a session's crew asking its person: run this plan,
-	// widen it, or a node's question the spec does not settle (§24).
-	decisionCrew decisionKind = "crew"
+	// decisionWorkflow is a session's workflow run asking its person:
+	// allow it, its revised plan, a loop at its max, a runaway step or
+	// the money (§25.5, §25.7).
+	decisionWorkflow decisionKind = "workflow"
 )
 
 // threadDecision is a render-time projection, not a second stored model.
@@ -42,8 +43,8 @@ type threadDecision struct {
 	question string
 	actions  []nextAction
 	ask      *engine.Ask
-	// crew is set on a decisionCrew: the crew decision it projects.
-	crew *domain.CrewDecision
+	// run is set on a decisionWorkflow: the run whose decision it projects.
+	run *domain.Run
 }
 
 // liveSessionFor is the card's session, if one is open: every place that
@@ -74,7 +75,7 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		// routes a foreign card's line to its consult session instead.
 		return nil
 	}
-	if d := crewDecision(r); d != nil {
+	if d := workflowDecision(r); d != nil {
 		return d
 	}
 	if sess := liveSessionFor(m.engine, r); sess != nil {
@@ -761,10 +762,10 @@ func (m *Shell) proseAnswersAsk() bool {
 // is confirmed live — a line typed with nothing to answer stays put
 // rather than vanishing under the notice explaining why it wasn't sent.
 func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
-	if d := crewDecision(r); d != nil {
+	if d := workflowDecision(r); d != nil {
 		m.threadInput.Reset()
 		m.threadFreeForm = false
-		return m.answerCrew(r, d, text)
+		return m.answerWorkflow(r, d, text)
 	}
 	sess := liveSessionFor(m.engine, r)
 	if sess == nil {
@@ -807,8 +808,8 @@ func (m *Shell) answerDecisionAt(r featureRow, d *threadDecision, cursor int, pi
 			return nil
 		}
 		answer := decisions.AnswerText(d.ask, cursor, picked)
-		if d.crew != nil {
-			return m.answerCrew(r, d, answer)
+		if d.run != nil {
+			return m.answerWorkflow(r, d, answer)
 		}
 		if answer == "" {
 			// Belt to parseAsk's braces. Nothing that reaches here should

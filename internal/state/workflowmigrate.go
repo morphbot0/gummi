@@ -133,8 +133,8 @@ func migrateToWorkflows(db *sql.DB, root string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE crews SET state = ?, pending = '', stopping = 0,
 		report = CASE WHEN report = '' THEN ? ELSE report END, updated_at = ?
 		WHERE state IN (?,?,?,?)`,
-		string(domain.CrewPartial), crewStoppedOnUpgrade, time.Now().UTC().Format(timeFmt),
-		string(domain.CrewProposed), string(domain.CrewRunning), string(domain.CrewPaused), string(domain.CrewReviewing)); err != nil {
+		legacyCrewPartial, crewStoppedOnUpgrade, time.Now().UTC().Format(timeFmt),
+		legacyCrewProposed, legacyCrewRunning, legacyCrewPaused, legacyCrewReviewing); err != nil {
 		return err
 	}
 	// PRAGMA user_version is transactional: a migration that fails here

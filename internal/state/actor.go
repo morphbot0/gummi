@@ -44,9 +44,10 @@ func PersonName(actor string) string {
 // as gummi's and never as the person's.
 const ActorObjective = "objective"
 
-// ActorCrew is the actor of the turns a crew sends (DESIGN §24): a node's
-// brief and reworks, and the report its session gets. A thread draws them
-// as the crew's.
+// ActorCrew is the actor of the turns a crew sent (DESIGN §24) before
+// workflows replaced crews: a node's brief and reworks, and the report its
+// session got. Nothing sends one now; an old transcript still carries
+// them, and a thread draws them as the crew's.
 const ActorCrew = "crew"
 
 // ActorWorkflow is the actor of the turns a workflow run sends (DESIGN

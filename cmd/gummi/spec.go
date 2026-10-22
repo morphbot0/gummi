@@ -53,9 +53,9 @@ func runSpec(fl cliFlags, args []string) error {
 // dumpSessionSpec prints a session's spec n, its only spec when n is 0,
 // or with list the specs themselves.
 func dumpSessionSpec(ctx context.Context, store *state.Store, root string, f domain.Feature, n int, list bool) error {
-	// A crew's or a step's card keeps no specs: its session does.
-	if f.InCrew() {
-		return fmt.Errorf("%s works for session %s: read that session's specs (`gummi spec %s`)", f.ID, f.Crew.Of, f.Crew.Of)
+	// A step's card (or an old crew's) keeps no specs: its session does.
+	if f.IsChild() {
+		return fmt.Errorf("%s works for session %s: read that session's specs (`gummi spec %s`)", f.ID, f.Child.Of, f.Child.Of)
 	}
 	specs, err := store.SessionSpecs(ctx, f.ID)
 	if err != nil {

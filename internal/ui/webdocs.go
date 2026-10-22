@@ -253,7 +253,7 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 	}
 	path := d.artifact()
 	if d.f.IsFreeform() && path == "" {
-		return webapi.Spec{None: true, Session: true, Why: "This session has no spec. Most never need one; a crew does, because it is judged against the spec's done-when items."}, nil
+		return webapi.Spec{None: true, Session: true, Why: "This session has no spec. Most never need one; a workflow run does, because it is judged against the spec's done-when items."}, nil
 	}
 	if path == "" {
 		return webapi.Spec{None: true, Why: "no " + artifactNoun(d.f.Kind) + " yet: it is written when the card's first stage runs"}, nil

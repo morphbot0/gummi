@@ -10,11 +10,12 @@ import (
 )
 
 // runResume implements `gummi resume <id|ref> [--answer <text> | "<message>"]`:
-// it picks a stopped session back up, answers its open question or its
-// crew's open decision (--answer) or sends it a turn (the message), and
-// drives on — streaming the same NDJSON and exiting with the same typed
-// status as run. With neither it carries on: a paused crew is resumed,
-// and a raised --envelope tells the session to continue.
+// it picks a stopped session back up, answers its open question, its
+// workflow run's open decision or a step's question (--answer) or sends it
+// a turn (the message), and drives on — streaming the same NDJSON and
+// exiting with the same typed status as run. With neither it carries on: a
+// paused run is resumed, and a raised --envelope tells the session to
+// continue.
 func runResume(fl cliFlags, args []string) error {
 	if len(args) < 1 || len(args) > 2 {
 		return fmt.Errorf("resume takes a card and, optionally, one message: resume <id|ref> [\"<message>\"]")

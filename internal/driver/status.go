@@ -2,16 +2,17 @@
 // `gummi resume`: a session (a freeform card) started from a prompt, or
 // picked back up, kept moving with no person at the keyboard.
 //
-// The person running `gummi run` pre-authorises the session's crew up to
-// the envelope (DESIGN §24), so a crew the session starts whose plan fits
-// runs without asking. Everything else that needs a person stops the run
-// instead of being decided for them: the session's ask_user question, a
-// crew decision the pre-authorisation does not cover (a plan over it, a
-// widening, a node's question that reached the person), a paused crew,
-// the envelope running dry, a quiet past the timeout. Each stop is a typed
+// The person running `gummi run` pre-authorises the session's workflow
+// runs up to the envelope (DESIGN §25.11), so a run the session proposes
+// whose estimate fits starts without asking. Everything else that needs a
+// person stops the run instead of being decided for them: the session's
+// ask_user question, a run's decision the pre-authorisation does not
+// cover (a proposal over it, a revised plan, a repeat at its max, a
+// runaway step, the budget), a step's own question, a paused run, the
+// envelope running dry, a quiet past the timeout. Each stop is a typed
 // Outcome the CLI maps to an exit code, after an NDJSON line that says
 // what to run next. The run is done when the session is idle with no
-// crew open.
+// workflow run open or queued.
 package driver
 
 import "github.com/morphis/gummi/internal/cardops"

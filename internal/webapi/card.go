@@ -35,9 +35,10 @@ type Card struct {
 	// Terminal says the page may open a shell in the card's worktree: the
 	// server was started with --terminal and the card has one.
 	Terminal bool `json:"terminal,omitempty"`
-	// CrewMark is the verified mark a landed crew left on a session
-	// (DESIGN §24.8); nil where no landed crew's checks passed.
-	CrewMark *CrewMark `json:"crewMark,omitempty"`
+	// Validated is a session's validated mark (DESIGN §25.6), in its
+	// words: "validated at tree <hash>" or "changed since validation";
+	// empty where no workflow run's checks all passed.
+	Validated string `json:"validated,omitempty"`
 }
 
 // Files maps a card's worktree onto the server: a file at Dir/<path> is
@@ -106,9 +107,6 @@ type Decision struct {
 	// Multi marks a question that takes several of its options at once:
 	// the answer names them comma-separated ("0,2").
 	Multi bool `json:"multi,omitempty"`
-	// Crew is set on a session's crew decision (DESIGN §24.9): the plan it
-	// would run, its checks, and for a widening the plan's diff.
-	Crew *CrewDecision `json:"crew,omitempty"`
 }
 
 // Against is a decision's revision: an opaque token for the server, and a

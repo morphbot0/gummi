@@ -546,7 +546,10 @@ func (p *Pool) Spent(ctx context.Context, f *domain.Feature) (bool, error) {
 // read that fails answers no — this picks which cards are worth handing
 // to a clean, and the clean repeats every check on the card it is given.
 func (p *Pool) Cleanable(ctx context.Context, f *domain.Feature) bool {
-	if f.Stage != domain.StageDone || f.MainCheckout {
+	// a session's hidden child has no branch of its own to clean: a step
+	// works in its session's tree, and an old crew's branches are left in
+	// the repository as they were (DESIGN §25.2)
+	if f.Stage != domain.StageDone || f.MainCheckout || f.IsChild() {
 		return false
 	}
 	spent, err := p.Spent(ctx, f)
@@ -786,7 +789,7 @@ func (p *Pool) managerForDelegatedCard(ctx context.Context, f *domain.Feature) (
 }
 
 // managerAt returns the cached manager rooted at a linked worktree of a
-// managed repository — a freeform card's, whose delegated and crew cards
+// managed repository — a freeform card's, whose delegated and child cards
 // fork from it. It never runs the .gummi exclusion pass: the worktree is
 // a linked worktree of an already-excluded repository.
 func (p *Pool) managerAt(ctx context.Context, dir string) (*Manager, error) {

@@ -30,7 +30,8 @@ const (
 	// with instead of borrowing whatever role the card's last stage
 	// session happened to run under.
 	RoleConsult Role = "consult"
-	// RolePlanner writes and revises a crew's plan (DESIGN §24.7). It is
+	// RolePlanner is a workflow's planner step (DESIGN §25.4), which may
+	// revise the run's remaining steps. It is
 	// not a stage role, and a profile need not declare it: an undeclared
 	// planner falls back to the architect's backend and model.
 	RolePlanner Role = "planner"

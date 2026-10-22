@@ -683,7 +683,7 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	}
 	room := max(inner-idWidth-badgeWidth, 0)
 	strip := stageStrip(s, f, inner)
-	if mark := crewMarkText(r.CrewMark); mark != "" {
+	if mark := validatedMarkText(r.Validated); mark != "" {
 		if full := strip + s.Faint.Render(" · ") + s.Success.Render(mark); ansi.StringWidth(full) <= inner {
 			strip = full
 		}
@@ -691,26 +691,14 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	return []string{id + " " + ansi.Truncate(title, room, "…") + badges(), strip}
 }
 
-// crewMarkText is the head's word for a session's verified mark: which
-// crew, at which commit, and how much has been committed on top since —
-// work no crew checked, which a reader of the diff should know about.
-func crewMarkText(mk *engine.CrewMark) string {
+// validatedMarkText is the head's word for a session's validated mark
+// (DESIGN §25.6): the tree a workflow run's checks all passed on, or that
+// the tree has changed since.
+func validatedMarkText(mk *engine.ValidatedMark) string {
 	if mk == nil {
 		return ""
 	}
-	sha := mk.SHA
-	if len(sha) > 7 {
-		sha = sha[:7]
-	}
-	crew := "crew " + itoa(mk.Seq)
-	if mk.Partial {
-		crew += " (partial)"
-	}
-	text := crew + " verified at " + sha
-	if mk.Since > 0 {
-		text += " · " + itoa(mk.Since) + " commit" + plural(mk.Since) + " since"
-	}
-	return text
+	return mk.Text()
 }
 
 // stageStrip renders every stage of this card's own workflow in order,
@@ -1143,7 +1131,6 @@ func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
 		return m.freeformAbsentLines(s, r, w)
 	}
 	lines := transcriptLines(s, snap, w, m.threadOutputs)
-	lines = append(lines, crewLines(s, r, w)...)
 	if snap.Err != nil {
 		for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {
 			lines = append(lines, "  "+s.Error.Render(l))

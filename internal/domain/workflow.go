@@ -59,12 +59,6 @@ func (r WorkflowRole) Reads() bool { return r == RoleScout || r == RoleReviewer 
 // known role but the reading ones does.
 func (r WorkflowRole) Writes() bool { return r.Known() && !r.Reads() }
 
-// StepTier is the profile slot a step's model comes from (`step-<tier>`,
-// falling back to `crew-<tier>`, then `implementer`). The values are the
-// crew's tiers: cheap, standard and strong, the empty tier reading as
-// standard.
-type StepTier = CrewTier
-
 // Recipe is a workflow as its YAML spells it (§25.4).
 type Recipe struct {
 	Name        string
@@ -527,4 +521,15 @@ func ParseQualifiedItem(s string) (spec int, item string, err error) {
 		return 0, "", fmt.Errorf("%q is not of the form S<n>/DW-<k>", s)
 	}
 	return n, item, nil
+}
+
+// SpecRevision is one saved state of a session's spec.
+type SpecRevision struct {
+	// Spec is the spec's number on its session (DESIGN §25.3); revisions
+	// count from 1 per spec.
+	Spec    int
+	Rev     int
+	Content string
+	By      string
+	At      time.Time
 }

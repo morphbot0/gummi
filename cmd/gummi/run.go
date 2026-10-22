@@ -21,13 +21,13 @@ import (
 const eventsFileMode = 0o600
 
 // defaultTimeout bounds how long a run may hear nothing from its session
-// or the session's crew before it stops as a likely hang. Generous by
+// or the session's workflow run before it stops as a likely hang. Generous by
 // default (a strong model on a large change can think for a long time
 // between events); --timeout 0 disables it.
 const defaultTimeout = 20 * time.Minute
 
 // runRun implements `gummi run [flags] "<prompt>"`: it starts one session
-// from the prompt, pre-authorises its crew up to the envelope, and drives
+// from the prompt, pre-authorises its workflow runs up to the envelope, and drives
 // it headlessly until it is done or needs a person, streaming NDJSON and
 // exiting with a typed status. An envelope is required (D6) and an agent
 // must be configured — both fail loud before any work begins.

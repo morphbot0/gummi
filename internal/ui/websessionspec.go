@@ -4,12 +4,13 @@ package ui
 // the reader is told (UseSpec, spec 1 by default), read with the rest of
 // a card's documents (WebDocs.Spec), started from the template, edited
 // whole, and every write a numbered revision — the engine's
-// StartSessionSpec and WriteSessionSpec, which a running crew hears of as
-// a steer. Notes and resolutions are written the way a workflow card's
+// StartSessionSpec and WriteSessionSpec, which an open run that froze the
+// spec hears of as a steer. Notes and resolutions are written the way a workflow card's
 // are, and recorded as a revision after.
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 
@@ -22,9 +23,9 @@ import (
 )
 
 // hasSessionSpec says whether a card may keep a session spec: a session
-// that is not a crew's own card or node, nor an agent in a home of its own.
+// that is no session's hidden child, nor an agent in a home of its own.
 func hasSessionSpec(f domain.Feature) bool {
-	return f.IsFreeform() && !f.InCrew() && !f.Home
+	return f.IsFreeform() && !f.IsChild() && !f.Home
 }
 
 // UseSpec points the reader at the session's spec n (DESIGN §25.3); a
@@ -56,6 +57,7 @@ func specRevisionBy(by string) string {
 	case engine.ActorAgent:
 		return "agent"
 	case state.ActorCrew:
+		// a revision an old crew wrote, before workflows replaced crews
 		return "crew"
 	case state.ActorWorkflow:
 		return "workflow"
@@ -70,21 +72,24 @@ func specRevisionBy(by string) string {
 func (d *WebDocs) sessionSpec(ctx context.Context, content string, out *webapi.Spec) {
 	out.Session = true
 	frozen := map[int][]int{}
-	// a crew froze a revision of spec 1, the one spec it knew
-	if crews, err := d.store.SessionCrews(ctx, d.f.ID); err == nil && d.sessionSpecN() == 1 {
-		for _, c := range crews {
-			if c.SpecRev > 0 {
-				frozen[c.SpecRev] = append(frozen[c.SpecRev], c.Seq)
+	// a run froze the revision of its spec it started on
+	if runs, err := d.store.SessionRuns(ctx, d.f.ID); err == nil {
+		for _, r := range runs {
+			if r.Spec == d.sessionSpecN() && r.SpecRev > 0 {
+				frozen[r.SpecRev] = append(frozen[r.SpecRev], r.N)
 			}
 		}
 	}
 	if revs, err := d.store.SpecRevisions(ctx, d.f.ID, d.sessionSpecN()); err == nil {
 		for _, r := range revs {
-			out.Revisions = append(out.Revisions, webapi.SpecRevision{Rev: r.Rev, By: specRevisionBy(r.By), At: r.At, Crews: frozen[r.Rev]})
+			out.Revisions = append(out.Revisions, webapi.SpecRevision{Rev: r.Rev, By: specRevisionBy(r.By), At: r.At, Runs: frozen[r.Rev]})
 		}
 	}
 	if items, _, err := spec.ParseDoneWhen(content); err == nil {
-		out.DoneWhen = webCrewItems(items)
+		out.DoneWhen = make([]webapi.DoneWhenItem, 0, len(items))
+		for _, it := range items {
+			out.DoneWhen = append(out.DoneWhen, webapi.DoneWhenItem{ID: it.ID, Says: it.Says, Check: it.Check, Judge: it.Judge})
+		}
 	}
 }
 
@@ -99,7 +104,7 @@ func (d *WebDocs) noteSessionRevision(ctx context.Context, path, person string) 
 		return err
 	}
 	_, err = d.eng.WriteSessionSpec(ctx, d.fresh(ctx), d.sessionSpecN(), string(raw), state.PersonActor(person))
-	return crewRefusal(err)
+	return engineRefusal(err)
 }
 
 // StartSessionSpec is POST /api/cards/{id}/spec/start: a new spec on the
@@ -121,7 +126,7 @@ func (d *WebDocs) StartSessionSpec(ctx context.Context, title, person string) (w
 	}
 	sp, _, err := d.eng.StartSessionSpec(ctx, d.fresh(ctx), title, state.PersonActor(person))
 	if err != nil {
-		return webapi.Spec{}, crewRefusal(err)
+		return webapi.Spec{}, engineRefusal(err)
 	}
 	d.UseSpec(sp.N)
 	return d.Spec(ctx)
@@ -160,8 +165,20 @@ func (d *WebDocs) WriteSessionSpec(ctx context.Context, req webapi.SpecWriteRequ
 	}
 	if content != string(raw) {
 		if _, err := d.eng.WriteSessionSpec(ctx, d.fresh(ctx), d.sessionSpecN(), content, state.PersonActor(person)); err != nil {
-			return webapi.Spec{}, crewRefusal(err)
+			return webapi.Spec{}, engineRefusal(err)
 		}
 	}
 	return d.Spec(ctx)
+}
+
+// engineRefusal is an engine's refusal of a person's write (a spec with
+// no such number, a closed session) as a conflict in its words.
+func engineRefusal(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return err
+	}
+	return &conflictError{msg: err.Error()}
 }

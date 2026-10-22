@@ -151,26 +151,14 @@ the note above it: "resolved by" when it closes it, "answered by" when an
 agent answered a person's note that only a person can close), `spec-checks`, `spec-check-<name>`, `spec-pending` (how many notes hold the
 gate), `spec-request-changes` (sends them to the stage that owns them: the TUI's R), `spec-none`.
 
-A session's spec (DESIGN §24.2): `spec-start-session` (start one from the
+A session's spec (DESIGN §25.3): `spec-start-session` (start one from the
 template, on `spec-none`), `spec-session` (its bar), `spec-rev`, `spec-ready`
 (its done-when items), `spec-edit`, `spec-editor`, `spec-save`, `spec-cancel`,
-`spec-stale` (the spec changed while it was being edited), `spec-crew` (Start
-a crew…), `spec-revisions`, `spec-revision-<n>`.
+`spec-stale` (the spec changed while it was being edited), `spec-revisions`,
+`spec-revision-<n>`.
 
-Crew (DESIGN §24.9, `crew.js`): `crew`, `crew-none`, `crew-state`,
-`crew-act-<start|pause|resume|stop|steer|land|recheck|preauth>`,
-`crew-budget`, `crew-spent`, `crew-asks` (the crew's question waiting on the
-person), `crew-canvas`, `crew-wave-<n>`, `crew-node-<id>` (`data-state`),
-`crew-node-state-<id>`, `crew-lane`, `crew-landed-<id>`, `crew-planner`,
-`crew-inspector`, `crew-item-<id>`, `crew-report`, `crew-log`. Dialogs:
-`crew-start-dialog` (`crew-brief`, `crew-budget`, `crew-start`,
-`crew-start-error`), `crew-steer-dialog`, `crew-stop-dialog`,
-`crew-preauth-dialog` (each `…-input`, `…-go`). In a crew decision:
-`crew-decision`, `crew-plan`, `crew-plan-<id>`, `crew-ticks`, `crew-widen`,
-`crew-change-<id>`. On the head: `card-crew`, `crew-mark`,
-`crew-mark-since`, `crew-recheck`, `crew-land` (and the menu's
-`action-crew-land`); on the rail: `rail-row-crew-<id>`; in the thread, a
-turn the crew sent: `thread-crew`.
+A session's workflow runs (DESIGN §25): on the head, `validated-mark`; in the
+thread, a turn a run sent (its report): `thread-workflow`.
 
 Memory: `memory`, `memory-src` (where the files live), `memory-global`,
 `memory-plan`, `memory-dead-ends` (a document's title and its rendered

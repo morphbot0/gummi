@@ -332,7 +332,7 @@ func TestADeliverRunIteratesUntilApproved(t *testing.T) {
 	}
 	// the step cards are hidden children of the session, working in its tree
 	card, _ := store.GetFeature(ctx, paths["design"].Card)
-	if !card.InRun() || card.ParentID != f.ID {
+	if !card.IsChild() || card.ParentID != f.ID {
 		t.Errorf("design's card %+v", card)
 	}
 	if ff := e.Freeform(card.ID); ff == nil || ff.WorkDir() != tree {

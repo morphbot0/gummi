@@ -173,16 +173,18 @@ func TestTranscriptShowsRunningWatches(t *testing.T) {
 	}
 }
 
-// TestTranscriptLabelsACrewReportAsTheCrews: a crew's report reaches its
-// session as a user turn sent by the crew (state.ActorCrew). It is not the
-// person's words, so it must not read "you".
-func TestTranscriptLabelsACrewReportAsTheCrews(t *testing.T) {
+// TestTranscriptLabelsARunsReportAsTheWorkflows: a workflow run's report
+// reaches its session as a user turn sent by the workflow
+// (state.ActorWorkflow), and an old crew's by the crew (state.ActorCrew).
+// Neither is the person's words, so neither may read "you".
+func TestTranscriptLabelsARunsReportAsTheWorkflows(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	snap := engine.Snapshot{
 		Role: agent.RoleImplementer,
 		Transcript: []engine.Message{
 			{Author: engine.AuthorUser, Content: "make the column"},
 			{Author: engine.AuthorUser, Content: "The crew has reported.", By: state.ActorCrew},
+			{Author: engine.AuthorUser, Content: "Workflow run 1 has reported.", By: state.ActorWorkflow},
 		},
 	}
 	lines := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
@@ -191,5 +193,8 @@ func TestTranscriptLabelsACrewReportAsTheCrews(t *testing.T) {
 	}
 	if !labelPrecedes(lines, "crew · report", "The crew has reported.") {
 		t.Errorf("the crew's report is not labelled as the crew's:\n%s", lines)
+	}
+	if !labelPrecedes(lines, "workflow", "Workflow run 1 has reported.") {
+		t.Errorf("the run's report is not labelled as the workflow's:\n%s", lines)
 	}
 }

@@ -17,13 +17,13 @@ import (
 	"github.com/morphis/gummi/internal/webapi"
 )
 
-// An agent and a crew's card keep a session spec of their own out of
+// An agent and a session's hidden child keep a session spec of their own out of
 // reach: neither may have one, so alt+s still says the card has no
 // document, and the bar never offers one — even with a file on disk.
 func TestTheSpecChordOnACardThatKeepsNoSpec(t *testing.T) {
 	for name, tweak := range map[string]func(*domain.Feature){
 		"agent": func(f *domain.Feature) { f.Home = true },
-		"crew":  func(f *domain.Feature) { f.Crew.Seq = 1 },
+		"child": func(f *domain.Feature) { f.Child.Seq = 1 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := freeformShell(t, 120, 34, true)
@@ -244,14 +244,14 @@ func TestAClosedSessionsSpecRefusesTerminalWrites(t *testing.T) {
 }
 
 // A workflow step's card (DESIGN §25.6) is a hidden child of its session,
-// as a crew's card is: the board's rows never hold it.
+// as an old crew's card is: the board's rows never hold it.
 func TestAStepCardIsNeverOnTheBoard(t *testing.T) {
 	b, _, sess := sessionSpecBoard(t, domain.StageOpen)
 	ctx := context.Background()
 	step := domain.Feature{
 		ID: "FF-002", Num: 2, Kind: domain.KindFreeform, Title: "Dark mode", Slug: sess.Slug,
 		Stage: domain.StageOpen, ParentID: sess.ID, CreatedAt: time.Now(), UpdatedAt: time.Now(),
-		Crew: domain.StepLink{Session: sess.ID, Run: 1, Path: "build/1/implement"}.Link(),
+		Child: domain.StepLink{Session: sess.ID, Run: 1, Path: "build/1/implement"}.Link(),
 	}
 	var ids []domain.FeatureID
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
@@ -314,4 +314,19 @@ func TestWebDocsActOnTheSpecTheyAreTold(t *testing.T) {
 	if three, err := untold.Spec(ctx); err != nil || !three.None {
 		t.Fatalf("a reader told a spec the session lacks reads %+v (%v)", three, err)
 	}
+}
+
+func webDocsFor(t *testing.T, b *Bridge, id string) *WebDocs {
+	t.Helper()
+	var (
+		d   *WebDocs
+		err error
+	)
+	if derr := b.Do(context.Background(), func(m *Shell) tea.Cmd { d, err = m.WebDocs(id); return nil }); derr != nil {
+		t.Fatal(derr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
 }

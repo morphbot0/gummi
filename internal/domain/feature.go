@@ -380,16 +380,16 @@ type Feature struct {
 	// "write a spec" is retired, so only a session continued before then
 	// carries one.
 	ContinuedAs FeatureID
-	// ParentID is the session (a freeform card) whose crew this card
-	// belongs to, empty for every other card. A crew's card forks from the
-	// session's branch and lands back on it (worktree.Pool.ManagerFor), so
-	// its work reaches main only through the person's read of the
+	// ParentID is the session (a freeform card) this card is a hidden
+	// child of (Child), empty for every other card. A child resolves to the
+	// manager rooted at the session's worktree (worktree.Pool.ManagerFor),
+	// so its work reaches main only through the person's read of the
 	// session's diff. A legacy card a session once created under its
 	// delegation carries one too.
 	ParentID FeatureID
-	// Crew marks a crew's own card or one of its nodes' (DESIGN §24): a
-	// hidden freeform child no person works. Zero on every other card.
-	Crew   CrewLink
+	// Child marks a session's hidden child: a workflow step's card, or an
+	// old crew's (ChildLink). Zero on every card a person works.
+	Child  ChildLink
 	Budget Budget
 	Spend  Spend // metered cost across all stages
 	// ExternalRef ties a bug back to its source (e.g. a GitHub issue URL),
@@ -709,7 +709,7 @@ func (f *Feature) CheckoutName() string {
 // There is one floor, and it is not here: a card lands on a person's read
 // of its diff (DESIGN §19.1, decision 27). Unresolved diff comments hold
 // the landing, enforced by the same open-comment check every landing
-// crosses, and an open crew holds its session's (Engine.CrewHolds). What
+// crosses, and an open workflow run holds its session's (Engine.RunHolds). What
 // this refuses is the card that has no landing of its own: a session
 // whose work went on as a spec, which that spec lands; a legacy goal,
 // which never landed; and a legacy research card, which holds no branch.
@@ -819,11 +819,10 @@ func (f *Feature) BranchName() string {
 	if f.BranchScheme == BranchSchemeAdopted {
 		return f.Branch
 	}
-	if f.Crew.Seq > 0 {
-		if f.Crew.Node != "" {
-			return CrewNodeBranch(f.Slug, f.Crew.Seq, f.Crew.Node)
-		}
-		return CrewBranch(f.Slug, f.Crew.Seq)
+	if f.IsChild() {
+		// a step works in its session's tree, and keeps no branch; an old
+		// crew's branches are left in the repository as they were
+		return ""
 	}
 	if f.BranchScheme == BranchSchemeKind {
 		return f.kind().branchPrefix() + "/" + f.Slug

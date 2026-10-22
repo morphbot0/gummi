@@ -103,7 +103,9 @@ CREATE TABLE IF NOT EXISTS features (
 	crew_node       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
--- A crew (DESIGN §24) and its nodes. The crew's own card is a hidden
+-- A crew (DESIGN §24) and its nodes, retired by workflows (§25.2): kept so
+-- an old database opens, and read only by the upgrade that stops an open
+-- one. The crew's own card is a hidden
 -- freeform child of its session (features.crew_of); the plan, the
 -- approved plan and the open decision are JSON, read back whole.
 CREATE TABLE IF NOT EXISTS crews (
@@ -988,9 +990,10 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN delegate_budget INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN delegate_all INTEGER NOT NULL DEFAULT 0`,
 	`CREATE INDEX IF NOT EXISTS features_parent ON features(parent_id)`,
-	// A crew's own card and its nodes' cards (DESIGN §24): the session
-	// they belong to, the crew's number on it, and the node id. Empty on
-	// every card a person works, which is every card before crews.
+	// A session's hidden child (domain.ChildLink): the session it belongs
+	// to, a number on it and a path — a workflow step's run and step path,
+	// or an old crew's number and node id. Empty on every card a person
+	// works.
 	`ALTER TABLE features ADD COLUMN crew_of TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN crew_seq INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN crew_node TEXT NOT NULL DEFAULT ''`,
@@ -1061,7 +1064,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		f.SessionBackend, f.SessionModel, f.MainCheckout, f.Home,
 		// delegate_budget/delegate_all are vestigial: delegation is gone
 		string(f.ParentID),
-		string(f.Crew.Of), f.Crew.Seq, f.Crew.Node)
+		string(f.Child.Of), f.Child.Seq, f.Child.Node)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -1135,14 +1138,14 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
 		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.Home, &f.VerifiedRev, &continuedAs,
 		&parentID,
-		&crewOf, &f.Crew.Seq, &f.Crew.Node)
+		&crewOf, &f.Child.Seq, &f.Child.Node)
 	if err != nil {
 		return f, err
 	}
 	f.StackID = domain.StackID(stackID)
 	f.ContinuedAs = domain.FeatureID(continuedAs)
 	f.ParentID = domain.FeatureID(parentID)
-	f.Crew.Of = domain.FeatureID(crewOf)
+	f.Child.Of = domain.FeatureID(crewOf)
 	f.Mode = domain.ResearchMode(mode)
 	f.FoundBy = domain.FeatureID(foundBy)
 	f.Severity = domain.Severity(severity)

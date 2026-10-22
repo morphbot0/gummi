@@ -9,7 +9,6 @@ import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
 import { draftHead } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
-import { crewMarkEl, landCrewButton, crewWord } from './crew.js?v=__ASSET_V__'
 
 let ctx = {}
 
@@ -71,15 +70,12 @@ function render () {
       h('div', { class: 'head-actions' },
         foldAt(1, commitButton(c, actions)),
         foldAt(2, publishButton(c, actions)),
-        // a crew waiting to land is the head's point: it folds last
-        foldAt(9, landCrewButton(state.card)),
         foldAt(3, landButton(c, actions)),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, data: { fold: '2' }, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
         menuBtn)),
     h('div', { class: 'subline' },
       stages(c),
-      crewLink(c),
-      crewMarkEl(state.card),
+      validatedEl(state.card),
       c.home ? h('span', { class: 'home', testid: 'card-home' }, h('i', { 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'mono' }, c.home)) : null,
       c.home ? h('span', null, 'no repository') : null,
       h('span', { class: 'sp' }),
@@ -93,12 +89,12 @@ function render () {
   fit()
 }
 
-// crewLink names a session's latest crew and opens its tab (DESIGN §24.9).
-function crewLink (c) {
-  // a landed crew is said by its verified mark beside this
-  if (!c.crew || (c.crew.state === 'landed' && state.card?.crewMark)) return null
-  return h('button', { class: 'link', type: 'button', testid: 'card-crew', title: 'Open the Crew tab', onclick: () => ctx.setTab('crew') },
-    `crew ${c.crew.seq} `, h('b', null, crewWord(c.crew.state)))
+// validatedEl is a session's validated mark (DESIGN §25.6): the tree a
+// workflow run's checks all passed on, or that the tree has changed since.
+function validatedEl (card) {
+  const v = card?.validated
+  if (!v) return null
+  return h('span', { class: ['validated-mark', v.startsWith('changed') && 'stale'], testid: 'validated-mark' }, v)
 }
 
 // foldAt ranks a head button for fit: the lower, the sooner it folds.
@@ -154,11 +150,6 @@ export function openActions (line = '') {
   const items = list.map(a => ({
     label: a.label, danger: a.danger, testid: `action-${a.id}`, hint: a.detail, onClick: () => runAction(state.card, a)
   }))
-  // landing a crew that has ended is the page's own button, not a menu
-  // action: its entry here is where it is reached once the head has folded
-  // it away (DESIGN §24.3)
-  const crewLand = landCrewButton(state.card)
-  if (crewLand) items.unshift({ label: 'Land crew', testid: 'action-crew-land', hint: crewLand.title, onClick: () => crewLand.click() })
   openMenu(btn, items, { testid: 'card-actions-menu' })
   return true
 }

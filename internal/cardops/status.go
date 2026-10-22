@@ -9,17 +9,17 @@ package cardops
 type Status string
 
 const (
-	// StatusDone: the session is idle with no crew open, or a card
+	// StatusDone: the session is idle with no workflow run open, or a card
 	// operation did what it was asked. gummi never merges on its own.
 	StatusDone Status = "done"
 	// StatusError: a setup or agent failure. The error event's
 	// `resumable` field says whether a session was left behind that a
 	// `resume <id>` may carry on.
 	StatusError Status = "error"
-	// StatusNeedsYou: the session asked a question, or its crew has a
-	// decision the pre-authorisation does not cover, or its crew is
-	// paused. `resume <id> --answer <text>` (or a bare `resume <id>` for
-	// a paused crew) continues.
+	// StatusNeedsYou: the session asked a question, or its workflow run
+	// has a decision the pre-authorisation does not cover, or a step asked
+	// one, or the run is paused. `resume <id> --answer <text>` (or a bare
+	// `resume <id>` for a parked run) continues.
 	StatusNeedsYou Status = "needs_you"
 	// StatusExhausted: the credit envelope ran dry. Raise it, then resume.
 	StatusExhausted Status = "exhausted"

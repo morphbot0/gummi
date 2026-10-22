@@ -2,14 +2,14 @@
 
 gummi is a meta-harness for coding agents. `gummi run` starts a **session** — a
 coding agent on a git branch and worktree of its own — from your prompt, and
-drives it headlessly. When the work divides, the session can start a **crew**:
-a planner turns the session's spec into a plan of specialist nodes (scouts, a
-contractor, implementers, testers, a scribe), each checked and reviewed on a
-branch of the crew's own, and the crew's report comes back to the session.
-Running `gummi run` pre-authorises a crew up to the envelope you give it; a
-crew plan over that, a widening of an approved plan, or a question gummi will
-not answer for a person stops the run and comes back to you. gummi never
-merges on its own.
+drives it headlessly. When the work deserves it, the session can run a
+**workflow**: a recipe of steps (design, build, review, validate — whatever
+the recipe chooses), each a fresh-context agent working in the session's own
+tree against one of its specs, and the run's report comes back to the
+session. Running `gummi run` pre-authorises runs up to the envelope you give
+it; a run estimated over that, a revised plan, or a question gummi will not
+answer for a person stops the run and comes back to you. gummi never merges
+on its own.
 
 ## When to use gummi (vs. editing directly)
 
@@ -47,8 +47,9 @@ driving process's live file. `watch --json` emits that stream as NDJSON.
 ## The loop
 
 Each `gummi run` / `gummi resume` streams NDJSON on stdout — `created`,
-`reply` (each finished reply of the session's agent), `crew` (a crew changing
-state), and one terminal line — and exits with a **typed status**. Branch on
+`reply` (each finished reply of the session's agent), `workflow` (a workflow
+run changing state; the same line is repeated as `crew` for older readers),
+and one terminal line — and exits with a **typed status**. Branch on
 the exit code:
 
 {{.ExitTable}}
@@ -76,23 +77,25 @@ The loop you run:
 1. `gummi run --envelope N "<prompt>"` (add `--ref <id>` to correlate with your
    own tracker).
 2. Read the exit code:
-   - **done (0)** — the session is idle with no crew open. Its replies are on
+   - **done (0)** — the session is idle with no workflow run open. Its replies are on
      the stream; its work is on the branch in the final `done` line, not
      merged. Report it and stop, or send the session its next turn with
      `gummi resume <id> "<message>"`.
    - **needs_you (2)** — the `question` event says whose question it is
-     (`kind`): the session's own (`ask`), a crew plan over the
-     pre-authorisation (`crew_plan`), a widening of an approved crew plan
-     (`crew_widen`), a crew node's question the planner would not answer
-     (`crew_question`), or a paused crew (`crew_paused`). Answer from your task
-     context first; read the session's spec (`gummi spec <id>`) or diff
-     (`gummi diff <id>`) if unsure; use `recommended` only as a tiebreaker.
-     Then `gummi resume <id> --answer "<option-or-your-words>"`. A crew
-     decision's options are fixed phrases (`Run the crew`, `Keep it a
-     session`, `Widen the plan`, `Keep the scope: write it into Limits`);
-     other words go to the crew's planner as a note. A paused crew resumes
-     with a bare `gummi resume <id>`. A widening is the person's call: ask the
-     human unless your task already settles it.
+     (`kind`): the session's own (`ask`); a workflow run estimated over the
+     pre-authorisation (`workflow_proposal`), a planner step's revised plan
+     (`workflow_plan`), a loop at its max (`workflow_max`), a step far past
+     its estimate (`workflow_runaway`) or the money (`workflow_budget`); a
+     step's own question (`workflow_ask`, `step` names it); or a paused run
+     (`workflow_paused`). Answer from your task context first; read the
+     session's spec (`gummi spec <id>`) or diff (`gummi diff <id>`) if unsure;
+     use `recommended` only as a tiebreaker. Then `gummi resume <id> --answer
+     "<option-or-your-words>"`. A run decision's options are fixed phrases
+     (`Allow`, `Deny`, `Allow the revised plan`, `Run one more iteration`, …);
+     an option's number works too, and other words to a proposal go to the
+     session as feedback. A paused run resumes with a bare `gummi resume
+     <id>`. Allowing a run is the person's call: ask the human unless your
+     task already settles it.
    - **exhausted (5) / timeout (6)** — stop and report to the human. Both are
      durable and resumable, and `next` carries the command. Run the
      `preconditions.check_running` probe on the event before retrying —
@@ -117,7 +120,7 @@ worktree.
 <id> -m "<message>"` (or `-m -` to read the message from stdin) squash-merges
 the branch into main — only with a Conventional Commits `type(scope): summary`
 message with no diff dump or agent attribution, and refused while the session
-has a crew open or unresolved diff comments. Draft that message from the
+has a workflow run open or unresolved diff comments. Draft that message from the
 session's work and the branch's own commits, and have the human confirm it
 before you run `gummi merge` — don't invent a message and merge unattended.
 `gummi clean <id>` removes a landed card's worktree and branch afterward. Both
@@ -146,9 +149,9 @@ before you run it.
 
 - **gummi never merges on its own.** Landing (a PR, a push, a squash-merge)
   stays with a person.
-- **A crew never runs past what was authorised.** A plan over the
-  pre-authorisation and every widening wait for an answer; a question a crew
-  node asks is answered from the frozen spec or comes to you.
+- **A workflow run never runs past what was authorised.** A run over the
+  pre-authorisation and every revised plan wait for an answer; a question a
+  step asks comes to you.
 - **It fails loud.** Anything a person would resolve — a question, an
   exhausted envelope, a stalled session — becomes a typed non-zero exit and a
   durable, resumable session, never a silent auto-proceed.

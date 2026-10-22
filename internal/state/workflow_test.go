@@ -163,12 +163,12 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	// a step instance, and its card: a hidden child of the session
 	card := freeformFeat(2, "deliver it")
 	card.Slug, card.ParentID = sess.Slug, sess.ID
-	card.Crew = domain.StepLink{Session: sess.ID, Run: 1, Path: "build/2/reviews/review-a"}.Link()
+	card.Child = domain.StepLink{Session: sess.ID, Run: 1, Path: "build/2/reviews/review-a"}.Link()
 	if err := s.CreateFeature(ctx, card); err != nil {
 		t.Fatal(err)
 	}
 	cf, _ := s.GetFeature(ctx, card.ID)
-	if l := cf.Step(); l.Session != sess.ID || l.Run != 1 || l.Path != "build/2/reviews/review-a" || !cf.InRun() || !cf.InCrew() {
+	if l := cf.Step(); l.Session != sess.ID || l.Run != 1 || l.Path != "build/2/reviews/review-a" || !cf.IsChild() {
 		t.Fatalf("step card's link: %+v", l)
 	}
 	st := &domain.RunStep{
@@ -244,23 +244,17 @@ func TestUpgradeRegistersTheSpecAndStopsOpenCrews(t *testing.T) {
 	withSpec, without := freeformFeat(1, "keeps a spec"), freeformFeat(2, "keeps none")
 	crewCard := freeformFeat(3, "keeps a spec")
 	crewCard.Slug, crewCard.ParentID = withSpec.Slug, withSpec.ID
-	crewCard.Crew = domain.CrewLink{Of: withSpec.ID, Seq: 1}
+	crewCard.Child = domain.ChildLink{Of: withSpec.ID, Seq: 1}
 	landed := freeformFeat(4, "keeps a spec")
 	landed.Slug, landed.ParentID = withSpec.Slug, withSpec.ID
-	landed.Crew = domain.CrewLink{Of: withSpec.ID, Seq: 2}
+	landed.Child = domain.ChildLink{Of: withSpec.ID, Seq: 2}
 	for _, f := range []*domain.Feature{withSpec, without, crewCard, landed} {
 		if err := s.CreateFeature(ctx, f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, c := range []*domain.Crew{
-		{ID: crewCard.ID, Session: withSpec.ID, Seq: 1, State: domain.CrewRunning, Pending: &domain.CrewDecision{ID: "d", Kind: domain.CrewDecideNode}},
-		{ID: landed.ID, Session: withSpec.ID, Seq: 2, State: domain.CrewLanded, Report: "landed"},
-	} {
-		if err := s.CreateCrew(ctx, c); err != nil {
-			t.Fatal(err)
-		}
-	}
+	insertLegacyCrew(t, s, crewCard.ID, withSpec.ID, 1, "running", `{"id":"d","kind":"node"}`, "")
+	insertLegacyCrew(t, s, landed.ID, withSpec.ID, 2, "landed", "", "landed")
 	// the spec as it was: one file at Feature.SpecPath, two revisions
 	legacy := filepath.Join(w.Root, filepath.FromSlash(withSpec.SpecPath()))
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
@@ -321,20 +315,18 @@ func TestUpgradeRegistersTheSpecAndStopsOpenCrews(t *testing.T) {
 	if none, _ := s.SessionSpecs(ctx, crewCard.ID); len(none) != 0 {
 		t.Errorf("a crew's card got a spec: %+v", none)
 	}
-	stopped, _ := s.Crew(ctx, crewCard.ID)
-	if stopped.State != domain.CrewPartial || stopped.Pending != nil || stopped.Report != crewStoppedOnUpgrade || stopped.State.Open() {
-		t.Fatalf("the open crew after the upgrade: %+v", stopped)
+	if st, pending, report := legacyCrew(t, s, crewCard.ID); st != legacyCrewPartial || pending != "" || report != crewStoppedOnUpgrade {
+		t.Fatalf("the open crew after the upgrade: %s %q %q", st, pending, report)
 	}
-	if kept, _ := s.Crew(ctx, landed.ID); kept.State != domain.CrewLanded || kept.Report != "landed" {
-		t.Errorf("a landed crew was touched: %+v", kept)
+	if st, _, report := legacyCrew(t, s, landed.ID); st != "landed" || report != "landed" {
+		t.Errorf("a landed crew was touched: %s %q", st, report)
 	}
-	if cf, _ := s.GetFeature(ctx, crewCard.ID); !cf.InCrew() {
+	if cf, _ := s.GetFeature(ctx, crewCard.ID); !cf.IsChild() {
 		t.Error("the stopped crew's card is no longer hidden")
 	}
 
 	// once: a crew open after the upgrade survives the next open
-	stopped.State = domain.CrewRunning
-	if err := s.UpdateCrew(ctx, stopped); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE crews SET state = 'running' WHERE id = ?`, string(crewCard.ID)); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -343,8 +335,8 @@ func TestUpgradeRegistersTheSpecAndStopsOpenCrews(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if again, _ := s.Crew(ctx, crewCard.ID); again.State != domain.CrewRunning {
-		t.Errorf("the upgrade ran twice: %s", again.State)
+	if st, _, _ := legacyCrew(t, s, crewCard.ID); st != legacyCrewRunning {
+		t.Errorf("the upgrade ran twice: %s", st)
 	}
 	if specs, _ := s.SessionSpecs(ctx, withSpec.ID); len(specs) != 1 {
 		t.Errorf("spec 1 registered twice: %+v", specs)

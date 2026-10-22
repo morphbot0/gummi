@@ -84,7 +84,6 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 	if o := m.freeformObjective(r); o != nil {
 		row.Objective = string(o.State)
 	}
-	row.Crew = webRowCrew(r)
 	it, needs := m.inbox.get(f.ID)
 	switch {
 	case needs:
@@ -97,9 +96,9 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r)}
 	case m.freeformWatching(r):
 		row.Status = webapi.StatusWatching
-	case r.Crew != nil && r.Crew.Pending != nil:
-		// a crew's decision is the session's, whether or not the inbox
-		// heard of it (a restart re-reads the crew, not the queue)
+	case r.DecidingRun != nil:
+		// a run's decision is the session's, whether or not the inbox
+		// heard of it (a restart re-reads the run, not the queue)
 		row.Status = webapi.StatusNeeds
 	default:
 		switch f.Stage.SuperState() {
@@ -111,8 +110,10 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 			row.Status = webapi.StatusIdle
 		}
 	}
-	if r.Crew != nil && r.Crew.Pending != nil && row.Status == webapi.StatusNeeds {
-		row.Needs = webCrewNeeds(r.Crew.Pending)
+	if d := r.DecidingRun; d != nil && row.Status == webapi.StatusNeeds {
+		// worded as the run's: the inbox's generic "the agent has a
+		// question" is about a live ask the run does not have
+		row.Needs = &webapi.RowNeeds{Kind: webapi.NeedsQuestion, Color: "info", Question: "workflow: " + d.Pending.Question, Word: workflowDecisionWord(d.Pending)}
 	}
 	return row
 }

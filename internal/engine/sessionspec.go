@@ -30,10 +30,6 @@ const (
 	specListToolName  = "spec_list"
 )
 
-// crewSpec is the spec a crew is judged against: spec 1, the session's
-// one spec from before many.
-const crewSpec = 1
-
 func specStartTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: specStartToolName,
@@ -88,7 +84,7 @@ func withSpecArg(def agent.ToolDef, also string) agent.ToolDef {
 const specArgNote = " On a session, spec names which of its specs; it may be left out while there is one."
 
 // sessionSpecTools are a session's spec tools, offered to every session
-// that is not a crew's.
+// that is not a run's step.
 func sessionSpecTools() []agent.ToolDef {
 	return []agent.ToolDef{
 		specStartTool(),
@@ -100,8 +96,8 @@ func sessionSpecTools() []agent.ToolDef {
 }
 
 // isSession reports whether f keeps specs of its own: a freeform card
-// that is no crew's and no step's.
-func isSession(f domain.Feature) bool { return f.IsFreeform() && !f.InCrew() }
+// that is no step's, nor a node of a crew from an old database.
+func isSession(f domain.Feature) bool { return f.IsFreeform() && !f.IsChild() }
 
 // SessionSpecs lists a session's specs, each with its state.
 func (e *Engine) SessionSpecs(ctx context.Context, f domain.Feature) ([]domain.SessionSpec, error) {
@@ -307,9 +303,6 @@ func (e *Engine) WriteSessionSpec(ctx context.Context, f domain.Feature, n int, 
 		return 0, err
 	}
 	rev, err := e.recordSpecRevision(ctx, f.ID, n, content, by)
-	if err == nil && n == crewSpec {
-		e.crewSpecEdited(ctx, f, rev)
-	}
 	if err == nil {
 		e.workflowSpecEdited(ctx, f, n, rev)
 	}
@@ -329,8 +322,7 @@ func (e *Engine) recordSpecRevision(ctx context.Context, id domain.FeatureID, n 
 }
 
 // noteSessionSpecWrite records a revision of spec n after the agent wrote
-// it at path through a spec tool, and tells a running crew judged against
-// it. A no-op on every card that is not a session (n is 0).
+// it at path through a spec tool, and tells an open run that froze it. A no-op on every card that is not a session (n is 0).
 func (e *Engine) noteSessionSpecWrite(s *Session, n int, path string) {
 	f := s.Feature
 	if n == 0 || !isSession(f) {
@@ -342,9 +334,6 @@ func (e *Engine) noteSessionSpecWrite(s *Session, n int, path string) {
 	}
 	ctx := context.Background()
 	if rev, err := e.recordSpecRevision(ctx, f.ID, n, string(raw), ActorAgent); err == nil {
-		if n == crewSpec {
-			e.crewSpecEdited(ctx, f, rev)
-		}
 		e.workflowSpecEdited(ctx, f, n, rev)
 	}
 }
@@ -359,6 +348,6 @@ func (e *Engine) specToolPath(s *Session, args json.RawMessage) (int, string, er
 	return e.specTarget(s.Feature, args)
 }
 
-const sessionCrewHint = `This session may keep specs and call on a crew (gummi's DESIGN §24). A spec is the written plan for one piece of work; a session keeps one per piece and most keep none. spec_start adds one from the template (Problem, Approach, Done when, Limits, Notes) and returns its number; spec_list names them; spec_view and spec_replace_section read and write one — pass spec (its number) once the session has more than one; the person edits them too. When the work is worth splitting — several parts that divide cleanly — and spec 1 has done-when items with checks, crew_start asks for a crew judged against spec 1: a planner plans nodes, the person approves, and specialists build, each checked and reviewed, on the crew's own branch. It returns at once; the report arrives later as a turn from the crew, and crew_land lands the crew's branch here. Small changes need no crew: do them yourself.`
+const sessionSpecHint = `This session may keep specs (gummi's DESIGN §25.3). A spec is the written plan for one piece of work; a session keeps one per piece and most keep none. spec_start adds one from the template (Problem, Approach, Done when, Limits, Notes) and returns its number; spec_list names them with their state; spec_view and spec_replace_section read and write one — pass spec (its number) once the session has more than one; the person edits them too. A spec's done-when items, each with a check command or judge: true, are what a workflow run on it is judged against.`
 
 func writeFile(path, content string) error { return atomicfile.Write(path, []byte(content), 0o600) }

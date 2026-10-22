@@ -39,7 +39,7 @@ type mergeReadyMsg struct {
 // landingRefusal is why f may not land right now, or "" when it may. A
 // card lands on a person's read of its diff (domain.Feature.MayLand), so
 // not while its agent is still writing it, nor over the person's own open
-// comments on it, nor while its crew is still working on its branch. A
+// comments on it, nor while a workflow run is still changing its tree. A
 // handed-off card may still be landed after all.
 //
 // Every landing path reads this one floor — the decision's "land it", the
@@ -70,8 +70,8 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, _ *nex
 	if m.freeformTurnBusy(r) {
 		return f.Name() + ": a turn is in flight — stop it, or let it finish, before landing"
 	}
-	if r.Crew != nil && r.Crew.State.Open() {
-		return fmt.Sprintf("%s: its crew %d is still %s — land or stop it first", f.Name(), r.Crew.Seq, r.Crew.State)
+	if r.OpenRun != nil {
+		return fmt.Sprintf("%s: its workflow run %d is still %s — let it finish or stop it first", f.Name(), r.OpenRun.N, r.OpenRun.State)
 	}
 	if n := r.OpenDiffComments; n > 0 {
 		return fmt.Sprintf("%s: %d open diff comment%s — resolve %s or send %s back before landing", f.Name(), n, plural(n), them(n), them(n))

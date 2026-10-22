@@ -46,7 +46,7 @@ const skillName = "gummi"
 // and its parser so the two cannot disagree about which agents exist.
 const skillAgentList = "claude|opencode|copilot"
 
-const skillDescription = "Hand a piece of work to a gummi session — a coding agent on a branch of its own, which can start a reviewed crew of specialist agents when the work divides — and drive it headlessly until it is done or needs you (gummi never merges). Use when the work deserves its own branch — not for trivial one-line edits."
+const skillDescription = "Hand a piece of work to a gummi session — a coding agent on a branch of its own, which can run a workflow of fresh-context agents in its own tree when the work deserves one — and drive it headlessly until it is done or needs you (gummi never merges). Use when the work deserves its own branch — not for trivial one-line edits."
 
 // skillShow prints the rendered SKILL.md (frontmatter + body) to stdout,
 // or — given a name — one of the reference files it points at.
@@ -377,9 +377,9 @@ func exitTable() string {
 		s       driver.Status
 		meaning string
 	}{
-		{driver.StatusDone, "the session is idle with no crew open — report its branch, or send it a next turn with `resume <id> \"<message>\"`"},
+		{driver.StatusDone, "the session is idle with no workflow run open — report its branch, or send it a next turn with `resume <id> \"<message>\"`"},
 		{driver.StatusError, "setup/agent failure — check `status <id>`; resumable if a session was left behind (`resumable` on the error event)"},
-		{driver.StatusNeedsYou, "a `question` event: the session asked (`kind: ask`), or its crew has a decision the pre-authorisation does not cover (`crew_plan`, `crew_widen`, `crew_question`) → `resume <id> --answer <text>`; a paused crew (`crew_paused`) → `resume <id>`"},
+		{driver.StatusNeedsYou, "a `question` event: the session asked (`kind: ask`), its workflow run has a decision the pre-authorisation does not cover (`workflow_proposal`, `workflow_plan`, `workflow_max`, `workflow_runaway`, `workflow_budget`), or a step asked (`workflow_ask`) → `resume <id> --answer <text>`; a paused run (`workflow_paused`) → `resume <id>`"},
 		{driver.StatusExhausted, "budget dry — `resume <id> --envelope <dollars>` (more than the dry budget) raises it and carries on"},
 		{driver.StatusTimeout, "nothing happened for the --timeout window — read the event `hint`, report to the human; `resume <id>` carries on"},
 	}

@@ -34,9 +34,9 @@ func (e *Engine) sessionBudget(f domain.Feature, creditRate float64) float64 {
 	if f.Budget.Envelope > 0 {
 		cur := e.currentFeature(f)
 		spent := cur.Spend.CreditEquivalentAt(creditRate)
-		if cur.IsFreeform() && !cur.InCrew() {
-			// a session and its crews draw from one envelope (§24.7a)
-			spent += e.sessionCrewsSpent(context.Background(), cur.ID) + e.sessionRunsSpent(context.Background(), cur.ID)
+		if cur.IsFreeform() && !cur.IsChild() {
+			// a session and its workflow runs draw from one envelope (§24.7a)
+			spent += e.legacyCrewsSpent(context.Background(), cur.ID) + e.sessionRunsSpent(context.Background(), cur.ID)
 		}
 		b := cur.Budget.Remaining(spent)
 		if reserve := e.turnReserve(); b > 0 && b < reserve {

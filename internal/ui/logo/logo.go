@@ -56,7 +56,7 @@ func Render(s *theme.Styles, width int) string {
 // work, in the same three stage words the stage strip will show them
 // thirty seconds later. It is kept under 80 columns so the narrowest
 // terminal anyone drives this on still gets the sentence.
-const tagline = "runs coding agent sessions — and a reviewed crew when the work divides"
+const tagline = "runs coding agent sessions — and workflows of agents when the work needs one"
 
 // firstStep is the empty board's call to action.
 //

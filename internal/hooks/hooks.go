@@ -60,7 +60,7 @@ import (
 // milestones. Nothing session-shaped (messages, tool calls, critiques)
 // is hooked — that volume belongs to `run --verbose`'s NDJSON stream.
 const (
-	// EventCardCreated: a card was minted (the new-card form, a schedule, a crew).
+	// EventCardCreated: a card was minted (the new-card form, a schedule).
 	EventCardCreated = "card.created"
 	// EventStageEnter: a workflow card crossed a stage edge. Never raised
 	// since workflow cards were retired; still accepted in a filter so an

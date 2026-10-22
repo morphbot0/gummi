@@ -29,7 +29,7 @@ const planTriesCap = 2
 
 // stepOf is the step instance a card works, nil when it is no step's card.
 func (e *Engine) stepOf(ctx context.Context, f domain.Feature) *domain.RunStep {
-	if e.cfg.Store == nil || !f.InRun() {
+	if e.cfg.Store == nil || !f.IsChild() {
 		return nil
 	}
 	st, err := e.cfg.Store.RunStepByCard(ctx, f.ID)
@@ -191,7 +191,7 @@ func (e *Engine) mintStepCard(ctx context.Context, sess domain.Feature, link dom
 	now := e.now().UTC()
 	f := domain.Feature{
 		ID: id, Num: num, Kind: domain.KindFreeform, Title: title, Slug: sess.Slug,
-		Stage: domain.StageOpen, Profile: sess.Profile, Repo: sess.Repo, ParentID: sess.ID, Crew: link.Link(),
+		Stage: domain.StageOpen, Profile: sess.Profile, Repo: sess.Repo, ParentID: sess.ID, Child: link.Link(),
 		SessionBackend: backend, SessionModel: model,
 		BranchScheme: domain.DefaultBranchScheme, CreatedAt: now, UpdatedAt: now,
 	}
@@ -314,7 +314,7 @@ func (e *Engine) sendStepTurn(card domain.FeatureID, msg string) {
 // queued: gummi records its end. It reports whether the card is a step's.
 func (ff *FreeformSession) workflowStepTurnEnded(sess *Session) bool {
 	f := sess.Feature
-	if !f.InRun() {
+	if !f.IsChild() {
 		return false
 	}
 	e := ff.engine
@@ -332,7 +332,7 @@ func (ff *FreeformSession) workflowStepTurnEnded(sess *Session) bool {
 // workflowStepErrored is a step's backend erroring: the step fails.
 func (ff *FreeformSession) workflowStepErrored(sess *Session, err error) {
 	f := sess.Feature
-	if !f.InRun() || err == nil {
+	if !f.IsChild() || err == nil {
 		return
 	}
 	e := ff.engine

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -130,11 +131,16 @@ func (h *harness) last(kind string) map[string]any {
 	return nil
 }
 
-// crewStates lists the states the stream's crew events reported, in order.
-func (h *harness) crewStates() []string {
+// runStates lists the states the stream's workflow events reported, in
+// order; crewStates the same under the crew events beside them.
+func (h *harness) runStates() []string { return h.statesOf("workflow") }
+
+func (h *harness) crewStates() []string { return h.statesOf("crew") }
+
+func (h *harness) statesOf(kind string) []string {
 	var out []string
 	for _, e := range h.events() {
-		if e["event"] == "crew" {
+		if e["event"] == kind {
 			out = append(out, e["state"].(string))
 		}
 	}
@@ -168,43 +174,52 @@ func gitRepo(t *testing.T) string {
 
 // --- the fake agent -----------------------------------------------------
 
-const crewSpec = "# Crew test\n\n## Problem\n\nA file is missing.\n\n## Approach\n\nWrite it.\n\n" +
-	"## Done when\n\n```gummi-done-when\n- id: DW-1\n  says: crew.txt exists\n  check: test -f crew.txt\n```\n\n" +
+const wfSpec = "# Workflow test\n\n## Problem\n\nA file is missing.\n\n## Approach\n\nWrite it.\n\n" +
+	"## Done when\n\n```gummi-done-when\n- id: DW-1\n  says: out.txt exists\n  check: test -f out.txt\n```\n\n" +
 	"## Limits\n\nNothing else.\n\n## Notes\n\nnone\n"
 
-// crewPlan is the planner's plan: one implementer writing crew.txt, at
-// budget credits.
-func crewPlan(budget int) string {
-	return "lanes: 1\nbudget: " + itoa(budget) + "\nnodes:\n  - id: t1\n    role: implementer\n    title: write crew.txt\n" +
-		"    owns: [crew.txt]\n    serves: [DW-1]\n    checks: [\"test -f crew.txt\"]\n    envelope: 100\n"
-}
+// wfRecipe is the recipe the session proposes: an implementer writes
+// out.txt, and a reviewer validates it. Its estimate is 150 credits.
+const wfRecipe = `name: make-file
+description: write the file and validate it
+steps:
+  - id: make
+    role: implementer
+    envelope: 100
+    prompt: |
+      Write out.txt for the spec below.
 
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
-}
+      {{spec}}
+  - id: validate
+    role: reviewer
+    envelope: 50
+    prompt: |
+      Read {{run.diff}} against the spec. End with MET: DW-1 or UNMET: DW-1.
 
-// sessionFake answers every role a session and its crew run. The session's
-// turns are scripted by first: what the first turn does (reply, ask, start
-// a crew); later session turns just acknowledge. The planner writes a
-// one-node plan, the node writes its file, a reviewer passes — crewFake's
-// shape (internal/engine/crew_test.go). widen makes the node's first run
-// steer the planner into widening the approved plan, and wait until that
-// decision is open.
+      {{spec}}
+`
+
+var stepRe = regexp.MustCompile(`You are step (\S+) of workflow run`)
+
+// sessionFake answers a session and its workflow run's steps. The
+// session's turns are scripted by first: what the first turn does (reply,
+// ask, propose a run, spend); later session turns just acknowledge. A
+// step is told apart by its brief: make writes out.txt — asking the
+// person first when stepAsks is set — and validate says MET.
 type sessionFake struct {
 	*agent.Fake
 	h *harness
 
 	mu       sync.Mutex
-	first    string // "reply" | "ask" | "crew" | "spend"
-	widen    bool
-	planner  int
-	nodeRuns int
+	first    string // "reply" | "ask" | "workflow" | "spend"
+	stepAsks bool
+	cardStep map[string]string
 	session  []string
+	steps    []string
 }
 
 func newSessionFake(first string) *sessionFake {
-	sf := &sessionFake{Fake: agent.NewFake(""), first: first}
+	sf := &sessionFake{Fake: agent.NewFake(""), first: first, cardStep: map[string]string{}}
 	sf.Caps = agent.Capabilities{ClientTools: true, UsageEvents: true, Interrupt: true}
 	sf.Responder = sf.respond
 	return sf
@@ -224,41 +239,19 @@ func say(text string) []agent.Event {
 }
 
 func (sf *sessionFake) respond(opts agent.SessionOpts, msg string) []agent.Event {
-	switch {
-	case opts.Role == agent.RolePlanner:
-		sf.mu.Lock()
-		sf.planner++
-		n := sf.planner
-		sf.mu.Unlock()
-		switch {
-		case strings.Contains(msg, "Write the plan now"):
-			return []agent.Event{
-				toolCall("p1", "plan_write", map[string]any{"plan": crewPlan(400)}), usage(),
-				{Kind: agent.EventMessage, Text: "planned"},
-				{Kind: agent.EventIdle},
-			}
-		case sf.widen && n == 2:
-			return []agent.Event{
-				toolCall("p2", "plan_write", map[string]any{"plan": crewPlan(600)}), usage(),
-				{Kind: agent.EventMessage, Text: "the docs need more budget"},
-				{Kind: agent.EventIdle},
-			}
-		}
-		return say("nothing to change")
-	case opts.Role == agent.RoleReviewer:
-		return say("VERDICT: pass")
-	case strings.Contains(msg, "You are node t1") || strings.Contains(msg, "Your work was sent back"):
-		sf.mu.Lock()
-		sf.nodeRuns++
-		n := sf.nodeRuns
-		sf.mu.Unlock()
-		if sf.widen && n == 1 {
-			sf.steerAndWait()
-		}
-		_ = os.WriteFile(filepath.Join(opts.WorkDir, "crew.txt"), []byte("made by the crew\n"), 0o600)
-		return say("Wrote it.\nDONE: wrote crew.txt\nDECISION: plain text")
-	}
 	sf.mu.Lock()
+	step := ""
+	if m := stepRe.FindStringSubmatch(msg); m != nil {
+		step = m[1][strings.LastIndex(m[1], "/")+1:]
+		sf.cardStep[opts.FeatureID] = step
+	} else if s, ok := sf.cardStep[opts.FeatureID]; ok {
+		step = s + "#"
+	}
+	if step != "" {
+		sf.steps = append(sf.steps, step+": "+firstLine(msg))
+		sf.mu.Unlock()
+		return sf.respondStep(opts, step, msg)
+	}
 	sf.session = append(sf.session, msg)
 	turn := len(sf.session)
 	sf.mu.Unlock()
@@ -281,51 +274,61 @@ func (sf *sessionFake) respond(opts agent.SessionOpts, msg string) []agent.Event
 			}),
 			{Kind: agent.EventIdle},
 		}
-	case "crew":
+	case "workflow":
 		sess := sf.sessionCard()
 		ctx := context.Background()
-		if _, _, err := sf.h.eng.StartSessionSpec(ctx, sess, "Crew test", "agent"); err != nil {
+		if _, _, err := sf.h.eng.StartSessionSpec(ctx, sess, "Workflow test", "agent"); err != nil {
 			return say("spec_start failed: " + err.Error())
 		}
-		if _, err := sf.h.eng.WriteSessionSpec(ctx, sess, 1, crewSpec, "agent"); err != nil {
+		if _, err := sf.h.eng.WriteSessionSpec(ctx, sess, 1, wfSpec, "agent"); err != nil {
 			return say("spec write failed: " + err.Error())
 		}
 		return []agent.Event{
 			usage(),
-			toolCall("c1", "crew_start", map[string]any{"brief": "make the file", "budget": 400}),
-			{Kind: agent.EventMessage, Text: "a crew is on it"},
+			toolCall("w1", "workflow_run", map[string]any{"recipe_yaml": wfRecipe}),
+			{Kind: agent.EventMessage, Text: "a workflow is on it"},
 			{Kind: agent.EventIdle},
 		}
 	}
 	return say("done: " + firstLine(msg))
 }
 
-// sessionCard is the run's session: the one freeform card no crew owns.
+// respondStep answers a step's turn: its brief, or (step ends in #) a
+// later turn on its card, such as the person's answer to its question.
+func (sf *sessionFake) respondStep(opts agent.SessionOpts, step, msg string) []agent.Event {
+	switch step {
+	case "make":
+		if sf.stepAsks {
+			return []agent.Event{
+				usage(),
+				toolCall("s1", "ask_user", map[string]any{
+					"question": "Plain text or markdown?",
+					"options":  []map[string]any{{"label": "plain"}, {"label": "markdown"}},
+				}),
+				{Kind: agent.EventIdle},
+			}
+		}
+		fallthrough
+	case "make#":
+		_ = os.WriteFile(filepath.Join(opts.WorkDir, "out.txt"), []byte("made by the run\n"), 0o600)
+		return say("Wrote it.\nDECISION: plain text")
+	case "validate":
+		return say("It is there.\nMET: DW-1")
+	}
+	return say("ok")
+}
+
+// sessionCard is the run's session: the one freeform card that is no
+// session's child.
 func (sf *sessionFake) sessionCard() domain.Feature {
 	all, _ := sf.h.store.ListFeatures(context.Background())
 	for _, f := range all {
-		if f.IsFreeform() && !f.InCrew() {
+		if f.IsFreeform() && !f.IsChild() {
 			return f
 		}
 	}
 	sf.h.t.Error("no session card")
 	return domain.Feature{}
-}
-
-// steerAndWait asks the planner for more, as a person would, and holds the
-// node until the planner's widening is open — so the run stops on it while
-// the crew is still running.
-func (sf *sessionFake) steerAndWait() {
-	ctx := context.Background()
-	sess := sf.sessionCard()
-	_ = sf.h.eng.CrewSteer(ctx, sess.ID, "the docs need a pass too", "user")
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, _ := sf.h.store.OpenCrew(ctx, sess.ID); c != nil && c.Pending != nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 func firstLine(s string) string {

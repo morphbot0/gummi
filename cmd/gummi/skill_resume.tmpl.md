@@ -8,22 +8,24 @@ need to choose yourself.
 ## Match the form to why the run stopped
 
 - `--answer "<text>"` — answers a **`question`** event: the session's own
-  `ask_user` (`kind: ask`), or its crew's open decision (`crew_plan`,
-  `crew_widen`, `crew_question`). For a crew decision, one of the event's
-  `options` decides it; other words reach the crew's planner as a note and
-  the decision comes back.
+  `ask_user` (`kind: ask`), its workflow run's open decision
+  (`workflow_proposal`, `workflow_plan`, `workflow_max`, `workflow_runaway`,
+  `workflow_budget`), or a step's own question (`workflow_ask`). For a run
+  decision, one of the event's `options` (or its number) decides it; other
+  words to a proposal reach the session as feedback, and to a revised plan
+  the planner step.
 - `"<message>"` (a second argument) — the session's next turn. Refused while a
   question is open: answer it with `--answer` instead.
 - `--envelope <dollars>` — clears an **`exhausted`** stop; it must exceed the
   dry envelope (the `envelope` field on the event), and only raises, never
-  lowers. It raises the crew pre-authorisation to match, and with no message
+  lowers. It raises the workflow pre-authorisation to match, and with no message
   tells the session to carry on where it stopped.
 - `--timeout <duration>` — retries a **`timeout`** with more room. The event
   carries `timeout_used`; if the backend was fine and just needed longer,
   double that rather than retrying at the same limit.
-- **neither** — carries on: a paused crew (`crew_paused`) is resumed, a
-  crew left running by a process that died is resumed, and the run waits for
-  the session and its crew as before. A bare `resume` is **not** how you answer
+- **neither** — carries on: a paused run (`workflow_paused`) is resumed, a
+  run left running by a process that died is resumed, and the run waits for
+  the session and its workflow run as before. A bare `resume` is **not** how you answer
   a question: the question is still open, and the run stops on it again.
 
 `--answer` and a message are mutually exclusive. `--envelope` and `--timeout`

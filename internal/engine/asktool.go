@@ -351,8 +351,6 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleSpecStart(s, tc)
 	case specListToolName:
 		e.handleSpecList(s, tc)
-	case crewStartToolName, crewStatusToolName, crewSteerToolName, crewStopToolName, crewLandToolName:
-		e.handleCrewTool(s, tc)
 	case workflowRecipesToolName, workflowRunToolName, workflowStatusToolName, workflowSteerToolName, workflowStopToolName:
 		e.handleWorkflowTool(s, tc)
 	case skillReadTool, skillManageTool:
@@ -504,11 +502,6 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	if st := e.stepOf(context.Background(), s.Feature); st != nil {
 		e.installAsk(s, tc.ID, ask)
 		e.workflowEvent(st.Session)
-		return
-	}
-	// a crew node's question goes to its planner first (DESIGN §24.6)
-	if s.Feature.Crew.Node != "" {
-		e.crewNodeAsk(s, tc.ID, ask)
 		return
 	}
 	e.installAsk(s, tc.ID, ask)

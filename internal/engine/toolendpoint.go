@@ -20,7 +20,7 @@ import (
 // startToolEndpoint serves a fixed tool set over a per-open unix socket for
 // an MCPTools backend, speaking the session-socket protocol the `gummi
 // __mcp --feature <id>` shim dials. It is the consult endpoint's shape with
-// the tool list and dispatch passed in, so a crew's planner or the curator
+// the tool list and dispatch passed in, so the curator
 // reaches exactly its own tools and nothing else.
 func (e *Engine) startToolEndpoint(ctx context.Context, id domain.FeatureID, label string, tools func() []agent.ToolDef, dispatch func(context.Context, string, json.RawMessage) (string, error)) (string, func(), error) {
 	path := filepath.Join(e.cfg.Workspace.StateDir(), "mcp", fmt.Sprintf("%s-%s-%s.sock", label, id, mcpNonce()))

@@ -161,7 +161,7 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 // by the caller, as a new numbered revision through the engine — the
 // terminal's mirror of the web page's own writer (WebDocs.noteSessionRevision),
 // so a comment, a resolution or an $EDITOR save made here reaches a
-// running crew as a steer the same way a web edit does. A no-op for
+// open workflow run that froze it as a steer the same way a web edit does. A no-op for
 // every card that is not such a session; a static board records the
 // revision through withEngine's own short-lived engine.
 func (m *Shell) noteSessionSpecRevision(f domain.Feature, path string) error {
@@ -458,7 +458,7 @@ func (m *Shell) specEdited(f domain.Feature, path, before string, reload tea.Cmd
 		}
 		// only a save that actually changed the file is worth a revision —
 		// an editor opened and closed untouched would otherwise spend a
-		// revision (and a crew steer) on nothing.
+		// revision (and a run's steer) on nothing.
 		if raw, rerr := os.ReadFile(path); rerr == nil && string(raw) != before {
 			if err := m.noteSessionSpecRevision(f, path); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}

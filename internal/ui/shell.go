@@ -196,9 +196,6 @@ type Shell struct {
 	// stackRows is each stacked card's position and staleness, derived in
 	// loadRows (it asks git) and read by cardLine (which may not).
 	stackRows map[domain.FeatureID]stackRow
-	// crewTicking and crewTickAgain coalesce crew ticks (crewloop.go).
-	crewTicking   map[domain.FeatureID]bool
-	crewTickAgain map[domain.FeatureID]bool
 	// workflowTicking and workflowTickAgain coalesce workflow ticks
 	// (workflowloop.go).
 	workflowTicking   bool
@@ -1128,7 +1125,7 @@ func (m *Shell) Init() tea.Cmd {
 		// badges them (and withholds the actions that would fight them)
 		// instead of presenting a card it cannot touch as idle.
 		cmds = append(cmds, foreignTick())
-		cmds = append(cmds, crewPollTick())
+		cmds = append(cmds, workflowPollTick())
 		// The stats tab's own slow refresh. It reads the record rather
 		// than the event stream, so nothing wakes it when a running lane
 		// grows or a wait is answered — a tick does, only while the tab
@@ -1213,10 +1210,6 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			}
 		}
 		return m.loadRows
-	case engine.EventCrew:
-		// something a session's crew conducts on changed: tick it, and
-		// reload so the squares and its decision are current
-		return tea.Batch(m.crewTickCmd(ev.Feature), m.loadRows)
 	case engine.EventWorkflow:
 		// something a workflow run's conductor reads changed: tick the
 		// runs, and reload so the session's decisions are current
@@ -1325,8 +1318,8 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 				}
 			}
 		}
-		if _, d := m.engine.CrewDecision(context.Background(), ev.Feature); d != nil {
-			q = "the crew asks: " + d.Question
+		if _, d := m.engine.WorkflowDecision(context.Background(), ev.Feature); d != nil {
+			q = "the workflow run asks: " + d.Question
 		}
 		m.raiseAttention(ev.Feature, attnQuestion, q)
 	case engine.EventAnnotations:
@@ -1452,9 +1445,6 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(statsLoadedMsg); ok {
 		return m, m.statsLoaded(msg)
-	}
-	if cmd, ok := m.updateCrew(msg); ok {
-		return m, cmd
 	}
 	if cmd, ok := m.updateWorkflow(msg); ok {
 		return m, cmd

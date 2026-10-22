@@ -28,7 +28,6 @@ import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
 import { runAction, messageHint, draftAffordance, landMethodControl, landMessageBox, keepBranchControl } from './actions.js?v=__ASSET_V__'
 import { pushAfterControl, openBasePush } from './pushbase.js?v=__ASSET_V__'
-import { crewPlanEl } from './crew.js?v=__ASSET_V__'
 
 let ctx = {}
 let answering = false
@@ -371,8 +370,6 @@ function drawDecision (box) {
             d.multi ? h('span', null, isMobile() ? ' · pick any, then Answer' : ' · pick any, then enter') : '']),
       jump ? h('button', { class: 'link', type: 'button', testid: 'decision-jump', onclick: () => ctx.setTab(jump[0]) }, jump[1]) : null)),
   h('div', { class: 'q', testid: 'decision-question' }, d.question),
-  // a crew's plan (or its widening) is drawn with the question it asks
-  crewPlanEl(d.crew),
   optionButtons(d, false),
   brief(d)
     ? h('button', { class: 'allopts', type: 'button', testid: 'decision-all', 'aria-expanded': 'false', onclick: () => set({ decAll: true }) }, `More answers (${d.options.length - 1})`)

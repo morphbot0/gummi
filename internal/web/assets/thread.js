@@ -356,11 +356,11 @@ function copyButton (text, title, testid) {
 // you is a line a person typed. It is headed with the name it was sent
 // with, and "you" when it came with none (the terminal's own lines) —
 // never with the viewer's own name, which would put one person's words
-// in another's mouth on a board several people share. A turn a session's
-// crew sent (its report, DESIGN §24.3) is the crew's, never the person's:
-// it is drawn on the other side, headed as the crew.
+// in another's mouth on a board several people share. A turn a workflow
+// run sent (its report, DESIGN §25.7) — or an old crew — is gummi's, never
+// the person's: it is drawn on the other side, headed as the workflow.
 function you (it) {
-  const crew = it.by === 'crew'
+  const run = it.by === 'workflow' || it.by === 'crew'
   const who = it.by || 'you'
   const text = String(it.text || '')
   // a long prompt is cut to a few lines, with a way to read it whole —
@@ -380,11 +380,11 @@ function you (it) {
         }
       }, whole ? 'show less' : 'show more')
     : null
-  return h('div', { class: ['msg', crew ? 'crewturn' : 'mine'], testid: crew ? 'thread-crew' : it.via === 'consult' ? 'thread-consult' : 'bubble' },
+  return h('div', { class: ['msg', run ? 'runturn' : 'mine'], testid: run ? 'thread-workflow' : it.via === 'consult' ? 'thread-consult' : 'bubble' },
     h('div', { class: 'bubble' }, body, more, attachmentThumbs(it.attachments)),
     h('div', { class: 'who' },
       it.via ? h('span', { class: 'via' }, it.via) : null,
-      h('b', { title: crew ? 'sent by the session’s crew' : 'who sent it' }, who),
+      h('b', { title: run ? `sent by the session’s ${it.by}` : 'who sent it' }, who),
       it.time ? h('span', { class: 'mono' }, clock(it.time)) : null,
       copyButton(text, 'Copy message', 'bubble-copy'),
       it.rewind ? h('button', { type: 'button', class: 'rewind', testid: 'turn-rewind', title: 'Take the conversation back to before this message and edit it. The branch keeps its commits.', onclick: it.rewind }, 'rewind') : null))

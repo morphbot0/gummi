@@ -35,8 +35,6 @@ func mkTool(name, desc string, props map[string]any, required ...string) agent.T
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-func num(desc string) map[string]any { return map[string]any{"type": "integer", "description": desc} }
-
 func strs(desc string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
 }

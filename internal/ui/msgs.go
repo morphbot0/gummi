@@ -23,18 +23,17 @@ import (
 // derived filesystem state the board displays.
 type featureRow struct {
 	F domain.Feature
-	// Crew is a session's latest crew (DESIGN §24) and CrewNodes its
-	// nodes, read at load so the board's squares and the open decision
-	// cost the render nothing. Nil on every card that never ran one.
-	Crew      *domain.Crew
-	CrewNodes []domain.CrewNodeRun
-	// CrewMoney is an open crew's money — spent, the forecast, what the
-	// session has left — read at load with the crew (Engine.CrewMoney).
-	CrewMoney *engine.CrewMoney
-	// CrewMark is the session's "crew verified at <sha>" mark (§24.8),
-	// read at load for an open session whose last crew landed: it runs
-	// git, so never at render. Nil on every other card.
-	CrewMark    *engine.CrewMark
+	// Validated is the session's validated mark (DESIGN §25.6), read at
+	// load for an open session a workflow run validated: it snapshots the
+	// tree, so never at render. Nil on every other card.
+	Validated *engine.ValidatedMark
+	// OpenRun is the session's open workflow run (running or paused), read
+	// at load; it holds the session's landing (Engine.RunHolds). Nil when
+	// none is open.
+	OpenRun *domain.Run
+	// DecidingRun is the session's run with an open decision for the
+	// person (Engine.WorkflowDecision), read at load; nil when none waits.
+	DecidingRun *domain.Run
 	HasWorktree bool
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	History     []state.TransitionRecord
@@ -238,18 +237,11 @@ func (m *Shell) loadRows() tea.Msg {
 			openSessions[f.ID] = f.BranchName()
 		}
 	}
-	crews := map[domain.FeatureID]*domain.Crew{}
-	if all, err := m.store.AllCrews(ctx); err == nil {
-		for i := range all {
-			crews[all[i].Session] = &all[i] // ordered by seq: the last wins
-		}
-	}
 	rows := make([]featureRow, 0, len(feats))
 	for _, f := range feats {
-		// a crew's own card and its nodes', and a workflow step's, are
-		// never on the board: their session is their face (DESIGN §24,
-		// §25.6)
-		if f.InCrew() {
+		// a workflow step's card, and an old crew's, are never on the
+		// board: their session is their face (DESIGN §25.6)
+		if f.IsChild() {
 			continue
 		}
 		// goals are retired: a legacy goal card is not on the board
@@ -257,16 +249,12 @@ func (m *Shell) loadRows() tea.Msg {
 			continue
 		}
 		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f)}
-		if c := crews[f.ID]; c != nil {
-			row.Crew = c
-			row.CrewNodes, _ = m.store.CrewNodes(ctx, c.ID)
-			if c.State.Open() && m.engine != nil {
-				money := m.engine.CrewMoney(ctx, c)
-				row.CrewMoney = &money
-			}
-			if c.State == domain.CrewLanded && f.Stage != domain.StageDone && m.engine != nil {
-				if mk, ok := m.engine.CrewVerifiedMark(ctx, f.ID); ok {
-					row.CrewMark = &mk
+		if f.IsFreeform() && f.Stage != domain.StageDone {
+			row.OpenRun, _ = m.store.OpenRun(ctx, f.ID)
+			if m.engine != nil {
+				row.DecidingRun, _ = m.engine.WorkflowDecision(ctx, f.ID)
+				if mk, ok := m.engine.ValidatedMark(ctx, f.ID); ok {
+					row.Validated = &mk
 				}
 			}
 		}

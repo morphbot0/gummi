@@ -90,7 +90,7 @@ func cardHasDiff(r featureRow) bool {
 
 // cardHasSessionSpec reports whether this card is a session with a spec
 // to open: a card hasSessionSpec may keep (websessionspec.go — freeform,
-// not a crew's own card or node, no home) whose spec file actually
+// no session's hidden child, no home) whose spec file actually
 // exists on disk. The tab bar, alt+s (here and shell.go's board-level
 // key) and cardActionsFor's "open document" entry all call this one
 // predicate, so they cannot disagree about whether a session has a spec
@@ -238,12 +238,12 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 
 // noArtifactReason says why the artifact tab draws nothing for this
 // card: a session hasSessionSpec may keep, but has not started one
-// (most never need one; a crew does), reads differently from an agent —
+// (most never need one; a workflow run does), reads differently from an agent —
 // a main-checkout card with no document at all, its record is its
 // thread and nothing else.
 func noArtifactReason(r featureRow) string {
 	if hasSessionSpec(r.F) {
-		return "it has no spec yet — most sessions never need one; a crew does"
+		return "it has no spec yet — most sessions never need one; a workflow run does"
 	}
 	return "a freeform card has no document — its thread is the record"
 }

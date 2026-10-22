@@ -12,10 +12,9 @@ import (
 )
 
 // A session's spec is started, edited whole from the revision it was read
-// at, and refused as moved from any other; its crew route answers that it
-// has none yet, refuses a crew its spec cannot carry, and a card in the
-// workflow has neither route.
-func TestSessionSpecAndCrewRoutes(t *testing.T) {
+// at, and refused as moved from any other; a card of a retired workflow
+// kind has no such route.
+func TestSessionSpecRoutes(t *testing.T) {
 	b := newDocsBoard(t, agent.NewFake("ok"))
 	ctx := context.Background()
 	id, _ := domain.NewID(domain.KindFreeform, 3)
@@ -56,23 +55,6 @@ func TestSessionSpecAndCrewRoutes(t *testing.T) {
 		t.Fatalf("the edit: %d %+v", st, sp.Revisions)
 	}
 
-	var c webapi.Crew
-	if st := b.get(path+"/crew", &c); st != http.StatusOK || !c.None || len(c.Acts) == 0 || c.Acts[0] != webapi.CrewActStart {
-		t.Fatalf("a session with no crew: %d %+v", st, c)
-	}
-	// the spec has no done-when item: the engine's refusal, in its words
-	if st := b.send(http.MethodPost, path+"/crew/start", pl(webapi.CrewRequest{Brief: "go", Budget: 400}), nil); st != http.StatusConflict {
-		t.Fatalf("a crew on a spec with no done-when answered %d", st)
-	}
-	if st := b.send(http.MethodPost, path+"/crew/start", pl(webapi.CrewRequest{Brief: "go"}), nil); st != http.StatusBadRequest {
-		t.Fatalf("a crew with no budget answered %d", st)
-	}
-	if st := b.send(http.MethodPost, path+"/crew/nonsense", "", nil); st != http.StatusNotFound {
-		t.Fatalf("an unknown crew action answered %d", st)
-	}
-	if st := b.get("/api/cards/FD-001/crew", nil); st != http.StatusNotFound {
-		t.Fatalf("a workflow card's crew answered %d", st)
-	}
 	if st := b.send(http.MethodPut, "/api/cards/FD-001/spec", pl(webapi.SpecWriteRequest{Markdown: "x", Rev: "y"}), nil); st != http.StatusNotFound {
 		t.Fatalf("a workflow card's spec PUT answered %d", st)
 	}

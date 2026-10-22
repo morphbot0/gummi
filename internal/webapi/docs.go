@@ -29,11 +29,11 @@ type Spec struct {
 	// workspace, a person edits it whole (PUT), and each write is a
 	// numbered revision, newest first in Revisions. A session with no spec
 	// yet answers None with Session set, so the page can offer to start
-	// one. DoneWhen is its gummi-done-when list: what a crew is judged
-	// against.
+	// one. DoneWhen is its gummi-done-when list: what a workflow run is
+	// judged against.
 	Session   bool           `json:"session,omitempty"`
 	Revisions []SpecRevision `json:"revisions,omitempty"`
-	DoneWhen  []CrewItem     `json:"doneWhen,omitempty"`
+	DoneWhen  []DoneWhenItem `json:"doneWhen,omitempty"`
 }
 
 // SpecSection is one heading and the line it starts on (1-based).
@@ -272,4 +272,39 @@ type PRNote struct {
 	Author string    `json:"author"`
 	Body   string    `json:"body"`
 	At     time.Time `json:"at,omitzero"`
+}
+
+// DoneWhenItem is one done-when item of a session's spec.
+type DoneWhenItem struct {
+	ID    string `json:"id"`
+	Says  string `json:"says"`
+	Check string `json:"check,omitempty"`
+	Judge bool   `json:"judge,omitempty"`
+}
+
+// SpecRevision is one saved state of a session's spec (§25.3), newest
+// first in Spec.Revisions. By is who wrote it: a person's name, "agent"
+// for the session's agent, or "you" when the terminal wrote it. Runs
+// lists the workflow runs that froze this revision.
+type SpecRevision struct {
+	Rev  int       `json:"rev"`
+	By   string    `json:"by"`
+	At   time.Time `json:"at,omitzero"`
+	Runs []int     `json:"runs,omitempty"`
+}
+
+// SpecWriteRequest is PUT /api/cards/{id}/spec: a session spec's new
+// text, written as one new revision. Rev is the Spec.Rev the edit was made
+// from; a spec that changed since is refused with 409 "moved". Answers
+// Spec.
+type SpecWriteRequest struct {
+	Markdown string `json:"markdown"`
+	Rev      string `json:"rev"`
+}
+
+// SpecStartRequest is POST /api/cards/{id}/spec/start: start a session's
+// spec from the template. An empty title takes the session's. Answers
+// Spec.
+type SpecStartRequest struct {
+	Title string `json:"title,omitempty"`
 }
