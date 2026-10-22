@@ -59,3 +59,61 @@ func TestSessionSpecRoutes(t *testing.T) {
 		t.Fatalf("a workflow card's spec PUT answered %d", st)
 	}
 }
+
+// A session's run routes: its specs list, a run's acts and its revert,
+// re-check and a step's face. A run the session lacks is refused, a run
+// number that is none is malformed, and a card that is no session has no
+// specs.
+func TestSessionRunRoutes(t *testing.T) {
+	b := newDocsBoard(t, agent.NewFake("ok"))
+	ctx := context.Background()
+	id, _ := domain.NewID(domain.KindFreeform, 3)
+	now := time.Now()
+	f := domain.Feature{
+		ID: id, Num: 3, Kind: domain.KindFreeform, Title: "Two pieces", Slug: "two-pieces", Stage: domain.StageOpen,
+		BranchScheme: domain.BranchSchemeKind, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := b.store.CreateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.eng.OpenFreeform(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/cards/" + string(id)
+	deadline := time.Now().Add(10 * time.Second)
+	for b.get(path, nil) != http.StatusOK {
+		if time.Now().After(deadline) {
+			t.Fatal("the board never loaded the session")
+		}
+		time.Sleep(20 * time.Millisecond)
+		_ = b.eng.Freeform(id).Send(ctx, "hi")
+	}
+	for _, title := range []string{"Export", "Import"} {
+		if st := b.send(http.MethodPost, path+"/spec/start", pl(webapi.SpecStartRequest{Title: title}), nil); st != http.StatusOK {
+			t.Fatalf("starting %s: %d", title, st)
+		}
+	}
+	var specs webapi.SpecList
+	if st := b.get(path+"/specs", &specs); st != http.StatusOK || len(specs.Specs) != 2 || specs.Specs[1].Title != "Import" ||
+		specs.Specs[1].State != "draft" || !specs.CanStart {
+		t.Fatalf("specs: %d %+v", st, specs)
+	}
+	if st := b.send(http.MethodPost, path+"/runs/1/pause", "", nil); st != http.StatusConflict {
+		t.Fatalf("pausing a run the session lacks answered %d", st)
+	}
+	if st := b.send(http.MethodPost, path+"/runs/one/stop", "", nil); st != http.StatusBadRequest {
+		t.Fatalf("a run named by no number answered %d", st)
+	}
+	if st := b.get(path+"/runs/1/revert", nil); st != http.StatusConflict {
+		t.Fatalf("a revert preview of a run the session lacks answered %d", st)
+	}
+	if st := b.send(http.MethodPost, path+"/recheck", "", nil); st != http.StatusConflict {
+		t.Fatalf("a re-check with no run answered %d", st)
+	}
+	if st := b.get(path+"/steps/FF-999", nil); st != http.StatusNotFound {
+		t.Fatalf("a step the session lacks answered %d", st)
+	}
+	if st := b.get("/api/cards/FD-001/specs", nil); st != http.StatusNotFound {
+		t.Fatalf("a workflow card's specs answered %d", st)
+	}
+}

@@ -112,7 +112,11 @@ type rowsMsg struct {
 	// empty for an unstacked one. Derived in loadRows for the same
 	// reason every other git-derived column is.
 	stacks map[domain.FeatureID]stackRow
-	err    error
+	// children are the sessions' hidden child cards (a workflow step's),
+	// which are no row of the board: the web face opens a step's thread
+	// by its card (DESIGN §25.10).
+	children map[domain.FeatureID]domain.Feature
+	err      error
 	// seq numbers the load by when it started (Shell.nextRowsSeq), so a
 	// load that returns after a newer one is dropped rather than applied
 	// over it. 0 is never judged stale.
@@ -238,10 +242,12 @@ func (m *Shell) loadRows() tea.Msg {
 		}
 	}
 	rows := make([]featureRow, 0, len(feats))
+	children := map[domain.FeatureID]domain.Feature{}
 	for _, f := range feats {
 		// a workflow step's card, and an old crew's, are never on the
 		// board: their session is their face (DESIGN §25.6)
 		if f.IsChild() {
+			children[f.ID] = f
 			continue
 		}
 		// goals are retired: a legacy goal card is not on the board
@@ -298,7 +304,7 @@ func (m *Shell) loadRows() tea.Msg {
 	// Stack annotations are derived here, on the command goroutine,
 	// because they ask git (is this card stale? has it landed?) and the
 	// render path may not. Keyed by card, so cardLine is a map lookup.
-	return rowsMsg{rows: rows, stacks: m.stackRowsForFeatures(ctx, feats), seq: seq, changes: changes}
+	return rowsMsg{rows: rows, children: children, stacks: m.stackRowsForFeatures(ctx, feats), seq: seq, changes: changes}
 }
 
 // stoppedDrift is a card's fork drift, asked only of a card stopped on a

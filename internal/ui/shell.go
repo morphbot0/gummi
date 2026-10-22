@@ -77,7 +77,15 @@ type Shell struct {
 	repoInstalled uint64
 
 	rows []featureRow
-	sel  int
+	// children are the hidden child cards of the sessions on the board (a
+	// workflow step's), by id: never rows, but the web face reads a step's
+	// thread by its card (webrun.go).
+	children map[domain.FeatureID]domain.Feature
+	// webStep is what the web last saw of each step card's session
+	// (emitStepChange), so a delta that moves nothing in its run's block
+	// does not send its session's page to read it again.
+	webStep map[domain.FeatureID]string
+	sel     int
 	// tab picks which of gummi's top-level tabs owns the main pane
 	// (tabs.go): board, stats, or inbox. cardOpen is the board tab's own
 	// page-within-a-tab — the selected card opened full width — and
@@ -1496,6 +1504,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and an index alone would quietly point somewhere else.
 		was := m.selectedID()
 		m.rows = msg.rows
+		m.children = msg.children
 		m.stackRows = msg.stacks
 		m.restoreSel(was)
 		var jump tea.Cmd

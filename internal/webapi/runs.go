@@ -167,16 +167,16 @@ type StepFace struct {
 	// Says is what a message to the step does now: a turn while it runs,
 	// a follow-up once it has ended.
 	Says string `json:"says"`
-	// Terminal is set when the session's terminal may be opened here.
-	Terminal bool `json:"terminal,omitempty"`
 }
 
 // StepArtifact is one artifact a step's brief names: its name, its path
-// in the run's directory, and whether it is there yet.
+// in the run's directory, whether it is there yet, and whether the step
+// writes it (declares it) or only reads it.
 type StepArtifact struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Exists bool   `json:"exists,omitempty"`
+	Writes bool   `json:"writes,omitempty"`
 }
 
 // StepSendRequest is POST /api/cards/{id}/steps/{card}/send: a person's

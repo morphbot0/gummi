@@ -297,6 +297,9 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 	if r, ok := m.rowByID(st.f.ID); ok && r.Validated != nil {
 		c.Validated = r.Validated.Text()
 	}
+	if c.Decision != nil {
+		c.Decision.Proposal = m.webProposal(ctx, st.f)
+	}
 	if dir, ok := filesDir(ctx, m.wt, st.f); ok {
 		// the server, which holds the key, fills in the URL
 		c.Files = &webapi.Files{Dir: dir}

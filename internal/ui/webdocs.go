@@ -92,6 +92,11 @@ func (m *Shell) WebDocs(id string) (*WebDocs, error) {
 	if !ok {
 		return nil, ErrNoCard
 	}
+	return m.webDocsFor(r)
+}
+
+// webDocsFor captures row r's documents.
+func (m *Shell) webDocsFor(r featureRow) (*WebDocs, error) {
 	if !m.attached() || m.store == nil || m.wt == nil {
 		return nil, ErrDetached
 	}
@@ -110,8 +115,16 @@ func (m *Shell) WebDocs(id string) (*WebDocs, error) {
 
 // WebThreadDocs is WebDocs for reading the thread, which also needs the
 // live block and the session still writing the log's last segment.
+// A workflow step's card is no row of the board, and its thread is read
+// all the same: it is what a step opened beside its session shows
+// (DESIGN §25.10).
 func (m *Shell) WebThreadDocs(id string) (*WebDocs, error) {
 	d, err := m.WebDocs(id)
+	if errors.Is(err, ErrNoCard) {
+		if r, ok := m.childRow(domain.FeatureID(id)); ok {
+			d, err = m.webDocsFor(r)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +162,7 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 	if err != nil {
 		spend = nil
 	}
-	items := threadfold.Items(evs, threadfold.Options{Spend: spend})
+	items := threadfold.Items(evs, threadfold.Options{Spend: spend, Runs: d.runInputs(ctx)})
 	var last int64
 	for _, it := range items {
 		last = max(last, it.Seq)
@@ -161,7 +174,9 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 	}
 	out := webapi.Thread{Items: []webapi.Item{}, Live: d.live, LastSeq: max(last, 0)}
 	for _, it := range groupActivity(converted) {
-		if it.Seq > after {
+		// a run's block changes without an event: every page carries it
+		// (threadfold.Since), and the page redraws it by its Rev
+		if it.Seq > after || it.T == webapi.ItemRun {
 			out.Items = append(out.Items, it)
 		}
 	}
@@ -219,6 +234,7 @@ func webItem(it threadfold.Item, cmds map[string]string) webapi.Item {
 			ID: it.Decision.ID, Kind: webapi.DecisionKind(it.Decision.Kind), Question: it.Decision.Question,
 		}
 	}
+	out.Run = webRunBlock(it.Run)
 	return out
 }
 

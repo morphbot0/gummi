@@ -30,6 +30,7 @@ func (s *Server) routes() {
 	s.cardRoutes()
 	s.docsRoutes()
 	s.specRoutes()
+	s.runRoutes()
 	s.fileRoutes()
 	s.termRoutes()
 	s.createRoutes()

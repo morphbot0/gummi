@@ -159,11 +159,11 @@
       },
       {
         "name": "review",
-        "path": ".gummi/runs/FF-12/2/review.json"
+        "path": ".gummi/runs/FF-12/2/review.json",
+        "writes": true
       }
     ],
-    "says": "a turn to the step while it runs",
-    "terminal": true
+    "says": "a turn to the step while it runs"
   },
   "send": {
     "text": "Keep the migration idempotent."

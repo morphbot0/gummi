@@ -18,7 +18,10 @@ import (
 func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 	r, ok := m.rowByID(domain.FeatureID(id))
 	if !ok {
-		return webapi.Live{}, false
+		// a workflow step's card: its conversation is its live block
+		if r, ok = m.childRow(domain.FeatureID(id)); !ok {
+			return webapi.Live{}, false
+		}
 	}
 	var live webapi.Live
 	f := r.F

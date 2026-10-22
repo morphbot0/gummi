@@ -308,6 +308,7 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 // decision and the board row too.
 func (m *Shell) emitEngineChange(ev engine.Event) {
 	id := string(ev.Feature)
+	m.emitStepChange(ev)
 	switch ev.Kind {
 	case engine.EventUpdated:
 		if id == "" {
@@ -342,6 +343,27 @@ func (m *Shell) emitEngineChange(ev engine.Event) {
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: id})
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeLive, ID: id})
 	}
+}
+
+// emitStepChange carries a workflow step's activity to its session's
+// page: the run's block there draws each step's last action, spend and
+// question (DESIGN §25.9). A streaming delta that moves none of those
+// moves nothing there.
+func (m *Shell) emitStepChange(ev engine.Event) {
+	f, ok := m.children[ev.Feature]
+	if !ok || m.engine == nil {
+		return
+	}
+	now, _ := m.engine.StepNow(ev.Feature)
+	key := fmt.Sprintf("%t|%s|%.1f|%t", now.Busy, now.Action, now.Spent, now.Ask != nil)
+	if ev.Kind == engine.EventUpdated && m.webStep[ev.Feature] == key {
+		return
+	}
+	if m.webStep == nil {
+		m.webStep = map[domain.FeatureID]string{}
+	}
+	m.webStep[ev.Feature] = key
+	m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(f.Child.Of)})
 }
 
 // setWebState records what the web last saw of card id: busy and watching.
