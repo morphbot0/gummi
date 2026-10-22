@@ -101,7 +101,7 @@ export async function loadCard (id = state.sel) {
   if (!id || state.gone === id) return null
   try {
     const c = await get(cardPath(id))
-    if (state.sel !== id) return c
+    if (state.sel !== id || state.gone === id) return c
     if (!state.cardErr && same(c, state.card)) return state.card
     const patch = { card: c, cardErr: null }
     const n = c.decision?.options?.length || 0
@@ -109,7 +109,9 @@ export async function loadCard (id = state.sel) {
     set(patch)
     return c
   } catch (err) {
-    if (state.sel === id) set({ cardErr: err })
+    // a read in flight when the card left the board fails for that reason:
+    // the card is said to be gone (initSelection), not that it did not load
+    if (state.sel === id && state.gone !== id) set({ cardErr: err })
     return null
   }
 }
@@ -119,7 +121,7 @@ export async function loadThread (id = state.sel, full = false) {
   const after = !full && state.thread?.items ? state.thread.lastSeq || 0 : 0
   try {
     const t = await get(cardPath(id, 'thread') + (after ? `?after=${after}` : ''))
-    if (state.sel !== id) return
+    if (state.sel !== id || state.gone === id) return
     const items = after ? upsert(state.thread.items, t.items || []) : (t.items || [])
     const lastSeq = Math.max(t.lastSeq || 0, after)
     const was = state.thread
@@ -129,7 +131,9 @@ export async function loadThread (id = state.sel, full = false) {
     if (moved) set({ thread: { items, lastSeq } })
     if (t.live !== undefined && !liveRoute) setLive(liveOrNull(t.live))
   } catch (err) {
-    if (state.sel !== id) return
+    // a read in flight when the card was deleted comes back not found:
+    // the thread already says the card is gone, and keeps saying so
+    if (state.sel !== id || state.gone === id) return
     set({ thread: { items: state.thread?.items || [], lastSeq: state.thread?.lastSeq || 0, unavailable: err.notBuilt, err } })
   }
 }
@@ -161,7 +165,7 @@ export async function loadLive (id = state.sel) {
   liveBusy = true
   try {
     const l = await get(cardPath(id, 'live'))
-    if (state.sel === id) setLive(liveOrNull(l))
+    if (state.sel === id && state.gone !== id) setLive(liveOrNull(l))
   } catch (err) {
     if (err.notBuilt) liveRoute = false
   } finally {
