@@ -13,12 +13,18 @@ package ui
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 const workflowPollInterval = 10 * time.Second
@@ -86,6 +92,9 @@ func workflowDecision(r featureRow) *threadDecision {
 }
 
 func workflowOptionDetail(o string) string {
+	if strings.HasPrefix(o, engine.WorkflowAlwaysPrefix) {
+		return "allows this run, and every later one estimated within it, without asking"
+	}
 	switch o {
 	case engine.WorkflowAllow:
 		return "the run starts; no agent allows its own run"
@@ -144,4 +153,99 @@ func (m *Shell) answerWorkflow(r featureRow, d *threadDecision, answer string) t
 			m.loadRows,
 		}
 	}
+}
+
+// runProposal is the proposal (or revised plan) d asks a person to allow,
+// as data, when the row read one for d's run.
+func runProposal(r featureRow, d *threadDecision) *engine.WorkflowProposal {
+	if d == nil || d.run == nil || r.Proposal == nil || r.Proposal.Run != d.run.N {
+		return nil
+	}
+	return r.Proposal
+}
+
+// firstParagraph is text up to its first blank line.
+func firstParagraph(text string) string {
+	if i := strings.Index(text, "\n\n"); i >= 0 {
+		return strings.TrimSpace(text[:i])
+	}
+	return strings.TrimSpace(text)
+}
+
+// proposalLines is a run's proposal as the picker draws it above its
+// answers (DESIGN §25.5): the recipe and its spec, what it costs against
+// the session's pool and whether the tree holds uncommitted work, Check's
+// warnings, the step tree with each step's role, tier and estimate, and
+// every done-when check it will run. It is the narration, so it sheds
+// from the end on a short page: the order is what matters most first.
+func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
+	fit := func(l string) string { return " " + ansi.Truncate(l, max(w-1, 8), "…") }
+	var out []string
+	head := s.Title.Render(sanitize(p.Recipe))
+	if p.Kind == domain.RunDecidePlan {
+		head = s.Title.Render("revised plan") + s.Faint.Render(" for "+sanitize(p.Recipe)+" · run "+strconv.Itoa(p.Run))
+	}
+	if p.Description != "" {
+		head += s.Faint.Render(" — " + sanitize(p.Description))
+	}
+	out = append(out, fit(head))
+	spec := fmt.Sprintf("spec S%d", p.Spec)
+	if p.SpecTitle != "" {
+		spec += " " + strconv.Quote(sanitize(p.SpecTitle))
+	}
+	out = append(out, fit(s.Subtle.Render(spec)+s.Faint.Render(fmt.Sprintf(" · freezes revision %d when it starts", p.SpecRev))))
+	money := "~" + domain.FormatDollars(float64(p.Estimate))
+	if p.Bounded {
+		money += " of " + domain.FormatDollars(math.Max(0, p.PoolLeft)) + " left in the session"
+	} else {
+		money += " · the session has no envelope"
+	}
+	tree := "nothing uncommitted in " + p.Branch
+	treeStyle := s.Faint
+	if p.Dirty {
+		tree, treeStyle = "the tree holds uncommitted work: the run's diff and a revert take it in too", s.Warning
+	}
+	out = append(out, fit(s.Muted.Render(money)+s.Faint.Render(" · ")+treeStyle.Render(tree)))
+	for _, warn := range p.Warnings {
+		out = append(out, fit(s.Warning.Render("⚠ "+sanitize(warn))))
+	}
+	if len(p.Warnings) == 0 && p.Kind == domain.RunDecideProposal {
+		out = append(out, fit(s.Success.Render("✓ the recipe passes its checks")))
+	}
+	for _, st := range p.Steps {
+		indent := strings.Repeat("  ", st.Depth)
+		switch st.Kind {
+		case "repeat":
+			l := indent + st.ID + fmt.Sprintf(" ↺ ≤%d", st.Max)
+			if st.Until != "" {
+				l += s.Faint.Render(" until " + sanitize(st.Until))
+			}
+			if st.OnMax != "" {
+				l += s.Faint.Render(", else " + string(st.OnMax))
+			}
+			out = append(out, fit("  "+s.Base.Render(l)))
+		case "parallel":
+			l := indent + st.ID + " ∥"
+			if st.Join != "" {
+				l += s.Faint.Render(" join " + string(st.Join))
+			}
+			out = append(out, fit("  "+s.Base.Render(l)))
+		default:
+			row := "  " + s.Base.Render(padTo(indent+st.ID, 16)) + " " +
+				roleStyle(s, st.Role).Render(padTo(string(st.Role), 12)) + " " +
+				s.Faint.Render(padTo(string(st.Tier), 9)) + " " +
+				s.Muted.Render(padTo("~"+domain.FormatDollars(float64(st.Estimate)), 7))
+			if st.Prompt != "" {
+				row += " " + s.Faint.Render(sanitize(st.Prompt))
+			}
+			out = append(out, fit(row))
+		}
+	}
+	if len(p.Checks) > 0 {
+		out = append(out, fit(s.Subtle.Render("checks it will run in the tree")))
+		for _, c := range p.Checks {
+			out = append(out, fit("  "+s.Muted.Render(c.Item)+" "+s.Base.Render(sanitize(c.Cmd))))
+		}
+	}
+	return out
 }

@@ -232,9 +232,19 @@ func (d *threadDecision) wordConsumer() int {
 // row lives without a shared constant (invariant, Considered approaches).
 func (d *threadDecision) optionCount() int {
 	if d.ask != nil {
-		return len(decisions.AskOptions(d.ask))
+		return len(d.askOptions())
 	}
 	return len(d.actions)
+}
+
+// askOptions is an ask-shaped decision's rows: a live question's
+// (decisions.AskOptions), or a workflow run's, whose words row is named
+// for what words do to it (decisions.RunOptions). Both faces read it.
+func (d *threadDecision) askOptions() []decisions.Option {
+	if d.run != nil && d.run.Pending != nil {
+		return decisions.RunOptions(d.run.Pending.Kind, d.ask)
+	}
+	return decisions.AskOptions(d.ask)
 }
 
 // pickerView is the shared inline decision picker. The card thread feeds
@@ -528,8 +538,16 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	title := "gummi"
 	options := make([]decisions.Option, 0, len(d.actions))
 	multi := false
+	question := d.question
 	if d.ask != nil {
 		title = r.F.Name() + " asks"
+		if d.run != nil {
+			title = fmt.Sprintf("workflow run %d · %s", d.run.N, workflowDecisionWord(d.run.Pending))
+			if p := runProposal(r, d); p != nil {
+				// the proposal's card says the rest beneath it
+				question = firstParagraph(d.question)
+			}
+		}
 		if m.threadFreeForm || m.proseAnswersAsk() {
 			// armed, or simply typed into: either way the composer below
 			// is the answer channel — say so on the pinned control, the
@@ -537,7 +555,7 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 			// picker stood.
 			title += " · your line is the answer"
 		}
-		options = decisions.AskOptions(d.ask)
+		options = d.askOptions()
 		multi = d.ask.MultiPick
 	} else {
 		aim := m.wordAim(d)
@@ -556,12 +574,12 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	}
 	armed := m.decisionArmed(d)
 	width := max(w-2, 10)
-	lines := strings.Split(pickerView(s, title, d.question, options,
+	lines := strings.Split(pickerView(s, title, question, options,
 		m.decisionCursor, m.decisionPicked, multi, w, armed), "\n")
 	// the head is however many rows the question needed (pickerHead wraps
 	// it onto its own when it will not sit beside the title), so the
 	// window has to be told rather than assuming one.
-	head := len(pickerHead(s, title, d.question, width))
+	head := len(pickerHead(s, title, question, width))
 
 	// The narration takes its rows out of the decision's own budget, and
 	// it is the first thing in the region to yield: the paragraph is what
@@ -597,6 +615,11 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 // itself to itself. It is also the settled answer to whether a pending
 // ask keeps the full answer set: it replaces it, narration included.
 func (m *Shell) narrationBlock(s *theme.Styles, d *threadDecision, r featureRow, width int) []string {
+	if p := runProposal(r, d); p != nil {
+		// a run's proposal, or a revised plan: what a person reads to
+		// allow it (DESIGN §25.5)
+		return append(proposalLines(s, *p, width), "")
+	}
 	if d == nil || d.ask != nil {
 		return nil
 	}

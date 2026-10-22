@@ -34,6 +34,10 @@ type featureRow struct {
 	// DecidingRun is the session's run with an open decision for the
 	// person (Engine.WorkflowDecision), read at load; nil when none waits.
 	DecidingRun *domain.Run
+	// Proposal is DecidingRun's proposal or revised plan as data
+	// (Engine.WorkflowProposal), read at load for the picker to draw:
+	// it asks git whether the tree is dirty. Nil for any other decision.
+	Proposal    *engine.WorkflowProposal
 	HasWorktree bool
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	History     []state.TransitionRecord
@@ -259,6 +263,12 @@ func (m *Shell) loadRows() tea.Msg {
 			row.OpenRun, _ = m.store.OpenRun(ctx, f.ID)
 			if m.engine != nil {
 				row.DecidingRun, _ = m.engine.WorkflowDecision(ctx, f.ID)
+				if d := row.DecidingRun; d != nil && d.Pending != nil &&
+					(d.Pending.Kind == domain.RunDecideProposal || d.Pending.Kind == domain.RunDecidePlan) {
+					if p, err := m.engine.WorkflowProposal(ctx, f.ID, d.N); err == nil {
+						row.Proposal = &p
+					}
+				}
 				if mk, ok := m.engine.ValidatedMark(ctx, f.ID); ok {
 					row.Validated = &mk
 				}

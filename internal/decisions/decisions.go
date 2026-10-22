@@ -13,6 +13,7 @@ package decisions
 import (
 	"strings"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 )
@@ -159,6 +160,29 @@ func AskOptions(ask *engine.Ask) []Option {
 	}
 	return append(options, Option{Label: ChatLabel, Detail: detail, Chat: true})
 }
+
+// RunOptions shapes a workflow run's open decision (DESIGN §25.5, §25.7)
+// as options: the run's own answers by their labels, then the words row
+// AskOptions appends, named for what the person's words do to this kind
+// of decision. On a proposal they are Feedback, delivered to the session
+// agent as a turn, which may propose again; on a revised plan they go to
+// its planner; on the money they are the amount to top up by.
+func RunOptions(kind domain.RunDecisionKind, ask *engine.Ask) []Option {
+	options := AskOptions(ask)
+	chat := &options[len(options)-1]
+	switch kind {
+	case domain.RunDecideProposal:
+		chat.Label, chat.Detail = RunFeedbackLabel, "type it below: the session hears it, and may propose again"
+	case domain.RunDecidePlan:
+		chat.Label, chat.Detail = "Talk it over", "type it below: the planner hears it, and may revise the plan again"
+	case domain.RunDecideBudget:
+		chat.Label, chat.Detail = "Another amount", "type the credits to top the session up by"
+	}
+	return options
+}
+
+// RunFeedbackLabel is a run proposal's words row.
+const RunFeedbackLabel = "Feedback"
 
 // ChatDetailRestored is the chat row's detail on a question restored
 // without its options (engine.Ask.Restored).

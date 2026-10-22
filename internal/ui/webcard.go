@@ -12,7 +12,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
@@ -107,7 +106,7 @@ func (m *Shell) webAskDecision(r featureRow, d *threadDecision) *webOpenDecision
 		od.api.Anchor = webapi.AnchorThread
 		od.api.Against.Label = "workflow run " + strconv.Itoa(d.run.N) + "'s " + workflowDecisionWord(d.run.Pending)
 	}
-	for i, o := range decisions.AskOptions(ask) {
+	for i, o := range d.askOptions() {
 		oid := strconv.Itoa(i)
 		if o.Chat {
 			oid = webOptionChat

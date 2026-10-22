@@ -159,6 +159,72 @@
     ]
   },
   {
+    "card": "FF-016",
+    "kind": "ask",
+    "question": "Run the deliver workflow on spec S1?",
+    "anchor": "thread",
+    "options": [
+      {
+        "id": "0",
+        "label": "Allow",
+        "detail": "the run starts; no agent allows its own run",
+        "words": false
+      },
+      {
+        "id": "1",
+        "label": "Always allow up to $5",
+        "detail": "allows this run, and every later one estimated within it, without asking",
+        "words": false
+      },
+      {
+        "id": "2",
+        "label": "Deny",
+        "detail": "no run; the session carries on by itself",
+        "words": false
+      },
+      {
+        "id": "chat",
+        "label": "Feedback",
+        "detail": "type it below: the session hears it, and may propose again",
+        "words": true,
+        "chat": true
+      }
+    ]
+  },
+  {
+    "card": "FF-017",
+    "kind": "ask",
+    "question": "Run 2: build reached its max of 3.",
+    "anchor": "thread",
+    "options": [
+      {
+        "id": "0",
+        "label": "Run one more iteration",
+        "detail": "the loop runs once more",
+        "words": false
+      },
+      {
+        "id": "1",
+        "label": "Continue",
+        "detail": "the run goes on to its next step",
+        "words": false
+      },
+      {
+        "id": "2",
+        "label": "Stop the run",
+        "detail": "the run stops; its changes stay in the tree",
+        "words": false
+      },
+      {
+        "id": "chat",
+        "label": "Chat about this",
+        "detail": "reply with your own words instead of picking an option",
+        "words": true,
+        "chat": true
+      }
+    ]
+  },
+  {
     "card": "ask",
     "kind": "ask",
     "question": "Persist where?",
