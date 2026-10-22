@@ -27,7 +27,7 @@ const eventsFileMode = 0o600
 const defaultTimeout = 20 * time.Minute
 
 // runRun implements `gummi run [flags] "<prompt>"`: it starts one session
-// from the prompt, pre-authorises its workflow runs up to the envelope, and drives
+// from the prompt, always allows its workflow runs (the envelope their only cap), and drives
 // it headlessly until it is done or needs a person, streaming NDJSON and
 // exiting with a typed status. An envelope is required (D6) and an agent
 // must be configured — both fail loud before any work begins.

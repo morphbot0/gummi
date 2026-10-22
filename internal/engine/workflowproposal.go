@@ -36,9 +36,9 @@ type WorkflowProposal struct {
 	// Checks are the done-when check commands the run will execute in the
 	// tree when it ends.
 	Checks []ProposalCheck
-	// Estimate is in credits; PoolLeft what the session's envelope has
-	// left, when Bounded (a session with no envelope has no pool to say).
-	Estimate int
+	// PoolLeft is what the session's envelope has left, when Bounded (a
+	// session with no envelope has no pool to say). A run estimates
+	// nothing: it spends from that pool until it is spent.
 	PoolLeft float64
 	Bounded  bool
 	// Dirty marks a tree holding uncommitted work, which the run's diff
@@ -56,12 +56,11 @@ type ProposalStep struct {
 	Depth int
 	// Kind is "step", "parallel" or "repeat".
 	Kind string
-	// A step's role, tier (its own or the recipe's) and estimate in
-	// credits, and the first line of its prompt.
-	Role     domain.WorkflowRole
-	Tier     domain.StepTier
-	Estimate int
-	Prompt   string
+	// A step's role, tier (its own or the recipe's), and the first line
+	// of its prompt.
+	Role   domain.WorkflowRole
+	Tier   domain.StepTier
+	Prompt string
 	// A repeat's bound, its stop condition in words and what it does at
 	// its max; a parallel's join.
 	Max   int
@@ -99,14 +98,13 @@ func (e *Engine) WorkflowProposal(ctx context.Context, session domain.FeatureID,
 	d := run.Pending
 	p := WorkflowProposal{
 		Run: run.N, Kind: d.Kind, Recipe: recipeLabel(run), Description: run.Recipe.Description,
-		Spec: run.Spec, Warnings: d.Warnings, Estimate: run.Estimate, Branch: sess.BranchName(),
+		Spec: run.Spec, Warnings: d.Warnings, Branch: sess.BranchName(),
 	}
 	entries := run.Recipe.Steps
 	if d.Kind == domain.RunDecidePlan {
 		if entries, err = workflowrecipe.ParseEntries([]byte(d.RecipeYAML)); err != nil {
 			return WorkflowProposal{}, err
 		}
-		p.Estimate = workflowrecipe.EstimateEntries(entries, nil)
 	}
 	p.Steps = proposalSteps(entries, run.Recipe.Tier, 0)
 	if sp, ok, err := st.SessionSpec(ctx, session, run.Spec); err == nil && ok {
@@ -145,8 +143,7 @@ func proposalSteps(es []domain.Entry, tier domain.StepTier, depth int) []Proposa
 			t = domain.TierStandard
 		}
 		return ProposalStep{
-			ID: s.ID, Depth: depth, Kind: "step", Role: s.Role, Tier: t,
-			Estimate: workflowrecipe.DefaultEnvelopes.Envelope(s), Prompt: firstLine(s.Prompt),
+			ID: s.ID, Depth: depth, Kind: "step", Role: s.Role, Tier: t, Prompt: firstLine(s.Prompt),
 		}
 	}
 	var out []ProposalStep
@@ -157,7 +154,6 @@ func proposalSteps(es []domain.Entry, tier domain.StepTier, depth int) []Proposa
 		case en.Parallel != nil:
 			out = append(out, ProposalStep{
 				ID: en.Parallel.ID, Depth: depth, Kind: "parallel", Join: en.Parallel.Join,
-				Estimate: workflowrecipe.EstimateEntries([]domain.Entry{en}, nil),
 			})
 			for _, s := range en.Parallel.Steps {
 				out = append(out, step(s, depth+1))
@@ -166,7 +162,6 @@ func proposalSteps(es []domain.Entry, tier domain.StepTier, depth int) []Proposa
 			r := en.Repeat
 			out = append(out, ProposalStep{
 				ID: r.ID, Depth: depth, Kind: "repeat", Max: r.Max, Until: untilText(r.Until), OnMax: r.OnMax.Or(),
-				Estimate: workflowrecipe.EstimateEntries([]domain.Entry{en}, nil),
 			})
 			out = append(out, proposalSteps(r.Steps, tier, depth+1)...)
 		}

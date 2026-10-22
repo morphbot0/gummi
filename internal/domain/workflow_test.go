@@ -104,13 +104,7 @@ func TestRunAndStepStates(t *testing.T) {
 	}
 }
 
-func TestRunawayAndPaths(t *testing.T) {
-	if got := (RunStep{Estimate: 50}).Runaway(); got != 150 {
-		t.Errorf("runaway = %v", got)
-	}
-	if got := (RunStep{Estimate: 50, Allowance: 2}).Runaway(); got != 450 {
-		t.Errorf("runaway with allowance = %v", got)
-	}
+func TestPaths(t *testing.T) {
 	if got := StepPath("build", "2", "implement"); got != "build/2/implement" {
 		t.Errorf("StepPath = %q", got)
 	}

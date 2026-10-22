@@ -62,21 +62,34 @@ func TestLegacyCrewCardsAreTheChildrenNoStepWorks(t *testing.T) {
 	}
 }
 
-// The pre-authorisation a person gave is read back as given.
-func TestWorkflowPreauthRoundTrips(t *testing.T) {
+// "Always allow" is read back as given, and withdrawn as given; an amount
+// a pre-authorisation from before stored reads as yes.
+func TestWorkflowAlwaysAllowRoundTrips(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
 	f := freeformFeat(1, "x")
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if n, _ := s.WorkflowPreauth(ctx, f.ID); n != 0 {
-		t.Fatalf("preauth before any = %d", n)
+	if always, _ := s.WorkflowAlwaysAllow(ctx, f.ID); always {
+		t.Fatal("always allowed before anyone said so")
 	}
-	if err := s.SetWorkflowPreauth(ctx, f.ID, 500); err != nil {
+	if err := s.SetWorkflowAlwaysAllow(ctx, f.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	if n, _ := s.WorkflowPreauth(ctx, f.ID); n != 500 {
-		t.Fatal(n)
+	if always, _ := s.WorkflowAlwaysAllow(ctx, f.ID); !always {
+		t.Fatal("always allow did not stick")
+	}
+	if err := s.SetWorkflowAlwaysAllow(ctx, f.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if always, _ := s.WorkflowAlwaysAllow(ctx, f.ID); always {
+		t.Fatal("always allow was not withdrawn")
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE crew_preauth SET credits=500 WHERE feature_id=?`, string(f.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if always, _ := s.WorkflowAlwaysAllow(ctx, f.ID); !always {
+		t.Fatal("an amount from before does not read as always allow")
 	}
 }

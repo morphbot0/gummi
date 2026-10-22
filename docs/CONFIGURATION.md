@@ -200,7 +200,8 @@ profiles:
 
 A recipe's planner step reads the work and may revise the run's
 remaining steps; its turns are paid from the session's envelope like
-every step's. A mid-size model is usually enough for it:
+every step's, and it plans without regard to money: a run estimates
+nothing, and goes on until the session's envelope is spent. A mid-size model is usually enough for it:
 `planner: { backend: claude, model: claude-sonnet-5 }` under an Opus
 architect, for example.
 

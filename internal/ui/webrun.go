@@ -85,7 +85,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 	}
 	out := &webapi.RunBlock{
 		N: r.N, Rev: r.Rev, Recipe: r.Recipe, Spec: r.Spec, SpecTitle: r.SpecTitle, SpecRev: r.SpecRev,
-		State: r.State, Reason: r.Reason, Stopping: r.Stopping, Spent: r.Spent, Estimate: r.Estimate,
+		State: r.State, Reason: r.Reason, Stopping: r.Stopping, Spent: r.Spent,
 		Started: r.Started, Ended: r.Ended, Strip: []webapi.RunStripEntry{}, Rows: []webapi.RunStepRow{},
 		Files: r.Files, Commits: r.Commits, Validated: r.Validated, Report: r.Report,
 		CanPause: r.CanPause, CanResume: r.CanResume, CanStop: r.CanStop, CanRevert: r.CanRevert,
@@ -104,7 +104,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 	for _, row := range r.Rows {
 		w := webapi.RunStepRow{
 			Key: row.Key, Path: row.Path, Repeat: row.Repeat, Iter: row.Iter, ID: row.ID, Role: row.Role, State: row.State,
-			Spent: row.Spent, Estimate: row.Estimate, Line: row.Line, Card: row.Card, Folded: row.Folded, Steps: row.Steps,
+			Spent: row.Spent, Line: row.Line, Card: row.Card, Folded: row.Folded, Steps: row.Steps,
 			Verdict: row.Verdict, Waiting: row.Waiting,
 		}
 		if q := row.Question; q != nil {
@@ -225,7 +225,7 @@ func (d *WebDocs) Step(ctx context.Context, card string) (webapi.StepFace, error
 	out := webapi.StepFace{
 		Card: string(st.Card), Session: string(d.f.ID), Run: run.N, Recipe: block.Recipe, Path: st.Path, ID: st.StepID,
 		Role: string(st.Role), Tier: string(st.Tier), State: string(st.State), Reason: threadfold.Sanitize(st.Reason),
-		Spent: st.Spent, Estimate: st.Estimate, Started: st.StartedAt, Ended: st.EndedAt, Live: st.State.Live(),
+		Spent: st.Spent, Started: st.StartedAt, Ended: st.EndedAt, Live: st.State.Live(),
 		Brief: threadfold.Sanitize(st.Prompt), Output: threadfold.Sanitize(st.Output),
 	}
 	out.Crumb = stepCrumb(block.Recipe, run.N, st)
@@ -450,11 +450,11 @@ func (m *Shell) webProposal(ctx context.Context, f domain.Feature) *webapi.RunPr
 	out := &webapi.RunProposal{
 		Run: p.Run, Kind: string(p.Kind), Recipe: threadfold.Sanitize(p.Recipe), Description: threadfold.Sanitize(p.Description),
 		Spec: p.Spec, SpecTitle: threadfold.Sanitize(p.SpecTitle), SpecRev: p.SpecRev, Steps: []webapi.ProposalStep{},
-		Warnings: p.Warnings, Estimate: p.Estimate, PoolLeft: p.PoolLeft, Bounded: p.Bounded, Dirty: p.Dirty, Branch: p.Branch,
+		Warnings: p.Warnings, PoolLeft: p.PoolLeft, Bounded: p.Bounded, Dirty: p.Dirty, Branch: p.Branch,
 	}
 	for _, s := range p.Steps {
 		out.Steps = append(out.Steps, webapi.ProposalStep{
-			ID: s.ID, Depth: s.Depth, Kind: s.Kind, Role: string(s.Role), Tier: string(s.Tier), Estimate: s.Estimate,
+			ID: s.ID, Depth: s.Depth, Kind: s.Kind, Role: string(s.Role), Tier: string(s.Tier),
 			Prompt: threadfold.Sanitize(s.Prompt), Max: s.Max, Until: s.Until, OnMax: string(s.OnMax), Join: string(s.Join),
 		})
 	}

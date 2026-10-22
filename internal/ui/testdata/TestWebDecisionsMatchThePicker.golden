@@ -172,8 +172,8 @@
       },
       {
         "id": "1",
-        "label": "Always allow up to $5",
-        "detail": "allows this run, and every later one estimated within it, without asking",
+        "label": "Always allow",
+        "detail": "allows this run and every later one of this session without asking; its budget is the only cap",
         "words": false
       },
       {

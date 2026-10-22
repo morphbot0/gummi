@@ -13,36 +13,30 @@
 // artifact's verdict, the last output) and feeds back, and then iterates,
 // ends the loop or applies onMax.
 //
-// Money (§24.7a, unchanged): one pool, the session's envelope. A step's
-// envelope and the recipe's estimate are estimates, never fences. A spent
-// pool pauses the run for a top-up and never drops work; a forecast past
-// what the pool has left warns the person once; a step past three times its
-// estimate is a runaway the person decides on.
+// Money (§24.7a): one pool, the session's envelope. A run estimates
+// nothing and binds to that budget alone: it goes on until the pool is
+// spent, then pauses for a top-up and never drops work.
 //
 // The rules, in the order Decide applies them:
 //
 //  1. Only a running run is conducted, but a stop winds down a paused one
 //     too: interrupt the live steps, then end the run stopped.
 //  2. A spent pool pauses the run for a top-up; nothing else happens.
-//  3. A runaway step goes to the person.
-//  4. A parallel whose join is decided settles, stopping branches it no
+//  3. A parallel whose join is decided settles, stopping branches it no
 //     longer needs; a repeat whose iteration has ended has its until
 //     judged, then iterates, ends, or applies onMax.
-//  5. The next ready step starts: the next entry in order, or every branch
+//  4. The next ready step starts: the next entry in order, or every branch
 //     of a parallel.
-//  6. A forecast past what the pool has left warns the person, once.
-//  7. When nothing is left, the run ends: done, or partial on a failed step
+//  5. When nothing is left, the run ends: done, or partial on a failed step
 //     outside a parallel, a failed parallel or an aborted loop.
 package workflowpolicy
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/workflowrecipe"
 )
 
 // Step is one step instance in a snapshot.
@@ -50,12 +44,7 @@ type Step struct {
 	// Path is where the instance sits: build/2/implement, reviews/review-a.
 	Path  string
 	State domain.StepState
-	// Estimate is the step's envelope; 0 takes its role's default.
-	// Allowance counts the further three estimates a person granted a
-	// runaway.
-	Estimate  int
-	Allowance int
-	Spent     float64
+	Spent float64
 }
 
 // UntilResult is the engine's judgement of a repeat's until after one
@@ -82,9 +71,6 @@ const (
 type Snapshot struct {
 	State  domain.RunState
 	Recipe domain.Recipe
-	// Defaults prices a step that names no envelope; nil takes
-	// workflowrecipe.DefaultEnvelopes.
-	Defaults workflowrecipe.Defaults
 	// Steps is every step instance the run has, in any order.
 	Steps []Step
 	// Until holds the judged untils, keyed by iteration path (build/2).
@@ -97,9 +83,6 @@ type Snapshot struct {
 	// not Bounded.
 	Bounded bool
 	Left    float64
-	// Warned marks a forecast warning already put to the person since the
-	// pool was last topped up.
-	Warned bool
 	// Stopping marks a workflow_stop or a person's stop.
 	Stopping bool
 }
@@ -121,22 +104,15 @@ const (
 	// iteration, continue, or stop. The answer comes back as
 	// Snapshot.OnMax[Path].
 	AskOnMax
-	// Runaway puts a step past three times its estimate to the person: let
-	// it run three estimates more, or drop it.
-	Runaway
-	// Pause parks the run for a top-up: the pool is spent. Amount is the
-	// top-up suggested.
+	// Pause parks the run for a top-up: the pool is spent.
 	Pause
-	// Warn puts the forecast to the person: Amount is about what the run
-	// needs beyond what the pool has left. Nothing pauses.
-	Warn
 	// End ends the run in State: run the end checks, write the report and
 	// send it to the session.
 	End
 )
 
 func (k Kind) String() string {
-	return [...]string{"start", "interrupt", "need-until", "ask-on-max", "runaway", "pause", "warn", "end"}[k]
+	return [...]string{"start", "interrupt", "need-until", "ask-on-max", "pause", "end"}[k]
 }
 
 // Action is one thing for the engine to do.
@@ -149,8 +125,6 @@ type Action struct {
 	// until or max is in question.
 	Step   string
 	Reason string
-	// Amount is Pause's and Warn's suggested top-up, in credits.
-	Amount int
 	// State is End's: done, partial or stopped.
 	State domain.RunState
 }
@@ -166,34 +140,7 @@ func (a Action) String() string {
 	if a.Reason != "" {
 		s += ": " + a.Reason
 	}
-	if a.Amount > 0 {
-		s += fmt.Sprintf(" (+%d)", a.Amount)
-	}
 	return s
-}
-
-// Forecast is where a run's money is headed.
-type Forecast struct {
-	// Spent is what the run's steps have spent.
-	Spent float64
-	// Ratio is how far finished steps ran over their estimates, never below
-	// 1: a run that ran over so far is expected to keep doing so.
-	Ratio float64
-	// ToFinish is what the run is expected to spend from here: each live
-	// step's estimate scaled by Ratio less what it has spent, and every
-	// step still to start at its estimate scaled by Ratio — a repeat's
-	// remaining iterations counted up to its max.
-	ToFinish float64
-	// Short is how much ToFinish exceeds what the pool has left; 0 when it
-	// fits or the pool has no ceiling.
-	Short float64
-}
-
-// TopUpFor is the top-up suggested to cover need: a quarter more, rounded
-// up to 50 credits, never below 100.
-func TopUpFor(need float64) int {
-	t := int(math.Ceil(need*1.25/50)) * 50
-	return max(t, 100)
 }
 
 // outcome is how far a part of the recipe has got.
@@ -209,16 +156,12 @@ const (
 type decider struct {
 	in     Snapshot
 	byPath map[string]Step
-	settle []Action // rule 4
-	starts []Action // rule 5
-	ratio  float64
+	settle []Action // rule 3
+	starts []Action // rule 4
 }
 
 func newDecider(in Snapshot) *decider {
-	d := &decider{in: in, byPath: map[string]Step{}, ratio: 1}
-	if d.in.Defaults == nil {
-		d.in.Defaults = workflowrecipe.DefaultEnvelopes
-	}
+	d := &decider{in: in, byPath: map[string]Step{}}
 	for _, s := range in.Steps {
 		d.byPath[s.Path] = s
 	}
@@ -243,37 +186,16 @@ func Decide(in Snapshot) []Action {
 	if in.State != domain.RunRunning {
 		return nil
 	}
-	fc := d.forecast()
 	if in.Bounded && in.Left <= 0 {
-		return []Action{{
-			Kind:   Pause,
-			Reason: fmt.Sprintf("the session's budget is spent (the run has spent %.0f)", fc.Spent),
-			Amount: TopUpFor(fc.ToFinish),
-		}}
-	}
-
-	var out []Action
-	for _, s := range live {
-		if est := d.estimateOf(s); est > 0 && s.Spent > float64(3*est*(1+s.Allowance)) {
-			out = append(out, Action{
-				Kind: Runaway, Path: s.Path,
-				Reason: fmt.Sprintf("it has spent %.0f against an estimate of %d", s.Spent, est),
-			})
-		}
+		return []Action{{Kind: Pause, Reason: fmt.Sprintf("the session's budget is spent (the run has spent %.0f)", Spent(in))}}
 	}
 
 	res, why := d.seq("", in.Recipe.Steps)
+	var out []Action
 	out = append(out, d.settle...)
 	out = append(out, d.starts...)
 
 	if res == pending || len(d.live()) > 0 {
-		if fc.Short > 0 && !in.Warned {
-			out = append(out, Action{
-				Kind:   Warn,
-				Reason: fmt.Sprintf("the run looks set to spend about %.0f more; the session has %.0f left", fc.ToFinish, math.Max(0, in.Left)),
-				Amount: TopUpFor(fc.Short),
-			})
-		}
 		return out
 	}
 	switch res {
@@ -298,16 +220,13 @@ func (d *decider) live() []Step {
 	return out
 }
 
-// estimateOf is an instance's estimate: its own, or its recipe step's.
-func (d *decider) estimateOf(s Step) int {
-	if s.Estimate > 0 {
-		return s.Estimate
+// Spent is what a snapshot's steps have spent together.
+func Spent(in Snapshot) float64 {
+	t := 0.0
+	for _, s := range in.Steps {
+		t += s.Spent
 	}
-	id := s.Path[strings.LastIndex(s.Path, "/")+1:]
-	if st, found := workflowrecipe.Find(d.in.Recipe, id); found {
-		return d.in.Defaults.Envelope(st)
-	}
-	return 0
+	return t
 }
 
 func join(prefix, id string) string {
@@ -495,94 +414,4 @@ func (d *decider) repeat(prefix string, r domain.Repeat) (outcome, string) {
 	}
 	d.settle = append(d.settle, Action{Kind: AskOnMax, Path: iter, Step: r.ID, Reason: why})
 	return pending, ""
-}
-
-// ComputeForecast reads a snapshot's money.
-func ComputeForecast(in Snapshot) Forecast { return newDecider(in).forecast() }
-
-func (d *decider) forecast() Forecast {
-	f := Forecast{Ratio: 1}
-	var doneSpent, doneEst float64
-	for _, s := range d.in.Steps {
-		f.Spent += s.Spent
-		if s.State == domain.StepDone {
-			if est := d.estimateOf(s); est > 0 {
-				doneSpent += s.Spent
-				doneEst += float64(est)
-			}
-		}
-	}
-	if doneEst > 0 {
-		f.Ratio = math.Max(1, doneSpent/doneEst)
-	}
-	d.ratio = f.Ratio
-	f.ToFinish = d.remainingSeq("", d.in.Recipe.Steps)
-	if d.in.Bounded {
-		f.Short = math.Max(0, f.ToFinish-d.in.Left)
-	}
-	return f
-}
-
-// started reports whether any instance sits at or under path.
-func (d *decider) started(path string) bool {
-	if _, has := d.byPath[path]; has {
-		return true
-	}
-	for p := range d.byPath {
-		if strings.HasPrefix(p, path+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-// remainingSeq is what a list of entries under prefix is expected to cost
-// from here: nothing for the entries before the last one started, the
-// rest of the one in progress, and every later one in full.
-func (d *decider) remainingSeq(prefix string, es []domain.Entry) float64 {
-	last := -1
-	for i, e := range es {
-		if d.started(join(prefix, e.ID())) {
-			last = i
-		}
-	}
-	t := 0.0
-	for i, e := range es {
-		switch {
-		case i < last:
-		case i > last:
-			t += float64(workflowrecipe.EstimateEntries([]domain.Entry{e}, d.in.Defaults)) * d.ratio
-		case e.Step != nil:
-			t += d.remainingStep(join(prefix, e.Step.ID), *e.Step)
-		case e.Parallel != nil:
-			for _, s := range e.Parallel.Steps {
-				t += d.remainingStep(join(join(prefix, e.Parallel.ID), s.ID), s)
-			}
-		case e.Repeat != nil:
-			r := *e.Repeat
-			cur := d.iterations(join(prefix, r.ID))
-			iter := domain.IterationPath(prefix, r.ID, cur)
-			t += d.remainingSeq(iter, r.Steps)
-			if !d.in.Until[iter].Met {
-				more := max(0, d.limit(prefix, r, cur)-cur)
-				t += float64(more*workflowrecipe.EstimateEntries(r.Steps, d.in.Defaults)) * d.ratio
-			}
-		}
-	}
-	return t
-}
-
-func (d *decider) remainingStep(path string, s domain.Step) float64 {
-	inst, has := d.byPath[path]
-	switch {
-	case !has || inst.State == domain.StepWaiting:
-		return float64(d.in.Defaults.Envelope(s)) * d.ratio
-	case inst.State.Live():
-		est := inst.Estimate
-		if est <= 0 {
-			est = d.in.Defaults.Envelope(s)
-		}
-		return math.Max(0, float64(est)*d.ratio-inst.Spent)
-	}
-	return 0
 }

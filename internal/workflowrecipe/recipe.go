@@ -1,6 +1,6 @@
 // Package workflowrecipe reads and judges workflow recipes (DESIGN §25.4):
 // the YAML a recipe is kept as, the rules a recipe must pass before it may
-// run (Check), what it is estimated to cost (Estimate), the templates a
+// run (Check), the templates a
 // step's prompt is filled from (Fill), the recipes gummi bundles and the
 // workspace's own (Load, List), and the lines a step's output may carry —
 // a planner's gummi-workflow block, FAILED:, MET:/UNMET:, DECISION: and
@@ -30,12 +30,14 @@ type rawRecipe struct {
 }
 
 // rawEntry is one entry of steps: a step's fields, or a parallel or a
-// repeat beside its id.
+// repeat beside its id. Envelope is read only to be ignored: a recipe from
+// before runs estimated nothing still parses, and Check warns about it
+// (domain.Step.StaleEnvelope).
 type rawEntry struct {
 	ID            string            `yaml:"id"`
 	Role          string            `yaml:"role,omitempty"`
 	Tier          string            `yaml:"tier,omitempty"`
-	Envelope      int               `yaml:"envelope,omitempty"`
+	Envelope      any               `yaml:"envelope,omitempty"`
 	Artifacts     map[string]string `yaml:"artifacts,omitempty"`
 	CaptureOutput *bool             `yaml:"captureOutput,omitempty"`
 	Prompt        string            `yaml:"prompt,omitempty"`
@@ -146,7 +148,7 @@ func entries(raw []rawEntry) ([]domain.Entry, error) {
 }
 
 func (re rawEntry) hasStepFields() bool {
-	return re.Role != "" || re.Prompt != "" || re.Tier != "" || re.Envelope != 0 ||
+	return re.Role != "" || re.Prompt != "" || re.Tier != "" || re.Envelope != nil ||
 		len(re.Artifacts) > 0 || re.CaptureOutput != nil
 }
 
@@ -211,7 +213,7 @@ func entry(re rawEntry) (domain.Entry, error) {
 		Role:          domain.WorkflowRole(strings.ToLower(strings.TrimSpace(re.Role))),
 		Prompt:        re.Prompt,
 		Tier:          domain.StepTier(strings.ToLower(strings.TrimSpace(re.Tier))),
-		Envelope:      re.Envelope,
+		StaleEnvelope: re.Envelope != nil,
 		Artifacts:     arts,
 		CaptureOutput: re.CaptureOutput,
 	}}, nil
@@ -244,7 +246,7 @@ func rawEntries(es []domain.Entry) []rawEntry {
 func rawStep(s domain.Step) rawEntry {
 	return rawEntry{
 		ID: s.ID, Role: string(s.Role), Prompt: s.Prompt, Tier: string(s.Tier),
-		Envelope: s.Envelope, Artifacts: s.Artifacts, CaptureOutput: s.CaptureOutput,
+		Artifacts: s.Artifacts, CaptureOutput: s.CaptureOutput,
 	}
 }
 

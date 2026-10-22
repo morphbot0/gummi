@@ -112,7 +112,7 @@ func TestMarshalRoundTrips(t *testing.T) {
 	extra := domain.Recipe{
 		Name: "x", Tier: domain.TierCheap, Inputs: map[string]string{"area": "where"},
 		Steps: []domain.Entry{
-			{Step: &domain.Step{ID: "a", Role: domain.RoleScout, Prompt: "look at {{inputs.area}}", Envelope: 12, CaptureOutput: &no}},
+			{Step: &domain.Step{ID: "a", Role: domain.RoleScout, Prompt: "look at {{inputs.area}}", CaptureOutput: &no}},
 			{Repeat: &domain.Repeat{ID: "r", Max: 2, Until: domain.Until{Contains: "DONE"}, OnMax: domain.OnMaxAbort, Steps: []domain.Entry{
 				{Step: &domain.Step{ID: "b", Role: domain.RoleTester, Prompt: "test"}},
 			}}},
@@ -199,7 +199,6 @@ func TestCheckRefusesARecipeThatCannotRun(t *testing.T) {
 		{"parallel bad join", "  - id: p\n    parallel: {join: race, steps: [{id: a, role: scout, prompt: p}]}\n", `join "race"`},
 		{"parallel empty", "  - id: p\n    parallel: {join: all, steps: []}\n", "parallel p has no steps"},
 		{"artifact escapes", "  - {id: a, role: scribe, prompt: p, artifacts: {x: ../x.md}}\n", "plain file name"},
-		{"negative envelope", "  - {id: a, role: scribe, prompt: p, envelope: -5}\n", "never below 0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, err := Parse([]byte(head + tc.steps))
@@ -280,21 +279,11 @@ func containsOne(list []string, sub string) bool {
 	return false
 }
 
-func TestEstimateCountsARepeatMaxTimes(t *testing.T) {
-	d := DefaultEnvelopes
-	for _, tc := range []struct {
-		name string
-		want int
-	}{
-		// design + 3 × (implement + review-a + review-b + verdict) + validate
-		{"deliver", d[domain.RoleContractor] + 3*(d[domain.RoleImplementer]+3*d[domain.RoleReviewer]) + d[domain.RoleReviewer]},
-		{"investigate", d[domain.RoleScout] + d[domain.RoleScribe]},
-		{"fix-until-green", 5 * d[domain.RoleImplementer]},
-	} {
-		if got := Estimate(mustLoad(t, tc.name), nil); got != tc.want {
-			t.Errorf("%s = %d, want %d", tc.name, got, tc.want)
-		}
-	}
+// TestAnEnvelopeIsIgnoredWithAWarning: a recipe from before runs
+// estimated nothing still parses with its envelopes — any value, even one
+// that was refused then — and Check warns that each is ignored. Nothing of
+// it survives into the recipe a run keeps.
+func TestAnEnvelopeIsIgnoredWithAWarning(t *testing.T) {
 	r, err := Parse([]byte(`
 steps:
   - {id: a, role: scout, prompt: p, envelope: 7}
@@ -303,19 +292,38 @@ steps:
       max: 2
       until: checks
       steps:
-        - {id: b, role: tester, prompt: p}
-        - id: q
-          repeat:
-            max: 3
-            until: checks
-            steps: [{id: c, role: scribe, prompt: p, envelope: 1}]
+        - {id: b, role: tester, prompt: p, envelope: -5}
+        - {id: c, role: scribe, prompt: p}
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	own := Defaults{domain.RoleTester: 10}
-	if got := Estimate(r, own); got != 7+2*(10+3*1) {
-		t.Errorf("nested = %d", got)
+	problems, warnings := Check(r)
+	if len(problems) > 0 {
+		t.Fatalf("problems = %q", problems)
+	}
+	for _, id := range []string{"a", "b"} {
+		if !containsOne(warnings, "step "+id+": its envelope is ignored") {
+			t.Errorf("no warning for %s: %q", id, warnings)
+		}
+	}
+	if containsOne(warnings, "step c:") {
+		t.Errorf("a step with no envelope is warned about: %q", warnings)
+	}
+	data, err := Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "envelope") {
+		t.Errorf("the run's copy keeps the envelope:\n%s", data)
+	}
+	// a planner's block may carry one too
+	es, err := ParsePlanBlock("```gummi-workflow\n- {id: d, role: implementer, prompt: p, envelope: 50}\n```")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, warnings := CheckReplacement(r, 2, es); !containsOne(warnings, "step d: its envelope is ignored") {
+		t.Errorf("revised plan warnings = %q", warnings)
 	}
 }
 

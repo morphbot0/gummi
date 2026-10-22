@@ -61,16 +61,17 @@ test('a session runs a workflow, from its proposal to Revert run', async ({ pair
   await input.fill('[workflow=make-and-read] [step-asks] make the workflow file');
   await page.keyboard.press('Enter');
 
-  // the proposal: its steps with their roles, the check it will run, the
-  // estimate against the session's pool
+  // the proposal: its steps with their roles, the check it will run, and
+  // what the session's pool has left — a run estimates nothing
   const proposal = page.getByTestId('run-proposal');
   await expect(proposal).toBeVisible({ timeout: 45_000 });
   await expect(proposal.getByTestId('proposal-step-make')).toContainText('implementer');
   await expect(proposal.getByTestId('proposal-step-read')).toContainText('reviewer');
   await expect(proposal.getByTestId('proposal-checks')).toContainText('test -f made.txt');
-  await expect(proposal.getByTestId('proposal-money')).toContainText('left in the session');
+  await expect(proposal.getByTestId('proposal-money')).toContainText('left in the session; the run spends from it');
+  await expect(proposal).not.toContainText('~$');
   await expect(page.getByTestId('decision-feedback')).toBeVisible();
-  await expect(page.getByTestId('decision-option-1')).toContainText('Always allow up to $');
+  await expect(page.getByTestId('decision-option-1')).toHaveText(/Always allow/);
   // the run's block stands in the thread already, waiting on the answer
   const block = page.getByTestId('run-1');
   await expect(block).toHaveAttribute('data-state', 'proposed');

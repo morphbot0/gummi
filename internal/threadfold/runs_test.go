@@ -37,22 +37,22 @@ func step(path string, role domain.WorkflowRole, st domain.StepState, m int, spe
 	id := path[strings.LastIndex(path, "/")+1:]
 	return domain.RunStep{
 		Session: "FF-001", Run: 2, Path: path, StepID: id, Card: domain.FeatureID("FF-1" + strings.ReplaceAll(path, "/", "")[:2]),
-		Role: role, State: st, Estimate: 30, Spent: spent, Output: out, StartedAt: runAt.Add(time.Duration(m) * time.Minute),
+		Role: role, State: st, Spent: spent, Output: out, StartedAt: runAt.Add(time.Duration(m) * time.Minute),
 	}
 }
 
 // runningRun is run 2 in build's second iteration: design done, the first
 // iteration ended CHANGES, and the implementer of the second asks its
-// person a question while a runaway decision is open on it.
+// person a question while a decision is open on it.
 func runningRun() RunInput {
 	return RunInput{
 		Run: domain.Run{
 			Session: "FF-001", N: 2, RecipeName: "deliver", Recipe: deliverRecipe(), Spec: 2, SpecRev: 2,
-			State: domain.RunRunning, Estimate: 420, StartTree: "aaaa", CreatedAt: runAt, StartedAt: runAt,
+			State: domain.RunRunning, StartTree: "aaaa", CreatedAt: runAt, StartedAt: runAt,
 			Until: map[string]domain.UntilJudgement{"build/1": {Met: false, Detail: "CHANGES · 2 findings: pruned logs come back out of order"}},
 			Pending: &domain.RunDecision{
-				ID: "run:FF-001:2:1", Kind: domain.RunDecideRunaway, Step: "build/2/implement",
-				Question: "Run 2: step build/2/implement has run past three times its estimate.", Options: []string{"Let it carry on", "Drop it"},
+				ID: "run:FF-001:2:1", Kind: domain.RunDecideMax, Step: "build/2/implement",
+				Question: "Run 2: the loop can't judge after build/2.", Options: []string{"Run one more iteration", "Continue", "Stop the run"},
 			},
 		},
 		SpecTitle: "Resume pre-migration sessions",
@@ -76,7 +76,7 @@ func runningRun() RunInput {
 
 func TestARunningRunFoldsToOneBlock(t *testing.T) {
 	r := FoldRun(runningRun())
-	if r.N != 2 || r.Recipe != "deliver" || r.SpecTitle != "Resume pre-migration sessions" || r.Spent != 310 || r.Estimate != 420 {
+	if r.N != 2 || r.Recipe != "deliver" || r.SpecTitle != "Resume pre-migration sessions" || r.Spent != 310 {
 		t.Fatalf("head %+v", r)
 	}
 	if !r.CanPause || !r.CanStop || r.CanResume || r.CanRevert {
@@ -110,7 +110,7 @@ func TestARunningRunFoldsToOneBlock(t *testing.T) {
 	if q == nil || len(q.Options) != 2 || !q.Options[0].Recommended || !strings.HasPrefix(q.Options[0].Label, "Resume") {
 		t.Fatalf("the question does not lead with its recommended answer: %+v", q)
 	}
-	if r.Pending == nil || r.Pending.Kind != "runaway" {
+	if r.Pending == nil || r.Pending.Kind != "max" {
 		t.Fatalf("pending %+v", r.Pending)
 	}
 	if r.Results != nil || r.Validated != "" {

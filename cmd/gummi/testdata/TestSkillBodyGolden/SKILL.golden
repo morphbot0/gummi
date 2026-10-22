@@ -39,7 +39,7 @@ Flags shared by run and resume — listed again under a
 verb only where that verb means something different by one:
 
     --base string       branch the session's work forks from and lands on (default: whatever the repository has checked out)
-    --envelope dollars  spend budget for the session, in dollars (required; falls back to GUMMI_ENVELOPE); its workflow runs are pre-authorised up to it
+    --envelope dollars  spend budget for the session, in dollars (required; falls back to GUMMI_ENVELOPE); its workflow runs are always allowed, and spend from it
     --profile string    profile mapping roles to models (default: first configured)
     --ref string        external correlation id, echoed in the stream and persisted for status/resume lookup
     --repo string       managed repository to start the session in (a configured repos: name; required when repos: is configured)
@@ -50,7 +50,7 @@ gummi run [flags] "<prompt>"
 
 gummi resume <id|ref> [--answer <text> | "<message>"]
     --answer string     answer the session's open question, its workflow run's open decision, or a step's question (one of the offered options, or your own words)
-    --envelope dollars  raise the session's budget, and its workflow pre-authorisation with it, in dollars (clears an exhausted stop; never lowers it)
+    --envelope dollars  raise the session's budget, in dollars (clears an exhausted stop or a run paused on a spent budget; never lowers it)
     --ref string        external correlation id, echoed in the stream
 
 gummi merge <id|ref> -m <message|->
@@ -125,7 +125,7 @@ the exit code:
 |------|--------|-----------------------------|
 | 0 | `done` | the session is idle with no workflow run open — report its branch, or send it a next turn with `resume <id> "<message>"` |
 | 1 | `error` | setup/agent failure — check `status <id>`; resumable if a session was left behind (`resumable` on the error event) |
-| 2 | `needs_you` | a `question` event: the session asked (`kind: ask`), its workflow run has a decision the pre-authorisation does not cover (`workflow_proposal`, `workflow_plan`, `workflow_max`, `workflow_runaway`, `workflow_budget`), or a step asked (`workflow_ask`) → `resume <id> --answer <text>`; a paused run (`workflow_paused`) → `resume <id>` |
+| 2 | `needs_you` | a `question` event: the session asked (`kind: ask`), its workflow run has a decision (`workflow_proposal`, `workflow_plan`, `workflow_max`, `workflow_budget`), or a step asked (`workflow_ask`) → `resume <id> --answer <text>`; a paused run (`workflow_paused`) → `resume <id>` |
 | 5 | `exhausted` | budget dry — `resume <id> --envelope <dollars>` (more than the dry budget) raises it and carries on |
 | 6 | `timeout` | nothing happened for the --timeout window — read the event `hint`, report to the human; `resume <id>` carries on |
 

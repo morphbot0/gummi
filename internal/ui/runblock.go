@@ -273,11 +273,7 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 		right = append(right, s.Success.Render("validated "+r.Validated))
 	}
 	if r.State != string(domain.RunProposed) && r.State != string(domain.RunDenied) {
-		money := domain.FormatDollars(r.Spent)
-		if r.Estimate > 0 {
-			money += " of ~" + domain.FormatDollars(float64(r.Estimate))
-		}
-		right = append(right, s.Muted.Render(money))
+		right = append(right, s.Muted.Render(domain.FormatDollars(r.Spent)))
 	}
 	if el != "" {
 		right = append(right, s.Faint.Render(el))

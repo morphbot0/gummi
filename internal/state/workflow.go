@@ -14,23 +14,25 @@ import (
 // A session's workflow runs and their step instances (DESIGN §25). A run
 // is keyed by its session and its number there; a step by its run and its
 // path, as in build/2/implement. Every write of a run bumps its revision,
-// so a face redraws only what changed.
+// so a face redraws only what changed. A run estimates nothing (§25.12):
+// the estimate, warned and allowance columns of a database from before are
+// left in place, unread and unwritten.
 
 // ErrRunQueued refuses a second queued run: the queue behind an open run
 // is one deep (§25.5).
 var ErrRunQueued = errors.New("a run is already queued behind the open one")
 
 const runCols = `session_id, n, recipe_name, recipe_yaml, recipe, inputs, spec_n, spec_rev, state,
-	estimate, spent, start_tree, end_tree, validated_tree, results, report, reason,
-	stopping, warned, out_of_budget, steers, pending, feedback, revision,
+	spent, start_tree, end_tree, validated_tree, results, report, reason,
+	stopping, out_of_budget, steers, pending, feedback, revision,
 	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max, commits`
 
 func scanRun(r rowScanner) (domain.Run, error) {
 	var run domain.Run
 	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated, until, onMax, commits string
 	err := r.Scan(&session, &run.N, &run.RecipeName, &run.RecipeYAML, &recipe, &inputs, &run.Spec, &run.SpecRev, &st,
-		&run.Estimate, &run.Spent, &run.StartTree, &run.EndTree, &run.ValidatedTree, &results, &run.Report, &run.Reason,
-		&run.Stopping, &run.Warned, &run.OutOfBudget, &steers, &pending, &run.Feedback, &run.Revision,
+		&run.Spent, &run.StartTree, &run.EndTree, &run.ValidatedTree, &results, &run.Report, &run.Reason,
+		&run.Stopping, &run.OutOfBudget, &steers, &pending, &run.Feedback, &run.Revision,
 		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax, &commits)
 	if err != nil {
 		return run, err
@@ -108,10 +110,10 @@ func (s *Store) CreateRun(ctx context.Context, r *domain.Run) error {
 		r.N = int(last.Int64) + 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_runs (`+runCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(r.Session), r.N, r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State),
-		r.Estimate, r.Spent, r.StartTree, r.EndTree, r.ValidatedTree, j[2], r.Report, r.Reason,
-		r.Stopping, r.Warned, r.OutOfBudget, j[3], j[4], r.Feedback, r.Revision,
+		r.Spent, r.StartTree, r.EndTree, r.ValidatedTree, j[2], r.Report, r.Reason,
+		r.Stopping, r.OutOfBudget, j[3], j[4], r.Feedback, r.Revision,
 		r.CreatedAt.UTC().Format(timeFmt), formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), r.UpdatedAt.UTC().Format(timeFmt),
 		r.StartHead, j[5], j[6], j[7]); err != nil {
 		return fmt.Errorf("creating run %d on %s: %w", r.N, r.Session, err)
@@ -135,12 +137,12 @@ func (s *Store) updateRun(ctx context.Context, db execer, r *domain.Run) error {
 	}
 	updated, rev := time.Now().UTC(), r.Revision+1
 	res, err := db.ExecContext(ctx, `UPDATE workflow_runs SET recipe_name=?, recipe_yaml=?, recipe=?, inputs=?,
-		spec_n=?, spec_rev=?, state=?, estimate=?, spent=?, start_tree=?, end_tree=?, validated_tree=?,
-		results=?, report=?, reason=?, stopping=?, warned=?, out_of_budget=?, steers=?, pending=?, feedback=?,
+		spec_n=?, spec_rev=?, state=?, spent=?, start_tree=?, end_tree=?, validated_tree=?,
+		results=?, report=?, reason=?, stopping=?, out_of_budget=?, steers=?, pending=?, feedback=?,
 		revision=?, started_at=?, ended_at=?, updated_at=?, start_head=?, until_results=?, on_max=?, commits=?
 		WHERE session_id=? AND n=?`,
-		r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State), r.Estimate, r.Spent,
-		r.StartTree, r.EndTree, r.ValidatedTree, j[2], r.Report, r.Reason, r.Stopping, r.Warned, r.OutOfBudget,
+		r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State), r.Spent,
+		r.StartTree, r.EndTree, r.ValidatedTree, j[2], r.Report, r.Reason, r.Stopping, r.OutOfBudget,
 		j[3], j[4], r.Feedback, rev, formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), updated.Format(timeFmt),
 		r.StartHead, j[5], j[6], j[7], string(r.Session), r.N)
 	if err != nil {
@@ -240,13 +242,13 @@ func (s *Store) lastRunIn(ctx context.Context, session domain.FeatureID, a, b do
 	return &runs[0], nil
 }
 
-const stepCols = `session_id, run_n, path, step_id, card_id, role, tier, state, estimate, allowance, spent,
+const stepCols = `session_id, run_n, path, step_id, card_id, role, tier, state, spent,
 	start_tree, end_tree, prompt, output, reason, started_at, ended_at`
 
 func scanStep(r rowScanner) (domain.RunStep, error) {
 	var st domain.RunStep
 	var session, card, role, tier, state, started, ended string
-	err := r.Scan(&session, &st.Run, &st.Path, &st.StepID, &card, &role, &tier, &state, &st.Estimate, &st.Allowance, &st.Spent,
+	err := r.Scan(&session, &st.Run, &st.Path, &st.StepID, &card, &role, &tier, &state, &st.Spent,
 		&st.StartTree, &st.EndTree, &st.Prompt, &st.Output, &st.Reason, &started, &ended)
 	if err != nil {
 		return st, err
@@ -262,9 +264,9 @@ func scanStep(r rowScanner) (domain.RunStep, error) {
 // taken once per run.
 func (s *Store) CreateRunStep(ctx context.Context, st *domain.RunStep) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO workflow_steps (`+stepCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(st.Session), st.Run, st.Path, st.StepID, string(st.Card), string(st.Role), string(st.Tier), string(st.State),
-		st.Estimate, st.Allowance, st.Spent, st.StartTree, st.EndTree, st.Prompt, st.Output, st.Reason,
+		st.Spent, st.StartTree, st.EndTree, st.Prompt, st.Output, st.Reason,
 		formatOptTime(st.StartedAt), formatOptTime(st.EndedAt))
 	if err != nil {
 		return fmt.Errorf("creating step %s of run %d on %s: %w", st.Path, st.Run, st.Session, err)
@@ -275,10 +277,10 @@ func (s *Store) CreateRunStep(ctx context.Context, st *domain.RunStep) error {
 // UpdateRunStep writes a step instance back whole.
 func (s *Store) UpdateRunStep(ctx context.Context, st *domain.RunStep) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE workflow_steps SET step_id=?, card_id=?, role=?, tier=?, state=?,
-		estimate=?, allowance=?, spent=?, start_tree=?, end_tree=?, prompt=?, output=?, reason=?, started_at=?, ended_at=?
+		spent=?, start_tree=?, end_tree=?, prompt=?, output=?, reason=?, started_at=?, ended_at=?
 		WHERE session_id=? AND run_n=? AND path=?`,
 		st.StepID, string(st.Card), string(st.Role), string(st.Tier), string(st.State),
-		st.Estimate, st.Allowance, st.Spent, st.StartTree, st.EndTree, st.Prompt, st.Output, st.Reason,
+		st.Spent, st.StartTree, st.EndTree, st.Prompt, st.Output, st.Reason,
 		formatOptTime(st.StartedAt), formatOptTime(st.EndedAt), string(st.Session), st.Run, st.Path)
 	if err != nil {
 		return err

@@ -359,9 +359,10 @@ send Enter
 expect_long "the proposal is the pinned decision"  'workflow run 1 · allow run' 20
 expect "it draws the recipe's step tree"       'build ↺ ≤3'
 expect "…the checks it will run"               'test -f made\.txt'
-expect "…and what it costs against the pool"   'left in the session'
+expect "…and what the pool has left"           'left in the session; the run spends from it'
 expect "Allow is the first answer"             '▸ 1\. Allow'
-expect "Always allow up to \$N"               '2\. Always allow up to \$'
+expect "Always allow"                          '2\. Always allow'
+refute "…with no amount"                       'Always allow up to'
 expect "Deny"                                  '3\. Deny'
 expect "Feedback takes the person's words"     '4\. Feedback'
 send Enter

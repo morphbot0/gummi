@@ -5,7 +5,7 @@
 // The run's block (§25.9): one per run, inline in the thread where the run
 // was proposed, built from the thread's run item (threadfold) and redrawn
 // only when its Rev moves. Its head says the recipe, the spec, the spend
-// against the estimate and the elapsed time, with Pause, Resume and Stop;
+// (a run estimates nothing) and the elapsed time, with Pause, Resume and Stop;
 // a strip draws the recipe's top-level entries; a row per step that has
 // run says what it did, with Open; a step's question is answered under
 // its row; the footer lists the files changed and offers Revert run….
@@ -121,7 +121,7 @@ function head (id, r) {
       }
     }
   }, label)
-  const money = r.estimate ? `${cr(r.spent)} of ~${cr(r.estimate)}` : cr(r.spent)
+  const money = cr(r.spent)
   return h('div', { class: 'rb-head', testid: 'run-head' },
     h('span', { class: 'k' }, 'workflow'),
     h('b', { testid: 'run-title' }, `${r.recipe} · run ${r.n}`),
@@ -364,7 +364,7 @@ function renderStep (pane, entry, pctx) {
     s.crumb.map((c, i) => [i ? h('span', { 'aria-hidden': 'true' }, ' › ') : null,
       i === 0 ? h('button', { class: 'link', type: 'button', testid: 'step-close', onclick: backToSession }, c)
         : i === s.crumb.length - 1 ? h('b', null, c) : h('span', null, c)]))
-  const money = s.estimate ? `${cr(s.spent)} of ~${cr(s.estimate)}` : cr(s.spent)
+  const money = cr(s.spent)
   const head = h('div', { class: 'stp-head', testid: 'step-head' },
     crumb,
     h('div', { class: 'stp-title' },
@@ -474,8 +474,9 @@ function composer (s, pctx) {
 // ---------------------------------------------------------------- the proposal
 
 // proposalEl is a run's proposal (or revised plan) as its decision draws
-// it: the step tree with each step's role, tier and estimate, the spec it
-// freezes, the checks it runs, the warnings, and the money.
+// it: the step tree with each step's role and tier, the spec it freezes,
+// the checks it runs, the warnings, and what the session's pool has left —
+// the run spends from it and estimates nothing.
 export function proposalEl (p) {
   const left = p.bounded ? `${cr(p.poolLeft)} left in the session` : 'the session has no envelope'
   return h('div', { class: 'wfp', testid: 'run-proposal' },
@@ -492,14 +493,13 @@ export function proposalEl (p) {
     h('span', { class: ['wrole', s.role && `r-${s.role}`], role: 'cell' }, s.role || (s.kind === 'parallel' ? s.join : '')),
     h('span', { class: 'ti', role: 'cell' }, s.kind === 'repeat'
       ? `until ${s.until} · at the max: ${s.onMax}`
-      : s.kind === 'parallel' ? `side by side, join ${s.join}` : [s.tier, s.prompt].filter(Boolean).join(' · ')),
-    h('span', { class: 'cost mono', role: 'cell' }, cr(s.estimate))))),
+      : s.kind === 'parallel' ? `side by side, join ${s.join}` : [s.tier, s.prompt].filter(Boolean).join(' · '))))),
     p.checks?.length ? h('div', { class: 'wfp-checks', testid: 'proposal-checks' }, h('span', { class: 'k' }, 'runs in the tree when it ends'),
       p.checks.map(c => h('div', null, h('b', { class: 'mono' }, c.item), ' ', h('span', { class: 'mono' }, c.cmd)))) : null,
     h('div', { class: 'wfp-ticks' },
       p.warnings?.length
         ? h('div', { class: 'warnc', testid: 'proposal-warnings' }, p.warnings.map(w => h('div', null, `! ${w}`)))
         : h('span', { class: 'okc' }, '✓ recipe checks pass'),
-      h('span', { class: p.bounded && p.estimate > p.poolLeft ? 'warnc' : 'okc', testid: 'proposal-money' }, `~${cr(p.estimate)} of ${left}`)),
+      h('span', { class: p.bounded && p.poolLeft <= 0 ? 'warnc' : 'okc', testid: 'proposal-money' }, `${left}; the run spends from it`)),
     h('div', { class: 'hint' }, 'Changes stay uncommitted in the tree · a snapshot at every step'))
 }

@@ -99,8 +99,10 @@ type Step struct {
 	Prompt string
 	// Tier is the step's own; empty takes the recipe's.
 	Tier StepTier
-	// Envelope is the step's estimate in credits; 0 takes its role's default.
-	Envelope int
+	// StaleEnvelope marks a step whose YAML still names an envelope, which
+	// gummi no longer reads: a run binds to its session's budget and
+	// estimates nothing (§25.12). Check warns about it; nothing else reads it.
+	StaleEnvelope bool
 	// Artifacts maps a name to a file name in the run's directory.
 	Artifacts map[string]string
 	// CaptureOutput, when false, keeps the step's final message out of the
@@ -250,8 +252,8 @@ const (
 	// StepAsking waits on the person's answer to its ask_user.
 	StepAsking StepState = "asking"
 	StepDone   StepState = "done"
-	// StepFailed: its backend errored, it was a runaway the person
-	// dropped, or its output's last line was FAILED: <why>.
+	// StepFailed: its backend errored, or its output's last line was
+	// FAILED: <why>.
 	StepFailed StepState = "failed"
 	// StepStopped was interrupted: a stop, or a join that settled without it.
 	StepStopped StepState = "stopped"
@@ -301,11 +303,10 @@ type Run struct {
 	Spec    int
 	SpecRev int
 	State   RunState
-	// Estimate is the recipe's estimate in credits; Spent is every step's
-	// spend together. Neither is a fence: the session's envelope is the
-	// one pool (§24.7a).
-	Estimate int
-	Spent    float64
+	// Spent is every step's spend together. A run estimates nothing: it
+	// spends from the session's envelope, the one pool (§24.7a), until
+	// that is spent.
+	Spent float64
 	// StartTree is the tree snapshot when the run started; EndTree the one
 	// when its last step settled; ValidatedTree is EndTree when every
 	// checked done-when item passed, and empty otherwise.
@@ -332,9 +333,6 @@ type Run struct {
 	Reason string
 	// Stopping marks a workflow_stop or a person's stop not yet wound down.
 	Stopping bool
-	// Warned marks the forecast warning put to the person, until the
-	// session's envelope is next raised.
-	Warned bool
 	// OutOfBudget marks a run paused because the pool was spent: a raise of
 	// the session's envelope resumes it.
 	OutOfBudget bool
@@ -363,19 +361,16 @@ type UntilJudgement struct {
 type RunDecisionKind string
 
 const (
-	// RunDecideProposal: allow this run? Allow, always allow up to an
-	// amount, deny, or typed feedback.
+	// RunDecideProposal: allow this run? Allow, always allow the session's
+	// runs, deny, or typed feedback.
 	RunDecideProposal RunDecisionKind = "proposal"
 	// RunDecidePlan: a planner step's revised plan, to allow or deny.
 	RunDecidePlan RunDecisionKind = "plan"
 	// RunDecideMax: a repeat reached its max without its condition and its
 	// onMax is pause — one more iteration, continue, or stop.
 	RunDecideMax RunDecisionKind = "max"
-	// RunDecideRunaway: a step ran past three times its estimate — let it
-	// run three estimates more, or drop it.
-	RunDecideRunaway RunDecisionKind = "runaway"
-	// RunDecideBudget: the session's pool is spent and the run paused, or
-	// the forecast says it will be. Amount is the top-up suggested.
+	// RunDecideBudget: the session's pool is spent and the run paused.
+	// Amount is the top-up suggested.
 	RunDecideBudget RunDecisionKind = "budget"
 )
 
@@ -392,8 +387,7 @@ type RunDecision struct {
 	// wrote them; Warnings are Check's on the proposal or the revision.
 	RecipeYAML string   `json:"recipe_yaml,omitempty"`
 	Warnings   []string `json:"warnings,omitempty"`
-	// Amount is a budget decision's top-up or a runaway's further
-	// allowance, in credits.
+	// Amount is a budget decision's top-up, in credits.
 	Amount int `json:"amount,omitempty"`
 }
 
@@ -409,11 +403,7 @@ type RunStep struct {
 	Role    WorkflowRole
 	Tier    StepTier
 	State   StepState
-	// Estimate is the step's envelope; Allowance counts the further three
-	// estimates a person let a runaway have.
-	Estimate  int
-	Allowance int
-	Spent     float64
+	Spent   float64
 	// StartTree and EndTree are the snapshots at the step's start and end;
 	// the step's own diff runs between them.
 	StartTree string
@@ -425,13 +415,6 @@ type RunStep struct {
 	Reason    string
 	StartedAt time.Time
 	EndedAt   time.Time
-}
-
-// Runaway is the spend past which a step goes to the person: three times
-// its estimate, and three more for every allowance granted. A step with no
-// estimate is never a runaway.
-func (s RunStep) Runaway() float64 {
-	return float64(3 * s.Estimate * (1 + s.Allowance))
 }
 
 // StepPath joins path segments: a repeat's id and iteration, a parallel's

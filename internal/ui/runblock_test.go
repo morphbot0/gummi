@@ -41,7 +41,7 @@ func tuiStep(path string, role domain.WorkflowRole, st domain.StepState, m int, 
 	id := path[strings.LastIndex(path, "/")+1:]
 	return domain.RunStep{
 		Session: "FF-001", Run: 2, Path: path, StepID: id, Card: domain.FeatureID("FF-1" + strings.ReplaceAll(path, "/", "")[:2]),
-		Role: role, State: st, Estimate: 30, Spent: spent, Output: out, StartedAt: tuiRunAt.Add(time.Duration(m) * time.Minute),
+		Role: role, State: st, Spent: spent, Output: out, StartedAt: tuiRunAt.Add(time.Duration(m) * time.Minute),
 	}
 }
 
@@ -51,7 +51,7 @@ func tuiRunningRun() threadfold.RunInput {
 	return threadfold.RunInput{
 		Run: domain.Run{
 			Session: "FF-001", N: 2, RecipeName: "deliver", Recipe: tuiDeliver(), Spec: 2, SpecRev: 2,
-			State: domain.RunRunning, Estimate: 420, StartTree: "aaaa", CreatedAt: tuiRunAt, StartedAt: tuiRunAt,
+			State: domain.RunRunning, StartTree: "aaaa", CreatedAt: tuiRunAt, StartedAt: tuiRunAt,
 			Until: map[string]domain.UntilJudgement{"build/1": {Met: false, Detail: "CHANGES · 2 findings"}},
 		},
 		SpecTitle: "Resume pre-migration sessions",
@@ -87,7 +87,7 @@ func tuiEndedRun() threadfold.RunInput {
 	return threadfold.RunInput{
 		Run: domain.Run{
 			Session: "FF-001", N: 1, RecipeName: "deliver", Recipe: tuiDeliver(), Spec: 1, SpecRev: 4,
-			State: domain.RunDone, Estimate: 420, StartTree: "aaaa", EndTree: "bbbbbbbbbb", ValidatedTree: "bbbbbbbbbb",
+			State: domain.RunDone, StartTree: "aaaa", EndTree: "bbbbbbbbbb", ValidatedTree: "bbbbbbbbbb",
 			CreatedAt: tuiRunAt, StartedAt: tuiRunAt, EndedAt: tuiRunAt.Add(72 * time.Minute),
 			Until:   map[string]domain.UntilJudgement{"build/1": {Met: true, Detail: "APPROVED"}},
 			Results: []domain.ItemResult{{Item: "DW-1", Verdict: domain.ItemMet, Checked: true}, {Item: "DW-2", Verdict: domain.ItemUnjudged}},
@@ -107,7 +107,7 @@ func TestRunBlockGolden(t *testing.T) {
 	running := threadfold.FoldRun(tuiRunningRun())
 	ended := threadfold.FoldRun(tuiEndedRun())
 	proposed := threadfold.FoldRun(threadfold.RunInput{Run: domain.Run{
-		Session: "FF-001", N: 3, RecipeName: "fix-until-green", Recipe: tuiDeliver(), Spec: 2, State: domain.RunProposed, Estimate: 200, CreatedAt: tuiRunAt,
+		Session: "FF-001", N: 3, RecipeName: "fix-until-green", Recipe: tuiDeliver(), Spec: 2, State: domain.RunProposed, CreatedAt: tuiRunAt,
 	}, SpecTitle: "Resume pre-migration sessions"})
 	var b strings.Builder
 	draw := func(label string, lines []string) {

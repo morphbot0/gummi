@@ -158,7 +158,7 @@ type driveFlags struct {
 // overrides the entries whose meaning differs for it.
 func stdDriveFlags() driveFlags {
 	return driveFlags{
-		envelope: "spend budget for the session, in dollars (required; falls back to GUMMI_ENVELOPE); its workflow runs are pre-authorised up to it",
+		envelope: "spend budget for the session, in dollars (required; falls back to GUMMI_ENVELOPE); its workflow runs are always allowed, and spend from it",
 		profile:  "profile mapping roles to models (default: first configured)",
 		timeout:  "stop as a timeout after this long with nothing happening on the session or its workflow run (0 disables)",
 		verbose:  "add the session's per-tool-call activity lines to the stream",

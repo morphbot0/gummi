@@ -13,8 +13,8 @@ import (
 
 // A run mints a session, sends the prompt as its first turn, and is done
 // as soon as the session is idle with no workflow run open — with the
-// session's reply on the stream and its runs pre-authorised up to the
-// envelope.
+// session's reply on the stream and its runs always allowed, the
+// envelope their only cap.
 func TestRunIsDoneWhenTheSessionIsIdle(t *testing.T) {
 	h := newHarness(t, newSessionFake("reply"))
 	out, f := h.run(Options{Envelope: 500, Ref: "JIRA-7"}, "tidy the README")
@@ -25,11 +25,14 @@ func TestRunIsDoneWhenTheSessionIsIdle(t *testing.T) {
 		t.Fatalf("minted %+v, want a freeform session with the envelope and ref", f)
 	}
 	created := h.last("created")
-	if created == nil || created["preauth"] != float64(500) || created["ref"] != "JIRA-7" {
+	if created == nil || created["always_allow"] != true || created["ref"] != "JIRA-7" {
 		t.Fatalf("created event %v", created)
 	}
-	if pre, _ := h.store.WorkflowPreauth(context.Background(), f.ID); pre != 500 {
-		t.Fatalf("workflow pre-authorisation = %d, want the envelope", pre)
+	if _, has := created["preauth"]; has {
+		t.Fatalf("created event still carries an amount: %v", created)
+	}
+	if always, _ := h.store.WorkflowAlwaysAllow(context.Background(), f.ID); !always {
+		t.Fatal("the session's workflow runs are not always allowed")
 	}
 	if r := h.last("reply"); r == nil || r["text"] != "done: tidy the README" {
 		t.Fatalf("reply event %v; stream %v", r, h.eventKinds())
@@ -110,20 +113,20 @@ func TestResumeSendsAMessageAsTheNextTurn(t *testing.T) {
 	}
 }
 
-// A session that proposes a workflow run estimated within the
-// pre-authorisation runs it without asking anyone: the steps run and the
+// A session that proposes a workflow run runs it without asking anyone —
+// `gummi run` always allows the session's runs: the steps run and the
 // run reports to the session, and the driver is done once the session has
 // answered the report — not in the moment between the run ending and its
 // report arriving. The stream carries each state as a workflow event and,
 // beside it, as the crew event it replaces.
-func TestAPreauthorisedRunRunsToItsReport(t *testing.T) {
+func TestAnAlwaysAllowedRunRunsToItsReport(t *testing.T) {
 	h := newHarness(t, newSessionFake("workflow"))
 	out, f := h.run(Options{Envelope: 2000}, "make the file")
 	if out.Status != StatusDone {
 		t.Fatalf("outcome %+v, want done; stream %v", out, h.eventKinds())
 	}
 	if q := h.last("question"); q != nil {
-		t.Fatalf("a run inside the pre-authorisation asked: %v", q)
+		t.Fatalf("an always allowed run asked: %v", q)
 	}
 	if states := strings.Join(h.runStates(), " "); !strings.Contains(states, "running") || !strings.HasSuffix(states, "done") {
 		t.Fatalf("workflow states %q", states)
@@ -131,8 +134,12 @@ func TestAPreauthorisedRunRunsToItsReport(t *testing.T) {
 	if states := strings.Join(h.crewStates(), " "); !strings.Contains(states, "running") || !strings.HasSuffix(states, "finished") {
 		t.Fatalf("the crew events beside them read %q", states)
 	}
-	if ev := h.last("workflow"); ev["run"] != float64(1) || ev["recipe"] != "make-file" || ev["estimate"] != float64(150) || ev["report"] == "" {
+	ev := h.last("workflow")
+	if ev["run"] != float64(1) || ev["recipe"] != "make-file" || ev["spent"] == nil || ev["report"] == "" {
 		t.Fatalf("the ended run's event %v", ev)
+	}
+	if _, has := ev["estimate"]; has {
+		t.Fatalf("the run's event still estimates: %v", ev)
 	}
 	h.fake.mu.Lock()
 	got := strings.Join(h.fake.session, "\n---\n")
@@ -178,12 +185,12 @@ func TestTheDoneLineCountsTheStepsSpend(t *testing.T) {
 	}
 }
 
-// A proposal over the pre-authorisation is the person's: the driver stops
-// on it, offering the run's own answers under the workflow's kind and the
+// A proposal on a session whose runs are not always allowed — one a
+// person withdrew it from — is the person's: the driver stops on it, offering the run's own answers under the workflow's kind and the
 // crew's beside it. A resume in another process answers it — in the
 // caller's case, which is mapped onto the option's — and the run goes on
 // to its report.
-func TestAProposalOverThePreauthorisationNeedsYou(t *testing.T) {
+func TestAProposalNotAlwaysAllowedNeedsYou(t *testing.T) {
 	h := newHarness(t, newSessionFake("workflow"))
 	ctx := context.Background()
 	d := h.driver(Options{Envelope: 2000})
@@ -191,7 +198,7 @@ func TestAProposalOverThePreauthorisationNeedsYou(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.store.SetWorkflowPreauth(ctx, f.ID, 100); err != nil {
+	if err := h.store.SetWorkflowAlwaysAllow(ctx, f.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	ff, err := h.eng.OpenFreeform(ctx, f)
@@ -252,13 +259,13 @@ func TestAStepsQuestionNeedsYouAndAResumeAnswersIt(t *testing.T) {
 // an option, a label matches whatever its case, and anything else — an
 // "always allow", feedback — is passed on as given.
 func TestAnAnswerIsMappedOntoTheDecisionsWords(t *testing.T) {
-	dec := &domain.RunDecision{Kind: domain.RunDecideProposal, Options: []string{"Allow", "Always allow up to 500", "Deny"}}
+	dec := &domain.RunDecision{Kind: domain.RunDecideProposal, Options: []string{"Allow", "Always allow", "Deny"}}
 	for in, want := range map[string]string{
-		"2":                     "Always allow up to 500",
-		"deny":                  "Deny",
-		"always allow up to $3": "Always allow up to $3",
-		"run only the tests":    "run only the tests",
-		"  ALLOW ":              "Allow",
+		"2":                  "Always allow",
+		"deny":               "Deny",
+		"always allow":       "Always allow",
+		"run only the tests": "run only the tests",
+		"  ALLOW ":           "Allow",
 	} {
 		if got, err := workflowAnswer(dec, in); err != nil || got != want {
 			t.Errorf("workflowAnswer(%q) = %q, %v; want %q", in, got, err, want)
@@ -266,8 +273,8 @@ func TestAnAnswerIsMappedOntoTheDecisionsWords(t *testing.T) {
 	}
 	// on a budget decision too a number picks its option, and an amount is
 	// spelt with its unit; a bare number past the options is refused
-	budget := &domain.RunDecision{Kind: domain.RunDecideBudget, Options: []string{"Top up the session", "Continue", "Stop the run"}}
-	for in, want := range map[string]string{"1": "Top up the session", "2": "Continue", "300cr": "300cr", "$3": "$3"} {
+	budget := &domain.RunDecision{Kind: domain.RunDecideBudget, Options: []string{"Top up the session", "Stop the run"}}
+	for in, want := range map[string]string{"1": "Top up the session", "2": "Stop the run", "300cr": "300cr", "$3": "$3"} {
 		if got, err := workflowAnswer(budget, in); err != nil || got != want {
 			t.Errorf("budget workflowAnswer(%q) = %q, %v; want %q", in, got, err, want)
 		}
@@ -279,7 +286,7 @@ func TestAnAnswerIsMappedOntoTheDecisionsWords(t *testing.T) {
 
 // A run that spends its envelope stops as exhausted, with a raise in its
 // next command; a resume with a higher envelope tells the session to carry
-// on and raises the workflow pre-authorisation with it.
+// on.
 func TestExhaustionStopsTheRunAndARaiseCarriesOn(t *testing.T) {
 	h := newHarness(t, newSessionFake("spend"))
 	// the first turn spends ten times the envelope
@@ -299,8 +306,8 @@ func TestExhaustionStopsTheRunAndARaiseCarriesOn(t *testing.T) {
 	if raised := h.last("envelope"); raised == nil || raised["to"] != float64(20000) {
 		t.Fatalf("envelope event %v", raised)
 	}
-	if pre, _ := h.store.WorkflowPreauth(context.Background(), f.ID); pre != 20000 {
-		t.Fatalf("pre-authorisation = %d after the raise, want 20000", pre)
+	if always, _ := h.store.WorkflowAlwaysAllow(context.Background(), f.ID); !always {
+		t.Fatal("a raise withdrew always allow")
 	}
 	if r := h.last("reply"); r == nil || !strings.HasPrefix(r["text"].(string), "ok: Your envelope was raised") {
 		t.Fatalf("the session was not told to carry on: %v", r)
@@ -403,8 +410,8 @@ func TestAResumeThatAnswersARunsDecisionCarriesTheRunOn(t *testing.T) {
 	h := newHarness(t, newSessionFake("reply"))
 	_, f := h.run(Options{Envelope: 2000}, "tidy the README")
 	run := parkedRun(t, h, f.ID, &domain.RunDecision{
-		ID: "run:warn", Kind: domain.RunDecideBudget, Amount: 100, Question: "Run 1 is on course to run out of money.",
-		Options: []string{engine.WorkflowTopUp, engine.WorkflowContinue, engine.WorkflowStopRun},
+		ID: "run:max", Kind: domain.RunDecideMax, Step: "loop/1", Question: "Run 1: the loop ran out of tries.",
+		Options: []string{engine.WorkflowOneMore, engine.WorkflowContinue, engine.WorkflowStopRun},
 	})
 	h.reopen()
 	answer := "2"

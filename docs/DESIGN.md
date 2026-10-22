@@ -6226,6 +6226,12 @@ and were retired with goals.
 
 ### 24.7a Money: one pool, estimates, and no work thrown away
 
+*For workflow runs (§25), which replaced crews, only **One pool**,
+**Pause, never drop** and **Only a person raises the money** below
+stand. A run estimates nothing: there is no forecast to warn ahead and no
+runaway, and a run goes on until the session's pool is spent, then
+pauses for a top-up (§25.7, §25.14).*
+
 Stopping an agent that is doing its job wastes what it has spent, so a
 crew is never stopped over money unless the person says so.
 
@@ -6620,9 +6626,12 @@ steps:
 - **a step**:
   - `id` and `role`, required;
   - `prompt`, required;
-  - `tier`, `envelope` (credits, its estimate) and `artifacts` (name to
-    file name), optional;
+  - `tier` and `artifacts` (name to file name), optional;
   - `captureOutput`, optional and true by default.
+
+  A step has no `envelope`: a run estimates nothing and spends from the
+  session's budget (§25.7). A recipe from before that still names one
+  parses, and `Check` warns that it is ignored.
 - **`parallel`**: an `id`, `join` (`all`, `allSettled` or `any`) and
   `steps`, which are plain steps.
 - **`repeat`**: an `id`, `max`, an `until` stop condition, `onMax`
@@ -6678,9 +6687,8 @@ tree.
 | `allSettled` | waits for every branch, and fails only if all of them do |
 | `any` | settles when one branch succeeds, and stops the rest |
 
-**A step fails** in three cases:
+**A step fails** in two cases:
 - its backend errors;
-- it is a runaway the person drops (§25.7);
 - its output's last line is `FAILED: <why>`.
 
 A failed step outside a `parallel` ends the run as partial.
@@ -6690,8 +6698,8 @@ block of steps. Those steps replace the run's remaining steps, once they
 pass `Check`, and go to the person as a revised plan to allow. A step
 that is already running is never rewritten.
 
-**`workflowrecipe`** is a pure package: `Parse`, `Check`, `Estimate` and
-the bundled recipes. `Check` refuses a recipe that cannot run:
+**`workflowrecipe`** is a pure package: `Parse`, `Check` and the bundled
+recipes. `Check` refuses a recipe that cannot run:
 - an id that is missing or duplicated;
 - an unknown role or tier;
 - a `{{…}}` that names no input, artifact or earlier step;
@@ -6700,11 +6708,9 @@ the bundled recipes. `Check` refuses a recipe that cannot run:
 - an `until` naming an artifact no step in its body declares.
 
 `Check` **warns** when one `parallel` block holds more than one writing
-role, because those steps can overwrite each other's work. It sets no
-floor: whether a recipe reviews, tests or designs is its own choice.
-
-`Estimate` sums the steps' envelopes, counting a `repeat`'s body `max`
-times. A step without an envelope takes its role's default.
+role, because those steps can overwrite each other's work, and when a
+step still names an `envelope`, which is ignored. It sets no floor:
+whether a recipe reviews, tests or designs is its own choice.
 
 **The bundled recipes:**
 - **`deliver`**, as above;
@@ -6723,20 +6729,21 @@ call returns at once, saying the run is proposed.
   is one deep.
 - The proposal goes to the person as a **decision in the thread**. It
   shows:
-  - the recipe's step tree, with each step's role, tier and estimate;
+  - the recipe's step tree, with each step's role and tier;
   - `Check`'s warnings;
   - the spec and the revision it will freeze;
   - every done-when check command the run will execute;
-  - the estimate against what is left in the session's pool;
+  - what is left in the session's pool, which the run spends from —
+    nothing is estimated;
   - whether the tree holds uncommitted work.
 - The person has four answers:
   - **Allow**;
-  - **Always allow up to $N**, which sets pre-authorisation (§24.3) and
-    allows this run;
+  - **Always allow**, which allows this run and every later run of the
+    session without asking; the session's budget is the only cap;
   - **Deny**;
   - typed **feedback**, delivered to the session agent as a turn, which
     may propose again.
-- A run whose estimate is within pre-authorisation is allowed without
+- A run on a session whose runs are always allowed is allowed without
   asking. No agent allows its own run.
 - A run allowed while another is open waits as **queued**. It starts
   when the open run ends. Its spec revision is frozen when it starts,
@@ -6792,25 +6799,22 @@ tick loops (`ui/workflowloop.go`) and the headless driver. In order:
 
 1. Wind down when stopped: interrupt running steps, then end the run.
 2. Pause when the session's pool is spent (§24.7a), and do nothing else.
-3. Put a runaway step to the person. A runaway is a step past three times
-   its estimate. The person may let it run three estimates more, or
-   drop it, which fails it.
-4. Settle a `parallel` whose join is decided, and a `repeat` whose
+3. Settle a `parallel` whose join is decided, and a `repeat` whose
    iteration has ended: check `until`, then iterate, end the loop, or
    apply `onMax`.
-5. Start the next ready step or steps. These are the next sibling in
+4. Start the next ready step or steps. These are the next sibling in
    order, or every branch of a `parallel`.
-6. Warn the person, once, when the forecast passes what the pool has
-   left. The forecast is what the remaining steps are estimated to cost,
-   scaled by how far finished steps ran over theirs.
-7. When nothing is left, run the end checks (§25.6), write the report
+5. When nothing is left, run the end checks (§25.6), write the report
    into the spec and the run's directory, and send it to the session as
    a turn under the workflow's actor.
 
-**Money** is §24.7a unchanged:
-- one pool, the session's envelope;
-- estimates, not fences;
-- a run pauses for a top-up and never drops work;
+**Money** is one pool, and nothing estimated against it:
+- the run binds to the session's envelope, and a step's backend may
+  spend what the pool has left;
+- nothing forecasts what a run will cost, and no step is a runaway; the
+  planner plans without regard to money;
+- a run goes on until the pool is spent, then pauses for a top-up and
+  never drops work;
 - only a person raises the money.
 
 **Questions.** A step's `ask_user` is a decision to the person, drawn
@@ -6848,8 +6852,8 @@ both draw it from that fold.
 
 The block holds:
 
-- **A head**: the recipe, the run's number, its spec, spend against the
-  estimate, elapsed time, and Pause, Resume and Stop.
+- **A head**: the recipe, the run's number, its spec, its spend, elapsed
+  time, and Pause, Resume and Stop.
 - **A strip** of the recipe's top-level entries, each in its state:
   - a `repeat` shows its iteration, as in `build ↺ 2/3`;
   - a `parallel` shows its branches joined by `∥`.
@@ -6881,8 +6885,7 @@ The **Crew tab**, `ui/webcrew.go`, `web/assets/crew.js` and the TUI's
 is a right-hand panel; in the TUI it is a pushed view with a crumb back,
 such as `Session › deliver run 2 › build ↺ 2 › implement`.
 
-- **Head**: the role, the model and tier, spend against the estimate,
-  and its state.
+- **Head**: the role, the model and tier, its spend, and its state.
 - **Transcript**: the step card's own thread, live.
 - **Diff**: the step's own diff, from its snapshots.
 - **Brief**: the prompt as filled in, and the artifacts it reads and
@@ -6904,9 +6907,11 @@ such as `Session › deliver run 2 › build ↺ 2 › implement`.
 ### 25.11 The headless driver
 
 `gummi run` and `resume` drive workflows as they drove crews.
-- `--envelope` pre-authorises runs up to the envelope.
-- A run proposal beyond it, a question, or a runaway stops the driver
-  with `needs_you`.
+- `gummi run` always allows the runs of the session it mints; the
+  envelope is their only cap.
+- A run proposal on a session not always allowed, a question, a run's
+  decision or a spent pool stops the driver with `needs_you` (or
+  `exhausted`).
 - NDJSON events are renamed from `crew_*` to `workflow_*`, and the
   `crew_*` names are still emitted alongside for one release.
 
@@ -6925,9 +6930,10 @@ such as `Session › deliver run 2 › build ↺ 2 › implement`.
   are still gathered into the report when a step writes them.
 
 **Stays:**
-- money (§24.7a);
-- a person's allowance of every run and every revised plan, or
-  pre-authorisation, with no agent allowing its own run;
+- money as one pool (§24.7a), with nothing estimated against it;
+- a person's allowance of every run and every revised plan, or a
+  person's "always allow" for the session's runs, with no agent allowing
+  its own run;
 - questions reaching the person;
 - a session landing on a person's read of its diff.
 
@@ -6962,15 +6968,12 @@ The build follows §25, with these differences.
   validated tree only when at least one done-when item has a check and
   every checked item passes, so a spec whose items are all judged by
   `MET:` lines stays `partial` after every run (§25.3, §25.6).
-- **"Always allow up to" names dollars**, as `Always allow up to $5`,
-  like every amount a person reads. The pre-authorisation it sets is
-  kept in credits.
 - **Every run decision has a words row**, as an `ask_user` question
   does, named for what the words do: **Feedback** on a proposal, to the
   session agent; **Talk it over** on a revised plan, to its planner;
   **Another amount** on a paused budget, the credits to top up by. A
   `repeat` at its max offers one more iteration, continue or stop; a
-  runaway step offers carry on or drop; a spent pool offers a top-up.
+  spent pool offers a top-up or a stop.
 - **An answer names the decision it answers.** A run raises one decision
   after another, so `WorkflowAnswer` takes the decision's id, and an
   answer to a decision the run has since replaced is refused, saying
@@ -6984,11 +6987,34 @@ The build follows §25, with these differences.
 - **Ids are unique across the whole recipe**, not only among siblings,
   so `{{<id>.output}}` always names one step.
 - **A `repeat` without `onMax` pauses** at its max.
-- **A step without an `envelope` takes its role's default**: scout,
-  planner and reviewer 30 credits, scribe 40, contractor and tester 60,
-  implementer 100.
+- **A step's `envelope` is ignored, with a warning.** A run estimates
+  nothing, so a recipe from before that names one still parses, and
+  `Check` warns on the proposal (and on a revised plan) that it is
+  ignored; the copy the run keeps drops it.
 - **A step's path names its `parallel` too**: a branch of `reviews` in
   iteration 1 of `build` is `build/1/reviews/review-a`.
+
+**Money.**
+- **A run estimates nothing.** The proposal, the run's block, the step
+  view, `workflow_status`, the report and the driver's NDJSON say what a
+  run has spent, never what it might: there is no estimate, no forecast
+  warning and no runaway. A run binds to its session's envelope and goes
+  on until it is spent.
+- **"Always allow" carries no amount.** It is kept in the old
+  pre-authorisation's table (`crew_preauth`) as yes or no, and an amount
+  a person set before reads as yes. `gummi run` sets it for the session
+  it mints, so its driver stops on a proposal only for a session minted
+  elsewhere whose runs are not always allowed.
+- **A paused run's top-up is as much again as the envelope**, rounded up
+  to 50 credits and never below 100; the person may top up by another
+  amount, or stop the run. The decision no longer offers Continue, which
+  answered the forecast warning.
+- **The store keeps the old columns unread.** `workflow_runs.estimate`
+  and `warned`, and `workflow_steps.estimate` and `allowance`, stay in a
+  database from before, unwritten.
+- **The NDJSON follows.** `created` carries `always_allow` instead of
+  `preauth`; a `workflow` line carries `spent` instead of `estimate`; the
+  `crew` line beside it drops `budget`; `workflow_runaway` is gone.
 
 **Running.**
 - **A process conducts only the runs it holds.** A tick conducts a

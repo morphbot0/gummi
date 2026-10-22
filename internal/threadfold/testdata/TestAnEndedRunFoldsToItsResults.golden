@@ -1,13 +1,12 @@
 {
   "n": 2,
-  "rev": "34b6qlinkckg2",
+  "rev": "371z5w90r5pb0",
   "recipe": "deliver",
   "spec": 2,
   "specTitle": "Resume pre-migration sessions",
   "specRev": 2,
   "state": "done",
   "spent": 280,
-  "estimate": 420,
   "started": "2026-10-01T09:00:00Z",
   "ended": "2026-10-01T10:12:00Z",
   "strip": [
@@ -37,7 +36,6 @@
       "role": "contractor",
       "state": "done",
       "spent": 40,
-      "estimate": 30,
       "line": "Design for the spec",
       "card": "FF-1de"
     },
@@ -49,7 +47,6 @@
       "id": "build",
       "state": "done",
       "spent": 170,
-      "estimate": 120,
       "line": "not met · CHANGES · 2 findings: pruned logs come back out of order",
       "folded": true,
       "steps": "implement · review-a ∥ review-b · verdict",
@@ -63,7 +60,6 @@
       "id": "build",
       "state": "done",
       "spent": 50,
-      "estimate": 120,
       "line": "met · APPROVED",
       "folded": true,
       "steps": "implement · review-a ∥ review-b · verdict",
@@ -76,7 +72,6 @@
       "role": "reviewer",
       "state": "done",
       "spent": 20,
-      "estimate": 30,
       "line": "all good",
       "card": "FF-1va"
     }

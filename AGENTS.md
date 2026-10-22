@@ -50,8 +50,9 @@ session ──talk──▶ spec n ──workflow_run──▶ proposal ──yo
   of steps kept as YAML (`.gummi/workflows/<name>.yaml`, else the
   bundled `deliver`, `investigate` and `fix-until-green`, or handed over
   inline), run against one of its specs. `workflow_run` proposes the
-  run; the person allows it (or has pre-authorised runs up to an
-  amount). Each step is a fresh-context agent of a role (`scout`,
+  run; the person allows it (or always allows the session's runs). A
+  run estimates nothing: it spends from the session's envelope until
+  that is spent, then pauses for a top-up. Each step is a fresh-context agent of a role (`scout`,
   `planner`, `contractor`, `implementer`, `tester`, `scribe`,
   `reviewer`) on a hidden child card whose working directory is the
   session's own checkout — one after another, side by side in a
@@ -84,9 +85,9 @@ agent/worktree/verify as leaf services.
 |---|---|
 | `domain` | Core types: cards (sessions and agents, plus the read-only rows of the retired workflow kinds), stages, a session's specs, workflow recipes, runs, their steps and decisions (`workflow.go`), a session's hidden children — a step's card, and an old crew's (`child.go`: `ChildLink`, `StepLink`, `IsChild`, step tiers) — and done-when items. No I/O. |
 | `spec` | The markdown artifacts and their blocks: a session's spec template (`session.go`), the `gummi-done-when` block (`donewhen.go`) and `gummi-checks`, and the `%%` marker grammar for anchored comments. |
-| `state` | SQLite store: cards, sessions, a session's specs and their revisions (`sessionspecs.go`), workflow runs and their steps (`workflow.go`), the run pre-authorisation and an old database's crews, read only (`legacycrew.go`, `workflowmigrate.go`), diff annotations, card events, sequences, workspace. |
-| `workflowrecipe` | Pure rules for a workflow recipe (DESIGN §25.4): `Parse` the YAML, `Check` it (ids, roles, tiers, templates, `repeat` and `parallel` shapes; a warning for two writers side by side), `Estimate` it (each step's envelope or its role's default, a `repeat` counted `max` times), `Fill` a step's templates, `Load`/`List` the workspace's recipes and the bundled ones (`bundled/`), and read the lines a step's output may carry (a planner's `gummi-workflow` block, `FAILED:`, `MET:`/`UNMET:`, `DECISION:`, `OPEN:`). |
-| `workflowpolicy` | Pure conductor of a running run (DESIGN §25.7): `Decide` takes a snapshot and returns the actions — start ready steps, interrupt, judge a `repeat`'s `until`, ask at its max, put a runaway step to the person, pause on a spent pool, warn on the forecast, end. `Engine.WorkflowTick` builds the snapshot and executes them. |
+| `state` | SQLite store: cards, sessions, a session's specs and their revisions (`sessionspecs.go`), workflow runs and their steps (`workflow.go`), whether a session always allows its runs and an old database's crews, read only (`legacycrew.go`, `workflowmigrate.go`), diff annotations, card events, sequences, workspace. |
+| `workflowrecipe` | Pure rules for a workflow recipe (DESIGN §25.4): `Parse` the YAML, `Check` it (ids, roles, tiers, templates, `repeat` and `parallel` shapes; a warning for two writers side by side, and for a step still naming an `envelope`, which is ignored), `Fill` a step's templates, `Load`/`List` the workspace's recipes and the bundled ones (`bundled/`), and read the lines a step's output may carry (a planner's `gummi-workflow` block, `FAILED:`, `MET:`/`UNMET:`, `DECISION:`, `OPEN:`). |
+| `workflowpolicy` | Pure conductor of a running run (DESIGN §25.7): `Decide` takes a snapshot and returns the actions — start ready steps, interrupt, judge a `repeat`'s `until`, ask at its max, pause on a spent pool, end. Nothing is estimated. `Engine.WorkflowTick` builds the snapshot and executes them. |
 | `engine` | The orchestrator. Runs sessions on agent backends, routes turns, streams activity, and conducts workflow runs. Start here to trace behavior. A run is `workflow.go` (lifecycle, the session's `workflow_*` tools, the person's answers, pause/resume/stop/steer, `WorkflowTick`, a run's end and report), `workflowproposal.go` (what a proposal shows), `workflowstep.go` (a step's card, brief, snapshots and the person's messages to it), `workflowtree.go` (the run's directory, snapshots and diffs, end checks, the validated mark, Revert run) and `workflowfaces.go` (what the faces read); `pool.go` is the session's pool and the helpers they share; the session's specs are `sessionspec.go`. |
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
 | `cardmint` | The one recipe for minting a card: a session, or an agent in a home of its own. Refuses the retired kinds. |
@@ -110,7 +111,7 @@ agent/worktree/verify as leaf services.
 | `gittest` | Blank-imported by every test package that builds a git repository in a `t.TempDir`: switches off git's detached auto-maintenance, which otherwise outlives the command a test ran and fails the TempDir cleanup. A bare remote a test pushes to sets `maintenance.auto false` itself — git does not pass the switch to the receiving end. |
 | `ui` | The Bubbletea TUI: board, card thread, diff/spec views, inbox, dialogs. `workflowloop.go` ticks every session's live run; `runblock.go` and `runkeys.go` draw a run's block in the thread and what a person does to it (alt+w), `stepview.go` a step opened from it; `webrun.go` and `websessionspec.go` are what the web page's run block, step panel and Specs tab are told. |
 | `cardops` | The card operations every face runs the same way: Merge, HandOff, Squash, Commit, Clean, and a linked PR's open-thread count, with the NDJSON emitter and the typed `Status`/`Outcome` exit table. `cmd/gummi`'s landing verbs call it directly. |
-| `driver` | The headless session loop behind `gummi run`/`resume`: mints a session from a prompt, pre-authorises its workflow runs up to the envelope, ticks its run and waits; stops `done`, or `needs_you` on a question or a run decision the pre-authorisation does not cover. Emits NDJSON + typed exit statuses (`docs/HEADLESS.md`), with the `crew` names beside the `workflow` ones for older readers. |
+| `driver` | The headless session loop behind `gummi run`/`resume`: mints a session from a prompt, always allows its workflow runs (the envelope the only cap), ticks its run and waits; stops `done`, or `needs_you` on a question or a run decision. Emits NDJSON + typed exit statuses (`docs/HEADLESS.md`), with the `crew` names beside the `workflow` ones for older readers. |
 | `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
 | `engine/freeformsession.go` | A session's whole working life — its worktree, its per-card lock and its envelope. It never commits for the agent: every commit on its branch is one the agent made on purpose. Built from `consultsession.go`'s lifecycle; read the two together. `engine/sessionmodel.go` holds the agent and model a session picks for itself, starting a backend the board did not launch, and switching mid-conversation, and `ui/websession.go` holds the picker's catalog (DESIGN §19.8). |
 | `web` | `gummi web`: serves the board to a browser as a page of its own (DESIGN §20). Holds no board: it asks the TUI's model, run headless behind `ui.Bridge`, for every read and write. Pairing and device tokens (`pair.go`), same-origin and auth (`auth.go`), the SSE hub (`hub.go`), one `routes_*.go` per area (a session's runs, steps and specs are `routes_runs.go`), and the page itself under `assets/` (plain ES modules, no build step, strict CSP — no inline script or style; a run's block and the step panel are `workflow.js`). |
@@ -208,14 +209,15 @@ worktrees and specs still work — the board just stays static. Key env vars are
 - **A run answers to three rules, and they do not bend** (decision 28,
   DESIGN §25.12):
   - **a person allows the run and every revision of its plan** — the
-    proposal and a planner's revised plan are the person's decisions, or
-    fall inside the pre-authorisation a person set; no agent allows its
-    own run;
+    proposal and a planner's revised plan are the person's decisions —
+    the proposal answered, or the session's runs always allowed by a
+    person; no agent allows its own run;
   - **money is a ceiling no agent raises** — one pool, the session's
-    envelope; a run is never stopped over money but paused for a
-    person's top-up (DESIGN §24.7a);
+    envelope, and nothing estimated against it; a run is never stopped
+    over money but paused for a person's top-up when the pool is spent
+    (DESIGN §24.7a);
   - **a question the run cannot settle reaches the person** — a step's
-    `ask_user`, a `repeat` at its max, a runaway step.
+    `ask_user`, a `repeat` at its max.
 
   Review, checks and design are what a recipe chooses, never a floor
   gummi imposes; a run's review and its end checks are evidence for the

@@ -492,7 +492,7 @@ func bindRunFlags(fs *pflag.FlagSet) {
 // surface, worded for a session that already exists, and the answer.
 func bindResumeFlags(fs *pflag.FlagSet) {
 	d := stdDriveFlags()
-	d.envelope = "raise the session's budget, and its workflow pre-authorisation with it, in dollars (clears an exhausted stop; never lowers it)"
+	d.envelope = "raise the session's budget, in dollars (clears an exhausted stop or a run paused on a spent budget; never lowers it)"
 	d.ref = "external correlation id, echoed in the stream"
 	// A resumed session already knows its repository, its base branch and
 	// the profile it was minted with; none of the three can change now.

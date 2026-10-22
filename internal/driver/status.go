@@ -2,14 +2,14 @@
 // `gummi resume`: a session (a freeform card) started from a prompt, or
 // picked back up, kept moving with no person at the keyboard.
 //
-// The person running `gummi run` pre-authorises the session's workflow
-// runs up to the envelope (DESIGN §25.11), so a run the session proposes
-// whose estimate fits starts without asking. Everything else that needs a
-// person stops the run instead of being decided for them: the session's
-// ask_user question, a run's decision the pre-authorisation does not
-// cover (a proposal over it, a revised plan, a repeat at its max, a
-// runaway step, the budget), a step's own question, a paused run, the
-// envelope running dry, a quiet past the timeout. Each stop is a typed
+// The person running `gummi run` always allows the session's workflow
+// runs (DESIGN §25.11), so a run the session proposes starts without
+// asking, the envelope its only cap. Everything else that needs a person
+// stops the run instead of being decided for them: the session's
+// ask_user question, a run's decision (a proposal, on a session not
+// always allowed, a revised plan, a repeat at its max, the budget), a
+// step's own question, a paused run, the envelope running dry, a quiet
+// past the timeout. Each stop is a typed
 // Outcome the CLI maps to an exit code, after an NDJSON line that says
 // what to run next. The run is done when the session is idle with no
 // workflow run open or queued.

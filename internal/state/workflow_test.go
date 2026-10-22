@@ -93,7 +93,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	created := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
 	r := &domain.Run{
 		Session: sess.ID, RecipeName: "deliver", Recipe: recipe, RecipeYAML: "name: deliver\n",
-		Inputs: map[string]string{"area": "export"}, Spec: 1, State: domain.RunProposed, Estimate: 120,
+		Inputs: map[string]string{"area": "export"}, Spec: 1, State: domain.RunProposed,
 		Pending:   &domain.RunDecision{ID: "d1", Kind: domain.RunDecideProposal, Question: "allow?", Warnings: []string{"two writers"}},
 		CreatedAt: created,
 	}
@@ -116,7 +116,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	got.State, got.Pending, got.Feedback, got.SpecRev = domain.RunRunning, nil, "go ahead", 4
 	got.StartTree, got.StartedAt, got.Spent, got.Steers = "t0", started, 12.5, []string{"mind the tests"}
 	got.Results = []domain.ItemResult{{Item: "DW-1", Checked: true, Verdict: domain.ItemMet}}
-	got.Warned, got.OutOfBudget, got.Stopping = true, true, true
+	got.OutOfBudget, got.Stopping = true, true
 	got.EndTree, got.ValidatedTree, got.Report, got.Reason = "t1", "t1", "all met", "why"
 	got.StartHead = "abc"
 	got.Until = map[string]domain.UntilJudgement{"build/1": {Met: true, Detail: "verdict APPROVED"}}
@@ -127,7 +127,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	back, _ := s.Run(ctx, sess.ID, 1)
 	if back.Revision != 2 || back.Pending != nil || back.Feedback != "go ahead" || back.SpecRev != 4 ||
 		!back.StartedAt.Equal(started) || back.Steers[0] != "mind the tests" || back.Results[0].Verdict != domain.ItemMet ||
-		!back.Warned || !back.OutOfBudget || !back.Stopping || back.ValidatedTree != "t1" || back.Report != "all met" || back.Spent != 12.5 ||
+		!back.OutOfBudget || !back.Stopping || back.ValidatedTree != "t1" || back.Report != "all met" || back.Spent != 12.5 ||
 		back.StartHead != "abc" || !back.Until["build/1"].Met || back.OnMax["build/3"] != "more" {
 		t.Fatalf("updated run came back as %+v", back)
 	}
@@ -173,7 +173,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	}
 	st := &domain.RunStep{
 		Session: sess.ID, Run: 1, Path: "build/2/reviews/review-a", StepID: "review-a", Card: card.ID,
-		Role: domain.RoleReviewer, Tier: domain.TierStrong, State: domain.StepRunning, Estimate: 30,
+		Role: domain.RoleReviewer, Tier: domain.TierStrong, State: domain.StepRunning,
 		StartTree: "t0", Prompt: "Review", StartedAt: started,
 	}
 	if err := s.CreateRunStep(ctx, st); err != nil {
@@ -186,7 +186,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	if err := s.CreateRunStep(ctx, design); err != nil {
 		t.Fatal(err)
 	}
-	st.State, st.Output, st.EndTree, st.Spent, st.Allowance, st.EndedAt = domain.StepDone, "LGTM", "t1", 31, 1, started.Add(time.Minute)
+	st.State, st.Output, st.EndTree, st.Spent, st.EndedAt = domain.StepDone, "LGTM", "t1", 31, started.Add(time.Minute)
 	if err := s.UpdateRunStep(ctx, st); err != nil {
 		t.Fatal(err)
 	}
@@ -205,11 +205,11 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 		t.Errorf("RunStep design = %+v", one)
 	}
 
-	if err := s.SetWorkflowPreauth(ctx, sess.ID, 400); err != nil {
+	if err := s.SetWorkflowAlwaysAllow(ctx, sess.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	if n, _ := s.WorkflowPreauth(ctx, sess.ID); n != 400 {
-		t.Errorf("preauth = %d", n)
+	if always, _ := s.WorkflowAlwaysAllow(ctx, sess.ID); !always {
+		t.Error("always allow did not stick")
 	}
 
 	// deleting the session takes its runs and steps with it

@@ -20,9 +20,9 @@ type createdEvent struct {
 	Ref      string `json:"ref,omitempty"`
 	Branch   string `json:"branch,omitempty"`
 	Envelope int    `json:"envelope"`
-	// Preauth is the workflow pre-authorisation the run set: a run
-	// estimated at up to this many credits starts without asking.
-	Preauth int `json:"preauth"`
+	// AlwaysAllow says the session's workflow runs start without asking:
+	// `gummi run` always allows them, the envelope the only cap.
+	AlwaysAllow bool `json:"always_allow"`
 }
 
 type resumedEvent struct {
@@ -51,36 +51,36 @@ type replyEvent struct {
 // proposed, queued, running, paused, and its ending — done, partial,
 // stopped or denied. An ended run's report rides it.
 type workflowEvent struct {
-	Event    string `json:"event"`
-	ID       string `json:"id"`
-	Run      int    `json:"run"`
-	Recipe   string `json:"recipe,omitempty"`
-	Spec     int    `json:"spec,omitempty"`
-	State    string `json:"state"`
-	Estimate int    `json:"estimate"`
-	Steps    int    `json:"steps,omitempty"`
-	Report   string `json:"report,omitempty"`
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Run    int    `json:"run"`
+	Recipe string `json:"recipe,omitempty"`
+	Spec   int    `json:"spec,omitempty"`
+	State  string `json:"state"`
+	// Spent is what the run's steps have spent so far, in credits, from
+	// the session's envelope.
+	Spent  float64 `json:"spent"`
+	Steps  int     `json:"steps,omitempty"`
+	Report string  `json:"report,omitempty"`
 }
 
 // crewEvent is the workflow event under the name it had while crews ran
-// (§25.11), emitted beside it for one release: crew is the run's number,
-// budget its estimate and nodes its recipe's step count; done reads
-// "finished" and denied "declined".
+// (§25.11), emitted beside it for one release: crew is the run's number
+// and nodes its recipe's step count; done reads "finished" and denied
+// "declined". A run has no budget of its own, so the crew's is gone.
 type crewEvent struct {
 	Event  string `json:"event"`
 	ID     string `json:"id"`
 	Crew   int    `json:"crew"`
 	State  string `json:"state"`
-	Budget int    `json:"budget"`
 	Nodes  int    `json:"nodes,omitempty"`
 	Report string `json:"report,omitempty"`
 }
 
 // questionEvent is every stop that waits on a person. Kind says whose
 // question it is: "ask" (the session's ask_user); "workflow_proposal",
-// "workflow_plan", "workflow_max", "workflow_runaway" or
-// "workflow_budget" (a workflow run's decision the pre-authorisation did
-// not cover); "workflow_ask" (a step's own ask_user); or
+// "workflow_plan", "workflow_max" or "workflow_budget" (a workflow run's
+// decision); "workflow_ask" (a step's own ask_user); or
 // "workflow_paused". CrewKind is the kind a crew's stop of the same sort
 // carried, emitted beside it for one release (§25.11).
 type questionEvent struct {

@@ -18,7 +18,8 @@ var templateRe = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // max or a single until, a parallel without a valid join, an until naming
 // an artifact its body does not declare, and an artifact whose file would
 // sit outside the run's directory. Warnings do not: a parallel holding more
-// than one writing role, whose steps can overwrite each other's work.
+// than one writing role, whose steps can overwrite each other's work, and
+// a step that still names an envelope, which is ignored.
 // Whether a recipe reviews, tests or designs is its own choice; Check sets
 // no floor.
 func Check(r domain.Recipe) (problems, warnings []string) {
@@ -155,8 +156,8 @@ func (c *checker) step(s domain.Step, previous string) {
 	if !s.Tier.Known() {
 		c.problem("step %s: tier %q is not one of cheap, standard or strong", name, s.Tier)
 	}
-	if s.Envelope < 0 {
-		c.problem("step %s: an envelope is never below 0", name)
+	if s.StaleEnvelope {
+		c.warnings = append(c.warnings, fmt.Sprintf("step %s: its envelope is ignored — a run spends from the session's budget and estimates nothing", name))
 	}
 	if strings.TrimSpace(s.Prompt) == "" {
 		c.problem("step %s has no prompt", name)
@@ -209,53 +210,4 @@ func (c *checker) template(ref, self, previous string) string {
 		return "names no earlier step"
 	}
 	return "is not a template: spec, inputs.<name>, artifacts.<name>, previous.output, <step>.output or run.diff"
-}
-
-// Defaults maps a role to the envelope a step of it takes when it names
-// none.
-type Defaults map[domain.WorkflowRole]int
-
-// DefaultEnvelopes is each role's default estimate, in credits.
-var DefaultEnvelopes = Defaults{
-	domain.RoleScout:       30,
-	domain.RolePlanner:     30,
-	domain.RoleContractor:  60,
-	domain.RoleImplementer: 100,
-	domain.RoleTester:      60,
-	domain.RoleScribe:      40,
-	domain.RoleReviewer:    30,
-}
-
-// Envelope is a step's estimate: its own, or its role's default.
-func (d Defaults) Envelope(s domain.Step) int {
-	if s.Envelope > 0 {
-		return s.Envelope
-	}
-	if d == nil {
-		d = DefaultEnvelopes
-	}
-	return d[s.Role]
-}
-
-// Estimate is what a recipe is expected to cost, in credits: the sum of
-// its steps' envelopes, a repeat's body counted max times. A nil defaults
-// takes DefaultEnvelopes.
-func Estimate(r domain.Recipe, d Defaults) int { return EstimateEntries(r.Steps, d) }
-
-// EstimateEntries is Estimate for a list of entries.
-func EstimateEntries(es []domain.Entry, d Defaults) int {
-	t := 0
-	for _, e := range es {
-		switch {
-		case e.Step != nil:
-			t += d.Envelope(*e.Step)
-		case e.Parallel != nil:
-			for _, s := range e.Parallel.Steps {
-				t += d.Envelope(s)
-			}
-		case e.Repeat != nil:
-			t += max(e.Repeat.Max, 1) * EstimateEntries(e.Repeat.Steps, d)
-		}
-	}
-	return t
 }

@@ -1,7 +1,6 @@
 package workflowpolicy
 
 import (
-	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -337,9 +336,9 @@ func TestDecidePausesOnASpentPool(t *testing.T) {
 	deliver := recipe(t, "deliver")
 	got := Decide(Snapshot{
 		State: domain.RunRunning, Recipe: deliver, Bounded: true, Left: 0,
-		Steps: []Step{{Path: "design", State: domain.StepDone, Estimate: 60, Spent: 60}, {Path: "build/1/implement", State: domain.StepRunning, Spent: 40}},
+		Steps: []Step{{Path: "design", State: domain.StepDone, Spent: 60}, {Path: "build/1/implement", State: domain.StepRunning, Spent: 40}},
 	})
-	if len(got) != 1 || got[0].Kind != Pause || got[0].Amount < 100 || got[0].Amount%50 != 0 || !strings.Contains(got[0].Reason, "spent 100") {
+	if len(got) != 1 || got[0].Kind != Pause || !strings.Contains(got[0].Reason, "spent 100") {
 		t.Fatalf("actions = %v", got)
 	}
 	// an unbounded pool never pauses
@@ -349,125 +348,30 @@ func TestDecidePausesOnASpentPool(t *testing.T) {
 	}
 }
 
-func TestDecideFlagsARunaway(t *testing.T) {
+// TestARunEstimatesNothing: a run binds to the session's budget alone. A
+// step that has spent any amount, however far past what anyone would have
+// guessed, is neither flagged nor warned about while the pool has money
+// left: the run goes on until the pool is spent, and then pauses.
+func TestARunEstimatesNothing(t *testing.T) {
 	deliver := recipe(t, "deliver")
-	for _, tc := range []struct {
-		name string
-		step Step
-		want []string
-	}{
-		{"under three estimates", Step{Path: "design", State: domain.StepRunning, Estimate: 50, Spent: 150}, []string{}},
-		{"past three estimates", Step{Path: "design", State: domain.StepRunning, Estimate: 50, Spent: 151}, []string{"runaway design"}},
-		{"the role's default prices it", Step{Path: "design", State: domain.StepRunning, Spent: 181}, []string{"runaway design"}},
-		{"an allowance lets it run", Step{Path: "design", State: domain.StepRunning, Estimate: 50, Allowance: 1, Spent: 290}, []string{}},
-		{"past the allowance too", Step{Path: "design", State: domain.StepAsking, Estimate: 50, Allowance: 1, Spent: 301}, []string{"runaway design"}},
-		{"a settled step is no runaway", Step{Path: "design", State: domain.StepDone, Estimate: 50, Spent: 900}, []string{"start build/1/implement"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := render(Decide(Snapshot{State: domain.RunRunning, Recipe: deliver, Steps: []Step{tc.step}}))
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("actions = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestForecastScalesByTheOverrun(t *testing.T) {
-	r := parse(t, `
-steps:
-  - {id: a, role: scout, prompt: x, envelope: 10}
-  - {id: b, role: implementer, prompt: x, envelope: 20}
-  - id: loop
-    repeat:
-      max: 3
-      until: checks
-      steps: [{id: c, role: tester, prompt: x, envelope: 5}]
-`)
-	for _, tc := range []struct {
-		name     string
-		steps    []Step
-		until    map[string]UntilResult
-		ratio    float64
-		toFinish float64
-		spent    float64
-	}{
-		{"nothing started: the whole estimate", nil, nil, 1, 10 + 20 + 15, 0},
-		{
-			"a ran at twice its estimate",
-			[]Step{{Path: "a", State: domain.StepDone, Estimate: 10, Spent: 20}},
-			nil,
-			2, 2 * (20 + 15), 20,
-		},
-		{
-			"under estimate never scales below one",
-			[]Step{{Path: "a", State: domain.StepDone, Estimate: 10, Spent: 5}},
-			nil,
-			1, 20 + 15, 5,
-		},
-		{
-			"a live step counts what it has left",
-			[]Step{{Path: "a", State: domain.StepDone, Estimate: 10, Spent: 10}, {Path: "b", State: domain.StepRunning, Estimate: 20, Spent: 8}},
-			nil,
-			1, 12 + 15, 18,
-		},
-		{
-			"a loop counts its remaining iterations",
-			[]Step{{Path: "a", State: domain.StepDone, Estimate: 10, Spent: 10}, {Path: "b", State: domain.StepDone, Estimate: 20, Spent: 20}, {Path: "loop/1/c", State: domain.StepDone, Estimate: 5, Spent: 5}},
-			map[string]UntilResult{"loop/1": {}},
-			1, 10, 35,
-		},
-		{
-			"a met loop has nothing left",
-			[]Step{{Path: "a", State: domain.StepDone, Estimate: 10, Spent: 10}, {Path: "b", State: domain.StepDone, Estimate: 20, Spent: 20}, {Path: "loop/1/c", State: domain.StepDone, Estimate: 5, Spent: 5}},
-			map[string]UntilResult{"loop/1": {Met: true}},
-			1, 0, 35,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := ComputeForecast(Snapshot{State: domain.RunRunning, Recipe: r, Steps: tc.steps, Until: tc.until, Bounded: true, Left: 10})
-			if math.Abs(f.Ratio-tc.ratio) > 1e-9 || math.Abs(f.ToFinish-tc.toFinish) > 1e-9 || math.Abs(f.Spent-tc.spent) > 1e-9 ||
-				math.Abs(f.Short-math.Max(0, tc.toFinish-10)) > 1e-9 {
-				t.Fatalf("forecast = %+v, want ratio %v, to finish %v, spent %v", f, tc.ratio, tc.toFinish, tc.spent)
-			}
-		})
-	}
-}
-
-func TestDecideWarnsOnceOfTheForecast(t *testing.T) {
-	r := parse(t, `
-steps:
-  - {id: a, role: scout, prompt: x, envelope: 10}
-  - {id: b, role: implementer, prompt: x, envelope: 100}
-`)
-	base := Snapshot{State: domain.RunRunning, Recipe: r, Bounded: true, Left: 50, Steps: []Step{{Path: "a", State: domain.StepRunning, Estimate: 10}}}
-	got := Decide(base)
-	if len(got) != 1 || got[0].Kind != Warn || got[0].Amount != TopUpFor(60) {
-		t.Fatalf("actions = %v", got)
-	}
-	base.Warned = true
-	if got := Decide(base); len(got) != 0 {
-		t.Errorf("warned twice: %v", got)
-	}
-	base.Warned, base.Left = false, 500
-	if got := Decide(base); len(got) != 0 {
-		t.Errorf("warned with money to spare: %v", got)
-	}
-	base.Left, base.Bounded = 0.5, false
-	if got := Decide(base); len(got) != 0 {
-		t.Errorf("warned on an unbounded pool: %v", got)
-	}
-	// the warning comes after the starts
-	base = Snapshot{State: domain.RunRunning, Recipe: r, Bounded: true, Left: 5}
-	if got := render(Decide(base)); !reflect.DeepEqual(got, []string{"start a", "warn"}) {
-		t.Errorf("order = %q", got)
-	}
-}
-
-func TestTopUpFor(t *testing.T) {
-	for need, want := range map[float64]int{0: 100, 10: 100, 100: 150, 200: 250, 1000: 1250} {
-		if got := TopUpFor(need); got != want {
-			t.Errorf("TopUpFor(%v) = %d, want %d", need, got, want)
+	for _, left := range []float64{0.5, 50, 5000} {
+		in := Snapshot{
+			State: domain.RunRunning, Recipe: deliver, Bounded: true, Left: left,
+			Steps: []Step{{Path: "design", State: domain.StepRunning, Spent: 100000}},
 		}
+		if got := Decide(in); len(got) != 0 {
+			t.Fatalf("with %v left, a live step spending freely draws %v", left, got)
+		}
+	}
+	in := Snapshot{
+		State: domain.RunRunning, Recipe: deliver, Bounded: true, Left: 0,
+		Steps: []Step{{Path: "design", State: domain.StepRunning, Spent: 30}},
+	}
+	if got := render(Decide(in)); !reflect.DeepEqual(got, []string{"pause"}) {
+		t.Fatalf("a spent pool = %q, want a pause alone", got)
+	}
+	if got := Spent(Snapshot{Steps: []Step{{Spent: 1.5}, {Spent: 2}}}); got != 3.5 {
+		t.Errorf("Spent = %v", got)
 	}
 }
 
@@ -476,7 +380,7 @@ func TestActionString(t *testing.T) {
 	if got := a.String(); got != "end partial: step x failed" {
 		t.Errorf("String = %q", got)
 	}
-	if got := (Action{Kind: Warn, Amount: 150}).String(); got != "warn (+150)" {
+	if got := (Action{Kind: Pause}).String(); got != "pause" {
 		t.Errorf("String = %q", got)
 	}
 }

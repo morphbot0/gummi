@@ -179,20 +179,18 @@ const wfSpec = "# Workflow test\n\n## Problem\n\nA file is missing.\n\n## Approa
 	"## Limits\n\nNothing else.\n\n## Notes\n\nnone\n"
 
 // wfRecipe is the recipe the session proposes: an implementer writes
-// out.txt, and a reviewer validates it. Its estimate is 150 credits.
+// out.txt, and a reviewer validates it.
 const wfRecipe = `name: make-file
 description: write the file and validate it
 steps:
   - id: make
     role: implementer
-    envelope: 100
     prompt: |
       Write out.txt for the spec below.
 
       {{spec}}
   - id: validate
     role: reviewer
-    envelope: 50
     prompt: |
       Read {{run.diff}} against the spec. End with MET: DW-1 or UNMET: DW-1.
 

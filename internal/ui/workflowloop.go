@@ -7,7 +7,7 @@ package ui
 // runs is coalesced into one more after it.
 //
 // A run's open decision — a proposal, a revised plan, a repeat at its
-// max, a runaway step or the budget — is its session's open decision,
+// max or the budget — is its session's open decision,
 // asked the way an ask_user question is and answered through
 // Engine.WorkflowAnswer.
 
@@ -92,10 +92,9 @@ func workflowDecision(r featureRow) *threadDecision {
 }
 
 func workflowOptionDetail(o string) string {
-	if strings.HasPrefix(o, engine.WorkflowAlwaysPrefix) {
-		return "allows this run, and every later one estimated within it, without asking"
-	}
 	switch o {
+	case engine.WorkflowAlways:
+		return "allows this run and every later one of this session without asking; its budget is the only cap"
 	case engine.WorkflowAllow:
 		return "the run starts; no agent allows its own run"
 	case engine.WorkflowDeny:
@@ -110,10 +109,6 @@ func workflowOptionDetail(o string) string {
 		return "the run goes on to its next step"
 	case engine.WorkflowStopRun:
 		return "the run stops; its changes stay in the tree"
-	case engine.WorkflowCarryOn:
-		return "the step may spend three estimates more"
-	case engine.WorkflowDrop:
-		return "the step fails; the run goes on as its recipe says"
 	case engine.WorkflowTopUp:
 		return "raises the session's envelope; a paused run carries on"
 	}
@@ -129,8 +124,6 @@ func workflowDecisionWord(d *domain.RunDecision) string {
 		return "revised plan"
 	case domain.RunDecideMax:
 		return "loop at max"
-	case domain.RunDecideRunaway:
-		return "runaway step"
 	case domain.RunDecideBudget:
 		return "run budget"
 	}
@@ -176,9 +169,9 @@ func firstParagraph(text string) string {
 }
 
 // proposalLines is a run's proposal as the picker draws it above its
-// answers (DESIGN §25.5): the recipe and its spec, what it costs against
-// the session's pool and whether the tree holds uncommitted work, Check's
-// warnings, the step tree with each step's role, tier and estimate, and
+// answers (DESIGN §25.5): the recipe and its spec, what the session's pool
+// has left and whether the tree holds uncommitted work, Check's warnings,
+// the step tree with each step's role and tier, and
 // every done-when check it will run. It is the narration, so it sheds
 // from the end on a short page: the order is what matters most first.
 func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
@@ -197,11 +190,9 @@ func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
 		spec += " " + strconv.Quote(sanitize(p.SpecTitle))
 	}
 	out = append(out, fit(s.Subtle.Render(spec)+s.Faint.Render(fmt.Sprintf(" · freezes revision %d when it starts", p.SpecRev))))
-	money := "~" + domain.FormatDollars(float64(p.Estimate))
+	money := "the session has no envelope; the run spends from it"
 	if p.Bounded {
-		money += " of " + domain.FormatDollars(math.Max(0, p.PoolLeft)) + " left in the session"
-	} else {
-		money += " · the session has no envelope"
+		money = domain.FormatDollars(math.Max(0, p.PoolLeft)) + " left in the session; the run spends from it"
 	}
 	tree := "nothing uncommitted in " + p.Branch
 	treeStyle := s.Faint
@@ -236,8 +227,7 @@ func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
 		default:
 			row := "  " + s.Base.Render(padTo(indent+st.ID, 16)) + " " +
 				roleStyle(s, st.Role).Render(padTo(string(st.Role), 12)) + " " +
-				s.Faint.Render(padTo(string(st.Tier), 9)) + " " +
-				s.Muted.Render(padTo("~"+domain.FormatDollars(float64(st.Estimate)), 7))
+				s.Faint.Render(padTo(string(st.Tier), 9))
 			if st.Prompt != "" {
 				row += " " + s.Faint.Render(sanitize(st.Prompt))
 			}

@@ -2,7 +2,7 @@ package engine
 
 // A session's workflow runs (DESIGN §25): the session proposes a run of a
 // recipe against one of its specs (workflow_run), the person allows it —
-// or has pre-authorised runs up to an amount — and the run's steps work in
+// or always allows the session's runs — and the run's steps work in
 // the session's own tree, one after another or side by side, until the
 // run ends with a report the session carries on from. Nothing is branched
 // or landed: the run leaves its changes in the tree, and the session
@@ -47,9 +47,10 @@ const (
 	// of its options is the person's feedback, delivered to the session.
 	WorkflowAllow = "Allow"
 	WorkflowDeny  = "Deny"
-	// WorkflowAlwaysPrefix starts the "Always allow up to N" answer: N
-	// credits, or $N.NN in dollars (WorkflowAlwaysAnswer spells it).
-	WorkflowAlwaysPrefix = "Always allow up to "
+	// WorkflowAlways allows this run and every later one of the session
+	// without asking: the session's budget is the only cap. An answer that
+	// begins with it (an older "Always allow up to $5") reads the same.
+	WorkflowAlways = "Always allow"
 	// a revised plan's
 	WorkflowAllowPlan = "Allow the revised plan"
 	WorkflowKeepPlan  = "Keep the plan"
@@ -57,27 +58,9 @@ const (
 	WorkflowOneMore  = "Run one more iteration"
 	WorkflowContinue = "Continue"
 	WorkflowStopRun  = "Stop the run"
-	// a runaway step's
-	WorkflowCarryOn = "Let it carry on"
-	WorkflowDrop    = "Drop it"
-	// a budget decision's, beside WorkflowContinue and WorkflowStopRun
+	// a budget decision's, beside WorkflowStopRun
 	WorkflowTopUp = "Top up the session"
-
-	// workflowRunawayFactor is how many estimates a runaway step is let run
-	// at a time (§25.7).
-	workflowRunawayFactor = 3
 )
-
-// WorkflowAlwaysAnswer is the "Always allow up to" answer for credits,
-// spelt in dollars as a person reads it ("Always allow up to $5"), which
-// the answer reads back as the same credits.
-func WorkflowAlwaysAnswer(credits int) string {
-	cents := float64(credits) * domain.CreditsToDollars * 100
-	if math.Mod(cents, 100) == 0 {
-		return fmt.Sprintf("%s$%d", WorkflowAlwaysPrefix, int(cents/100))
-	}
-	return fmt.Sprintf("%s$%.2f", WorkflowAlwaysPrefix, cents/100)
-}
 
 // workflowRuntime is what this process knows about runs beyond the store:
 // the work in flight (a step starting, an until being judged, a run
@@ -231,7 +214,7 @@ func workflowTools() []agent.ToolDef {
 			"(.gummi/workflows/) and gummi's bundled ones, each with its description.", map[string]any{}),
 		mkTool(workflowRunToolName,
 			"Propose a workflow run: a recipe of steps, each a fresh-context agent, run in this session's own tree "+
-				"against one of its specs. The person allows it (or has pre-authorised runs up to an amount). Returns at "+
+				"against one of its specs. The person allows it (or always allows this session's runs). Returns at "+
 				"once; the run's report arrives later as a turn. Nothing is committed: the run leaves its changes in the "+
 				"tree for you to read and commit. One run at a time; one more may wait queued behind it.",
 			map[string]any{
@@ -298,10 +281,10 @@ func (e *Engine) handleWorkflowTool(s *Session, tc *agent.ToolCall) {
 func proposedText(r *domain.Run) string {
 	switch r.State {
 	case domain.RunRunning:
-		return fmt.Sprintf("run %d is pre-authorised and has started; its report will arrive as a turn. "+
+		return fmt.Sprintf("run %d is always allowed and has started; its report will arrive as a turn. "+
 			"Do not change files in the tree until then.", r.N)
 	case domain.RunQueued:
-		return fmt.Sprintf("run %d is pre-authorised and queued behind the open run; it starts when that one ends.", r.N)
+		return fmt.Sprintf("run %d is always allowed and queued behind the open run; it starts when that one ends.", r.N)
 	}
 	return fmt.Sprintf("run %d proposed: the person decides whether it runs. Its report will arrive as a turn; carry on meanwhile.", r.N)
 }
@@ -369,9 +352,10 @@ type WorkflowRequest struct {
 // WorkflowPropose proposes a run on session (§25.5). It is refused when
 // the recipe fails Check, when the spec does not exist, or when a run is
 // already proposed or queued. The recipe is copied into the run, and the
-// proposal goes to the person as a decision — or, within the session's
-// pre-authorisation, is allowed at once: queued behind an open run, or
-// started.
+// proposal goes to the person as a decision — or, when the person always
+// allows the session's runs, is allowed at once: queued behind an open
+// run, or started. Nothing is estimated: the run spends from the session's
+// budget until it is spent.
 func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, req WorkflowRequest) (*domain.Run, error) {
 	st := e.cfg.Store
 	if st == nil {
@@ -428,15 +412,14 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	}
 	run := &domain.Run{
 		Session: session, RecipeName: name, Recipe: recipe, RecipeYAML: text, Inputs: req.Inputs,
-		Spec: n, State: domain.RunProposed, Estimate: workflowrecipe.Estimate(recipe, nil), CreatedAt: e.now(),
+		Spec: n, State: domain.RunProposed, CreatedAt: e.now(),
 	}
 	if err := st.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
 	_, _ = e.writeRunFile(session, run.N, "recipe.yaml", text)
-	pre, _ := st.WorkflowPreauth(ctx, session)
-	if pre > 0 && run.Estimate <= pre {
-		if err := e.allowRunLocked(ctx, run, fmt.Sprintf("pre-authorised up to %d", pre)); err != nil {
+	if always, _ := st.WorkflowAlwaysAllow(ctx, session); always {
+		if err := e.allowRunLocked(ctx, run, "the person always allows this session's runs"); err != nil {
 			return nil, err
 		}
 		e.workflowEvent(session)
@@ -445,13 +428,13 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	run.Pending = &domain.RunDecision{
 		ID: e.runDecisionID(run), Kind: domain.RunDecideProposal,
 		Question:   e.proposalQuestion(ctx, sess, run, warnings),
-		Options:    []string{WorkflowAllow, WorkflowAlwaysAnswer(workflowpolicy.TopUpFor(float64(run.Estimate))), WorkflowDeny},
+		Options:    []string{WorkflowAllow, WorkflowAlways, WorkflowDeny},
 		RecipeYAML: text, Warnings: warnings,
 	}
 	if err := st.UpdateRun(ctx, run); err != nil {
 		return nil, err
 	}
-	e.runNote(session, fmt.Sprintf("run %d (%s) proposed on spec %d · estimated %d", run.N, recipeLabel(run), n, run.Estimate))
+	e.runNote(session, fmt.Sprintf("run %d (%s) proposed on spec %d", run.N, recipeLabel(run), n))
 	e.send(Event{Feature: session, Stage: domain.StageOpen, Kind: EventQuestion})
 	e.workflowEvent(session)
 	return run, nil
@@ -546,13 +529,12 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 			}
 		}
 	}
-	fmt.Fprintf(&b, "\nEstimated %d credits (%s)", run.Estimate, domain.FormatDollars(float64(run.Estimate)))
 	if left, bounded := e.sessionPoolLeft(ctx, sess); bounded {
-		fmt.Fprintf(&b, "; the session has %s left", domain.FormatDollars(math.Max(0, left)))
+		fmt.Fprintf(&b, "\nIt spends from the session's budget, which has %s left, and pauses for a top-up if that runs out.\n",
+			domain.FormatDollars(math.Max(0, left)))
 	} else {
-		b.WriteString("; the session has no envelope")
+		b.WriteString("\nIt spends from the session, which has no envelope.\n")
 	}
-	b.WriteString(".\n")
 	if mgr, err := e.mgr(ctx, &sess); err == nil {
 		if dirty, err := mgr.Dirty(ctx, &sess); err == nil && dirty {
 			b.WriteString("The tree holds uncommitted work: the run's diff and a Revert run take it in too.\n")
@@ -561,8 +543,7 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// writeRecipeTree draws a recipe's steps, each with its role, tier and
-// estimate.
+// writeRecipeTree draws a recipe's steps, each with its role and tier.
 func writeRecipeTree(b *strings.Builder, es []domain.Entry, tier domain.StepTier, indent string) {
 	stepLine := func(s domain.Step, mark string) {
 		t := s.Tier
@@ -572,7 +553,7 @@ func writeRecipeTree(b *strings.Builder, es []domain.Entry, tier domain.StepTier
 		if t == "" {
 			t = domain.TierStandard
 		}
-		fmt.Fprintf(b, "%s- %s%s · %s · %s · ~%d\n", indent, mark, s.ID, s.Role, t, workflowrecipe.DefaultEnvelopes.Envelope(s))
+		fmt.Fprintf(b, "%s- %s%s · %s · %s\n", indent, mark, s.ID, s.Role, t)
 	}
 	for _, en := range es {
 		switch {
@@ -683,8 +664,8 @@ func (e *Engine) raiseRunDecision(run *domain.Run, d domain.RunDecision) bool {
 }
 
 // WorkflowDecision is the session's run with an open decision, if any:
-// a proposal, a revised plan, a repeat at its max, a runaway step or the
-// budget. A step's own ask_user is a question on the step's card.
+// a proposal, a revised plan, a repeat at its max or the budget. A step's
+// own ask_user is a question on the step's card.
 func (e *Engine) WorkflowDecision(ctx context.Context, session domain.FeatureID) (*domain.Run, *domain.RunDecision) {
 	if e.cfg.Store == nil {
 		return nil, nil
@@ -703,9 +684,9 @@ func (e *Engine) WorkflowDecision(ctx context.Context, session domain.FeatureID)
 }
 
 // WorkflowAnswer answers run n's open decision (§25.5, §25.7). answer is
-// one of the decision's options; for a proposal it may also be "Always
-// allow up to N" (credits, or $N.NN), or the person's own words, which go
-// to the session agent as a turn and close the proposal. A revised plan
+// one of the decision's options; for a proposal it may also be the
+// person's own words, which go to the session agent as a turn and close
+// the proposal. A revised plan
 // answered in other words goes back to the planner as a turn; a budget
 // decision also takes an amount, the top-up: credits as "300cr" or
 // "300 credits", or dollars as "$3" (parseTopUp).
@@ -768,15 +749,11 @@ func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n i
 				return nil, err
 			}
 			return nil, nil
-		case strings.HasPrefix(answer, WorkflowAlwaysPrefix):
-			credits, err := parseCredits(strings.TrimPrefix(answer, WorkflowAlwaysPrefix))
-			if err != nil {
+		case strings.HasPrefix(answer, WorkflowAlways):
+			if err := st.SetWorkflowAlwaysAllow(ctx, session, true); err != nil {
 				return nil, err
 			}
-			if err := st.SetWorkflowPreauth(ctx, session, credits); err != nil {
-				return nil, err
-			}
-			if err := e.allowRunLocked(ctx, run, fmt.Sprintf("%s allowed runs up to %d", who, credits)); err != nil {
+			if err := e.allowRunLocked(ctx, run, who+" always allows this session's runs"); err != nil {
 				return nil, err
 			}
 			return nil, nil
@@ -831,29 +808,8 @@ func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n i
 			return nil, notAnOption(d)
 		}
 		e.runNote(session, fmt.Sprintf("run %d: %s at %s", n, strings.ToLower(answer), d.Step))
-	case domain.RunDecideRunaway:
-		inst, err := st.RunStep(ctx, session, n, d.Step)
-		if err != nil || inst == nil {
-			return nil, fmt.Errorf("step %s is gone", d.Step)
-		}
-		switch answer {
-		case WorkflowCarryOn:
-			if inst.State.Live() {
-				inst.Allowance++
-				if err := st.UpdateRunStep(ctx, inst); err != nil {
-					return nil, err
-				}
-			}
-			e.runNote(session, fmt.Sprintf("run %d: the person let %s run %d more", n, d.Step, d.Amount))
-		case WorkflowDrop:
-			e.settleStepLocked(ctx, session, n, d.Step, domain.StepFailed, "a runaway the person dropped")
-			e.interruptStep(inst.Card)
-		default:
-			return nil, notAnOption(d)
-		}
 	case domain.RunDecideBudget:
 		switch answer {
-		case WorkflowContinue:
 		case WorkflowStopRun:
 			run.Stopping, run.Reason = true, "stopped by the person over its budget"
 		default:
@@ -917,7 +873,7 @@ func (e *Engine) spliceLocked(ctx context.Context, run *domain.Run, d domain.Run
 	if err != nil {
 		return err
 	}
-	run.Recipe, run.RecipeYAML, run.Estimate = r, string(text), workflowrecipe.Estimate(r, nil)
+	run.Recipe, run.RecipeYAML = r, string(text)
 	_, _ = e.writeRunFile(run.Session, run.N, "recipe.yaml", run.RecipeYAML)
 	e.runNote(run.Session, fmt.Sprintf("run %d: the person allowed %s's revised plan", run.N, d.Step))
 	return nil
@@ -950,9 +906,8 @@ func (e *Engine) topUpForRun(ctx context.Context, session domain.FeatureID, cred
 	return e.RaiseEnvelope(ctx, session, sess.Budget.Envelope+max(credits, 1))
 }
 
-// workflowEnvelopeRaised is the session's envelope going up: a forecast
-// may warn again, and a run paused because the money ran out carries on
-// once the pool has some again.
+// workflowEnvelopeRaised is the session's envelope going up: a run paused
+// because the money ran out carries on once the pool has some again.
 func (e *Engine) workflowEnvelopeRaised(ctx context.Context, session domain.FeatureID) {
 	if e.cfg.Store == nil {
 		return
@@ -963,7 +918,6 @@ func (e *Engine) workflowEnvelopeRaised(ctx context.Context, session domain.Feat
 	if err != nil || run == nil {
 		return
 	}
-	run.Warned = false
 	if run.Pending != nil && run.Pending.Kind == domain.RunDecideBudget {
 		run.Pending = nil
 	}
@@ -1286,8 +1240,7 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 		// out of money with another decision in the way: put the top-up to
 		// the person once that one is answered
 		if run.OutOfBudget && run.Pending == nil {
-			fc := workflowpolicy.ComputeForecast(in)
-			if e.raiseRunDecision(run, e.budgetDecision(run, workflowpolicy.TopUpFor(fc.ToFinish), true, "")) {
+			if e.raiseRunDecision(run, e.budgetDecision(ctx, run)) {
 				acts = append(acts, "budget")
 				return acts, st.UpdateRun(ctx, run)
 			}
@@ -1321,24 +1274,10 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 				Question: fmt.Sprintf("Run %d: %s. Run one more iteration, continue to the next step, or stop the run?", run.N, a.Reason),
 				Options:  []string{WorkflowOneMore, WorkflowContinue, WorkflowStopRun},
 			}) || dirty
-		case workflowpolicy.Runaway:
-			s := byPath[a.Path]
-			amount := workflowRunawayFactor * max(s.Estimate, 1)
-			dirty = e.raiseRunDecision(run, domain.RunDecision{
-				Kind: domain.RunDecideRunaway, Step: a.Path, Amount: amount,
-				Question: fmt.Sprintf("Run %d: step %s has run past three times its estimate: %s. Let it run up to %d credits (%s) more, or drop it, which fails it?",
-					run.N, a.Path, a.Reason, amount, domain.FormatDollars(float64(amount))),
-				Options: []string{WorkflowCarryOn, WorkflowDrop},
-			}) || dirty
 		case workflowpolicy.Pause:
 			// the pool is spent: nothing new starts, and what runs stops
-			if err := e.pauseForBudgetLocked(ctx, run, a.Amount, a.Reason); err != nil {
+			if err := e.pauseForBudgetLocked(ctx, run, a.Reason); err != nil {
 				return acts, err
-			}
-		case workflowpolicy.Warn:
-			if e.raiseRunDecision(run, e.budgetDecision(run, a.Amount, false, a.Reason)) {
-				run.Warned, dirty = true, true
-				e.runNote(session, fmt.Sprintf("run %d: warned the person: %s", run.N, a.Reason))
 			}
 		case workflowpolicy.End:
 			e.endRunAsync(session, run.N, a.State, a.Reason)
@@ -1350,18 +1289,28 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 	return acts, nil
 }
 
-func (e *Engine) budgetDecision(run *domain.Run, amount int, paused bool, why string) domain.RunDecision {
-	d := domain.RunDecision{Kind: domain.RunDecideBudget, Amount: amount}
-	if paused {
-		d.Question = fmt.Sprintf("The session's budget is spent: run %d paused, its steps' work kept. Top the session up by %s to carry on?",
-			run.N, domain.FormatDollars(float64(amount)))
-		d.Options = []string{WorkflowTopUp, WorkflowStopRun}
-		return d
+// budgetDecision is the top-up a run paused on a spent pool puts to the
+// person.
+func (e *Engine) budgetDecision(ctx context.Context, run *domain.Run) domain.RunDecision {
+	amount := e.runTopUp(ctx, run.Session)
+	return domain.RunDecision{
+		Kind: domain.RunDecideBudget, Amount: amount,
+		Question: fmt.Sprintf("The session's budget is spent: run %d paused, its steps' work kept. Top the session up by %s to carry on?",
+			run.N, domain.FormatDollars(float64(amount))),
+		Options: []string{WorkflowTopUp, WorkflowStopRun},
 	}
-	d.Question = fmt.Sprintf("Run %d is on course to run out of money before it finishes: %s. Nothing has stopped. Top the session up by %s?",
-		run.N, why, domain.FormatDollars(float64(amount)))
-	d.Options = []string{WorkflowTopUp, WorkflowContinue, WorkflowStopRun}
-	return d
+}
+
+// runTopUp is the top-up a paused run suggests: as much again as the
+// session's envelope, rounded up to 50 credits and never below 100. gummi
+// does not guess what a run will spend; the person may top up by another
+// amount.
+func (e *Engine) runTopUp(ctx context.Context, session domain.FeatureID) int {
+	env := 0
+	if sess, err := e.cfg.Store.GetFeature(ctx, session); err == nil {
+		env = sess.Budget.Envelope
+	}
+	return max((env+49)/50*50, 100)
 }
 
 // raisePlanDecision puts a planner's revised plan, waiting since its turn
@@ -1387,7 +1336,7 @@ func (e *Engine) raisePlanDecision(run *domain.Run, steps []domain.RunStep) bool
 		var b strings.Builder
 		fmt.Fprintf(&b, "Run %d: step %s (planner) revised the plan. Its steps replace the run's remaining ones:\n\n", run.N, s.Path)
 		writeRecipeTree(&b, entries, run.Recipe.Tier, "")
-		fmt.Fprintf(&b, "\nEstimated %d credits more. Allow the revised plan?", workflowrecipe.EstimateEntries(entries, nil))
+		b.WriteString("\nAllow the revised plan?")
 		if e.raiseRunDecision(run, domain.RunDecision{
 			Kind: domain.RunDecidePlan, Step: s.Path, Question: b.String(),
 			Options: []string{WorkflowAllowPlan, WorkflowKeepPlan}, RecipeYAML: string(text), Warnings: warnings,
@@ -1411,7 +1360,7 @@ func (e *Engine) newStepLocked(ctx context.Context, run *domain.Run, a workflowp
 	}
 	inst := domain.RunStep{
 		Session: run.Session, Run: run.N, Path: a.Path, StepID: a.Step, Role: def.Role, Tier: tier,
-		State: domain.StepRunning, Estimate: workflowrecipe.DefaultEnvelopes.Envelope(def), StartedAt: e.now(),
+		State: domain.StepRunning, StartedAt: e.now(),
 	}
 	if _, exists := have[a.Path]; exists {
 		return e.cfg.Store.UpdateRunStep(ctx, &inst)
@@ -1428,7 +1377,7 @@ func (e *Engine) runSnapshot(ctx context.Context, run *domain.Run) (workflowpoli
 		return workflowpolicy.Snapshot{}, nil, err
 	}
 	in := workflowpolicy.Snapshot{
-		State: run.State, Recipe: run.Recipe, Warned: run.Warned, Stopping: run.Stopping,
+		State: run.State, Recipe: run.Recipe, Stopping: run.Stopping,
 		Until: map[string]workflowpolicy.UntilResult{}, OnMax: map[string]workflowpolicy.OnMaxAnswer{},
 	}
 	spent := 0.0
@@ -1455,7 +1404,7 @@ func (e *Engine) runSnapshot(ctx context.Context, run *domain.Run) (workflowpoli
 			}
 		}
 		spent += s.Spent
-		in.Steps = append(in.Steps, workflowpolicy.Step{Path: s.Path, State: s.State, Estimate: s.Estimate, Allowance: s.Allowance, Spent: s.Spent})
+		in.Steps = append(in.Steps, workflowpolicy.Step{Path: s.Path, State: s.State, Spent: s.Spent})
 	}
 	for k, v := range run.Until {
 		in.Until[k] = workflowpolicy.UntilResult{Met: v.Met, Detail: v.Detail}
@@ -1686,7 +1635,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 
 // runReport writes a run's report: each done-when item's result, the
 // DECISION: and OPEN: lines its steps wrote, the files it changed, the
-// commits made while it ran, and its cost against its estimate.
+// commits made while it ran, and what it spent.
 func runReport(run *domain.Run, end domain.RunState, why string, items []domain.DoneWhen, results []domain.ItemResult,
 	steps []domain.RunStep, paths, commits []string, validated string,
 ) string {
@@ -1754,7 +1703,7 @@ func runReport(run *domain.Run, end domain.RunState, why string, items []domain.
 	for _, s := range steps {
 		spent += s.Spent
 	}
-	fmt.Fprintf(&b, "\nSpent %.0f credits against an estimate of %d.\n", spent, run.Estimate)
+	fmt.Fprintf(&b, "\nSpent %.0f credits (%s) from the session's budget.\n", spent, domain.FormatDollars(spent))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -1816,7 +1765,7 @@ func (e *Engine) WorkflowStatusText(ctx context.Context, session domain.FeatureI
 	if r.Reason != "" && r.State != domain.RunRunning {
 		b.WriteString(" — " + r.Reason)
 	}
-	fmt.Fprintf(&b, " · estimated %d · spent %.0f", r.Estimate, r.Spent)
+	fmt.Fprintf(&b, " · spent %.0f", r.Spent)
 	if sess, err := e.cfg.Store.GetFeature(ctx, session); err == nil {
 		if left, bounded := e.sessionPoolLeft(ctx, sess); bounded {
 			fmt.Fprintf(&b, " · the session has %.0f left", math.Max(0, left))
@@ -2015,18 +1964,17 @@ func (e *Engine) checkRunPool(card domain.FeatureID) {
 		if err != nil {
 			return
 		}
-		fc := workflowpolicy.ComputeForecast(in)
-		why := fmt.Sprintf("the session's budget is spent (the run has spent %.0f)", fc.Spent)
-		_ = e.pauseForBudgetLocked(ctx, run, workflowpolicy.TopUpFor(fc.ToFinish), why)
+		why := fmt.Sprintf("the session's budget is spent (the run has spent %.0f)", workflowpolicy.Spent(in))
+		_ = e.pauseForBudgetLocked(ctx, run, why)
 	})
 }
 
 // pauseForBudgetLocked parks a running run whose session's pool is spent:
 // it puts the top-up to the person and stops every live step's backend,
 // its work kept in the tree. The caller holds the run lock.
-func (e *Engine) pauseForBudgetLocked(ctx context.Context, run *domain.Run, amount int, why string) error {
+func (e *Engine) pauseForBudgetLocked(ctx context.Context, run *domain.Run, why string) error {
 	run.State, run.OutOfBudget, run.Reason = domain.RunPaused, true, why
-	e.raiseRunDecision(run, e.budgetDecision(run, amount, true, why))
+	e.raiseRunDecision(run, e.budgetDecision(ctx, run))
 	if err := e.cfg.Store.UpdateRun(ctx, run); err != nil {
 		return err
 	}

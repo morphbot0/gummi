@@ -18,7 +18,7 @@ test("a session's turn edits its tree, and the diff is real", async ({ workspace
   expect(diff.stdout).toContain('Add a wave helper');
 });
 
-test('[workflow] a run inside the pre-authorisation runs to its report, with real checks', async ({ workspace: ws }) => {
+test('[workflow] an always-allowed run runs to its report, with real checks', async ({ workspace: ws }) => {
   const r = await ws.drive(['run', '--envelope', '50', '[workflow] make the workflow file']);
   expect(r.code, r.stdout + r.stderr).toBe(0);
   const kinds = r.events.map((e) => e.event);

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -468,9 +469,11 @@ func TestARepeatAtItsMaxAsksThePerson(t *testing.T) {
 	}
 }
 
-// TestARunawayStepIsThePersonsToCarryOn: a step past three times its
-// estimate goes to the person; letting it carry on gives it three more.
-func TestARunawayStepIsThePersonsToCarryOn(t *testing.T) {
+// TestAStepIsNeverHeldOverWhatItSpends: a run estimates nothing, so no
+// step is a runaway and nothing warns of a forecast. A step that spends
+// far past the envelope its recipe still names — ignored — runs on while
+// the session's pool has money; only a person's stop ends it.
+func TestAStepIsNeverHeldOverWhatItSpends(t *testing.T) {
 	wf := newWFFake()
 	e, _, f, _ := wfEngine(t, wf)
 	// the step spends past its cap, then holds its turn open
@@ -490,22 +493,21 @@ func TestARunawayStepIsThePersonsToCarryOn(t *testing.T) {
 	}(wf.Responder)
 	ctx := context.Background()
 	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: big\nsteps:\n  - { id: big, role: scout, envelope: 10, prompt: look }\n"})
-	r := tickRuns(t, e, f.ID, run.N, "asked about the runaway", pendingOf(domain.RunDecideRunaway))
-	if r.Pending.Step != "big" || r.Pending.Amount != 30 {
-		t.Fatalf("decision %+v", r.Pending)
+	tickRuns(t, e, f.ID, run.N, "the step has spent past ten times its old envelope", func(*domain.Run) bool {
+		s, ok := stepPaths(t, e, f.ID, run.N)["big"]
+		return ok && s.Spent >= 40
+	})
+	for range 5 {
+		if _, err := e.WorkflowTick(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowCarryOn); err != nil {
-		t.Fatal(err)
+	r, _ := e.cfg.Store.Run(ctx, f.ID, run.N)
+	if r.Pending != nil || r.State != domain.RunRunning {
+		t.Fatalf("a step's spend was held against it: %s, %+v", r.State, r.Pending)
 	}
-	if s := stepPaths(t, e, f.ID, run.N)["big"]; s.Allowance != 1 || s.State != domain.StepRunning {
+	if s := stepPaths(t, e, f.ID, run.N)["big"]; s.State != domain.StepRunning {
 		t.Fatalf("step %+v", s)
-	}
-	// with its allowance it is no runaway: ticking asks nothing
-	if _, err := e.WorkflowTick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if r, _ := e.cfg.Store.Run(ctx, f.ID, run.N); r.Pending != nil {
-		t.Fatalf("asked again: %+v", r.Pending)
 	}
 	if err := e.WorkflowStop(ctx, f.ID, "enough"); err != nil {
 		t.Fatal(err)
@@ -535,8 +537,8 @@ func TestASpentPoolPausesTheRunAndATopUpCarriesItOn(t *testing.T) {
 	r := tickRuns(t, e, f.ID, run.N, "paused for money", func(r *domain.Run) bool {
 		return r.State == domain.RunPaused && r.Pending != nil && r.Pending.Kind == domain.RunDecideBudget
 	})
-	if !r.OutOfBudget || r.Pending.Amount <= 0 {
-		t.Fatalf("paused run %+v", r)
+	if !r.OutOfBudget || r.Pending.Amount < 150 || !reflect.DeepEqual(r.Pending.Options, []string{WorkflowTopUp, WorkflowStopRun}) {
+		t.Fatalf("paused run %+v, deciding %+v", r, r.Pending)
 	}
 	if _, ran := stepPaths(t, e, f.ID, run.N)["second"]; ran {
 		t.Fatal("a step started on a spent pool")
@@ -701,10 +703,10 @@ func TestARunAllowedWhileAnotherIsOpenWaitsQueued(t *testing.T) {
 	}
 }
 
-// TestPreAuthorisationAllowsARunWithoutAsking: "Always allow up to N"
-// allows this run and every later one estimated within N; one beyond it
-// still asks.
-func TestPreAuthorisationAllowsARunWithoutAsking(t *testing.T) {
+// TestAlwaysAllowAllowsEveryLaterRun: "Always allow" carries no amount. It
+// allows this run and every later one of the session without asking,
+// however large its recipe: the session's budget is the only cap.
+func TestAlwaysAllowAllowsEveryLaterRun(t *testing.T) {
 	wf := newWFFake()
 	e, store, f, _ := wfEngine(t, wf)
 	ctx := context.Background()
@@ -713,11 +715,14 @@ func TestPreAuthorisationAllowsARunWithoutAsking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowAlwaysAnswer(100)); err != nil {
+	if !reflect.DeepEqual(run.Pending.Options, []string{WorkflowAllow, WorkflowAlways, WorkflowDeny}) {
+		t.Fatalf("a proposal offers %q", run.Pending.Options)
+	}
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowAlways); err != nil {
 		t.Fatal(err)
 	}
-	if pre, _ := store.WorkflowPreauth(ctx, f.ID); pre != 100 {
-		t.Fatalf("pre-authorised %d", pre)
+	if always, _ := store.WorkflowAlwaysAllow(ctx, f.ID); !always {
+		t.Fatal("always allow was not kept")
 	}
 	tickRuns(t, e, f.ID, run.N, "ended", ended)
 	again, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: recipe})
@@ -728,13 +733,18 @@ func TestPreAuthorisationAllowsARunWithoutAsking(t *testing.T) {
 		t.Fatalf("a pre-authorised run asked: %+v", again)
 	}
 	tickRuns(t, e, f.ID, again.N, "ended", ended)
-	big, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: strings.Replace(recipe, "envelope: 40", "envelope: 400", 1)})
+	big, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: "name: big\nsteps:\n" +
+		"  - id: loop\n    repeat:\n      max: 50\n      until: checks\n      steps: [{ id: one, role: implementer, envelope: 4000, prompt: build }]\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if big.State != domain.RunProposed || big.Pending == nil {
-		t.Fatalf("a run beyond the pre-authorisation did not ask: %+v", big)
+	if big.State != domain.RunRunning || big.Pending != nil {
+		t.Fatalf("a large run asked: %+v", big)
 	}
+	if err := e.WorkflowStop(ctx, f.ID, "enough"); err != nil {
+		t.Fatal(err)
+	}
+	tickRuns(t, e, f.ID, big.N, "ended", ended)
 }
 
 // TestFeedbackOnAProposalReachesTheSession: the person's own words close
@@ -747,9 +757,14 @@ func TestFeedbackOnAProposalReachesTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"design · contractor", "build ↺ up to 3", "DW-1: test -f out.txt", "Estimated"} {
+	for _, want := range []string{"design · contractor", "build ↺ up to 3", "DW-1: test -f out.txt", "spends from the session's budget"} {
 		if !strings.Contains(run.Pending.Question, want) {
 			t.Errorf("the proposal does not show %q:\n%s", want, run.Pending.Question)
+		}
+	}
+	for _, not := range []string{"stimate", "~"} {
+		if strings.Contains(run.Pending.Question, not) {
+			t.Errorf("the proposal still estimates (%q):\n%s", not, run.Pending.Question)
 		}
 	}
 	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), "use investigate first"); err != nil {
@@ -934,10 +949,10 @@ func TestAStepsQuestionWaitsOnThePerson(t *testing.T) {
 }
 
 // TestAProposalReadsAsItsCard: the proposal the faces draw (DESIGN §25.5)
-// carries the recipe's step tree with each step's role, tier and estimate,
-// the spec and the revision it would freeze, every done-when check command,
-// the estimate against the pool, and whether the tree is dirty; the
-// "Always allow" answer is offered in dollars and allows the run.
+// carries the recipe's step tree with each step's role and tier, the spec
+// and the revision it would freeze, every done-when check command, what
+// the session's pool has left, and whether the tree is dirty; the "Always
+// allow" answer names no amount and allows the run.
 func TestAProposalReadsAsItsCard(t *testing.T) {
 	wf := newWFFake()
 	e, _, f, ff := wfEngine(t, wf)
@@ -956,7 +971,7 @@ func TestAProposalReadsAsItsCard(t *testing.T) {
 	if p.Recipe != "deliver" || p.Spec != 1 || p.SpecTitle != "Workflow test" || p.SpecRev == 0 {
 		t.Fatalf("head %+v", p)
 	}
-	if !p.Dirty || !p.Bounded || p.Estimate != run.Estimate || p.PoolLeft <= 0 {
+	if !p.Dirty || !p.Bounded || p.PoolLeft <= 0 {
 		t.Fatalf("money or tree %+v", p)
 	}
 	if len(p.Checks) != 1 || p.Checks[0].Item != "DW-1" || p.Checks[0].Cmd != "test -f out.txt" {
@@ -969,12 +984,12 @@ func TestAProposalReadsAsItsCard(t *testing.T) {
 	if b := kinds["build"]; b.Kind != "repeat" || b.Max != 3 || b.Depth != 0 {
 		t.Fatalf("build %+v", b)
 	}
-	if r := kinds["review-a"]; r.Kind != "step" || r.Role != domain.RoleReviewer || r.Tier != domain.TierStrong || r.Depth != 2 || r.Estimate == 0 {
+	if r := kinds["review-a"]; r.Kind != "step" || r.Role != domain.RoleReviewer || r.Tier != domain.TierStrong || r.Depth != 2 {
 		t.Fatalf("review-a %+v", r)
 	}
 	always := run.Pending.Options[1]
-	if !strings.HasPrefix(always, WorkflowAlwaysPrefix+"$") {
-		t.Fatalf("always allow is not in dollars: %q", always)
+	if always != WorkflowAlways {
+		t.Fatalf("always allow reads %q", always)
 	}
 	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), always); err != nil {
 		t.Fatal(err)

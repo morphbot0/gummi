@@ -38,7 +38,7 @@ func TestWebDecisionsMatchThePicker(t *testing.T) {
 	proposal, loop := freeformRow(16, "run proposed", true), freeformRow(17, "loop at max", true)
 	proposal.DecidingRun = &domain.Run{Session: proposal.F.ID, N: 1, State: domain.RunProposed, Pending: &domain.RunDecision{
 		ID: "run:FF-016:1:0", Kind: domain.RunDecideProposal, Question: "Run the deliver workflow on spec S1?",
-		Options: []string{engine.WorkflowAllow, engine.WorkflowAlwaysAnswer(500), engine.WorkflowDeny},
+		Options: []string{engine.WorkflowAllow, engine.WorkflowAlways, engine.WorkflowDeny},
 	}}
 	loop.DecidingRun = &domain.Run{Session: loop.F.ID, N: 2, State: domain.RunRunning, Pending: &domain.RunDecision{
 		ID: "run:FF-017:2:1", Kind: domain.RunDecideMax, Step: "build/3", Question: "Run 2: build reached its max of 3.",

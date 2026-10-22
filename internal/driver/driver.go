@@ -20,8 +20,7 @@ import (
 // Options configures one run or resume. Envelope is required to mint (D6).
 type Options struct {
 	// Envelope is the session's credit budget. On a resume it is a floor:
-	// a larger one raises the budget (and the workflow pre-authorisation
-	// with it), a smaller one changes nothing.
+	// a larger one raises the budget, a smaller one changes nothing.
 	Envelope int
 	Profile  string
 	// Timeout is the inactivity budget: a run that hears nothing from the
@@ -93,15 +92,16 @@ func (d *Driver) Create(ctx context.Context, prompt string) (domain.Feature, err
 	}
 	d.out.Emit(createdEvent{
 		Event: "created", ID: string(f.ID), Ref: d.opts.Ref,
-		Branch: f.BranchName(), Envelope: f.Budget.Envelope, Preauth: f.Budget.Envelope,
+		Branch: f.BranchName(), Envelope: f.Budget.Envelope, AlwaysAllow: true,
 	})
 	return f, nil
 }
 
-// Start pre-authorises the session's workflow runs up to its envelope,
-// sends the prompt as its first turn, and drives it to a terminal Outcome.
+// Start always allows the session's workflow runs, its envelope the only
+// cap, sends the prompt as its first turn, and drives it to a terminal
+// Outcome.
 func (d *Driver) Start(ctx context.Context, f domain.Feature, prompt string) (Outcome, error) {
-	if err := d.store.SetWorkflowPreauth(ctx, f.ID, f.Budget.Envelope); err != nil {
+	if err := d.store.SetWorkflowAlwaysAllow(ctx, f.ID, true); err != nil {
 		return d.fail(ctx, string(f.ID), err)
 	}
 	ff, err := d.eng.OpenFreeform(ctx, f)
@@ -154,9 +154,6 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 			return d.fail(ctx, string(id), fmt.Errorf("raising envelope: %w", err))
 		}
 		f.Budget.Envelope = d.opts.Envelope
-		if err := d.store.SetWorkflowPreauth(ctx, id, f.Budget.Envelope); err != nil {
-			return d.fail(ctx, string(id), err)
-		}
 		d.out.Emit(envelopeRaisedEvent{Event: "envelope", ID: string(id), From: from, To: f.Budget.Envelope})
 		raised = true
 	}
@@ -456,11 +453,11 @@ func (d *Driver) streamRuns(ctx context.Context, id domain.FeatureID) {
 		}
 		d.out.Emit(workflowEvent{
 			Event: "workflow", ID: string(id), Run: r.N, Recipe: name, Spec: r.Spec,
-			State: string(r.State), Estimate: r.Estimate, Steps: steps, Report: r.Report,
+			State: string(r.State), Spent: r.Spent, Steps: steps, Report: r.Report,
 		})
 		d.out.Emit(crewEvent{
 			Event: "crew", ID: string(id), Crew: r.N, State: crewState(r.State),
-			Budget: r.Estimate, Nodes: steps, Report: r.Report,
+			Nodes: steps, Report: r.Report,
 		})
 	}
 }
@@ -506,9 +503,9 @@ func (d *Driver) askStop(id domain.FeatureID, ask *engine.Ask) Outcome {
 	return Outcome{Status: StatusNeedsYou, ID: string(id)}
 }
 
-// decisionStop is the run's decision the pre-authorisation did not
-// cover: a proposal beyond it, a revised plan, a repeat at its max, a
-// runaway step or the budget.
+// decisionStop is the run's decision: a proposal on a session whose runs
+// are not always allowed, a revised plan, a repeat at its max or the
+// budget.
 func (d *Driver) decisionStop(id domain.FeatureID, run *domain.Run, dec *domain.RunDecision) Outcome {
 	rec := ""
 	if len(dec.Options) > 0 {
@@ -542,8 +539,6 @@ func crewKind(k domain.RunDecisionKind) string {
 		return "crew_plan"
 	case domain.RunDecidePlan:
 		return "crew_widen"
-	case domain.RunDecideRunaway:
-		return "crew_node"
 	case domain.RunDecideBudget:
 		return "crew_budget"
 	}
@@ -553,9 +548,9 @@ func crewKind(k domain.RunDecisionKind) string {
 // workflowAnswer maps a caller's answer onto the decision's own words: a
 // number picks that option (from 1), on every decision, and an option's
 // label matches whatever its case. Anything else is passed on as it was
-// given — an "Always allow up to N", a top-up of another amount (credits
-// as "300cr", dollars as "$3"), or feedback in the caller's own words,
-// which Engine.WorkflowAnswer takes as such.
+// given — a top-up of another amount (credits as "300cr", dollars as
+// "$3"), or feedback in the caller's own words, which
+// Engine.WorkflowAnswer takes as such.
 //
 // A bare number that is no option is refused rather than guessed at: on
 // a budget decision it could read as an amount, which is spelt with its
@@ -575,9 +570,6 @@ func workflowAnswer(dec *domain.RunDecision, answer string) (string, error) {
 		if strings.EqualFold(a, o) {
 			return o, nil
 		}
-	}
-	if p := engine.WorkflowAlwaysPrefix; len(a) > len(p) && strings.EqualFold(a[:len(p)], p) {
-		return p + strings.TrimSpace(a[len(p):]), nil
 	}
 	return a, nil
 }

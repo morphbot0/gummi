@@ -68,10 +68,9 @@ type Run struct {
 	State    string `json:"state"`
 	Reason   string `json:"reason,omitempty"`
 	Stopping bool   `json:"stopping,omitempty"`
-	// Spent is what its steps have spent, live ones included, against the
-	// Estimate, both in credits.
-	Spent    float64 `json:"spent"`
-	Estimate int     `json:"estimate"`
+	// Spent is what its steps have spent, live ones included, in credits:
+	// a run estimates nothing, and spends from the session's budget.
+	Spent float64 `json:"spent"`
 	// Started and Ended bound its elapsed time; a face counts an open
 	// run's to now.
 	Started time.Time `json:"started,omitzero"`
@@ -82,7 +81,7 @@ type Run struct {
 	// started, a finished repeat iteration folded to one.
 	Rows []StepRow `json:"rows"`
 	// Pending is the run's open decision (the proposal, a revised plan, a
-	// loop at its max, a runaway, the budget). The decision itself is the
+	// loop at its max, the budget). The decision itself is the
 	// session's pinned decision; the block only says one is pending.
 	Pending *RunPending `json:"pending,omitempty"`
 	// Files are the paths the run has changed so far, uncommitted, or
@@ -133,9 +132,8 @@ type StepRow struct {
 	Role string `json:"role,omitempty"`
 	// State is the step's (domain.StepState); a folded iteration's is
 	// done, or failed when one of its steps failed.
-	State    string  `json:"state"`
-	Spent    float64 `json:"spent"`
-	Estimate int     `json:"estimate,omitempty"`
+	State string  `json:"state"`
+	Spent float64 `json:"spent"`
 	// Line is the step's last action while it works, "asks you" while it
 	// waits on the person, and its end summary once it has ended.
 	Line string `json:"line,omitempty"`
@@ -230,7 +228,7 @@ func FoldRun(in RunInput) Run {
 	r := Run{
 		N: run.N, Recipe: runRecipe(run), Spec: run.Spec, SpecTitle: Sanitize(in.SpecTitle), SpecRev: run.SpecRev,
 		State: string(run.State), Reason: Sanitize(run.Reason), Stopping: run.Stopping,
-		Estimate: run.Estimate, Started: run.StartedAt, Ended: run.EndedAt,
+		Started: run.StartedAt, Ended: run.EndedAt,
 		Files: in.Files, Strip: []StripEntry{}, Rows: []StepRow{},
 	}
 	steps := append([]domain.RunStep(nil), in.Steps...)
@@ -494,7 +492,6 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 		}
 		row := &rows[i]
 		row.Spent = roundCredits(row.Spent + s.Spent)
-		row.Estimate += s.Estimate
 		if s.State == domain.StepFailed {
 			row.State = string(domain.StepFailed)
 		}
@@ -510,7 +507,7 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 	row := StepRow{
 		Key: s.Path, Path: s.Path, ID: s.StepID, Role: string(s.Role), State: string(s.State),
-		Spent: roundCredits(stepSpent(s, live)), Estimate: s.Estimate, Card: string(s.Card),
+		Spent: roundCredits(stepSpent(s, live)), Card: string(s.Card),
 	}
 	if row.ID == "" {
 		row.ID = s.Path[strings.LastIndex(s.Path, "/")+1:]

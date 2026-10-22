@@ -28,9 +28,9 @@ type RunBlock struct {
 	State    string `json:"state"`
 	Reason   string `json:"reason,omitempty"`
 	Stopping bool   `json:"stopping,omitempty"`
-	// Spent (live steps included) against Estimate, in credits.
-	Spent    float64 `json:"spent"`
-	Estimate int     `json:"estimate"`
+	// Spent (live steps included), in credits, from the session's budget:
+	// a run estimates nothing.
+	Spent float64 `json:"spent"`
 	// Started and Ended bound its elapsed time; an open run's runs to now.
 	Started time.Time `json:"started,omitzero"`
 	Ended   time.Time `json:"ended,omitzero"`
@@ -82,9 +82,8 @@ type RunStepRow struct {
 	ID     string `json:"id"`
 	Role   string `json:"role,omitempty"`
 	// State is waiting, running, asking, done, failed or stopped.
-	State    string  `json:"state"`
-	Spent    float64 `json:"spent"`
-	Estimate int     `json:"estimate,omitempty"`
+	State string  `json:"state"`
+	Spent float64 `json:"spent"`
 	// Line is its last action while it works, its end summary after.
 	Line string `json:"line,omitempty"`
 	// Card is the step's card: Open shows it, a message goes to it.
@@ -150,12 +149,11 @@ type StepFace struct {
 	Model string   `json:"model,omitempty"`
 	// State is the step's (waiting, running, asking, done, failed,
 	// stopped); Reason why it failed or stopped.
-	State    string    `json:"state"`
-	Reason   string    `json:"reason,omitempty"`
-	Spent    float64   `json:"spent"`
-	Estimate int       `json:"estimate,omitempty"`
-	Started  time.Time `json:"started,omitzero"`
-	Ended    time.Time `json:"ended,omitzero"`
+	State   string    `json:"state"`
+	Reason  string    `json:"reason,omitempty"`
+	Spent   float64   `json:"spent"`
+	Started time.Time `json:"started,omitzero"`
+	Ended   time.Time `json:"ended,omitzero"`
 	// Live marks a step whose agent is at work now.
 	Live bool `json:"live,omitempty"`
 	// Brief is the prompt as it was filled in; Artifacts what it reads and
@@ -273,9 +271,8 @@ type RunProposal struct {
 	Warnings []string       `json:"warnings,omitempty"`
 	// Checks are the done-when check commands the run will execute.
 	Checks []ProposalCheck `json:"checks,omitempty"`
-	// Estimate in credits; PoolLeft what the session has left, when
-	// Bounded by an envelope.
-	Estimate int     `json:"estimate"`
+	// PoolLeft is what the session has left, when Bounded by an envelope:
+	// the run spends from it, and estimates nothing.
 	PoolLeft float64 `json:"poolLeft,omitempty"`
 	Bounded  bool    `json:"bounded,omitempty"`
 	// Dirty: the tree holds uncommitted work already.
@@ -288,15 +285,14 @@ type ProposalStep struct {
 	ID    string `json:"id"`
 	Depth int    `json:"depth"`
 	// Kind is "step", "parallel" or "repeat".
-	Kind     string `json:"kind"`
-	Role     string `json:"role,omitempty"`
-	Tier     string `json:"tier,omitempty"`
-	Estimate int    `json:"estimate"`
-	Prompt   string `json:"prompt,omitempty"`
-	Max      int    `json:"max,omitempty"`
-	Until    string `json:"until,omitempty"`
-	OnMax    string `json:"onMax,omitempty"`
-	Join     string `json:"join,omitempty"`
+	Kind   string `json:"kind"`
+	Role   string `json:"role,omitempty"`
+	Tier   string `json:"tier,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+	Max    int    `json:"max,omitempty"`
+	Until  string `json:"until,omitempty"`
+	OnMax  string `json:"onMax,omitempty"`
+	Join   string `json:"join,omitempty"`
 }
 
 // ProposalCheck is one done-when item's check command.

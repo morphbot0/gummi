@@ -27,8 +27,8 @@ const (
 	// happened, so its head is a statement rather than a question.
 	decisionClosed decisionKind = "closed"
 	// decisionWorkflow is a session's workflow run asking its person:
-	// allow it, its revised plan, a loop at its max, a runaway step or
-	// the money (§25.5, §25.7).
+	// allow it, its revised plan, a loop at its max, or the money
+	// (§25.5, §25.7).
 	decisionWorkflow decisionKind = "workflow"
 )
 

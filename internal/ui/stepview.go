@@ -3,7 +3,7 @@ package ui
 // A workflow step opened from its run's block (DESIGN §25.10): a view
 // pushed over the session's thread, with a crumb back to it — "Session ›
 // deliver run 2 › build ↺ 2 › implement". Its head says the step's role,
-// model and tier, spend against its estimate and its state; three tabs
+// model and tier, what it has spent and its state; three tabs
 // show its own transcript (its card's conversation, live), its own diff
 // (from its snapshots, in the diff view) and its brief (the prompt as
 // filled in, and the artifacts it reads and writes). A line typed under
@@ -425,11 +425,7 @@ func (m *Shell) stepViewRender(w, h int) string {
 		if f.Tier != "" {
 			facts = append(facts, s.Faint.Render("step-"+f.Tier))
 		}
-		money := domain.FormatDollars(f.Spent)
-		if f.Estimate > 0 {
-			money += " of ~" + domain.FormatDollars(float64(f.Estimate)) + " est"
-		}
-		facts = append(facts, s.Muted.Render(money), s.Faint.Render("in the session's tree"))
+		facts = append(facts, s.Muted.Render(domain.FormatDollars(f.Spent)), s.Faint.Render("in the session's tree"))
 		head = append(head, strings.Join(facts, s.Faint.Render(" · ")))
 		if f.Reason != "" && !f.Live {
 			head = append(head, s.Subtle.Render(f.Reason))

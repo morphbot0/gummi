@@ -12,8 +12,8 @@ import (
 // so an old database still opens: the upgrade stops any crew left open
 // (workflowmigrate.go), and nothing reads a crew again but the money its
 // cards spent, which came out of its session's envelope. A person's
-// pre-authorisation outlives them: a session's workflow runs read the same
-// amount, kept in the crew_preauth table.
+// pre-authorisation outlives them: kept in the crew_preauth table, it now
+// says only whether a session's workflow runs are always allowed.
 
 // The crew states the upgrade reads and writes: a crew in an open state
 // is stopped as partial.
@@ -48,21 +48,28 @@ func (s *Store) LegacyCrewCards(ctx context.Context, session domain.FeatureID) (
 	return out, rows.Err()
 }
 
-// SetWorkflowPreauth records what a session's workflow runs may be
-// estimated at and still start without asking (0 withdraws it): the
-// "Always allow up to" answer to a proposal (DESIGN §25.5).
-func (s *Store) SetWorkflowPreauth(ctx context.Context, id domain.FeatureID, credits int) error {
+// SetWorkflowAlwaysAllow records whether a session's workflow runs start
+// without asking: the "Always allow" answer to a proposal, or a headless
+// run's session (DESIGN §25.5, §25.11). The session's budget is the only
+// cap. It is kept in the old crew pre-authorisation's table, as 1 for yes
+// and 0 for no.
+func (s *Store) SetWorkflowAlwaysAllow(ctx context.Context, id domain.FeatureID, always bool) error {
+	credits := 0
+	if always {
+		credits = 1
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO crew_preauth (feature_id, credits) VALUES (?,?)
 		ON CONFLICT(feature_id) DO UPDATE SET credits=excluded.credits`, string(id), credits)
 	return err
 }
 
-// WorkflowPreauth reads it; 0 means every run is asked.
-func (s *Store) WorkflowPreauth(ctx context.Context, id domain.FeatureID) (int, error) {
+// WorkflowAlwaysAllow reads it: any amount above 0 is yes, so a
+// pre-authorisation up to an amount, from before, always allows too.
+func (s *Store) WorkflowAlwaysAllow(ctx context.Context, id domain.FeatureID) (bool, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT credits FROM crew_preauth WHERE feature_id=?`, string(id)).Scan(&n)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil
+		return false, nil
 	}
-	return n, err
+	return n > 0, err
 }

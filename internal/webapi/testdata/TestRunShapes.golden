@@ -14,7 +14,6 @@
       "specRev": 2,
       "state": "running",
       "spent": 310,
-      "estimate": 420,
       "started": "2026-09-27T09:12:00Z",
       "strip": [
         {
@@ -50,7 +49,6 @@
           "role": "contractor",
           "state": "done",
           "spent": 40,
-          "estimate": 60,
           "line": "Design for the spec",
           "card": "FF-12"
         },
@@ -76,7 +74,6 @@
           "role": "implementer",
           "state": "asking",
           "spent": 100,
-          "estimate": 100,
           "line": "asks you",
           "card": "FF-14",
           "waiting": true,
@@ -96,11 +93,12 @@
         }
       ],
       "pending": {
-        "kind": "runaway",
-        "question": "Let it carry on?",
+        "kind": "max",
+        "question": "Run one more iteration?",
         "options": [
-          "Let it carry on",
-          "Drop it"
+          "Run one more iteration",
+          "Continue",
+          "Stop the run"
         ],
         "step": "build/2/implement"
       },
@@ -147,7 +145,6 @@
     "model": "sonnet",
     "state": "running",
     "spent": 1,
-    "estimate": 150,
     "started": "2026-09-27T09:12:00Z",
     "live": true,
     "brief": "You are step build/2/implement of workflow run 2…",
@@ -257,7 +254,7 @@
       },
       {
         "id": "1",
-        "label": "Always allow up to $5",
+        "label": "Always allow",
         "words": false
       },
       {
@@ -287,14 +284,12 @@
           "kind": "step",
           "role": "contractor",
           "tier": "standard",
-          "estimate": 60,
           "prompt": "Write the design"
         },
         {
           "id": "build",
           "depth": 0,
           "kind": "repeat",
-          "estimate": 450,
           "max": 3,
           "until": "verdict APPROVED in review",
           "onMax": "pause"
@@ -303,7 +298,6 @@
           "id": "reviews",
           "depth": 1,
           "kind": "parallel",
-          "estimate": 60,
           "join": "allSettled"
         },
         {
@@ -311,8 +305,7 @@
           "depth": 2,
           "kind": "step",
           "role": "reviewer",
-          "tier": "strong",
-          "estimate": 30
+          "tier": "strong"
         }
       ],
       "warnings": [
@@ -325,7 +318,6 @@
           "cmd": "go test ./internal/engine -run TestMigrateV40"
         }
       ],
-      "estimate": 420,
       "poolLeft": 1620,
       "bounded": true,
       "dirty": true,
