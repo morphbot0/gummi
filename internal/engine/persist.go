@@ -101,6 +101,7 @@ func (e *Engine) saveLocked(s *Session) {
 			// the user-message row this stamp exists to keep out.
 			AnsweredBy: m.AnsweredBy,
 			Images:     stateImages(m.Images),
+			At:         m.At, By: m.By,
 		})
 	}
 	_ = e.cfg.Store.SaveSession(context.Background(), rec)

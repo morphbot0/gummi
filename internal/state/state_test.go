@@ -906,6 +906,41 @@ func TestSessionMessageImagesRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSessionMessageStampAndAuthorRoundTrip: when a turn was written and
+// who typed it survive a save and load, and a turn with neither stays
+// without them — a restored thread places its runs by them.
+func TestSessionMessageStampAndAuthorRoundTrip(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "Stamps round trip")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 23, 4, 9, 1, 500, time.UTC)
+	if err := s.SaveSession(ctx, SessionSnapshot{
+		Feature: f.ID, Stage: f.Stage, Role: "implementer", State: "running",
+		Transcript: []SessionMessage{
+			{Author: "user", Content: "Run 1 has reported.", At: at, By: "workflow"},
+			{Author: "assistant", Content: "ok"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snaps, err := s.LoadSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) != 1 || len(snaps[0].Transcript) != 2 {
+		t.Fatalf("LoadSessions = %+v", snaps)
+	}
+	if m := snaps[0].Transcript[0]; !m.At.Equal(at) || m.By != "workflow" {
+		t.Errorf("the stamped turn came back as %v by %q", m.At, m.By)
+	}
+	if m := snaps[0].Transcript[1]; !m.At.IsZero() || m.By != "" {
+		t.Errorf("the unstamped turn came back as %v by %q", m.At, m.By)
+	}
+}
+
 // TestSessionMessageLegacyRowHasNoImages: a row written before the images
 // column existed (empty string, the migration's default) decodes to no
 // images rather than an error.

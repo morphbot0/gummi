@@ -1507,6 +1507,7 @@ func restoredFreeformSession(f domain.Feature, snap state.SessionSnapshot) *Sess
 			ToolStatus: ToolStatus(m.ToolStatus), ToolOutput: m.ToolOutput,
 			AnsweredBy: m.AnsweredBy,
 			Images:     engineImages(m.Images),
+			At:         m.At, By: m.By,
 		})
 	}
 	sess.activity = append(sess.activity, snap.Activity...)

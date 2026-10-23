@@ -93,6 +93,7 @@ func TestSessionPersistAndRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitTurn(t, e1)
+	before := liveSession(e1, f.ID).Snapshot().Transcript
 	e1.Close()
 
 	// a fresh engine restores the session from the store
@@ -116,6 +117,13 @@ func TestSessionPersistAndRestore(t *testing.T) {
 	}
 	if snap.Spend.Credits != 2 {
 		t.Errorf("restored spend = %+v", snap.Spend)
+	}
+	// each turn keeps when it was written: a restored thread places its
+	// workflow runs among the turns by it
+	for i, m := range snap.Transcript {
+		if m.At.IsZero() || !m.At.Equal(before[i].At) {
+			t.Errorf("turn %d restored at %v, written at %v", i, m.At, before[i].At)
+		}
 	}
 	if s.State() != StateInteractive {
 		t.Errorf("restored interactive session state = %s", s.State())

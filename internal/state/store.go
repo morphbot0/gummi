@@ -1021,6 +1021,11 @@ var migrations = []string{
 	// The workspace recipe a person saved a run's inline recipe as (DESIGN
 	// §25.9). Empty is a run whose recipe nobody saved.
 	`ALTER TABLE workflow_runs ADD COLUMN saved_as TEXT NOT NULL DEFAULT ''`,
+	// When a session's turn was written, and who typed a user turn, so a
+	// restored thread still places and folds its runs (DESIGN §25.9).
+	// Empty on every row from before.
+	`ALTER TABLE session_messages ADD COLUMN at TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE session_messages ADD COLUMN by_actor TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
