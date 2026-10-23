@@ -201,7 +201,7 @@
       "implement"
     ],
     "role": "implementer",
-    "tier": "standard",
+    "slot": "implementer-fast",
     "model": "sonnet",
     "state": "running",
     "spent": 1,
@@ -360,7 +360,7 @@
           "depth": 0,
           "kind": "step",
           "role": "contractor",
-          "tier": "standard",
+          "model": "claude-opus-5-5 on claude",
           "prompt": "Write the design"
         },
         {
@@ -382,7 +382,8 @@
           "depth": 2,
           "kind": "step",
           "role": "reviewer",
-          "tier": "strong"
+          "slot": "reviewer-alt",
+          "model": "gpt-5 on copilot"
         }
       ],
       "warnings": [

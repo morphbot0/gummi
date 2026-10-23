@@ -84,23 +84,13 @@ func (f *Feature) validateParent() error {
 	return nil
 }
 
-// StepTier is the profile slot a step's model comes from (`step-<tier>`,
-// falling back to `crew-<tier>`, then `implementer`).
-type StepTier string
-
-const (
-	TierCheap    StepTier = "cheap"
-	TierStandard StepTier = "standard"
-	TierStrong   StepTier = "strong"
-)
-
-// StepTiers is every tier, cheapest first.
-var StepTiers = []StepTier{TierCheap, TierStandard, TierStrong}
-
-// Known reports whether t is a tier; the empty tier reads as standard.
-func (t StepTier) Known() bool {
-	switch t {
-	case "", TierCheap, TierStandard, TierStrong:
+// LegacyTier reports whether slot is one of the tiers a recipe step
+// named before steps took their model from their role (cheap, standard,
+// strong): a step stored by an older gummi carries one, and it names no
+// profile slot.
+func LegacyTier(slot string) bool {
+	switch slot {
+	case "cheap", "standard", "strong":
 		return true
 	}
 	return false

@@ -9,6 +9,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // TestABoardEditRepairsItsProfiles: a board that came up on a profiles
@@ -89,13 +90,13 @@ func TestSaveProfileChecksEachRole(t *testing.T) {
 
 	edit := config.ProfileEdit{Roles: config.Profile{
 		"implementer": {Backend: "claude", Model: " claude-sonnet-5-5 "},
-		"step-cheap":  {Model: "claude-haiku-5-5"},
+		"scout":       {Model: "claude-haiku-5-5"},
 	}}
 	if err := e.SaveProfile(ctx, "mine", edit, false); err != nil {
 		t.Fatalf("SaveProfile: %v", err)
 	}
-	if rc, _ := e.stepRole("mine", "implementer", "cheap"); rc.Model != "claude-haiku-5-5" {
-		t.Errorf("a cheap step runs %q", rc.Model)
+	if rc, _ := e.stepRole("mine", domain.RoleScout, ""); rc.Model != "claude-haiku-5-5" {
+		t.Errorf("a scout step runs %q", rc.Model)
 	}
 	if rc, b := e.resolveRole("mine", agent.RoleImplementer); rc.Model != "claude-sonnet-5-5" || b != "claude" {
 		t.Errorf("the implementer runs %q on %q", rc.Model, b)
@@ -112,5 +113,42 @@ func TestSaveProfileChecksEachRole(t *testing.T) {
 	}
 	if got := e.ProfileNames(); !slices.Equal(got, []string{"mine", "other"}) {
 		t.Errorf("ProfileNames = %v", got)
+	}
+}
+
+// TestAStepRunsOnItsRolesSlot: a step's model comes from the slot its
+// recipe named, then its role's own, then the architect for design work,
+// then the implementer — never from a tier.
+func TestAStepRunsOnItsRolesSlot(t *testing.T) {
+	fake := agent.NewFake("ok")
+	e := New(Config{Agents: map[string]agent.Agent{"": fake}, Model: "fallback", Profiles: config.Profiles{
+		Default: "p",
+		Profiles: map[string]config.Profile{"p": {
+			"implementer":  {Model: "impl"},
+			"architect":    {Model: "arch"},
+			"reviewer":     {Model: "rev"},
+			"reviewer-alt": {Model: "rev-alt"},
+			"scribe":       {Model: "scribe"},
+			"step-strong":  {Model: "a tier, never read"},
+		}},
+	}})
+	t.Cleanup(func() { e.Close() })
+	for _, c := range []struct {
+		role domain.WorkflowRole
+		slot string
+		want string
+	}{
+		{domain.RoleReviewer, "", "rev"},
+		{domain.RoleReviewer, "reviewer-alt", "rev-alt"},
+		{domain.RoleReviewer, "reviewer-nope", "rev"},
+		{domain.RoleScribe, "", "scribe"},
+		{domain.RolePlanner, "", "arch"},
+		{domain.RoleContractor, "", "arch"},
+		{domain.RoleScout, "", "impl"},
+		{domain.RoleTester, "", "impl"},
+	} {
+		if rc, _ := e.stepRole("p", c.role, c.slot); rc.Model != c.want {
+			t.Errorf("%s with slot %q runs %q, want %q", c.role, c.slot, rc.Model, c.want)
+		}
 	}
 }

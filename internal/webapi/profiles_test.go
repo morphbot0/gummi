@@ -20,7 +20,7 @@ func TestProfilesShapes(t *testing.T) {
 				Name: "claude", Sandbox: "warn",
 				Roles: []ProfileRole{
 					{Role: "implementer", Backend: "claude", Model: "claude-sonnet-5-5"},
-					{Role: "step-cheap", Model: "claude-haiku-5-5"},
+					{Role: "scout", Model: "claude-haiku-5-5"},
 				},
 			}, {
 				Name:  "open",

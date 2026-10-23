@@ -14,7 +14,7 @@
             "model": "claude-sonnet-5-5"
           },
           {
-            "role": "step-cheap",
+            "role": "scout",
             "model": "claude-haiku-5-5"
           }
         ]

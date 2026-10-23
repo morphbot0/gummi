@@ -16,19 +16,22 @@ import (
 )
 
 // RoleSlots are the role names gummi reads from a profile, in the order a
-// person is shown them, each with what it decides. A profile may name
-// others — an older file's crew-<tier> — and they are kept as written.
+// person is shown them, each with what it decides. A workflow step runs on
+// its role's slot, or on one its recipe names (`slot:`), falling back as
+// Engine.stepRole says. A profile may name others — a slot a recipe of the
+// workspace's names — and they are kept as written.
 var RoleSlots = []struct{ Role, Help string }{
-	{"implementer", "a session's own model, unless the session picks one; a step's when no step slot is set"},
-	{"architect", "a planner step's and a consult's when they have no slot of their own"},
-	{"planner", "a workflow run's planner step"},
-	{"reviewer", "a workflow run's reviewer step"},
-	{"scribe", "drafts landing commit messages; an objective's auditor when it has no slot"},
+	{"implementer", "a session's own model, unless the session picks one; an implementer step's; any role's last fallback"},
+	{"architect", "consult sessions, and planner and contractor steps when they have no slot of their own"},
+	{"planner", "a workflow's planner step"},
+	{"contractor", "a workflow's contractor step: design, interfaces, stubs"},
+	{"scout", "a workflow's scout step: reads, reproduces, maps"},
+	{"tester", "a workflow's tester step"},
+	{"scribe", "a workflow's scribe step, and landing commit messages; an objective's auditor when it has no slot"},
+	{"reviewer", "a workflow's reviewer step"},
+	{"reviewer-alt", "the second reviewer of deliver, so two reviews run on two models; the reviewer when unset"},
 	{"consult", "a consult session"},
 	{"auditor", "judges an objective's progress"},
-	{"step-cheap", "a workflow step of tier cheap"},
-	{"step-standard", "a workflow step of tier standard (a step's default tier)"},
-	{"step-strong", "a workflow step of tier strong"},
 }
 
 // Backends are the names a role's `backend:` may take, sorted.

@@ -124,12 +124,14 @@ written for that backend: the CLI's aliases for claude and
 `provider/model` for opencode. An existing file is never rewritten.
 
 A `default:` name plus a `profiles:` map. Each profile maps roles to
-`{backend, model}`. A workflow run's step takes its model from its
-tier's slot — `step-cheap`, `step-standard` or `step-strong` (falling back
-to `crew-<tier>`, the name an older file used, then `implementer`). A
-`planner` step reads `planner` first (falling back to `architect`), and a
-`reviewer` step reads `reviewer` first. `consult` falls back to
-`architect`, and `scribe` drafts landing messages:
+`{backend, model}`. A session runs on `implementer`. A workflow run's step
+runs on its role's slot — `scout`, `planner`, `contractor`, `implementer`,
+`tester`, `scribe` or `reviewer` — or on the slot its recipe names
+(`slot:`, as `deliver`'s second reviewer names `reviewer-alt`), falling
+back to `architect` for a planner or contractor and then to `implementer`.
+`consult` falls back to `architect`, `scribe` also drafts landing
+messages, and `auditor` falls back to `scribe`. A recipe has no tiers: an
+older profile's `step-<tier>` and `crew-<tier>` slots are no longer read.
 
 ```yaml
 default: thrifty
@@ -138,6 +140,7 @@ profiles:
     architect:   { backend: claude,  model: claude-opus-5 }
     implementer: { backend: copilot, model: gpt-5 }
     reviewer:    { backend: claude,  model: claude-sonnet-5 }
+    reviewer-alt: { backend: copilot, model: gpt-5 } # deliver's second review
     scribe:      { backend: copilot, model: gpt-5-mini }
   open: # everything on opencode
     architect:   { backend: opencode, model: anthropic/claude-sonnet-5-5 }
@@ -150,7 +153,7 @@ A recipe's planner step reads the work and may revise the run's
 remaining steps; its turns are paid from the session's envelope like
 every step's, and it plans without regard to money: a run estimates
 nothing, and goes on until the session's envelope is spent. A mid-size model is usually enough for it:
-`planner: { backend: claude, model: claude-sonnet-5 }` under an Opus
+`planner: { backend: claude, model: claude-sonnet-5-5 }` under an Opus
 architect, for example.
 
 A person may edit the file from the board instead: the web page's

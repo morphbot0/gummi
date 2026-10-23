@@ -19,7 +19,6 @@ problems, with nothing proposed: fix them and call again.
 ```yaml
 name: test-first
 description: Write the failing tests, then build until they pass
-tier: standard              # every step's default: cheap, standard or strong
 inputs: {}                  # name: hint; filled by workflow_run's inputs
 steps:
   - id: tests
@@ -54,7 +53,7 @@ steps:
 
 `steps` run in order. Each entry is exactly one of:
 
-- **a step**: `id`, `role`, `prompt`; optional `tier`, `artifacts`
+- **a step**: `id`, `role`, `prompt`; optional `slot`, `artifacts`
   (name → plain file name in the run's directory) and `captureOutput`
   (false keeps its final message from later steps).
 - **`parallel`**: `id`, `join`, and `steps` of plain steps side by side
@@ -76,9 +75,12 @@ steps:
 
 Every step has a full shell; a reader is told to change nothing, and
 one that did is flagged in the report. gummi gives each step its role's
-preamble: do not repeat it in the prompt. `tier` picks the model from
-the profile (`step-<tier>`): `strong` where judgment matters most — a
-deciding reviewer — `cheap` for mechanical work.
+preamble: do not repeat it in the prompt. A step's model is the person's
+choice, made in their profile per role: a step runs on its role's slot
+(`reviewer`, `scribe`, …). `slot: <name>` puts one on another slot the
+profile may declare — a second reviewer on `reviewer-alt` — falling back
+to its role's when the profile has none. Do not name a slot to ask for a
+bigger or cheaper model; the profile decides that.
 
 ## Templates
 
@@ -128,7 +130,7 @@ is one. Tell the implementer to read the last review first:
 | `allSettled` | waits for all; fails only if all fail |
 | `any` | settles on the first success, stopping the rest |
 
-Put readers side by side (two reviewers on different tiers). Two
+Put readers side by side (two reviewers, one on `slot: reviewer-alt`). Two
 writers in one tree overwrite each other: gummi warns, and you should
 split them into steps in order instead.
 

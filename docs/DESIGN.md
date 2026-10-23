@@ -6517,7 +6517,7 @@ writers and per-step isolation go, and with them all their machinery.
 | crew branch, node branches | none |
 | the session's spec | the session's **specs** (§25.3) |
 | Crew tab, the TUI's `crewLines` | the run's block in the thread (§25.9) |
-| profile slot `crew-<tier>` | `step-<tier>`, falling back to `crew-<tier>`, then `implementer` |
+| profile slot `crew-<tier>` | the step's role's slot (§25.4); a recipe has no tiers |
 | `Engine.CrewHolds` | `Engine.RunHolds` |
 
 **Crews already in an old database** are stopped on upgrade, if any was
@@ -6585,7 +6585,6 @@ what the person allows is that copy.
 ```yaml
 name: deliver
 description: Design, build and validate a spec's done-when items
-tier: standard            # default for every step
 inputs: {}                # name: hint, filled at workflow_run
 steps:
   - id: design
@@ -6613,8 +6612,10 @@ steps:
           parallel:
             join: allSettled
             steps:
-              - { id: review-a, role: reviewer, tier: strong,   prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
-              - { id: review-b, role: reviewer, tier: standard, prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+              # two reviews on two models: review-b reads the profile's
+              # reviewer-alt slot, its reviewer when the profile has none
+              - { id: review-a, role: reviewer,                     prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+              - { id: review-b, role: reviewer, slot: reviewer-alt, prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
         - id: verdict
           role: reviewer
           prompt: |
@@ -6632,18 +6633,20 @@ steps:
       {{spec}}
 ```
 
-**Fields.** A recipe has `name`, `description`, `tier`, `inputs` and
+**Fields.** A recipe has `name`, `description`, `inputs` and
 `steps`, which run in order. Each entry of `steps` is exactly one of:
 
 - **a step**:
   - `id` and `role`, required;
   - `prompt`, required;
-  - `tier` and `artifacts` (name to file name), optional;
+  - `slot` and `artifacts` (name to file name), optional;
   - `captureOutput`, optional and true by default.
 
   A step has no `envelope`: a run estimates nothing and spends from the
-  session's budget (§25.7). A recipe from before that still names one
-  parses, and `Check` warns that it is ignored.
+  session's budget (§25.7). It has no `tier` either: its model is the
+  person's choice, made per role in their profile (below). A recipe from
+  before either change still parses, and `Check` warns that the field is
+  ignored.
 - **`parallel`**: an `id`, `join` (`all`, `allSettled` or `any`) and
   `steps`, which are plain steps.
 - **`repeat`**: an `id`, `max`, an `until` stop condition, `onMax`
@@ -6651,7 +6654,14 @@ steps:
 
 **Roles.** `scout`, `planner`, `contractor`, `implementer`, `tester`,
 `scribe` and `reviewer`.
-- Each role has a prompt preamble, and `planner` has its profile slot.
+- Each role has a prompt preamble and a **profile slot** of its own
+  name: a step's model is looked up in the slot its recipe names
+  (`slot:`), then its role's, then — for a `planner` or `contractor` —
+  `architect`, then `implementer` (`Engine.stepRole`). A recipe names a
+  slot only to run two steps of one role on different models, as
+  `deliver`'s second reviewer does; it never picks a model's size, which
+  is the profile's to decide. A stored step from before carries a tier,
+  read as no slot.
 - `scout` and `reviewer` are **reading roles**: their preamble tells them
   to change no files. They have the full shell any step has — a reviewer
   runs the tests — so nothing enforces it; a reading step whose end
@@ -6728,7 +6738,7 @@ that is already running is never rewritten.
 **`workflowrecipe`** is a pure package: `Parse`, `Check` and the bundled
 recipes. `Check` refuses a recipe that cannot run:
 - an id that is missing or duplicated;
-- an unknown role or tier;
+- an unknown role, or a slot that is not a slot name;
 - a `{{…}}` that names no input, artifact or earlier step;
 - a `repeat` without a `max` or an `until`;
 - a `parallel` without a valid `join`;
@@ -6736,7 +6746,7 @@ recipes. `Check` refuses a recipe that cannot run:
 
 `Check` **warns** when one `parallel` block holds more than one writing
 role, because those steps can overwrite each other's work, and when a
-step still names an `envelope`, which is ignored. It sets no floor:
+step still names an `envelope` or a `tier`, which are ignored. It sets no floor:
 whether a recipe reviews, tests or designs is its own choice.
 
 **The bundled recipes:**
@@ -6756,7 +6766,8 @@ call returns at once, saying the run is proposed.
   is one deep.
 - The proposal goes to the person as a **decision in the thread**. It
   shows:
-  - the recipe's step tree, with each step's role and tier;
+  - the recipe's step tree, with each step's role and the model it runs
+    on under the session's profile;
   - `Check`'s warnings;
   - the spec and the revision it will freeze;
   - every done-when check command the run will execute;
@@ -7033,7 +7044,8 @@ The **Crew tab**, `ui/webcrew.go`, `web/assets/crew.js` and the TUI's
 is a right-hand panel; in the TUI it is a pushed view with a crumb back,
 such as `Session › deliver run 2 › build ↺ 2 › implement`.
 
-- **Head**: the role, the model and tier, its spend, and its state.
+- **Head**: the role, the model and the slot it named, its spend, and
+  its state.
 - **Transcript**: the step card's own thread, live.
 - **Diff**: the step's own diff, from its snapshots.
 - **Brief**: the prompt as filled in, and the artifacts it reads and

@@ -1,6 +1,5 @@
 name: fix-until-green
 description: Fix the tree until every done-when check of the spec passes
-tier: standard
 inputs: {}
 steps:
   - id: fix

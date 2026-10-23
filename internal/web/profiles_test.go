@@ -25,7 +25,7 @@ func TestProfileRoutes(t *testing.T) {
 
 	cheap := webapi.ProfileRequest{Roles: []webapi.ProfileRole{
 		{Role: "implementer", Model: "fake-model"},
-		{Role: "step-cheap", Model: "fake-small"},
+		{Role: "scout", Model: "fake-small"},
 	}}
 	b.must(http.StatusOK, http.MethodPut, "/api/profiles/cheap", cheap, &got)
 	if got.Default != "cheap" || len(got.Profiles) != 1 || len(got.Profiles[0].Roles) != 2 || got.Problem != "" {

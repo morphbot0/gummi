@@ -66,7 +66,7 @@ func TestRunShapes(t *testing.T) {
 		}},
 		Step: StepFace{
 			Card: "FF-14", Session: "FF-12", Run: 2, Recipe: "deliver", Path: "build/2/implement", ID: "implement",
-			Crumb: []string{"Session", "deliver run 2", "build ↺ 2", "implement"}, Role: "implementer", Tier: "standard", Model: "sonnet",
+			Crumb: []string{"Session", "deliver run 2", "build ↺ 2", "implement"}, Role: "implementer", Slot: "implementer-fast", Model: "sonnet",
 			State: "running", Spent: 1, Started: at, Live: true,
 			Brief:     "You are step build/2/implement of workflow run 2…",
 			Artifacts: []StepArtifact{{Name: "design", Path: ".gummi/runs/FF-12/2/design.md", Exists: true}, {Name: "review", Path: ".gummi/runs/FF-12/2/review.json", Writes: true}},
@@ -92,10 +92,10 @@ func TestRunShapes(t *testing.T) {
 			Proposal: &RunProposal{
 				Run: 2, Kind: "proposal", Recipe: "deliver", Description: "Design, build and validate", Spec: 2, SpecTitle: "Resume pre-migration sessions", SpecRev: 2,
 				Steps: []ProposalStep{
-					{ID: "design", Kind: "step", Role: "contractor", Tier: "standard", Prompt: "Write the design"},
+					{ID: "design", Kind: "step", Role: "contractor", Model: "claude-opus-5-5 on claude", Prompt: "Write the design"},
 					{ID: "build", Kind: "repeat", Max: 3, Until: "verdict APPROVED in review", OnMax: "pause"},
 					{ID: "reviews", Depth: 1, Kind: "parallel", Join: "allSettled"},
-					{ID: "review-a", Depth: 2, Kind: "step", Role: "reviewer", Tier: "strong"},
+					{ID: "review-a", Depth: 2, Kind: "step", Role: "reviewer", Slot: "reviewer-alt", Model: "gpt-5 on copilot"},
 				},
 				Warnings: []string{"parallel reviews holds more than one writing role"},
 				Checks:   []ProposalCheck{{Item: "DW-1", Says: "a v40 session resumes", Cmd: "go test ./internal/engine -run TestMigrateV40"}},

@@ -42,13 +42,13 @@ test('profiles are added, defaulted and deleted', async ({ pairedPage: page, api
   await page.getByTestId('profile-form-name').fill('cheap');
   // a profile on the scripted agent saves
   await pickModel(page, 'profile-form-implementer', 'e2e-cheap', 'headless');
-  await pickModel(page, 'profile-form-step-cheap', 'e2e-tiny', 'headless');
+  await pickModel(page, 'profile-form-scout', 'e2e-tiny', 'headless');
   await shot(page, info, 'profiles-form');
   await page.getByTestId('profile-form-save').click();
   await expect(page.getByTestId('profile-form')).toHaveCount(0);
   await expect(page.getByTestId('profile-cheap')).toContainText('e2e-tiny');
   await expect(page.getByTestId('profiles-count')).toHaveText('3 profiles');
-  expect(fs.readFileSync(file, 'utf8')).toContain('step-cheap: {backend: headless, model: e2e-tiny}');
+  expect(fs.readFileSync(file, 'utf8')).toContain('scout: {backend: headless, model: e2e-tiny}');
 
   await page.getByTestId('profile-cheap-make-default').click();
   await expect(page.getByTestId('profile-cheap-default')).toBeVisible();

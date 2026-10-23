@@ -1,6 +1,5 @@
 name: deliver
 description: Design, build and validate a spec's done-when items
-tier: standard            # default for every step
 inputs: {}                # name: hint, filled at workflow_run
 steps:
   - id: design
@@ -28,8 +27,10 @@ steps:
           parallel:
             join: allSettled
             steps:
-              - { id: review-a, role: reviewer, tier: strong,   prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
-              - { id: review-b, role: reviewer, tier: standard, prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+              # two reviews on two models: review-b reads the profile's
+              # reviewer-alt slot, its reviewer when the profile has none
+              - { id: review-a, role: reviewer,                     prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+              - { id: review-b, role: reviewer, slot: reviewer-alt, prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
         - id: verdict
           role: reviewer
           prompt: |

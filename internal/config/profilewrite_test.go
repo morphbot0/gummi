@@ -91,7 +91,7 @@ func TestDeletingTheBrokenProfileRepairsTheFile(t *testing.T) {
 func TestSaveProfile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "profiles.yaml")
 	edit := ProfileEdit{Roles: Profile{
-		"step-strong": {Backend: "claude", Model: "opus"},
+		"reviewer":    {Backend: "claude", Model: "opus"},
 		"implementer": {Backend: "claude", Model: "sonnet"},
 		"crew-cheap":  {Model: "haiku", OutputTokenMax: 64000},
 	}, Sandbox: "warn"}
@@ -107,7 +107,7 @@ func TestSaveProfile(t *testing.T) {
 	}
 	// RoleSlots order, then the rest.
 	got := readFile(t, path)
-	if i, j, k := strings.Index(got, "implementer"), strings.Index(got, "step-strong"), strings.Index(got, "crew-cheap"); i > j || j > k {
+	if i, j, k := strings.Index(got, "implementer"), strings.Index(got, "reviewer"), strings.Index(got, "crew-cheap"); i > j || j > k {
 		t.Errorf("roles out of order:\n%s", got)
 	}
 
