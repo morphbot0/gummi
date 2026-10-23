@@ -3,7 +3,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -166,7 +165,8 @@ func quitOnHangup(p *tea.Program) func() {
 //
 // Env config (M1 stand-in for profiles):
 //
-//	GUMMI_MODEL             model id (default "gpt-5")
+//	GUMMI_MODEL             model id for a role no profile covers (default
+//	                        none: the backend's own default model)
 //	GUMMI_AGENT             default backend (copilot|claude|opencode|headless)
 //	GUMMI_HEADLESS_CREDITS_PER_1K
 //	                        headless adapter's token→credit rate, for a
@@ -275,7 +275,10 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 	if len(agents) == 0 {
 		return nil, nil, nil, "none of the backends the profiles name could start", nil
 	}
-	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
+	// No default model: a role no profile covers runs on its backend's own
+	// default. A named fallback belongs to one vendor, and the default
+	// backend may be another's — claude told to drive gpt-5.
+	model := os.Getenv("GUMMI_MODEL")
 	var stageBudget float64
 	if v := os.Getenv("GUMMI_STAGE_BUDGET"); v != "" {
 		if b, err := strconv.ParseFloat(v, 64); err == nil && b > 0 {

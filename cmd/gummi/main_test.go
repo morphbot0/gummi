@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -397,6 +398,34 @@ profiles:
 	}
 	if eng == nil {
 		t.Fatal("eng = nil, want a started engine for a compatible pairing")
+	}
+}
+
+// TestAnUncoveredRoleNamesNoOtherVendorsModel: with no profiles and no
+// GUMMI_MODEL, a claude board's session names no model at all — the
+// backend's own default — rather than a fallback written for copilot.
+func TestAnUncoveredRoleNamesNoOtherVendorsModel(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("GUMMI_MODEL", "")
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_CLAUDE_BIN", bin)
+	t.Setenv("GUMMI_AGENT", "claude")
+	repo := gitRepo(t)
+	writeConfig(t, repo, "")
+	ws, err := state.Open(repo, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	if err != nil || eng == nil {
+		t.Fatalf("newEngineFromEnv = %v, %v", eng, err)
+	}
+	backend, model := eng.SessionModel(domain.Feature{Kind: domain.KindFreeform})
+	if backend != "claude" || model != "" {
+		t.Fatalf("SessionModel = %q, %q; want claude and no model", backend, model)
 	}
 }
 

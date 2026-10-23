@@ -258,7 +258,7 @@ re-raised decision that deduped to a no-op raises nothing).
 | `GUMMI_AGENT_CMD` | the headless adapter's command line |
 | `GUMMI_CLAUDE_BIN`, `GUMMI_OPENCODE_BIN` | a backend's binary, when it is not the default name on PATH |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
-| `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
+| `GUMMI_MODEL` | fallback model when a role isn't covered by a profile (unset: the backend's own default) |
 | `GUMMI_ENVELOPE` | default budget for new cards, in dollars (`20`, `$12.50`). Unset, the board prefills $20 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
 | `GUMMI_STAGE_BUDGET` | flat credit cap for a card's agent session when the card has no envelope |
 | `GUMMI_TURN_RESERVE` | one turn's credits: the floor under envelope-derived session budgets, and what a planner or curator run must have left to start |
