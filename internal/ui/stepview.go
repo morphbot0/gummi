@@ -14,6 +14,7 @@ package ui
 import (
 	"context"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -47,6 +48,12 @@ type stepView struct {
 	diff       *diffView
 	diffWhy    string
 	diffLoaded bool
+	// diffBusy marks a read of the diff in flight, diffAt when the last
+	// one began: a step at work moves its card on every tool call, and its
+	// diff snapshots the tree, so it is read again at most every
+	// stepDiffEvery and never twice at once
+	diffBusy bool
+	diffAt   time.Time
 	// scroll is how far the transcript is paged back from its end, or the
 	// brief down from its top. bodyLen is how many rows the transcript had
 	// at the last frame: one that grows while scrolled back keeps its
@@ -112,11 +119,15 @@ func (m *Shell) reloadStep(card domain.FeatureID) tea.Cmd {
 		return nil
 	}
 	cmds := []tea.Cmd{m.loadStep(card)}
-	if sv.tab == stepTabDiff {
+	if sv.tab == stepTabDiff && !sv.diffBusy && m.now().Sub(sv.diffAt) >= stepDiffEvery {
 		cmds = append(cmds, m.loadStepDiff())
 	}
 	return tea.Batch(cmds...)
 }
+
+// stepDiffEvery bounds how often an open step's diff is read again while
+// its card moves.
+const stepDiffEvery = 2 * time.Second
 
 // loadStepDiff reads the open step's own diff: its start snapshot to its
 // end one, to now while it runs.
@@ -134,6 +145,7 @@ func (m *Shell) loadStepDiff() tea.Cmd {
 		return errNoticeCmd(err.Error())
 	}
 	card := sv.card
+	sv.diffBusy, sv.diffAt = true, m.now()
 	return func() tea.Msg {
 		ctx := context.Background()
 		st, _, _, err := d.step(ctx, string(card))
@@ -174,7 +186,7 @@ func (m *Shell) stepDiffLoaded(msg stepDiffMsg) {
 	if sv == nil || sv.card != msg.card {
 		return
 	}
-	sv.diffLoaded = true
+	sv.diffLoaded, sv.diffBusy = true, false
 	if msg.err != nil {
 		sv.diff, sv.diffWhy = nil, sanitize(msg.err.Error())
 		return
