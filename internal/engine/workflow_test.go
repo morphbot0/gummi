@@ -962,7 +962,7 @@ func TestAStepsQuestionWaitsOnThePerson(t *testing.T) {
 }
 
 // TestAProposalReadsAsItsCard: the proposal the faces draw (DESIGN §25.5)
-// carries the recipe's step tree with each step's role and tier, the spec
+// carries the recipe's step tree with each step's role and model, the spec
 // and the revision it would freeze, every done-when check command, what
 // the session's pool has left, and whether the tree is dirty; the "Always
 // allow" answer names no amount and allows the run.
@@ -997,8 +997,11 @@ func TestAProposalReadsAsItsCard(t *testing.T) {
 	if b := kinds["build"]; b.Kind != "repeat" || b.Max != 3 || b.Depth != 0 {
 		t.Fatalf("build %+v", b)
 	}
-	if r := kinds["review-a"]; r.Kind != "step" || r.Role != domain.RoleReviewer || r.Tier != domain.TierStrong || r.Depth != 2 {
+	if r := kinds["review-a"]; r.Kind != "step" || r.Role != domain.RoleReviewer || r.Slot != "" || r.Model == "" || r.Depth != 2 {
 		t.Fatalf("review-a %+v", r)
+	}
+	if r := kinds["review-b"]; r.Slot != "reviewer-alt" {
+		t.Fatalf("review-b %+v", r)
 	}
 	always := run.Pending.Options[1]
 	if always != WorkflowAlways {

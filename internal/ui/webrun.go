@@ -350,7 +350,7 @@ func (d *WebDocs) Step(ctx context.Context, card string) (webapi.StepFace, error
 	block := threadfold.FoldRun(threadfold.RunInput{Run: run})
 	out := webapi.StepFace{
 		Card: string(st.Card), Session: string(d.f.ID), Run: run.N, Recipe: block.Recipe, Path: st.Path, ID: st.StepID,
-		Role: string(st.Role), Tier: string(st.Tier), State: string(st.State), Reason: threadfold.Sanitize(st.Reason),
+		Role: string(st.Role), Slot: st.Slot, State: string(st.State), Reason: threadfold.Sanitize(st.Reason),
 		Spent: st.Spent, Started: st.StartedAt, Ended: st.EndedAt, Live: st.State.Live(),
 		Brief: threadfold.Sanitize(st.Prompt), Output: threadfold.Sanitize(st.Output),
 	}
@@ -588,7 +588,7 @@ func (m *Shell) webProposal(ctx context.Context, f domain.Feature) *webapi.RunPr
 	}
 	for _, s := range p.Steps {
 		out.Steps = append(out.Steps, webapi.ProposalStep{
-			ID: s.ID, Depth: s.Depth, Kind: s.Kind, Role: string(s.Role), Tier: string(s.Tier),
+			ID: s.ID, Depth: s.Depth, Kind: s.Kind, Role: string(s.Role), Slot: s.Slot, Model: threadfold.Sanitize(s.Model),
 			Prompt: threadfold.Sanitize(s.Prompt), Max: s.Max, Until: s.Until, OnMax: string(s.OnMax), Join: string(s.Join),
 		})
 	}

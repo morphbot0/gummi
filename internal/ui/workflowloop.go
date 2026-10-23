@@ -231,7 +231,7 @@ func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
 		default:
 			row := "  " + s.Base.Render(padTo(indent+st.ID, 16)) + " " +
 				roleStyle(s, st.Role).Render(padTo(string(st.Role), 12)) + " " +
-				s.Faint.Render(padTo(string(st.Tier), 9))
+				s.Faint.Render(padTo(st.Model, 28))
 			if st.Prompt != "" {
 				row += " " + s.Faint.Render(sanitize(st.Prompt))
 			}

@@ -124,12 +124,14 @@ written for that backend: the CLI's aliases for claude and
 `provider/model` for opencode. An existing file is never rewritten.
 
 A `default:` name plus a `profiles:` map. Each profile maps roles to
-`{backend, model}`. A workflow run's step takes its model from its
-tier's slot — `step-cheap`, `step-standard` or `step-strong` (falling back
-to `crew-<tier>`, the name an older file used, then `implementer`). A
-`planner` step reads `planner` first (falling back to `architect`), and a
-`reviewer` step reads `reviewer` first. `consult` falls back to
-`architect`, and `scribe` drafts landing messages:
+`{backend, model}`. A session runs on `implementer`. A workflow run's step
+runs on its role's slot — `scout`, `planner`, `contractor`, `implementer`,
+`tester`, `scribe` or `reviewer` — or on the slot its recipe names
+(`slot:`, as `deliver`'s second reviewer names `reviewer-alt`), falling
+back to `architect` for a planner or contractor and then to `implementer`.
+`consult` falls back to `architect`, `scribe` also drafts landing
+messages, and `auditor` falls back to `scribe`. A recipe has no tiers: an
+older profile's `step-<tier>` and `crew-<tier>` slots are no longer read.
 
 ```yaml
 default: thrifty
@@ -138,6 +140,7 @@ profiles:
     architect:   { backend: claude,  model: claude-opus-5 }
     implementer: { backend: copilot, model: gpt-5 }
     reviewer:    { backend: claude,  model: claude-sonnet-5 }
+    reviewer-alt: { backend: copilot, model: gpt-5 } # deliver's second review
     scribe:      { backend: copilot, model: gpt-5-mini }
   open: # everything on opencode
     architect:   { backend: opencode, model: anthropic/claude-sonnet-5-5 }
@@ -150,11 +153,22 @@ A recipe's planner step reads the work and may revise the run's
 remaining steps; its turns are paid from the session's envelope like
 every step's, and it plans without regard to money: a run estimates
 nothing, and goes on until the session's envelope is spent. A mid-size model is usually enough for it:
-`planner: { backend: claude, model: claude-sonnet-5 }` under an Opus
+`planner: { backend: claude, model: claude-sonnet-5-5 }` under an Opus
 architect, for example.
 
+A person may edit the file from the board instead: the web page's
+**Profiles** view (the More menu) and the terminal's (`P`) add, edit and
+delete a profile and make one the default. Each role is checked the way a
+session's agent and model are — a claude role given a gpt model is
+refused — a backend the board has not started is started, and the file is
+validated as a whole before it is written, so a save never leaves one the
+board refuses. Both list a file that does not load beside why, so the
+profile that breaks it can be fixed or deleted there. A misspelt key
+(`Default:`, a role's `adapter:`) is refused rather than ignored.
+
 `backend:` is optional; a role without one uses `GUMMI_AGENT`.
-`output_token_max` caps a role's output tokens per turn. Provider config
+`output_token_max` raises a role's cap on output tokens per turn; only
+the opencode backend reads it. Provider config
 (endpoints, keys, credit rates) stays in each backend's native store, so
 this file is safe to commit.
 
@@ -163,8 +177,8 @@ and its **next** session resolves against the edit; a session already
 running keeps the model it started with. An edit that does not parse, or
 that routes a role to a backend the board did not start, is refused — the
 board keeps the profiles it had and says why (the web Doctor view's
-`profiles:live` line) — and backends are started once, so a new backend
-needs a restart.
+`profiles:live` line) — and a hand edit naming a backend the board did
+not start needs a restart; the same edit saved from the board does not.
 
 Sessions (freeform cards) are the one exception to "the profiles decide
 which backends start". A session picks its own agent and model in the web
@@ -258,7 +272,7 @@ re-raised decision that deduped to a no-op raises nothing).
 | `GUMMI_AGENT_CMD` | the headless adapter's command line |
 | `GUMMI_CLAUDE_BIN`, `GUMMI_OPENCODE_BIN` | a backend's binary, when it is not the default name on PATH |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
-| `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
+| `GUMMI_MODEL` | fallback model when a role isn't covered by a profile (unset: the backend's own default) |
 | `GUMMI_ENVELOPE` | default budget for new cards, in dollars (`20`, `$12.50`). Unset, the board prefills $20 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
 | `GUMMI_STAGE_BUDGET` | flat credit cap for a card's agent session when the card has no envelope |
 | `GUMMI_TURN_RESERVE` | one turn's credits: the floor under envelope-derived session budgets, and what a planner or curator run must have left to start |

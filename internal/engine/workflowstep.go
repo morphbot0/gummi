@@ -51,21 +51,55 @@ func (e *Engine) stepTreeDir(ctx context.Context, f domain.Feature) (string, boo
 	return dir, true, err
 }
 
-// stepRole is the profile slot a step's model comes from: step-<tier>,
-// then crew-<tier>, then the implementer; a planner and a reviewer try
-// their own slots first.
-func (e *Engine) stepRole(profile string, role domain.WorkflowRole, tier domain.StepTier) (config.RoleConfig, string) {
-	if tier == "" {
-		tier = domain.TierStandard
+// stepSlots is the profile slots a step's model is looked up in, in
+// order: the slot its recipe named, then its role's own, then the role a
+// role with no slot of its own resembles (a planner's and a contractor's
+// design work, the architect), then the implementer.
+func stepSlots(role domain.WorkflowRole, slot string) []agent.Role {
+	var out []agent.Role
+	if slot != "" {
+		out = append(out, agent.Role(slot))
 	}
-	slots := []agent.Role{agent.Role("step-" + string(tier)), agent.Role("crew-" + string(tier)), agent.RoleImplementer}
+	out = append(out, agent.Role(role))
 	switch role {
-	case domain.RolePlanner:
-		slots = append([]agent.Role{agent.RolePlanner, agent.RoleArchitect}, slots...)
-	case domain.RoleReviewer:
-		slots = append([]agent.Role{agent.RoleReviewer}, slots...)
+	case domain.RolePlanner, domain.RoleContractor:
+		out = append(out, agent.RoleArchitect)
 	}
-	return e.resolveRoleWithFallback(profile, slots...)
+	if role != domain.RoleImplementer {
+		out = append(out, agent.RoleImplementer)
+	}
+	return out
+}
+
+// stepRole is the model and backend a step of role runs on under a
+// profile: the first of its stepSlots the profile declares, else the
+// engine's single model on the default backend.
+func (e *Engine) stepRole(profile string, role domain.WorkflowRole, slot string) (config.RoleConfig, string) {
+	return e.resolveRoleWithFallback(profile, stepSlots(role, slot)...)
+}
+
+// sessionProfile is a session's profile, "" when the card cannot be read
+// (the default profile, then).
+func (e *Engine) sessionProfile(id domain.FeatureID) string {
+	f, err := e.feature(context.Background(), id)
+	if err != nil {
+		return ""
+	}
+	return f.Profile
+}
+
+// stepModelWords is what a step runs on, as a proposal says it.
+func (e *Engine) stepModelWords(profile string, role domain.WorkflowRole, slot string) string {
+	rc, backend := e.stepRole(profile, role, slot)
+	if backend == "" {
+		if a := e.agentFor(""); a != nil {
+			backend = a.Name()
+		}
+	}
+	if rc.Model == "" {
+		return backend + "'s default model"
+	}
+	return rc.Model + " on " + backend
 }
 
 func stepKey(session domain.FeatureID, n int, path string) string {
@@ -133,17 +167,13 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 		return err
 	}
 	brief := stepBrief(run, step, path, filled)
-	tier := step.Tier
-	if tier == "" {
-		tier = run.Recipe.Tier
-	}
 	card := domain.Feature{}
 	if inst.Card != "" {
 		if card, err = st.GetFeature(ctx, inst.Card); err != nil {
 			return err
 		}
 	} else {
-		rc, backend := e.stepRole(sess.Profile, step.Role, tier)
+		rc, backend := e.stepRole(sess.Profile, step.Role, step.Slot)
 		card, err = e.mintStepCard(ctx, sess, domain.StepLink{Session: session, Run: n, Path: path},
 			fmt.Sprintf("%s · run %d · %s", sess.Title, n, path), backend, rc.Model)
 		if err != nil {

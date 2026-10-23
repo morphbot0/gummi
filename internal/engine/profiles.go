@@ -75,14 +75,16 @@ func (e *Engine) resolveConsultRole(profileName string) (config.RoleConfig, stri
 	return config.RoleConfig{}, ""
 }
 
-// agentFor returns the Agent for the given backend name. An empty name,
-// or an unknown backend, resolves to the engine's default agent (the
-// entry stored under the "" key in cfg.Agents). Returns nil when the
-// engine has no agents at all — a construction-time misconfiguration the
-// callers already guard against with their own nil checks.
+// agentFor returns the Agent for the given backend name: one the board
+// launched, or one started since — for a session, or for a profile a
+// person saved (SaveProfile). An empty name, or a backend never started,
+// resolves to the engine's default agent (the entry stored under the ""
+// key in cfg.Agents). Returns nil when the engine has no agents at all —
+// a construction-time misconfiguration the callers already guard against
+// with their own nil checks.
 func (e *Engine) agentFor(backend string) agent.Agent {
 	if backend != "" {
-		if a, ok := e.cfg.Agents[backend]; ok {
+		if a := e.knownAgent(backend); a != nil {
 			return a
 		}
 	}

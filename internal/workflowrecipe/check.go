@@ -12,6 +12,10 @@ import (
 // templateRe finds a {{…}} in a prompt.
 var templateRe = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 
+// slotName is what a step's slot may be: a profile role name, the rule
+// config.SaveProfile holds a profile's roles to.
+var slotName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
+
 // Check judges whether a recipe can run (§25.4). Problems refuse it: an id
 // missing or used twice, an unknown role or tier, a step without a prompt,
 // a {{…}} naming no input, artifact or earlier step, a repeat without a
@@ -19,7 +23,7 @@ var templateRe = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // an artifact its body does not declare, and an artifact whose file would
 // sit outside the run's directory. Warnings do not: a parallel holding more
 // than one writing role, whose steps can overwrite each other's work, and
-// a step that still names an envelope, which is ignored.
+// a step that still names an envelope or a tier, which are ignored.
 // Whether a recipe reviews, tests or designs is its own choice; Check sets
 // no floor.
 func Check(r domain.Recipe) (problems, warnings []string) {
@@ -28,8 +32,8 @@ func Check(r domain.Recipe) (problems, warnings []string) {
 		ids:       map[string]string{},
 		artifacts: map[string]bool{},
 	}
-	if !r.Tier.Known() {
-		c.problem("the recipe's tier %q is not one of cheap, standard or strong", r.Tier)
+	if r.StaleTier {
+		c.warnings = append(c.warnings, "the recipe's tier is ignored — a step's model comes from its role's profile slot, or the slot it names")
 	}
 	if len(r.Steps) == 0 {
 		c.problem("the recipe has no steps")
@@ -153,8 +157,11 @@ func (c *checker) step(s domain.Step, previous string) {
 	if !s.Role.Known() {
 		c.problem("step %s: role %q is not one of scout, planner, contractor, implementer, tester, scribe or reviewer", name, s.Role)
 	}
-	if !s.Tier.Known() {
-		c.problem("step %s: tier %q is not one of cheap, standard or strong", name, s.Tier)
+	if s.Slot != "" && !slotName.MatchString(s.Slot) {
+		c.problem("step %s: slot %q is not a profile slot name (lower case letters, digits and -)", name, s.Slot)
+	}
+	if s.StaleTier {
+		c.warnings = append(c.warnings, fmt.Sprintf("step %s: its tier is ignored — its model comes from its role's profile slot, or the slot it names", name))
 	}
 	if s.StaleEnvelope {
 		c.warnings = append(c.warnings, fmt.Sprintf("step %s: its envelope is ignored — a run spends from the session's budget and estimates nothing", name))

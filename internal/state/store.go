@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
 	step_id    TEXT NOT NULL DEFAULT '',
 	card_id    TEXT NOT NULL DEFAULT '',
 	role       TEXT NOT NULL DEFAULT '',
-	tier       TEXT NOT NULL DEFAULT '',
+	tier       TEXT NOT NULL DEFAULT '', -- the step's profile slot (named for the tier it once held)
 	state      TEXT NOT NULL,
 	estimate   INTEGER NOT NULL DEFAULT 0,
 	allowance  INTEGER NOT NULL DEFAULT 0,

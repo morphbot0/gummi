@@ -1471,6 +1471,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.updateSchedule(msg); ok {
 		return m, cmd
 	}
+	if cmd, ok := m.updateProfiles(msg); ok {
+		return m, cmd
+	}
 	if cmd, ok := m.updateCurator(msg); ok {
 		return m, cmd
 	}
@@ -2494,6 +2497,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		// person typing. The list is the only place the board shows them,
 		// so the key lives beside W's — another whole-board surface.
 		return m.openSchedules()
+	case "P":
+		// The profiles: which agent and model each role runs on, and a
+		// person's edits of them — the same file the web page's Profiles
+		// view writes.
+		return m.openProfiles()
 	case "E":
 		// The skill pack and its curator (DESIGN §23): the one place a
 		// person checks, pins and reverts what reaches every session

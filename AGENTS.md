@@ -64,9 +64,12 @@ session ──talk──▶ spec n ──workflow_run──▶ proposal ──yo
   spec and sends it to the session; the spec reads `met` when every
   checked item passed and none is unjudged. The session (or the person)
   reads the diff and commits.
-- A **profile** maps roles to concrete models: `planner` (falling back
-  to `architect`), a step's tier as `step-<tier>` (falling back to
-  `crew-<tier>`, then `implementer`), and `reviewer`.
+- A **profile** maps roles to concrete models. A step runs on its
+  role's slot (`scout`, `planner`, `contractor`, `implementer`, `tester`,
+  `scribe`, `reviewer`) or one its recipe names (`slot:`), falling back
+  to `architect` for design work and then `implementer`; the session
+  itself runs on `implementer`. A person edits profiles from the board
+  (`P` in the TUI, Profiles on the web page).
 
 Cards of the retired workflow kinds (feature, bug, research, goal) may
 still sit in an old database: they are read-only, and gummi refuses to
@@ -84,10 +87,10 @@ agent/worktree/verify as leaf services.
 
 | package | responsibility |
 |---|---|
-| `domain` | Core types: cards (sessions and agents, plus the read-only rows of the retired workflow kinds), stages, a session's specs, workflow recipes, runs, their steps and decisions (`workflow.go`), a session's hidden children — a step's card, and an old crew's (`child.go`: `ChildLink`, `StepLink`, `IsChild`, step tiers) — and done-when items. No I/O. |
+| `domain` | Core types: cards (sessions and agents, plus the read-only rows of the retired workflow kinds), stages, a session's specs, workflow recipes, runs, their steps and decisions (`workflow.go`), a session's hidden children — a step's card, and an old crew's (`child.go`: `ChildLink`, `StepLink`, `IsChild`) — and done-when items. No I/O. |
 | `spec` | The markdown artifacts and their blocks: a session's spec template (`session.go`), the `gummi-done-when` block (`donewhen.go`) and `gummi-checks`, and the `%%` marker grammar for anchored comments. |
 | `state` | SQLite store: cards, sessions, a session's specs and their revisions (`sessionspecs.go`), workflow runs and their steps (`workflow.go`), whether a session always allows its runs and an old database's crews, read only (`legacycrew.go`, `workflowmigrate.go`), diff annotations, card events, sequences, workspace. |
-| `workflowrecipe` | Pure rules for a workflow recipe (DESIGN §25.4): `Parse` the YAML, `Check` it (ids, roles, tiers, templates, `repeat` and `parallel` shapes; a warning for two writers side by side, and for a step still naming an `envelope`, which is ignored), `Fill` a step's templates, `Load`/`List` the workspace's recipes and the bundled ones (`bundled/`), read the lines a step's output may carry (a planner's `gummi-workflow` block, `FAILED:`, `MET:`/`UNMET:`, `DECISION:`, `OPEN:`), and capture an artifact a step declared but did not write from its output (`CaptureArtifact`). |
+| `workflowrecipe` | Pure rules for a workflow recipe (DESIGN §25.4): `Parse` the YAML, `Check` it (ids, roles, slots, templates, `repeat` and `parallel` shapes; a warning for two writers side by side, and for a recipe or step still naming an `envelope` or a `tier`, which are ignored), `Fill` a step's templates, `Load`/`List` the workspace's recipes and the bundled ones (`bundled/`), read the lines a step's output may carry (a planner's `gummi-workflow` block, `FAILED:`, `MET:`/`UNMET:`, `DECISION:`, `OPEN:`), and capture an artifact a step declared but did not write from its output (`CaptureArtifact`). |
 | `workflowpolicy` | Pure conductor of a running run (DESIGN §25.7): `Decide` takes a snapshot and returns the actions — start ready steps, interrupt, judge a `repeat`'s `until`, ask at its max or when its `until` could not be judged, pause on a spent pool, end. Nothing is estimated. `Engine.WorkflowTick` builds the snapshot and executes them. |
 | `engine` | The orchestrator. Runs sessions on agent backends, routes turns, streams activity, and conducts workflow runs. Start here to trace behavior. A run is `workflow.go` (lifecycle, the session's `workflow_*` tools, the person's answers, pause/resume/stop/steer, `WorkflowTick`, a run's end and report), `workflowproposal.go` (what a proposal shows), `workflowstep.go` (a step's card, brief, snapshots and the person's messages to it), `workflowtree.go` (the run's directory, snapshots and diffs, end checks, Revert run) and `workflowfaces.go` (what the faces read); `pool.go` is the session's pool and the helpers they share; the session's specs are `sessionspec.go`. |
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `claude`, `opencode` — the three supported agents — plus `headless` (the line protocol the demo and web e2e drive) and `fake.go` for tests. |

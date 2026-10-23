@@ -65,8 +65,10 @@ func (r WorkflowRole) Writes() bool { return r.Known() && !r.Reads() }
 type Recipe struct {
 	Name        string
 	Description string
-	// Tier is the default for every step that names none.
-	Tier StepTier
+	// StaleTier marks a recipe whose YAML still names a tier, which gummi
+	// no longer reads: a step's model comes from its role's profile slot.
+	// Check warns about it; nothing else reads it.
+	StaleTier bool
 	// Inputs names what workflow_run fills in, each with a hint.
 	Inputs map[string]string
 	// Steps run in order.
@@ -99,8 +101,14 @@ type Step struct {
 	ID     string
 	Role   WorkflowRole
 	Prompt string
-	// Tier is the step's own; empty takes the recipe's.
-	Tier StepTier
+	// Slot names the profile slot the step's model comes from; empty is
+	// its role's own (Engine.stepRole has the fallbacks). A recipe names
+	// one to run two steps of a role on different models — a second
+	// reviewer on `reviewer-alt`, say.
+	Slot string
+	// StaleTier marks a step whose YAML still names a tier, ignored like
+	// the recipe's.
+	StaleTier bool
 	// StaleEnvelope marks a step whose YAML still names an envelope, which
 	// gummi no longer reads: a run binds to its session's budget and
 	// estimates nothing (§25.12). Check warns about it; nothing else reads it.
@@ -459,9 +467,11 @@ type RunStep struct {
 	StepID  string
 	Card    FeatureID // empty until the step starts
 	Role    WorkflowRole
-	Tier    StepTier
-	State   StepState
-	Spent   float64
+	// Slot is the step's profile slot as its recipe named it; empty is its
+	// role's own.
+	Slot  string
+	State StepState
+	Spent float64
 	// StartTree and EndTree are the snapshots at the step's start and end;
 	// the step's own diff runs between them.
 	StartTree string

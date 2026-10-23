@@ -274,7 +274,13 @@ func scanStep(r rowScanner) (domain.RunStep, error) {
 		}
 	}
 	st.Session, st.Card = domain.FeatureID(session), domain.FeatureID(card)
-	st.Role, st.Tier, st.State = domain.WorkflowRole(role), domain.StepTier(tier), domain.StepState(state)
+	// The column is named for the tier a step carried before its model
+	// came from its role; it holds the step's slot now, and a tier an
+	// older run stored names no slot.
+	if domain.LegacyTier(tier) {
+		tier = ""
+	}
+	st.Role, st.Slot, st.State = domain.WorkflowRole(role), tier, domain.StepState(state)
 	st.StartedAt, _ = parseOptTime(started)
 	st.EndedAt, _ = parseOptTime(ended)
 	return st, nil
@@ -289,7 +295,7 @@ func (s *Store) CreateRunStep(ctx context.Context, st *domain.RunStep) error {
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO workflow_steps (`+stepCols+`)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		string(st.Session), st.Run, st.Path, st.StepID, string(st.Card), string(st.Role), string(st.Tier), string(st.State),
+		string(st.Session), st.Run, st.Path, st.StepID, string(st.Card), string(st.Role), st.Slot, string(st.State),
 		st.Spent, st.StartTree, st.EndTree, st.Prompt, st.Output, st.Reason,
 		formatOptTime(st.StartedAt), formatOptTime(st.EndedAt), string(changed))
 	if err != nil {
@@ -307,7 +313,7 @@ func (s *Store) UpdateRunStep(ctx context.Context, st *domain.RunStep) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE workflow_steps SET step_id=?, card_id=?, role=?, tier=?, state=?,
 		spent=?, start_tree=?, end_tree=?, prompt=?, output=?, reason=?, started_at=?, ended_at=?, changed=?
 		WHERE session_id=? AND run_n=? AND path=?`,
-		st.StepID, string(st.Card), string(st.Role), string(st.Tier), string(st.State),
+		st.StepID, string(st.Card), string(st.Role), st.Slot, string(st.State),
 		st.Spent, st.StartTree, st.EndTree, st.Prompt, st.Output, st.Reason,
 		formatOptTime(st.StartedAt), formatOptTime(st.EndedAt), string(changed), string(st.Session), st.Run, st.Path)
 	if err != nil {

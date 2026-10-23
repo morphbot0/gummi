@@ -57,7 +57,7 @@ request once).
 | `rail-filtered` | compact rail only: a filter still applies; opens the full rail |
 | `rail-foot`, `rail-new-session`, `rail-new-agent`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new-agent`, behind the button's arrow, the same draft as an agent's, `rail-new` the new-card form) |
 | `rail-group-agents` | the agents' own group, above the status groups |
-| `rail-more-menu`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
+| `rail-more-menu`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-profiles`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
 ## Notifications
 
@@ -325,6 +325,18 @@ Restack answer: `stack-result`, `stack-result-close`, `stack-replayed`,
 `stack-conflict`, `stack-waiting`, `stack-push`, `stack-push-line`,
 `stack-push-copy`, `stack-push-copy-all`.
 Card head: `card-stack` (opens the stacks view on the card's stack).
+
+## Profiles (`views/profiles.js`)
+`profiles-count`, `profiles-new`, `profiles-list`, `profiles-empty`,
+`profiles-problem` (why the file is not in force), `profiles-notice`,
+`profiles-path`. One profile: `profile-<name>`, `profile-<name>-default`
+(the badge), `profile-<name>-edit`, `profile-<name>-make-default`,
+`profile-<name>-delete`, and its confirm `profile-<name>-confirm`
+(`-yes`/`-no`). Form `profile-form`: `profile-form-name`,
+`profile-form-sandbox`, `profile-form-<role>` per role (opens the
+composer's `model-picker`; `model-blank` leaves the role unset),
+`profile-form-default`, `profile-form-error`, `profile-form-error-detail`,
+`profile-form-cancel`, `profile-form-save`.
 
 ## Schedules (`views/schedules.js`)
 `schedules-list`, `schedules-count`, `schedules-new`, `schedules-empty`,

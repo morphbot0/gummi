@@ -95,10 +95,12 @@ type ProposalStep struct {
 	Depth int
 	// Kind is "step", "parallel" or "repeat".
 	Kind string
-	// A step's role, tier (its own or the recipe's), and the first line
-	// of its prompt.
+	// A step's role, the profile slot it named (empty: its role's), the
+	// model it runs on under the session's profile in words, and the first
+	// line of its prompt.
 	Role   domain.WorkflowRole
-	Tier   domain.StepTier
+	Slot   string
+	Model  string
 	Prompt string
 	// A repeat's bound, its stop condition in words and what it does at
 	// its max; a parallel's join.
@@ -145,7 +147,7 @@ func (e *Engine) WorkflowProposal(ctx context.Context, session domain.FeatureID,
 			return WorkflowProposal{}, err
 		}
 	}
-	p.Steps = proposalSteps(entries, run.Recipe.Tier, 0)
+	p.Steps = e.proposalSteps(sess.Profile, entries, 0)
 	if sp, ok, err := st.SessionSpec(ctx, session, run.Spec); err == nil && ok {
 		p.SpecTitle = sp.Title
 	}
@@ -175,17 +177,11 @@ func (e *Engine) WorkflowProposal(ctx context.Context, session domain.FeatureID,
 }
 
 // proposalSteps flattens entries into the proposal's tree, depth first.
-func proposalSteps(es []domain.Entry, tier domain.StepTier, depth int) []ProposalStep {
+func (e *Engine) proposalSteps(profile string, es []domain.Entry, depth int) []ProposalStep {
 	step := func(s domain.Step, depth int) ProposalStep {
-		t := s.Tier
-		if t == "" {
-			t = tier
-		}
-		if t == "" {
-			t = domain.TierStandard
-		}
 		return ProposalStep{
-			ID: s.ID, Depth: depth, Kind: "step", Role: s.Role, Tier: t, Prompt: firstLine(s.Prompt),
+			ID: s.ID, Depth: depth, Kind: "step", Role: s.Role, Slot: s.Slot,
+			Model: e.stepModelWords(profile, s.Role, s.Slot), Prompt: firstLine(s.Prompt),
 		}
 	}
 	var out []ProposalStep
@@ -205,7 +201,7 @@ func proposalSteps(es []domain.Entry, tier domain.StepTier, depth int) []Proposa
 			out = append(out, ProposalStep{
 				ID: r.ID, Depth: depth, Kind: "repeat", Max: r.Max, Until: untilText(r.Until), OnMax: r.OnMax.Or(),
 			})
-			out = append(out, proposalSteps(r.Steps, tier, depth+1)...)
+			out = append(out, e.proposalSteps(profile, r.Steps, depth+1)...)
 		}
 	}
 	return out

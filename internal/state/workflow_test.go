@@ -82,7 +82,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	}
 	yes := false
 	recipe := domain.Recipe{
-		Name: "deliver", Tier: domain.TierStandard, Inputs: map[string]string{"area": "where"},
+		Name: "deliver", Inputs: map[string]string{"area": "where"},
 		Steps: []domain.Entry{
 			{Step: &domain.Step{ID: "design", Role: domain.RoleContractor, Prompt: "{{spec}}", Artifacts: map[string]string{"design": "design.md"}, CaptureOutput: &yes}},
 			{Repeat: &domain.Repeat{ID: "build", Max: 3, Until: domain.Until{Verdict: "APPROVED", In: "review"}, OnMax: domain.OnMaxPause, Steps: []domain.Entry{
@@ -173,7 +173,7 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	}
 	st := &domain.RunStep{
 		Session: sess.ID, Run: 1, Path: "build/2/reviews/review-a", StepID: "review-a", Card: card.ID,
-		Role: domain.RoleReviewer, Tier: domain.TierStrong, State: domain.StepRunning,
+		Role: domain.RoleReviewer, Slot: "reviewer-alt", State: domain.StepRunning,
 		StartTree: "t0", Prompt: "Review", StartedAt: started,
 	}
 	if err := s.CreateRunStep(ctx, st); err != nil {
@@ -182,10 +182,15 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	if err := s.CreateRunStep(ctx, st); err == nil {
 		t.Error("a path was taken twice in one run")
 	}
-	design := &domain.RunStep{Session: sess.ID, Run: 1, Path: "design", StepID: "design", State: domain.StepWaiting}
+	// a step an older gummi stored carries a tier, which names no slot
+	design := &domain.RunStep{Session: sess.ID, Run: 1, Path: "design", StepID: "design", Slot: "strong", State: domain.StepWaiting}
 	if err := s.CreateRunStep(ctx, design); err != nil {
 		t.Fatal(err)
 	}
+	if got, _ := s.RunStep(ctx, sess.ID, 1, "design"); got == nil || got.Slot != "" {
+		t.Fatalf("a stored tier read back as slot %+v", got)
+	}
+	design.Slot = ""
 	st.State, st.Output, st.EndTree, st.Spent, st.EndedAt = domain.StepDone, "LGTM", "t1", 31, started.Add(time.Minute)
 	st.Changed = []string{"notes.md"} // a reviewer that changed a file, flagged
 	if err := s.UpdateRunStep(ctx, st); err != nil {

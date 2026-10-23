@@ -1,0 +1,59 @@
+{
+  "read": {
+    "path": "/work/.gummi/profiles.yaml",
+    "problem": "profile \"old\" role \"implementer\" backend \"antigravity\" is not one of claude|copilot|headless|opencode",
+    "default": "claude",
+    "profiles": [
+      {
+        "name": "claude",
+        "sandbox": "warn",
+        "roles": [
+          {
+            "role": "implementer",
+            "backend": "claude",
+            "model": "claude-sonnet-5-5"
+          },
+          {
+            "role": "scout",
+            "model": "claude-haiku-5-5"
+          }
+        ]
+      },
+      {
+        "name": "open",
+        "roles": [
+          {
+            "role": "implementer",
+            "backend": "opencode",
+            "model": "openrouter/z-ai/glm",
+            "outputTokenMax": 64000
+          }
+        ]
+      }
+    ],
+    "slots": [
+      {
+        "role": "implementer",
+        "help": "a session's own model"
+      }
+    ],
+    "backends": [
+      "claude",
+      "copilot",
+      "headless",
+      "opencode"
+    ],
+    "defaultBackend": "claude"
+  },
+  "request": {
+    "roles": [
+      {
+        "role": "reviewer",
+        "backend": "claude",
+        "model": "claude-opus-5-5"
+      }
+    ],
+    "sandbox": "enforce",
+    "makeDefault": true
+  }
+}

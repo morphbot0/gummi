@@ -157,7 +157,7 @@ var boardHelpKeyGroup = map[string]int{
 	// works the card, or spends credits on it now
 	"enter": 0, "p": 0, "h": 0, "u": 0,
 	// reads the card without changing anything
-	"s": 1, "d": 1, "t": 1, "i": 1, "P": 1,
+	"s": 1, "d": 1, "t": 1, "i": 1,
 	// branch/worktree plumbing
 	"r": 2, "m": 2, "z": 2, "c": 2, "o": 2,
 }
@@ -280,6 +280,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "W", label: "this week", help: "what the last seven days produced: endings, cost, rework"},
 		{key: "L", label: "schedules", help: "schedules and heartbeats — what comes back on a clock without a person typing"},
 		{key: "E", label: "skills", help: "the skill pack and its curator — pin, revert, run now"},
+		{key: "P", label: "profiles", help: "profiles — the agent and model each role runs on; add, edit, delete, make default"},
 		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
 		{key: "f", label: "fold archive", help: "fold or unfold the archive of cards that settled a while ago"},
 		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},

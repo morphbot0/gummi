@@ -232,8 +232,10 @@ type StepFace struct {
 	// iteration, the step ("Session › deliver run 2 › build ↺ 2 › implement").
 	Crumb []string `json:"crumb"`
 	Role  string   `json:"role"`
-	Tier  string   `json:"tier,omitempty"`
-	Model string   `json:"model,omitempty"`
+	// Slot is the profile slot the step's recipe named; empty is its
+	// role's own.
+	Slot  string `json:"slot,omitempty"`
+	Model string `json:"model,omitempty"`
 	// State is the step's (waiting, running, asking, done, failed,
 	// stopped); Reason why it failed or stopped.
 	State   string    `json:"state"`
@@ -393,9 +395,12 @@ type ProposalStep struct {
 	ID    string `json:"id"`
 	Depth int    `json:"depth"`
 	// Kind is "step", "parallel" or "repeat".
-	Kind   string `json:"kind"`
-	Role   string `json:"role,omitempty"`
-	Tier   string `json:"tier,omitempty"`
+	Kind string `json:"kind"`
+	Role string `json:"role,omitempty"`
+	// Slot is the profile slot a step names, empty for its role's own;
+	// Model what it runs on under the session's profile, in words.
+	Slot   string `json:"slot,omitempty"`
+	Model  string `json:"model,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
 	Max    int    `json:"max,omitempty"`
 	Until  string `json:"until,omitempty"`

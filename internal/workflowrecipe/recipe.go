@@ -25,19 +25,21 @@ import (
 type rawRecipe struct {
 	Name        string            `yaml:"name"`
 	Description string            `yaml:"description,omitempty"`
-	Tier        string            `yaml:"tier,omitempty"`
+	Tier        any               `yaml:"tier,omitempty"`
 	Inputs      map[string]string `yaml:"inputs,omitempty"`
 	Steps       []rawEntry        `yaml:"steps"`
 }
 
 // rawEntry is one entry of steps: a step's fields, or a parallel or a
-// repeat beside its id. Envelope is read only to be ignored: a recipe from
-// before runs estimated nothing still parses, and Check warns about it
-// (domain.Step.StaleEnvelope).
+// repeat beside its id. Envelope and Tier are read only to be ignored: a
+// recipe from before runs estimated nothing, or from before a step's model
+// came from its role, still parses, and Check warns about it
+// (domain.Step.StaleEnvelope, StaleTier).
 type rawEntry struct {
 	ID            string            `yaml:"id"`
 	Role          string            `yaml:"role,omitempty"`
-	Tier          string            `yaml:"tier,omitempty"`
+	Slot          string            `yaml:"slot,omitempty"`
+	Tier          any               `yaml:"tier,omitempty"`
 	Envelope      any               `yaml:"envelope,omitempty"`
 	Artifacts     map[string]string `yaml:"artifacts,omitempty"`
 	CaptureOutput *bool             `yaml:"captureOutput,omitempty"`
@@ -108,7 +110,7 @@ func Parse(data []byte) (domain.Recipe, error) {
 	r := domain.Recipe{
 		Name:        strings.TrimSpace(raw.Name),
 		Description: strings.TrimSpace(raw.Description),
-		Tier:        domain.StepTier(strings.ToLower(strings.TrimSpace(raw.Tier))),
+		StaleTier:   raw.Tier != nil,
 	}
 	if len(raw.Inputs) > 0 {
 		r.Inputs = raw.Inputs
@@ -149,7 +151,7 @@ func entries(raw []rawEntry) ([]domain.Entry, error) {
 }
 
 func (re rawEntry) hasStepFields() bool {
-	return re.Role != "" || re.Prompt != "" || re.Tier != "" || re.Envelope != nil ||
+	return re.Role != "" || re.Prompt != "" || re.Slot != "" || re.Tier != nil || re.Envelope != nil ||
 		len(re.Artifacts) > 0 || re.CaptureOutput != nil
 }
 
@@ -213,7 +215,8 @@ func entry(re rawEntry) (domain.Entry, error) {
 		ID:            id,
 		Role:          domain.WorkflowRole(strings.ToLower(strings.TrimSpace(re.Role))),
 		Prompt:        re.Prompt,
-		Tier:          domain.StepTier(strings.ToLower(strings.TrimSpace(re.Tier))),
+		Slot:          strings.TrimSpace(re.Slot),
+		StaleTier:     re.Tier != nil,
 		StaleEnvelope: re.Envelope != nil,
 		Artifacts:     arts,
 		CaptureOutput: re.CaptureOutput,
@@ -226,7 +229,6 @@ func Marshal(r domain.Recipe) ([]byte, error) {
 	raw := rawRecipe{
 		Name:        r.Name,
 		Description: r.Description,
-		Tier:        string(r.Tier),
 		Inputs:      r.Inputs,
 		Steps:       rawEntries(r.Steps),
 	}
@@ -246,7 +248,7 @@ func rawEntries(es []domain.Entry) []rawEntry {
 
 func rawStep(s domain.Step) rawEntry {
 	return rawEntry{
-		ID: s.ID, Role: string(s.Role), Prompt: s.Prompt, Tier: string(s.Tier),
+		ID: s.ID, Role: string(s.Role), Prompt: s.Prompt, Slot: s.Slot,
 		Artifacts: s.Artifacts, CaptureOutput: s.CaptureOutput,
 	}
 }

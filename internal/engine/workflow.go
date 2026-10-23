@@ -535,7 +535,7 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 	}
 	fmt.Fprintf(&b, "Run the %s workflow on spec S%d%s? It freezes the spec's revision when it starts (now revision %d).\n\nSteps:\n",
 		recipeLabel(run), run.Spec, title, rev)
-	writeRecipeTree(&b, run.Recipe.Steps, run.Recipe.Tier, "")
+	e.writeRecipeTree(&b, sess.Profile, run.Recipe.Steps, "")
 	if len(warnings) > 0 {
 		b.WriteString("\nWarnings:\n- " + strings.Join(warnings, "\n- ") + "\n")
 	}
@@ -566,17 +566,11 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// writeRecipeTree draws a recipe's steps, each with its role and tier.
-func writeRecipeTree(b *strings.Builder, es []domain.Entry, tier domain.StepTier, indent string) {
+// writeRecipeTree draws a recipe's steps, each with its role and the
+// model it runs on under profile.
+func (e *Engine) writeRecipeTree(b *strings.Builder, profile string, es []domain.Entry, indent string) {
 	stepLine := func(s domain.Step, mark string) {
-		t := s.Tier
-		if t == "" {
-			t = tier
-		}
-		if t == "" {
-			t = domain.TierStandard
-		}
-		fmt.Fprintf(b, "%s- %s%s · %s · %s\n", indent, mark, s.ID, s.Role, t)
+		fmt.Fprintf(b, "%s- %s%s · %s · %s\n", indent, mark, s.ID, s.Role, e.stepModelWords(profile, s.Role, s.Slot))
 	}
 	for _, en := range es {
 		switch {
@@ -591,7 +585,7 @@ func writeRecipeTree(b *strings.Builder, es []domain.Entry, tier domain.StepTier
 		case en.Repeat != nil:
 			r := en.Repeat
 			fmt.Fprintf(b, "%s- %s ↺ up to %d, until %s (at the max: %s)\n", indent, r.ID, r.Max, untilText(r.Until), r.OnMax.Or())
-			writeRecipeTree(b, r.Steps, tier, indent+"  ")
+			e.writeRecipeTree(b, profile, r.Steps, indent+"  ")
 		}
 	}
 }
@@ -1395,7 +1389,7 @@ func (e *Engine) raisePlanDecision(run *domain.Run, steps []domain.RunStep) bool
 		_, _, warnings := workflowrecipe.CheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
 		var b strings.Builder
 		fmt.Fprintf(&b, "Run %d: step %s (planner) revised the plan. Its steps replace the run's remaining ones:\n\n", run.N, s.Path)
-		writeRecipeTree(&b, entries, run.Recipe.Tier, "")
+		e.writeRecipeTree(&b, e.sessionProfile(run.Session), entries, "")
 		b.WriteString("\nAllow the revised plan?")
 		if e.raiseRunDecision(run, domain.RunDecision{
 			Kind: domain.RunDecidePlan, Step: s.Path, Question: b.String(),
@@ -1414,12 +1408,8 @@ func (e *Engine) newStepLocked(ctx context.Context, run *domain.Run, a workflowp
 	if !ok {
 		return fmt.Errorf("the recipe has no step %s", a.Step)
 	}
-	tier := def.Tier
-	if tier == "" {
-		tier = run.Recipe.Tier
-	}
 	inst := domain.RunStep{
-		Session: run.Session, Run: run.N, Path: a.Path, StepID: a.Step, Role: def.Role, Tier: tier,
+		Session: run.Session, Run: run.N, Path: a.Path, StepID: a.Step, Role: def.Role, Slot: def.Slot,
 		State: domain.StepRunning, StartedAt: e.now(),
 	}
 	if _, exists := have[a.Path]; exists {

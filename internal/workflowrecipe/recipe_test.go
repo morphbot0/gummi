@@ -22,7 +22,7 @@ func mustLoad(t *testing.T, name string) domain.Recipe {
 
 func TestParseReadsDeliver(t *testing.T) {
 	r := mustLoad(t, "deliver")
-	if r.Name != "deliver" || r.Tier != domain.TierStandard || r.Inputs != nil || len(r.Steps) != 3 {
+	if r.Name != "deliver" || r.StaleTier || r.Inputs != nil || len(r.Steps) != 3 {
 		t.Fatalf("recipe = %+v", r)
 	}
 	design := r.Steps[0].Step
@@ -36,7 +36,7 @@ func TestParseReadsDeliver(t *testing.T) {
 	}
 	reviews := build.Steps[1].Parallel
 	if reviews == nil || reviews.Join != domain.JoinAllSettled || len(reviews.Steps) != 2 ||
-		reviews.Steps[0].Tier != domain.TierStrong || reviews.Steps[1].ID != "review-b" {
+		reviews.Steps[0].Slot != "" || reviews.Steps[1].ID != "review-b" || reviews.Steps[1].Slot != "reviewer-alt" {
 		t.Fatalf("reviews = %+v", build.Steps[1])
 	}
 	if !strings.Contains(reviews.Steps[0].Prompt, "\n\n{{spec}}") {
@@ -110,9 +110,9 @@ func TestParseReadsEveryUntil(t *testing.T) {
 func TestMarshalRoundTrips(t *testing.T) {
 	no := false
 	extra := domain.Recipe{
-		Name: "x", Tier: domain.TierCheap, Inputs: map[string]string{"area": "where"},
+		Name: "x", Inputs: map[string]string{"area": "where"},
 		Steps: []domain.Entry{
-			{Step: &domain.Step{ID: "a", Role: domain.RoleScout, Prompt: "look at {{inputs.area}}", CaptureOutput: &no}},
+			{Step: &domain.Step{ID: "a", Role: domain.RoleScout, Slot: "scout-wide", Prompt: "look at {{inputs.area}}", CaptureOutput: &no}},
 			{Repeat: &domain.Repeat{ID: "r", Max: 2, Until: domain.Until{Contains: "DONE"}, OnMax: domain.OnMaxAbort, Steps: []domain.Entry{
 				{Step: &domain.Step{ID: "b", Role: domain.RoleTester, Prompt: "test"}},
 			}}},
@@ -177,7 +177,7 @@ func TestCheckRefusesARecipeThatCannotRun(t *testing.T) {
 		{"duplicate across kinds", "  - {id: a, role: scout, prompt: p}\n  - id: a\n    parallel: {join: all, steps: [{id: b, role: scout, prompt: p}]}\n", `"a" is used twice`},
 		{"unknown role", "  - {id: a, role: wizard, prompt: p}\n", `role "wizard"`},
 		{"no role", "  - {id: a, prompt: p}\n", `role ""`},
-		{"unknown tier", "  - {id: a, role: scout, tier: huge, prompt: p}\n", `tier "huge"`},
+		{"bad slot", "  - {id: a, role: scout, slot: Big Model, prompt: p}\n", `slot "Big Model"`},
 		{"no prompt", "  - {id: a, role: scout}\n", "has no prompt"},
 		{"unknown input", "  - {id: a, role: scout, prompt: '{{inputs.nope}}'}\n", "names no input"},
 		{"unknown artifact", "  - {id: a, role: scout, prompt: '{{artifacts.nope}}'}\n", "names no artifact"},
@@ -211,8 +211,18 @@ func TestCheckRefusesARecipeThatCannotRun(t *testing.T) {
 			}
 		})
 	}
-	if problems, _ := Check(domain.Recipe{Tier: "huge", Steps: mustLoad(t, "investigate").Steps}); !containsOne(problems, `recipe's tier "huge"`) {
-		t.Errorf("recipe tier: %q", problems)
+}
+
+// TestCheckWarnsAboutATier: a recipe written when steps had tiers still
+// parses and runs; Check says the tiers are ignored.
+func TestCheckWarnsAboutATier(t *testing.T) {
+	r, err := Parse([]byte("name: x\ntier: standard\nsteps:\n  - {id: a, role: scout, tier: strong, prompt: p}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	problems, warnings := Check(r)
+	if len(problems) != 0 || !containsOne(warnings, "the recipe's tier is ignored") || !containsOne(warnings, "step a: its tier is ignored") {
+		t.Fatalf("problems %q, warnings %q", problems, warnings)
 	}
 }
 

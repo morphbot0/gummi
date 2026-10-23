@@ -394,7 +394,8 @@ func authCheck(bi backendInfo, _ doctorOpts) doctorCheck {
 // resolveRoleModel mirrors the engine's per-role fallback (Engine.resolveRole)
 // to find the effective (model, backend) a feature using profile would run
 // role with: the declared role, then the declared default profile's role,
-// then the single engine model (GUMMI_MODEL) on the default backend. An
+// then the single engine model (GUMMI_MODEL, empty for the backend's own
+// default) on the default backend. An
 // empty backend means "use the default backend".
 func resolveRoleModel(profiles config.Profiles, profileName string, role agent.Role) (model, backend string) {
 	prof, ok := profiles.Profiles[profileName]
@@ -408,7 +409,7 @@ func resolveRoleModel(profiles config.Profiles, profileName string, role agent.R
 			return rc.Model, rc.Backend
 		}
 	}
-	return cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5"), ""
+	return os.Getenv("GUMMI_MODEL"), ""
 }
 
 // reachChecks emits one reach:<profile>/<role> check per declared profile

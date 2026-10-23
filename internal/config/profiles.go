@@ -108,6 +108,18 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 	if err := yaml.Unmarshal(raw, &probe); err != nil {
 		return Profiles{}, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	// yaml.v3 drops a key it has no field for, so a misspelt one — the
+	// `Default:` that left a file with no default, a role's `adapter:` from
+	// an older format — read as if it were not there at all.
+	for k := range probe {
+		if k == "default" || k == "profiles" {
+			continue
+		}
+		if strings.EqualFold(k, "default") || strings.EqualFold(k, "profiles") {
+			return Profiles{}, fmt.Errorf("%s: unknown key %q — keys are lower case: %q", path, k, strings.ToLower(k))
+		}
+		return Profiles{}, fmt.Errorf("%s: unknown key %q — a profiles file has only default and profiles", path, k)
+	}
 	if profs, ok := probe["profiles"].(map[string]any); ok {
 		for name, p := range profs {
 			roles, ok := p.(map[string]any)
@@ -118,6 +130,13 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 				rcm, ok := rc.(map[string]any)
 				if !ok {
 					continue
+				}
+				for f := range rcm {
+					switch f {
+					case "backend", "model", "output_token_max", "byok":
+					default:
+						return Profiles{}, fmt.Errorf("%s: profile %q role %q has unknown field %q — a role takes backend, model and output_token_max", path, name, role, f)
+					}
 				}
 				if _, has := rcm["byok"]; has {
 					return Profiles{}, fmt.Errorf("%s: profile %q role %q uses the removed `byok:` field; "+

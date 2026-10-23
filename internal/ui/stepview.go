@@ -481,8 +481,8 @@ func (m *Shell) stepThread(w, h int) string {
 		if f.Model != "" {
 			facts = append(facts, s.Subtle.Render(f.Model))
 		}
-		if f.Tier != "" {
-			facts = append(facts, s.Faint.Render("step-"+f.Tier))
+		if f.Slot != "" {
+			facts = append(facts, s.Faint.Render("slot "+f.Slot))
 		}
 		facts = append(facts, s.Muted.Render(domain.FormatDollars(f.Spent)), s.Faint.Render("in the session's tree"))
 		mast = []string{title, " " + strings.Join(facts, s.Faint.Render(" · "))}

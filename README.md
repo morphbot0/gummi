@@ -42,9 +42,10 @@ session on main is always your read of its diff and your keypress.
   per piece of work, with numbered revisions, that you read and annotate
   beside the thread. A run is judged against the spec it froze, not a
   transcript.
-- **Pick the model per role** — the session, the planner, each step tier
-  and the reviewer map to models through profiles: strong ones where they
-  earn it, cheap or local ones elsewhere. Each session spends from a
+- **Pick the model per role** — the session and each workflow role
+  (planner, implementer, reviewer, scribe, …) map to models through
+  profiles, edited from the board: strong ones where they earn it, cheap
+  or local ones elsewhere. Each session spends from a
   budget in dollars, and its workflow runs spend from the same budget.
   Nothing guesses what a run will cost: it goes on until the budget runs
   out, then pauses for a top-up rather than throwing work away.

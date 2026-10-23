@@ -27,10 +27,10 @@ func TestTheProposalInThePicker(t *testing.T) {
 		Run: 2, Kind: domain.RunDecideProposal, Recipe: "deliver", Description: "design, build until approved, validate",
 		Spec: 2, SpecTitle: "Resume", SpecRev: 2, PoolLeft: 1620, Bounded: true, Dirty: true, Branch: "ff/persist",
 		Steps: []engine.ProposalStep{
-			{ID: "design", Kind: "step", Role: domain.RoleContractor, Tier: "standard", Prompt: "Write design.md for the spec."},
+			{ID: "design", Kind: "step", Role: domain.RoleContractor, Model: "claude-opus-5-5 on claude", Prompt: "Write design.md for the spec."},
 			{ID: "build", Kind: "repeat", Max: 3, Until: "review says APPROVED", OnMax: domain.OnMaxPause},
-			{ID: "implement", Depth: 1, Kind: "step", Role: domain.RoleImplementer, Tier: "standard"},
-			{ID: "validate", Kind: "step", Role: domain.RoleTester, Tier: "standard"},
+			{ID: "implement", Depth: 1, Kind: "step", Role: domain.RoleImplementer, Model: "claude-sonnet-5-5 on claude"},
+			{ID: "validate", Kind: "step", Role: domain.RoleTester, Slot: "tester-fast", Model: "claude-haiku-5-5 on claude"},
 		},
 		Checks: []engine.ProposalCheck{{Item: "DW-1", Cmd: "go test ./internal/engine -run TestMigrate"}},
 		Baseline: &engine.ProposalBaseline{Items: []engine.BaselineItem{

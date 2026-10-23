@@ -521,7 +521,7 @@ function renderStep (pane, entry, pctx) {
       h('b', { testid: 'step-title' }, s.id)),
     h('div', { class: 'stp-meta' },
       s.live ? h('span', { class: 'stp-live', testid: 'step-live' }, 'live') : h('span', { class: ['rb-state', `s-${s.state}`], testid: 'step-state' }, s.state),
-      [s.model, s.tier && `step-${s.tier}`].filter(Boolean).join(' · '),
+      [s.model, s.slot && `slot ${s.slot}`].filter(Boolean).join(' · '),
       h('span', { class: 'mono', testid: 'step-spent' }, money),
       'in the session’s tree'),
     s.reason ? h('div', { class: 'rb-why' }, s.reason) : null)
@@ -622,7 +622,8 @@ function composer (s, pctx) {
 // ---------------------------------------------------------------- the proposal
 
 // proposalEl is a run's proposal (or revised plan) as its decision draws
-// it: the step tree with each step's role and tier, the spec it freezes,
+// it: the step tree with each step's role and the model it runs on, the
+// spec it freezes,
 // the checks it runs, the warnings, and what the session's pool has left —
 // the run spends from it and estimates nothing.
 export function proposalEl (p) {
@@ -641,7 +642,7 @@ export function proposalEl (p) {
     h('span', { class: ['wrole', s.role && `r-${s.role}`], role: 'cell' }, s.role || (s.kind === 'parallel' ? s.join : '')),
     h('span', { class: 'ti', role: 'cell' }, s.kind === 'repeat'
       ? `until ${s.until} · at the max: ${s.onMax}`
-      : s.kind === 'parallel' ? `side by side, join ${s.join}` : [s.tier, s.prompt].filter(Boolean).join(' · '))))),
+      : s.kind === 'parallel' ? `side by side, join ${s.join}` : [s.model, s.prompt].filter(Boolean).join(' · '))))),
     p.checks?.length ? h('div', { class: 'wfp-checks', testid: 'proposal-checks' }, h('span', { class: 'k' }, 'runs in the tree when it ends'),
       p.checks.map(c => h('div', null, h('b', { class: 'mono' }, c.item), ' ', h('span', { class: 'mono' }, c.cmd)))) : null,
     baselineEl(p.baseline, 'proposal-baseline'),
