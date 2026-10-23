@@ -42,21 +42,40 @@ func (e *Engine) skillDirsFor(ctx context.Context, ag agent.Agent, f *domain.Fea
 	if ag == nil || !ag.Capabilities().SkillDirs || e.cfg.Workspace.Root == "" {
 		return nil
 	}
+	// The pack sits beside the person's own skills, never over them.
+	prefixed := func(dir string) (string, error) {
+		if ag.Capabilities().SkillNamespace {
+			return dir, nil
+		}
+		return skillpack.Prefixed(dir)
+	}
+	// gummi's own skills come first, and whatever the pack holds: a pack
+	// that cannot be read still leaves them.
+	var dirs []string
+	if dir, err := skillpack.Builtin(e.SkillPack().BuiltinDir); err == nil {
+		if dir, err = prefixed(dir); err == nil {
+			dirs = skillpack.DirsFor(dir, f.Repo)
+		}
+	}
 	dir, _, err := e.SkillPack().SessionDir(ctx, key, string(f.ID), continuing)
 	if err != nil || dir == "" {
-		return nil // `gummi curator status` and doctor show a pack that cannot be read
+		return dirs // `gummi curator status` and doctor show a pack that cannot be read
 	}
 	// The card's own staged changes, over the pinned revision (§23.5).
 	if dir, err = e.SkillPack().Overlay(dir, string(f.ID)); err != nil {
-		return nil
+		return dirs
 	}
-	if !ag.Capabilities().SkillNamespace {
-		// The pack sits beside the person's own skills, never over them.
-		if dir, err = skillpack.Prefixed(dir); err != nil {
-			return nil
+	if dir, err = prefixed(dir); err != nil {
+		return dirs
+	}
+	for _, d := range skillpack.DirsFor(dir, f.Repo) {
+		// A pack skill a person named like one of gummi's own by hand
+		// never stands in for it.
+		if !skillpack.IsBuiltin(strings.TrimPrefix(filepath.Base(d), skillpack.Prefix)) {
+			dirs = append(dirs, d)
 		}
 	}
-	return skillpack.DirsFor(dir, f.Repo)
+	return dirs
 }
 
 // missingOnBase is the grounding lint's read (§23.3): which of paths the
@@ -159,10 +178,11 @@ func skillCalled(tool, detail string) (name string, view bool) {
 // noteSkillUse counts one tool call of card's session toward the skill it
 // used, if any. It is called for every session's tool calls, stage and
 // freeform alike; a name the pack does not hold is counted harmlessly and
-// never read.
+// never read. gummi's own skills are not the pack's: no count, and no
+// question about fixing one a session cannot change.
 func (e *Engine) noteSkillUse(card domain.FeatureID, tool, detail string, at time.Time) {
 	name, view := skillCalled(tool, detail)
-	if name == "" {
+	if name == "" || skillpack.IsBuiltin(name) {
 		return
 	}
 	e.countSkillUseAt(string(card), name, view, at)
@@ -324,3 +344,19 @@ func (e *Engine) SkillDoc(ctx context.Context, card, name string) (SkillDoc, err
 // endLine ends md in one newline: the pack's read trims it and a staged
 // file keeps it, and a review's diff must not show the difference.
 func endLine(md string) string { return strings.TrimRight(md, "\n") + "\n" }
+
+// sessionWorkflowHintFor is the workflow hint for a session on ag, naming
+// gummi's own skills on the workflows where ag takes skills (§23.2).
+func sessionWorkflowHintFor(ag agent.Agent) string {
+	if ag == nil || !ag.Capabilities().SkillDirs {
+		return sessionWorkflowHint
+	}
+	name := func(n string) string {
+		if ag.Capabilities().SkillNamespace {
+			return packNamespace + ":" + n
+		}
+		return skillpack.Prefix + n
+	}
+	return sessionWorkflowHint + " Read the " + name("workflows") + " skill before you propose a run or write done-when checks, and " +
+		name("workflow-recipes") + " before you write a recipe."
+}

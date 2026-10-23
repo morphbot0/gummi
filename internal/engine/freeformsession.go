@@ -366,7 +366,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			own := append(sessionSpecTools(), workflowTools()...)
 			extra = append(extra, own...)
 			tools = append(tools, own...)
-			hints = append(hints, sessionSpecHint, sessionWorkflowHint)
+			hints = append(hints, sessionSpecHint, sessionWorkflowHintFor(ag))
 		}
 		path, teardown, merr := e.startMCPEndpoint(ctx, f, extra...)
 		if merr != nil {

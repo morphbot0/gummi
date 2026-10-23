@@ -95,18 +95,18 @@ func TestCuratorRunWritesThePackAndEverySessionGetsIt(t *testing.T) {
 	// Every later session on a backend that takes skill directories gets
 	// the published skill: as gummi-make-test where the backend names
 	// skills bare, so it never shadows a person's make-test.
-	dirs := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false)
+	dirs := packDirsFor(ctx, e, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false)
 	if len(dirs) != 1 || filepath.Base(dirs[0]) != "gummi-make-test" {
 		t.Fatalf("a session gets %v", dirs)
 	}
 	namespaced := agent.NewFake("")
 	namespaced.Caps = agent.Capabilities{SkillDirs: true, SkillNamespace: true}
-	if got := e.skillDirsFor(ctx, namespaced, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 1 || filepath.Base(got[0]) != "make-test" {
+	if got := packDirsFor(ctx, e, namespaced, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 1 || filepath.Base(got[0]) != "make-test" {
 		t.Errorf("a backend that namespaces the pack itself gets %v", got)
 	}
 	noSkills := agent.NewFake("")
 	noSkills.Caps = agent.Capabilities{}
-	if got := e.skillDirsFor(ctx, noSkills, &domain.Feature{ID: "FD-1"}, "FD-1", false); got != nil {
+	if got := packDirsFor(ctx, e, noSkills, &domain.Feature{ID: "FD-1"}, "FD-1", false); got != nil {
 		t.Errorf("a backend without SkillDirs got %v", got)
 	}
 
@@ -114,7 +114,7 @@ func TestCuratorRunWritesThePackAndEverySessionGetsIt(t *testing.T) {
 	if err := e.SkillPack().Revert(ctx, run.Before, run.After, "revert"); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 0 {
+	if got := packDirsFor(ctx, e, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 0 {
 		t.Errorf("after the revert a session still gets %v", got)
 	}
 
@@ -167,7 +167,7 @@ func TestCuratorRunIsPinnedAndRevertedByItsID(t *testing.T) {
 	if _, err := e.RevertCuratorRun(ctx, run.ID); err == nil || !strings.Contains(err.Error(), "already reverted") {
 		t.Errorf("a second revert of the run = %v", err)
 	}
-	if got := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 0 {
+	if got := packDirsFor(ctx, e, cf, &domain.Feature{ID: "FD-1"}, "FD-1", false); len(got) != 0 {
 		t.Errorf("after the revert a session still gets %v", got)
 	}
 

@@ -75,7 +75,9 @@ func (e *Engine) cardSkillToolsFor(ag agent.Agent) []agent.ToolDef {
 
 // skillStageHint tells a session it may improve the pack, and how.
 const skillStageHint = `The workspace skill pack is the skills named gummi-skills:<name> or
-gummi-<name> in your session. You may improve it with skill_manage: write
+gummi-<name> in your session, beside gummi's own workflows and
+workflow-recipes, which ship with gummi and cannot be changed here. You
+may improve the pack with skill_manage: write
 a new skill, rewrite one that is wrong or stale, or archive one that
 misleads. Read a skill whole with skill_read before you rewrite it.
 What you change is staged for this card: its next session sees it, and
