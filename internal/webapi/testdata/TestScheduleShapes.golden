@@ -29,6 +29,32 @@
         "prompt": "check CI, keep going",
         "enabled": false,
         "createdAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "id": "watch-foo",
+        "name": "watch foo",
+        "kind": "run",
+        "target": "FF-003",
+        "spec": 1,
+        "recipe": {
+          "steps": [
+            "check · run",
+            "bump · dispatch"
+          ],
+          "commands": [
+            "check: ./check-release.sh"
+          ],
+          "repos": [
+            "myrepo · envelope 5 · fix-until-green"
+          ]
+        },
+        "cron": "0 * * * *",
+        "prompt": "name: watch\n",
+        "enabled": false,
+        "lastRun": "2026-10-03T10:00:00Z",
+        "lastStatus": "no-change",
+        "lastDetail": "nothing to do",
+        "createdAt": "0001-01-01T00:00:00Z"
       }
     ]
   },

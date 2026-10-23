@@ -34,10 +34,20 @@ func allDigits(s string) bool {
 // Whether a recipe reviews, tests or designs is its own choice; Check sets
 // no floor.
 func Check(r domain.Recipe) (problems, warnings []string) {
+	return check(r, false)
+}
+
+// check is Check; frozen is the recipe a dispatch carries, which is run by
+// a session that is not an agent and so may not dispatch in turn.
+func check(r domain.Recipe, frozen bool) (problems, warnings []string) {
 	c := checker{
 		r:         r,
+		frozen:    frozen,
 		ids:       map[string]string{},
 		artifacts: map[string]bool{},
+	}
+	if len(r.Steps) > 0 && r.Steps[0].Step != nil {
+		c.firstID = r.Steps[0].Step.ID
 	}
 	if r.StaleTier {
 		c.warnings = append(c.warnings, "the recipe's tier is ignored — a step's model comes from its role's profile slot, or the slot it names")
@@ -56,6 +66,8 @@ func Check(r domain.Recipe) (problems, warnings []string) {
 
 type checker struct {
 	r         domain.Recipe
+	frozen    bool   // a dispatch's recipe: no dispatch inside
+	firstID   string // the id of the recipe's first step, when it is a plain one
 	problems  []string
 	warnings  []string
 	ids       map[string]string // id → the kind that took it
@@ -166,6 +178,10 @@ func (c *checker) repeat(rp domain.Repeat) {
 
 func (c *checker) step(s domain.Step, previous string) {
 	name := c.id(s.ID, "step")
+	if s.Run != "" || s.Dispatch != nil || s.QuietExit != nil {
+		c.agentless(s, name, previous)
+		return
+	}
 	if !s.Role.Known() {
 		c.problem("step %s: role %q is not one of scout, planner, contractor, implementer, tester, scribe or reviewer", name, s.Role)
 	}
@@ -191,6 +207,93 @@ func (c *checker) step(s domain.Step, previous string) {
 			c.problem("step %s: {{%s}} %s", name, m[1], why)
 		}
 	}
+}
+
+// agentless checks a command step (§26.3) or a dispatch step (§26.4):
+// gummi's own acts, with no role, slot or prompt of their own.
+func (c *checker) agentless(s domain.Step, name, previous string) {
+	switch {
+	case s.Run != "" && s.Dispatch != nil:
+		c.problem("step %s: a step is a command (run) or a dispatch, not both", name)
+		return
+	case s.QuietExit != nil && s.Run == "":
+		c.problem("step %s: quietExit belongs to a command step (run)", name)
+		return
+	case s.Dispatch != nil && c.frozen:
+		c.problem("step %s: a dispatched recipe cannot dispatch in turn", name)
+		return
+	}
+	if s.Role != "" || s.Slot != "" || strings.TrimSpace(s.Prompt) != "" || len(s.Artifacts) > 0 {
+		c.problem("step %s: a %s step has no role, slot, prompt or artifacts of its own", name, s.Kind())
+	}
+	if s.StaleEnvelope {
+		c.problem("step %s: a %s step has no envelope of its own; a dispatch names its session's under dispatch", name, s.Kind())
+	}
+	templates := func(field, text string) {
+		for _, m := range templateRe.FindAllStringSubmatch(text, -1) {
+			if why := c.template(m[1], s.ID, previous); why != "" {
+				c.problem("step %s: %s {{%s}} %s", name, field, m[1], why)
+			}
+		}
+	}
+	if s.Run != "" {
+		if q := s.QuietExit; q != nil {
+			if *q < 1 || *q > 255 {
+				c.problem("step %s: quietExit %d is not an exit code from 1 to 255", name, *q)
+			}
+			if s.ID == "" || s.ID != c.firstID {
+				c.problem("step %s: quietExit belongs to the recipe's first step: a run that ended quietly leaves no trace, so no model may have worked before it", name)
+			}
+		}
+		if strings.Contains(s.Run, "run.diff") {
+			c.problem("step %s: a command cannot read {{run.diff}}", name)
+		}
+		if templateQuoted(s.Run) {
+			c.problem("step %s: a {{template}} in a command is a word of its own, filled quoted: never write it inside quotes", name)
+		}
+		templates("run", s.Run)
+		return
+	}
+	d := s.Dispatch
+	switch {
+	case d.Repo == "":
+		c.problem("step %s: a dispatch names the repository its session is minted in", name)
+	case strings.Contains(d.Repo, "{{"):
+		c.problem("step %s: a dispatch's repo is a literal the person allows, never a template", name)
+	case strings.ContainsAny(d.Repo, "/\\"):
+		c.problem("step %s: repo %q must be a configured repository name, not a path", name, d.Repo)
+	}
+	if d.Envelope <= 0 {
+		c.problem("step %s: a dispatch gives its session an envelope above zero, carved from the agent's", name)
+	}
+	if strings.TrimSpace(d.Title) == "" {
+		c.problem("step %s: a dispatch names its session's title", name)
+	}
+	hasRecipe := d.Recipe != "" || strings.TrimSpace(d.RecipeYAML) != ""
+	switch {
+	case hasRecipe && strings.TrimSpace(d.Spec) == "":
+		c.problem("step %s: a dispatch with a recipe gives its session the spec the run is judged against", name)
+	case hasRecipe && strings.TrimSpace(d.Prompt) != "":
+		c.problem("step %s: a dispatch with a recipe starts a run, not a conversation: give it a spec, not a prompt", name)
+	case !hasRecipe && strings.TrimSpace(d.Prompt) == "":
+		c.problem("step %s: a dispatch without a recipe gives its session an opening prompt", name)
+	case !hasRecipe && strings.TrimSpace(d.Spec) != "":
+		c.problem("step %s: a dispatch's spec is for its recipe's run: name a recipe, or give a prompt instead", name)
+	}
+	if y := strings.TrimSpace(d.RecipeYAML); y != "" {
+		if d.Recipe == "" {
+			c.problem("step %s: a frozen recipe comes with the name of the recipe it froze", name)
+		}
+		r, err := Parse([]byte(y))
+		if err != nil {
+			c.problem("step %s: its frozen recipe: %v", name, err)
+		} else if p, _ := check(r, true); len(p) > 0 {
+			c.problem("step %s: its frozen recipe cannot run: %s", name, strings.Join(p, "; "))
+		}
+	}
+	templates("title", d.Title)
+	templates("spec", d.Spec)
+	templates("prompt", d.Prompt)
 }
 
 // template says why ref names nothing a step may read, or "" when it does.
@@ -229,4 +332,27 @@ func (c *checker) template(ref, self, previous string) string {
 		return "names no earlier step"
 	}
 	return "is not a template: spec, inputs.<name>, artifacts.<name>, previous.output, <step>.output or run.diff"
+}
+
+// templateQuoted reports whether a {{template}} in a shell command sits
+// between quote characters, where its filled, quoted value would end the
+// quote and let an earlier step's output run as commands.
+func templateQuoted(command string) bool {
+	var quote byte
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		switch {
+		case quote == 0 && (c == '\'' || c == '"'):
+			quote = c
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote == '"' && c == '\\':
+			i++
+		case quote != 0 && strings.HasPrefix(command[i:], "{{"):
+			if loc := templateRe.FindStringIndex(command[i:]); loc != nil && loc[0] == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }

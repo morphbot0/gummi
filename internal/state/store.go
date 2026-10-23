@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 	start_index    TEXT NOT NULL DEFAULT '',
 	active_ms      INTEGER NOT NULL DEFAULT 0,
 	resumed_at     TEXT NOT NULL DEFAULT '',
+	schedule_id    TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, n)
 );
 CREATE TABLE IF NOT EXISTS workflow_steps (
@@ -290,8 +291,23 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_detail   TEXT NOT NULL DEFAULT '',
 	last_card     TEXT NOT NULL DEFAULT '',
 	orphan_card   TEXT NOT NULL DEFAULT '',
-	created_at    TEXT NOT NULL
+	created_at    TEXT NOT NULL,
+	spec_n        INTEGER NOT NULL DEFAULT 0
 );
+
+-- The sessions an agent dispatched (DESIGN §26.4): which agent minted
+-- which session, from which run, and the envelope it carved for it. The
+-- agent may read and steer only the sessions named here.
+CREATE TABLE IF NOT EXISTS dispatches (
+	card_id    TEXT PRIMARY KEY,
+	agent_id   TEXT NOT NULL,
+	run_n      INTEGER NOT NULL DEFAULT 0,
+	envelope   INTEGER NOT NULL DEFAULT 0,
+	step_path  TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dispatches_agent ON dispatches(agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS dispatches_step ON dispatches(agent_id, run_n, step_path);
 
 -- One row per (feature, round kind) live loop counter: the collapsed
 -- seam behind internal/rounds, replacing the former plan_rounds and
@@ -1034,6 +1050,11 @@ var migrations = []string{
 	// Empty on every row from before.
 	`ALTER TABLE session_messages ADD COLUMN at TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE session_messages ADD COLUMN by_actor TEXT NOT NULL DEFAULT ''`,
+	// The schedule that started a run (DESIGN §26.2), and the agent's spec
+	// a run schedule starts its runs against. Empty and 0 on every row
+	// from before, and on every run a session proposed.
+	`ALTER TABLE workflow_runs ADD COLUMN schedule_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE schedules ADD COLUMN spec_n INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Close releases the database.

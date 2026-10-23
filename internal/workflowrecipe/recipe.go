@@ -44,8 +44,22 @@ type rawEntry struct {
 	Artifacts     map[string]string `yaml:"artifacts,omitempty"`
 	CaptureOutput *bool             `yaml:"captureOutput,omitempty"`
 	Prompt        string            `yaml:"prompt,omitempty"`
+	Run           string            `yaml:"run,omitempty"`
+	QuietExit     *int              `yaml:"quietExit,omitempty"`
+	Dispatch      *rawDispatch      `yaml:"dispatch,omitempty"`
 	Parallel      *rawParallel      `yaml:"parallel,omitempty"`
 	Repeat        *rawRepeat        `yaml:"repeat,omitempty"`
+}
+
+// rawDispatch is a dispatch step's session (DESIGN §26.4).
+type rawDispatch struct {
+	Repo       string `yaml:"repo"`
+	Title      string `yaml:"title,omitempty"`
+	Spec       string `yaml:"spec,omitempty"`
+	Prompt     string `yaml:"prompt,omitempty"`
+	Recipe     string `yaml:"recipe,omitempty"`
+	RecipeYAML string `yaml:"recipeYAML,omitempty"`
+	Envelope   int    `yaml:"envelope"`
 }
 
 type rawParallel struct {
@@ -152,7 +166,8 @@ func entries(raw []rawEntry) ([]domain.Entry, error) {
 
 func (re rawEntry) hasStepFields() bool {
 	return re.Role != "" || re.Prompt != "" || re.Slot != "" || re.Tier != nil || re.Envelope != nil ||
-		len(re.Artifacts) > 0 || re.CaptureOutput != nil
+		len(re.Artifacts) > 0 || re.CaptureOutput != nil ||
+		re.Run != "" || re.QuietExit != nil || re.Dispatch != nil
 }
 
 func entry(re rawEntry) (domain.Entry, error) {
@@ -211,6 +226,15 @@ func entry(re rawEntry) (domain.Entry, error) {
 	if len(arts) == 0 {
 		arts = nil
 	}
+	var d *domain.Dispatch
+	if rd := re.Dispatch; rd != nil {
+		d = &domain.Dispatch{
+			Repo: strings.TrimSpace(rd.Repo), Title: strings.TrimSpace(rd.Title),
+			Spec: rd.Spec, Prompt: rd.Prompt,
+			Recipe: strings.TrimSpace(rd.Recipe), RecipeYAML: rd.RecipeYAML,
+			Envelope: rd.Envelope,
+		}
+	}
 	return domain.Entry{Step: &domain.Step{
 		ID:            id,
 		Role:          domain.WorkflowRole(strings.ToLower(strings.TrimSpace(re.Role))),
@@ -220,6 +244,9 @@ func entry(re rawEntry) (domain.Entry, error) {
 		StaleEnvelope: re.Envelope != nil,
 		Artifacts:     arts,
 		CaptureOutput: re.CaptureOutput,
+		Run:           strings.TrimSpace(re.Run),
+		QuietExit:     re.QuietExit,
+		Dispatch:      d,
 	}}, nil
 }
 
@@ -247,10 +274,18 @@ func rawEntries(es []domain.Entry) []rawEntry {
 }
 
 func rawStep(s domain.Step) rawEntry {
-	return rawEntry{
+	re := rawEntry{
 		ID: s.ID, Role: string(s.Role), Prompt: s.Prompt, Slot: s.Slot,
 		Artifacts: s.Artifacts, CaptureOutput: s.CaptureOutput,
+		Run: s.Run, QuietExit: s.QuietExit,
 	}
+	if d := s.Dispatch; d != nil {
+		re.Dispatch = &rawDispatch{
+			Repo: d.Repo, Title: d.Title, Spec: d.Spec, Prompt: d.Prompt,
+			Recipe: d.Recipe, RecipeYAML: d.RecipeYAML, Envelope: d.Envelope,
+		}
+	}
+	return re
 }
 
 func toRaw(e domain.Entry) rawEntry {
@@ -312,4 +347,40 @@ func Find(r domain.Recipe, id string) (domain.Step, bool) {
 		}
 	}
 	return domain.Step{}, false
+}
+
+// Summary is what a person reads of a recipe before allowing it to run on
+// a schedule: its steps, each command verbatim, and each repository a
+// dispatch targets.
+type Summary struct {
+	Steps    []string // "id · kind", in order
+	Commands []string // "id: command"
+	Repos    []string // "repo · envelope · recipe"
+}
+
+// Summarize reads a recipe's steps, commands and dispatch targets.
+func Summarize(r domain.Recipe) Summary {
+	var s Summary
+	for _, st := range Steps(r) {
+		s.Steps = append(s.Steps, st.ID+" · "+st.Kind())
+		if st.Run != "" {
+			s.Commands = append(s.Commands, st.ID+": "+st.Run)
+		}
+		if d := st.Dispatch; d != nil {
+			with := "a prompt"
+			if d.Recipe != "" {
+				with = d.Recipe
+			}
+			s.Repos = append(s.Repos, fmt.Sprintf("%s · envelope %s · %s", d.Repo, domain.FormatDollars(float64(d.Envelope)), with))
+			// the frozen recipe runs its commands in that repository
+			if child, err := Parse([]byte(d.RecipeYAML)); err == nil && d.RecipeYAML != "" {
+				for _, c := range Steps(child) {
+					if c.Run != "" {
+						s.Commands = append(s.Commands, fmt.Sprintf("%s (in %s): %s: %s", d.Recipe, d.Repo, c.ID, c.Run))
+					}
+				}
+			}
+		}
+	}
+	return s
 }

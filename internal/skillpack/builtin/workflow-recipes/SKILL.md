@@ -205,6 +205,41 @@ steps:
       {{spec}}
 ````
 
+## Command and dispatch steps (an agent's recipe)
+
+A step may be gummi's own act instead of a model: `run:` a command, or
+`dispatch:` a session. An agent's scheduled watch is a command gate, then
+a dispatch.
+
+```yaml
+name: watch-foo
+tier: cheap
+steps:
+  - id: check
+    run: ./check-release.sh
+    quietExit: 1
+  - id: bump
+    dispatch:
+      repo: myrepo
+      title: "Bump foo to {{check.output}}"
+      envelope: 5
+      recipe: fix-until-green
+      spec: |
+        Upstream foo released {{check.output}}. Bump the dependency.
+```
+
+- `run` goes through `sh -c` in the run's tree. Exit 0 passes its
+  standard output on as `{{check.output}}`; `quietExit` (1–255, the
+  recipe's first step only) ends the run with no trace; any other exit
+  fails the step. A `{{…}}` in a command is one quoted shell word, never
+  put it inside quotes. It is one check, never a wait.
+- `dispatch` is for an agent only. `repo` is a literal name, `envelope`
+  comes out of the agent's own. With a `recipe` give a `spec` (its spec
+  1) and the run starts at once; without one give a `prompt`, the
+  opening turn.
+- Neither has a role, tier or prompt of its own. A dispatched recipe may
+  not dispatch.
+
 ## Before you propose
 
 - Every id is unique across the recipe, nested ones included, and holds

@@ -2085,7 +2085,7 @@ Decided in the design interview (2026-07-03):
     2026-10-22; §25.14 records where the build departed from §25.
 
 29. **An agent may watch on a schedule and dispatch sessions**, decided
-    2026-10-23 (§26), not built. A schedule may start a run on an agent,
+    2026-10-23 (§26), built (§26.8). A schedule may start a run on an agent,
     and a recipe may hold a `run:` step — a command, no model, whose
     declared `quietExit` ends the run with nothing but the schedule's
     `no-change` — and a `dispatch` step that mints a session in a
@@ -4331,7 +4331,7 @@ now exists (opencode's server), so the dock's work is its own card.
 
 > **Amended by §26 (decision 29).** A third kind, `run`, starts a run on
 > an agent instead of sending a turn, and an agent may *propose* a
-> schedule (`schedule_propose`). Only the person's answer enables it;
+> schedule (`schedule_propose`). Only the person's enable turns it on;
 > "an agent cannot schedule itself" below still holds for enabling,
 > editing and raising one.
 
@@ -7477,7 +7477,7 @@ The build follows §25, with these differences.
 
 ## 26. Watches — an agent on a schedule that dispatches sessions
 
-*Decided 2026-10-23 (decision 29); not built.* This section amends §19.3d
+*Decided 2026-10-23 (decision 29); built — §26.8 says where the build departs.* This section amends §19.3d
 (an agent may run a workflow and dispatch sessions), §19.9 (an agent may
 propose a schedule, and a schedule may start a run) and §25.13 (a command
 step is no longer deferred). Where it and those sections disagree, this
@@ -7601,19 +7601,24 @@ schedule; a step that polls a command inside an open run stays deferred
 
 ### 26.5 The agent proposes; a person allows once
 
-An agent may propose a schedule: `schedule_propose(cron, recipe_yaml,
-spec)`. The proposal is a decision in the agent's thread, and it shows
-the cadence, the recipe's step tree, every recipe a `dispatch` names,
-and every repository it targets.
+An agent may propose a schedule: `schedule_propose(name, cron or preset,
+timezone?, recipe or recipe_yaml, spec)`. The proposal is a **disabled
+run-schedule row** and a line in the agent's thread. The person reads it
+in the schedules view — the cadence, the recipe's steps, every `run:`
+command verbatim and every repository a `dispatch` targets, with the
+recipe it starts there — and enables it from there.
 
 - **One allowance covers the chain.** The recipe, and every recipe its
-  `dispatch` steps name, are copied into the proposal. Allowing it
-  allows every run the schedule starts and every run a dispatch starts.
-  A change to any of them is a new proposal.
+  `dispatch` steps name, are copied into the row (`Schedule.Prompt` holds
+  the YAML, each dispatch's `recipeYAML` the named recipe as it was at
+  proposal). Enabling it allows every run the schedule starts and every
+  run a dispatch starts. A change to any of them is a new proposal.
 - **Allowing is enabling.** The schedule is stored as §19.9 stores any:
-  disabled, and enabled only by the person's answer. An agent never
-  enables, edits or raises one. A person's edit to the row forces it off
-  again, as for any schedule.
+  disabled, and enabled only by the person's enable — that is the
+  allowance, not a decision in the thread. An agent never enables, edits
+  or deletes one; `CreateSchedule` from the tool is hard-wired off. A
+  person's edit to a row forces it off again, and a run row's recipe is
+  not editable: a different recipe is a new proposal.
 - A person may still create the same schedule by hand, from the
   schedules view, with an agent as its target.
 
@@ -7637,3 +7642,61 @@ envelope.
 - A per-fire history for a schedule, beyond its row's last outcome.
 - A dispatch target chosen at fire time from a list the person allowed.
 - A step that polls a command inside an open run (§25.13).
+
+### 26.8 As built
+
+What was built follows §26. Where it chose, or departs:
+
+- **A quiet exit is the recipe's first step only.** `Check` refuses
+  `quietExit` anywhere else: a run that ended quietly leaves no trace, so
+  no model may have worked before it. A quiet run deletes its row, its
+  steps and its run directory, records `no-change` on the schedule that
+  started it, and sends no turn and leaves no note. The tree is not
+  reverted.
+- **A value filled into a `run:` command is one quoted shell word**
+  (`FillShell`), not wrapped in the delimiters a prompt's are, so an
+  earlier step's output cannot add to the command it is filled into; a
+  template stands as a word of its own, never inside quotes. A
+  dispatch's title, spec and prompt are data and fill plain
+  (`FillPlain`). `{{run.diff}}` is refused in a command.
+- **A command step runs unconfined**, as the person's user in the run's
+  tree (an agent's home), through `sh -c`, killed with its process group
+  after ten minutes. It is not under `internal/sandbox`'s confinement,
+  and it inherits gummi's environment. Its end tree is a snapshot like any step's; it has no card and spends
+  nothing, and a step stored for it carries `run` or `dispatch` where a
+  role would be.
+- **A dispatch's `spec` is the child's whole spec 1**, replacing the
+  template. A recipe a dispatch carries may not itself dispatch, and
+  freezing refuses one that does.
+- **The agent's spec is not frozen into its schedule.** A run schedule
+  names the agent's spec by number, and each run freezes that spec's
+  revision as it starts, so an agent that edits the spec after the person
+  enabled the schedule changes what a model step of the watch reads. A
+  dispatch's spec is frozen in the recipe and cannot drift. Freezing the
+  agent's spec into the row is deferred.
+- **A dispatch needs a bounded agent** — the child's envelope comes out of
+  the agent's own, so an agent with no envelope fails the step — and is
+  **idempotent per step**: `dispatches` keeps the step's path, and a step
+  restarted after it minted resumes from the record.
+- **Pool accounting is one number.** `SessionPoolSpent` of an agent adds
+  what its dispatched sessions hold (`dispatchedHeld`), so the pool left,
+  the tick's spent-pool check and the driver's lines agree. A dispatch the
+  pool cannot cover pauses the run (`pauseForBudgetLocked`) and leaves the
+  step live; a top-up starts it again.
+- **A child's run end is a line, not a turn.** The agent's thread gets
+  `dispatch: session … run N ended …` as an activity line; nothing wakes
+  the agent. Its status and report are `session_status`; `session_send`
+  is a turn into a child it dispatched, and both refuse any other card.
+- **A planner's revised plan adds no command or dispatch**: what the
+  person allowed is the recipe's own.
+- **A dispatch is refused at proposal on a session that is not an agent**
+  (and fails at run time).
+- **The faces:** the schedules view (TUI `L`, the web page,
+  `gummi schedule list`) shows a run row as `run · <agent> · S<n>`, its
+  steps, commands and repositories, and the `no-change` status. A run
+  row has no edit form and no `--kind run`; proposals come from the
+  agent.
+- A schedule's `ok` outcome is written when the run starts; a quiet gate
+  overwrites its status with `no-change` after.
+- Nothing limits how many disabled run schedules an agent may propose.
+

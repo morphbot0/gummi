@@ -22,6 +22,7 @@ import (
 	"github.com/morphis/gummi/internal/schedule"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
+	"github.com/morphis/gummi/internal/workflowrecipe"
 )
 
 // Schedules is GET /api/schedules: every row, oldest first.
@@ -53,7 +54,7 @@ func WebSchedule(sc domain.Schedule) webapi.Schedule {
 }
 
 func webSchedule(sc domain.Schedule) webapi.Schedule {
-	return webapi.Schedule{
+	out := webapi.Schedule{
 		ID: string(sc.ID), Name: sc.Name, Kind: string(sc.Kind),
 		Target: string(sc.Target), Repo: sc.Repo,
 		Cron: sc.Cron, Timezone: sc.Timezone, Prompt: sc.Prompt,
@@ -64,6 +65,17 @@ func webSchedule(sc domain.Schedule) webapi.Schedule {
 		LastCard: string(sc.LastCard), OrphanCard: string(sc.OrphanCard),
 		CreatedAt: sc.CreatedAt,
 	}
+	if sc.Kind == domain.ScheduleRun {
+		out.Spec = sc.Spec
+		out.Recipe = &webapi.ScheduleRecipe{}
+		if r, err := workflowrecipe.Parse([]byte(sc.Prompt)); err != nil {
+			out.Recipe.Error = err.Error()
+		} else {
+			sum := workflowrecipe.Summarize(r)
+			out.Recipe.Steps, out.Recipe.Commands, out.Recipe.Repos = sum.Steps, sum.Commands, sum.Repos
+		}
+	}
+	return out
 }
 
 // webScheduleFire projects one fire for the page.
@@ -255,6 +267,9 @@ func (b *Bridge) UpdateSchedule(ctx context.Context, id string, req webapi.Sched
 	current, err := store.Schedule(ctx, domain.ScheduleID(id))
 	if err != nil {
 		return webapi.Schedule{}, webScheduleErr(err)
+	}
+	if current.Kind == domain.ScheduleRun {
+		return webapi.Schedule{}, webErr(WebConflict, "a run schedule is the agent's proposal and is not edited: a changed recipe is a new proposal")
 	}
 	// The identity is not what an edit changes: the row's id and kind
 	// stay, and a heartbeat keeps its target unless the request names

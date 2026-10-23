@@ -33,14 +33,46 @@ type Vars struct {
 // error, as is one naming no template at all; a step that has left no
 // output (a failed branch of a settled parallel) fills as a note saying so.
 func Fill(prompt string, v Vars) (string, error) {
-	var err error
-	out := templateRe.ReplaceAllStringFunc(prompt, func(m string) string {
-		ref := templateRe.FindStringSubmatch(m)[1]
-		s, e := v.resolve(ref)
-		if e != nil && err == nil {
-			err = e
+	return fill(prompt, v, func(r ref) string {
+		if r.step != "" {
+			return Wrap(r.step, r.text)
 		}
-		return s
+		return r.text
+	})
+}
+
+// FillPlain fills the templates of text that is data, not instruction —
+// a dispatch's title, spec or prompt — with each step's output as it
+// stands, trimmed and with no delimiters around it.
+func FillPlain(text string, v Vars) (string, error) {
+	return fill(text, v, func(r ref) string { return strings.TrimSpace(r.text) })
+}
+
+// FillShell fills a command's templates. Every value stands as one
+// single-quoted shell word, so an earlier step's output cannot add to the
+// command it is filled into: write a template as a word of its own, never
+// inside quotes.
+func FillShell(command string, v Vars) (string, error) {
+	return fill(command, v, func(r ref) string {
+		return "'" + strings.ReplaceAll(strings.TrimSpace(r.text), "'", `'\''`) + "'"
+	})
+}
+
+// ref is one resolved template: its text, and the id of the step it is the
+// output of (empty for anything else).
+type ref struct{ step, text string }
+
+func fill(text string, v Vars, render func(ref) string) (string, error) {
+	var err error
+	out := templateRe.ReplaceAllStringFunc(text, func(m string) string {
+		r, e := v.resolve(templateRe.FindStringSubmatch(m)[1])
+		if e != nil {
+			if err == nil {
+				err = e
+			}
+			return ""
+		}
+		return render(r)
 	})
 	if err != nil {
 		return "", err
@@ -48,40 +80,40 @@ func Fill(prompt string, v Vars) (string, error) {
 	return out, nil
 }
 
-func (v Vars) resolve(ref string) (string, error) {
-	switch ref {
+func (v Vars) resolve(name string) (ref, error) {
+	switch name {
 	case "spec":
-		return v.Spec, nil
+		return ref{text: v.Spec}, nil
 	case "run.diff":
 		if v.RunDiff == "" {
-			return "", fmt.Errorf("{{run.diff}}: no diff file was written")
+			return ref{}, fmt.Errorf("{{run.diff}}: no diff file was written")
 		}
-		return v.RunDiff, nil
+		return ref{text: v.RunDiff}, nil
 	case "previous.output":
 		if v.Previous == "" {
-			return "", fmt.Errorf("{{previous.output}}: no step ran before this one")
+			return ref{}, fmt.Errorf("{{previous.output}}: no step ran before this one")
 		}
-		return Wrap(v.Previous, v.PreviousOutput), nil
+		return ref{step: v.Previous, text: v.PreviousOutput}, nil
 	}
-	head, tail, ok := strings.Cut(ref, ".")
+	head, tail, ok := strings.Cut(name, ".")
 	switch {
 	case !ok:
 	case head == "inputs":
 		s, given := v.Inputs[tail]
 		if !given {
-			return "", fmt.Errorf("{{%s}}: input %q was not given", ref, tail)
+			return ref{}, fmt.Errorf("{{%s}}: input %q was not given", name, tail)
 		}
-		return s, nil
+		return ref{text: s}, nil
 	case head == "artifacts":
 		s, declared := v.Artifacts[tail]
 		if !declared {
-			return "", fmt.Errorf("{{%s}}: no artifact %q in the run", ref, tail)
+			return ref{}, fmt.Errorf("{{%s}}: no artifact %q in the run", name, tail)
 		}
-		return s, nil
+		return ref{text: s}, nil
 	case tail == "output":
-		return Wrap(head, v.Outputs[head]), nil
+		return ref{step: head, text: v.Outputs[head]}, nil
 	}
-	return "", fmt.Errorf("{{%s}} is not a template", ref)
+	return ref{}, fmt.Errorf("{{%s}} is not a template", name)
 }
 
 const (

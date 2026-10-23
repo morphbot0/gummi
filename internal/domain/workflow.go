@@ -118,10 +118,54 @@ type Step struct {
 	// CaptureOutput, when false, keeps the step's final message out of the
 	// run's outputs. Nil reads as true.
 	CaptureOutput *bool
+	// Run makes the step a command (DESIGN §26.3): it runs in the run's
+	// tree with no role, no model and no prompt, and its standard output
+	// is its output.
+	Run string
+	// QuietExit is the exit code with which a command step says "nothing
+	// to do": the run ends quietly and leaves no row. Nil: none.
+	QuietExit *int
+	// Dispatch makes the step mint a session in a named repository (DESIGN
+	// §26.4), with no role and no model of its own.
+	Dispatch *Dispatch
 }
 
 // Captures reports whether the step's output is kept for later steps.
 func (s Step) Captures() bool { return s.CaptureOutput == nil || *s.CaptureOutput }
+
+// Agentless reports whether the step is gummi's own act — a command or a
+// dispatch — rather than a fresh-context agent.
+func (s Step) Agentless() bool { return s.Run != "" || s.Dispatch != nil }
+
+// Kind names what the step is where a role would: its role, or "run" or
+// "dispatch".
+func (s Step) Kind() string {
+	switch {
+	case s.Run != "":
+		return "run"
+	case s.Dispatch != nil:
+		return "dispatch"
+	}
+	return string(s.Role)
+}
+
+// Dispatch is a dispatch step's session (DESIGN §26.4): minted in Repo,
+// a literal the person allowed with the recipe, with an envelope of its
+// own carved from the dispatching agent's. With a Recipe the filled Spec
+// becomes the session's spec 1 and the recipe's run starts on it at once;
+// without one the filled Prompt is the session's opening turn.
+type Dispatch struct {
+	Repo   string
+	Title  string
+	Spec   string
+	Prompt string
+	// Recipe names the recipe the session runs; RecipeYAML is that recipe
+	// frozen when the run (or the schedule) was proposed, which is what
+	// the person allowed and what runs.
+	Recipe     string
+	RecipeYAML string
+	Envelope   int
+}
 
 // Join is how a parallel block settles.
 type Join string
@@ -388,6 +432,9 @@ type Run struct {
 	// SavedAs is the workspace recipe a person saved this run's inline
 	// recipe as (.gummi/workflows/<SavedAs>.yaml), empty until one does.
 	SavedAs string
+	// Schedule is the schedule that started the run (DESIGN §26.2), empty
+	// for a run a session proposed. A quiet end records no-change on it.
+	Schedule ScheduleID
 	// Until holds each repeat iteration's stop condition as the engine
 	// judged it, keyed by the iteration's path (build/2).
 	Until map[string]UntilJudgement

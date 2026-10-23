@@ -10,11 +10,17 @@ import "time"
 type Schedule struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	Kind string `json:"kind"` // "mint" or "heartbeat"
-	// Target is the heartbeat's one freeform card; Repo the mint's
-	// configured repository, empty for the workspace default.
+	Kind string `json:"kind"` // "mint", "heartbeat" or "run"
+	// Target is the heartbeat's one freeform card, or the agent a run
+	// schedule starts its runs on; Repo the mint's configured repository,
+	// empty for the workspace default.
 	Target string `json:"target,omitempty"`
 	Repo   string `json:"repo,omitempty"`
+	// Spec is the agent's spec a run schedule's runs are judged against.
+	Spec int `json:"spec,omitempty"`
+	// Recipe is what a run schedule's frozen recipe does, for the person
+	// who enables it: Prompt carries its YAML.
+	Recipe *ScheduleRecipe `json:"recipe,omitempty"`
 	// Cron is the canonical 5-field expression — presets compile before
 	// they are stored, so what a page shows and what fires agree.
 	Cron     string `json:"cron"`
@@ -45,6 +51,17 @@ type Schedule struct {
 	OrphanCard string `json:"orphanCard,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+// ScheduleRecipe is a run schedule's recipe as the page shows it before it
+// is enabled: Steps as "id · kind", each command verbatim as "id: command",
+// and each dispatch's target as "repo · envelope n · recipe".
+type ScheduleRecipe struct {
+	Steps    []string `json:"steps"`
+	Commands []string `json:"commands,omitempty"`
+	Repos    []string `json:"repos,omitempty"`
+	// Error says why the recipe could not be read.
+	Error string `json:"error,omitempty"`
 }
 
 // Schedules is GET /api/schedules.
@@ -116,7 +133,7 @@ type ScheduleFire struct {
 	Name   string `json:"name,omitempty"`
 	Kind   string `json:"kind,omitempty"`
 	Forced bool   `json:"forced,omitempty"`
-	// Status is the outcome: ok, skipped-busy, paused-exhausted,
+	// Status is the outcome: ok, no-change, skipped-busy, paused-exhausted,
 	// disabled-target-closed or failed.
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`

@@ -32,7 +32,7 @@ import (
 const scheduleCols = `id, name, kind, target, repo, cron, timezone, prompt,
 	backend, model, envelope, enabled, run_requested,
 	last_run, next_run, last_status, last_detail, last_card, orphan_card,
-	created_at`
+	created_at, spec_n`
 
 // checkSchedule is the two checks every definition write runs before a
 // row is touched: the structural rules, then the cron package's rule that
@@ -62,12 +62,12 @@ func (s *Store) CreateSchedule(ctx context.Context, sc *domain.Schedule) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO schedules (
 		id, name, kind, target, repo, cron, timezone, prompt, backend, model,
 		envelope, enabled, run_requested, last_run, next_run, last_status,
-		last_detail, last_card, orphan_card, created_at
+		last_detail, last_card, orphan_card, created_at, spec_n
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		0, 0, '', '', '', '', '', '', ?)`,
+		0, 0, '', '', '', '', '', '', ?, ?)`,
 		string(sc.ID), sc.Name, string(sc.Kind), string(sc.Target), sc.Repo,
 		sc.Cron, sc.Timezone, sc.Prompt, sc.Backend, sc.Model, sc.Envelope,
-		sc.CreatedAt.UTC().Format(timeFmt))
+		sc.CreatedAt.UTC().Format(timeFmt), sc.Spec)
 	if err != nil {
 		return fmt.Errorf("creating schedule %s: %w", sc.ID, err)
 	}
@@ -86,11 +86,11 @@ func (s *Store) UpdateScheduleDefinition(ctx context.Context, sc *domain.Schedul
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE schedules SET
 		kind = ?, target = ?, repo = ?, cron = ?, timezone = ?, prompt = ?,
-		backend = ?, model = ?, envelope = ?,
+		backend = ?, model = ?, envelope = ?, spec_n = ?,
 		enabled = 0, run_requested = 0, next_run = ''
 	WHERE id = ?`,
 		string(sc.Kind), string(sc.Target), sc.Repo, sc.Cron, sc.Timezone, sc.Prompt,
-		sc.Backend, sc.Model, sc.Envelope, string(sc.ID))
+		sc.Backend, sc.Model, sc.Envelope, sc.Spec, string(sc.ID))
 	if err != nil {
 		return fmt.Errorf("updating schedule %s: %w", sc.ID, err)
 	}
@@ -243,6 +243,16 @@ func (s *Store) RecordScheduleOutcome(ctx context.Context, id domain.ScheduleID,
 	return nil
 }
 
+// RecordScheduleStatus overwrites the last outcome's status and detail
+// only: what a run schedule's run said once it got that far (DESIGN
+// §26.3), after the fire itself recorded that it started the run. It
+// moves nothing else on the row.
+func (s *Store) RecordScheduleStatus(ctx context.Context, id domain.ScheduleID, at time.Time, st domain.ScheduleStatus, detail string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE schedules SET last_run = ?, last_status = ?, last_detail = ? WHERE id = ?`,
+		formatOptTime(at), string(st), detail, string(id))
+	return err
+}
+
 // boolInt is a bool as SQLite wants it.
 func boolInt(b bool) int {
 	if b {
@@ -308,7 +318,7 @@ func scanSchedule(row interface{ Scan(...any) error }) (domain.Schedule, error) 
 		&sc.Prompt, &sc.Backend, &sc.Model, &envelope,
 		&enabled, &requested,
 		&lastRun, &nextRun, &status, &sc.LastDetail, &sc.LastCard, &sc.OrphanCard,
-		&createdAt)
+		&createdAt, &sc.Spec)
 	if err != nil {
 		return sc, err
 	}

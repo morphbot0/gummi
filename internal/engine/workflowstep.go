@@ -129,7 +129,7 @@ func (e *Engine) startStepAsync(session domain.FeatureID, n int, path string) {
 			// run pauses for a top-up, and the step, never briefed, starts
 			// again when it carries on — it did nothing to fail over
 			e.pauseOnSpentPool(ctx, session, n)
-		case err != nil:
+		case err != nil && ctx.Err() == nil:
 			e.settleStep(ctx, session, n, path, domain.StepFailed, "it could not start: "+err.Error())
 		}
 	}) {
@@ -171,6 +171,9 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 		if vars.RunDiff, err = e.writeRunDiff(ctx, run, path, startTree); err != nil {
 			return fmt.Errorf("writing the run's diff: %w", err)
 		}
+	}
+	if step.Agentless() {
+		return e.startAgentless(ctx, run, sess, inst, step, startTree, vars)
 	}
 	filled, err := workflowrecipe.Fill(step.Prompt, vars)
 	if err != nil {
@@ -454,9 +457,16 @@ func (e *Engine) plannerEnded(ctx context.Context, run *domain.Run, inst *domain
 		return false
 	}
 	var problems []string
+	if err == nil {
+		workflowrecipe.Walk(entries, func(s domain.Step, _ []domain.Entry) {
+			if s.Agentless() {
+				problems = append(problems, fmt.Sprintf("step %s: a revised plan adds no command or dispatch: the person allowed the recipe's own", s.ID))
+			}
+		})
+	}
 	if err != nil {
 		problems = []string{err.Error()}
-	} else {
+	} else if len(problems) == 0 {
 		steps, _ := e.cfg.Store.RunSteps(ctx, run.Session, run.N)
 		_, problems, _ = workflowrecipe.CheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
 	}

@@ -27,21 +27,22 @@ const runCols = `session_id, n, recipe_name, recipe_yaml, recipe, inputs, spec_n
 	spent, start_tree, end_tree, results, report, reason,
 	stopping, out_of_budget, steers, pending, feedback, revision,
 	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max, commits, baseline, saved_as,
-	start_index, active_ms, resumed_at`
+	start_index, active_ms, resumed_at, schedule_id`
 
 func scanRun(r rowScanner) (domain.Run, error) {
 	var run domain.Run
-	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated, until, onMax, commits, baseline, resumed string
+	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated, until, onMax, commits, baseline, resumed, sched string
 	var activeMS int64
 	err := r.Scan(&session, &run.N, &run.RecipeName, &run.RecipeYAML, &recipe, &inputs, &run.Spec, &run.SpecRev, &st,
 		&run.Spent, &run.StartTree, &run.EndTree, &results, &run.Report, &run.Reason,
 		&run.Stopping, &run.OutOfBudget, &steers, &pending, &run.Feedback, &run.Revision,
 		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax, &commits, &baseline, &run.SavedAs,
-		&run.StartIndex, &activeMS, &resumed)
+		&run.StartIndex, &activeMS, &resumed, &sched)
 	if err != nil {
 		return run, err
 	}
 	run.Session, run.State = domain.FeatureID(session), domain.RunState(st)
+	run.Schedule = domain.ScheduleID(sched)
 	for _, j := range []struct {
 		raw string
 		v   any
@@ -130,13 +131,13 @@ func (s *Store) CreateRun(ctx context.Context, r *domain.Run) error {
 		r.N = int(last.Int64) + 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_runs (`+runCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(r.Session), r.N, r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State),
 		r.Spent, r.StartTree, r.EndTree, j[2], r.Report, r.Reason,
 		r.Stopping, r.OutOfBudget, j[3], j[4], r.Feedback, r.Revision,
 		r.CreatedAt.UTC().Format(timeFmt), formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), r.UpdatedAt.UTC().Format(timeFmt),
 		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs,
-		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt)); err != nil {
+		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), string(r.Schedule)); err != nil {
 		return fmt.Errorf("creating run %d on %s: %w", r.N, r.Session, err)
 	}
 	return tx.Commit()
@@ -411,4 +412,21 @@ func (s *Store) RenameRunStep(ctx context.Context, session domain.FeatureID, n i
 		return fmt.Errorf("run %d's step %s: %w", n, path, ErrNotFound)
 	}
 	return nil
+}
+
+// DeleteRun removes a run and its steps. A run whose command gate said
+// there was nothing to do leaves no row (DESIGN §26.3).
+func (s *Store) DeleteRun(ctx context.Context, session domain.FeatureID, n int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_steps WHERE session_id=? AND run_n=?`, string(session), n); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_runs WHERE session_id=? AND n=?`, string(session), n); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

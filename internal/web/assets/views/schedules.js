@@ -75,8 +75,28 @@ function when (iso) {
   return `in ${Math.round(hEl / 24)}d`
 }
 
+// kindWords is a row's kind and what it acts on
+function kindWords (sc) {
+  if (sc.kind === 'heartbeat') return `heartbeat → ${sc.target}`
+  if (sc.kind === 'run') return `run · ${cardName(sc.target)}${sc.spec ? ` · S${sc.spec}` : ''}`
+  return sc.repo ? `mint · ${sc.repo}` : 'mint'
+}
+
+// recipeBlock is what a run schedule's frozen recipe does: the steps, each
+// command verbatim and each repository it dispatches into, so the person
+// who enables it has read what they allow
+function recipeBlock (sc) {
+  const r = sc.recipe
+  if (!r) return null
+  if (r.error) return h('p', { class: 'sch-detail warn', testid: `schedule-${sc.id}-recipe` }, `its recipe does not parse: ${r.error}`)
+  return h('div', { class: 'sch-recipe', testid: `schedule-${sc.id}-recipe` },
+    h('div', { class: 'sch-meta' }, `steps: ${(r.steps || []).join(' → ')}`),
+    ...(r.commands || []).map(c => h('div', { class: 'sch-meta' }, ['runs ', h('code', {}, c)])),
+    ...(r.repos || []).map(d => h('div', { class: 'sch-meta' }, `dispatches into ${d}`)))
+}
+
 function statusClass (status) {
-  if (status === 'ok') return 't-ok'
+  if (status === 'ok' || status === 'no-change') return 't-ok'
   if (status === 'skipped-busy' || status === 'paused-exhausted' || status === 'disabled-target-closed') return 't-warn'
   if (status) return 't-err'
   return 'mute'
@@ -85,6 +105,7 @@ function statusClass (status) {
 // STATUS is a fire outcome in words: the server's slugs are for code
 const STATUS = {
   ok: 'fired',
+  'no-change': 'checked, nothing to do',
   'skipped-busy': 'skipped, session busy',
   'paused-exhausted': 'paused, envelope spent',
   'disabled-target-closed': 'off, session closed',
@@ -94,7 +115,7 @@ function statusWords (status) { return STATUS[status] || String(status).replace(
 
 function fireText (fire) {
   if (fire.status === 'ok') {
-    return fire.kind === 'mint' ? `minted ${fire.card}` : 'sent its turn'
+    return fire.kind === 'mint' ? `minted ${fire.card}` : fire.kind === 'run' ? (fire.detail || 'started its run') : 'sent its turn'
   }
   if (fire.status === 'skipped-busy') return 'skipped — the session is mid-turn'
   return `${statusWords(fire.status)}${fire.detail ? ' — ' + fire.detail : ''}`
@@ -221,7 +242,7 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
   const row = h('div', { class: 'sch-row', testid: `schedule-${sc.id}`, data: { enabled: String(!!sc.enabled) } },
     h('div', { class: 'sch-head' },
       h('b', { class: 'sch-name' }, sc.name),
-      h('span', { class: 'sch-kind' }, sc.kind === 'heartbeat' ? `heartbeat → ${sc.target}` : (sc.repo ? `mint · ${sc.repo}` : 'mint')),
+      h('span', { class: 'sch-kind' }, kindWords(sc)),
       h('span', { class: ['sch-toggle', sc.enabled ? 'on' : 'off'], testid: `schedule-${sc.id}-state` }, sc.enabled ? 'on' : 'off'),
       h('span', { class: 'grow' }),
       next, status),
@@ -232,6 +253,7 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
       sc.lastCard ? h('span', { class: 'sch-meta' }, `last card ${sc.lastCard}`) : null,
       sc.orphanCard ? h('span', { class: 'sch-meta warn', testid: `schedule-${sc.id}-orphan` }, `retrying ${cardName(sc.orphanCard)}`) : null),
     sc.lastDetail ? h('p', { class: 'sch-detail' }, sc.lastDetail) : null,
+    recipeBlock(sc),
     h('div', { class: 'sch-actions' },
       h('button', {
         class: 'btn', type: 'button', testid: `schedule-${sc.id}-toggle`, disabled: v.busy,
@@ -241,7 +263,7 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
           draw()
         }
       }, sc.enabled ? 'Turn off' : 'Turn on'),
-      h('button', {
+      sc.kind === 'run' ? null : h('button', {
         class: 'btn', type: 'button', testid: `schedule-${sc.id}-edit`, disabled: v.busy,
         onclick: () => openForm(sc)
       }, 'Edit'),
@@ -280,7 +302,9 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
           ? `Fire ${sc.name || sc.id} now, once?`
           : `Delete ${sc.name || sc.id}?`,
       detail: what === 'enable'
-        ? 'It fires on its cadence from now, spending its card\'s envelope.'
+        ? (sc.kind === 'run'
+            ? 'It starts a run on its agent on its cadence from now. Enabling allows every run it starts, with the commands and repositories listed above, spending the agent\'s envelope.'
+            : 'It fires on its cadence from now, spending its card\'s envelope.')
         : what === 'run'
           ? 'It fires once right now, even though the schedule is off. A mint starts a card with its envelope; a heartbeat sends the turn into the session.'
           : 'The row goes; the cards it minted stay on the board.',

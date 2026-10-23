@@ -367,6 +367,14 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			extra = append(extra, own...)
 			tools = append(tools, own...)
 			hints = append(hints, sessionSpecHint, sessionWorkflowHintFor(ag))
+			// an agent's watch (DESIGN §26): the schedule it proposes and
+			// the sessions it dispatched
+			if f.Home {
+				watch := agentTools()
+				extra = append(extra, watch...)
+				tools = append(tools, watch...)
+				hints = append(hints, agentWatchHint)
+			}
 		}
 		path, teardown, merr := e.startMCPEndpoint(ctx, f, extra...)
 		if merr != nil {
