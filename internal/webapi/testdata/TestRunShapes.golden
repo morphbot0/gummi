@@ -102,6 +102,15 @@
         ],
         "step": "build/2/implement"
       },
+      "baseline": {
+        "items": [
+          {
+            "item": "DW-1",
+            "verdict": "unmet",
+            "line": "DW-1 fails before the run"
+          }
+        ]
+      },
       "files": [
         "internal/state/migrate_turns.go"
       ],
@@ -109,7 +118,9 @@
         {
           "item": "DW-1",
           "verdict": "met",
-          "checked": true
+          "checked": true,
+          "before": "unmet",
+          "change": "failed → passed"
         },
         {
           "item": "DW-2",
@@ -337,6 +348,21 @@
           "cmd": "go test ./internal/engine -run TestMigrateV40"
         }
       ],
+      "baseline": {
+        "items": [
+          {
+            "item": "DW-1",
+            "verdict": "unmet",
+            "line": "DW-1 fails before the run"
+          },
+          {
+            "item": "DW-3",
+            "verdict": "unjudged",
+            "line": "DW-3 ran no tests",
+            "problem": true
+          }
+        ]
+      },
       "poolLeft": 1620,
       "bounded": true,
       "dirty": true,

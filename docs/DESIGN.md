@@ -6748,6 +6748,8 @@ call returns at once, saying the run is proposed.
   - `Check`'s warnings;
   - the spec and the revision it will freeze;
   - every done-when check command the run will execute;
+  - the run's **baseline**, each checked item as it stands before the
+    run (below), or that the checks are still running;
   - what is left in the session's pool, which the run spends from —
     nothing is estimated;
   - whether the tree holds uncommitted work.
@@ -6763,6 +6765,27 @@ call returns at once, saying the run is proposed.
 - A run allowed while another is open waits as **queued**. It starts
   when the open run ends. Its spec revision is frozen when it starts,
   not when it was allowed.
+- **The baseline.** A check that already passes before a run, or a `go
+  test -run` that matches no test, proves nothing about what the run did,
+  and its end result alone cannot tell. So gummi runs the spec's done-when
+  checks as the run's baseline: in the background when the run is
+  proposed (`workflow_run` still returns at once), and again before the
+  first step starts — allowed, always allowed or dequeued — when the tree
+  or the frozen revision has moved since. It records each checked item's
+  result (passes, fails, or ran no tests by `verify.RanNoTests`; an item
+  judged by a step has none) and the tree snapshot it ran at.
+  - An item that **already passes** or **ran no tests** is named on the
+    proposal ("DW-2 already passes before the run", "DW-3 ran no tests"),
+    and the session agent is told which and why in a turn under the
+    workflow's actor, so it can rewrite the check, withdraw the proposal
+    and propose again, or carry on.
+  - The report and the ended block read each checked item before and
+    after: "DW-1 failed → passed", "DW-2 passed → passed (already passed
+    before the run)".
+  - It is evidence, never a gate (decision 28): no proposal is refused
+    and no run is paused over what it finds. The first step waits only
+    for the checks to have run; checks that cannot run at all leave the
+    run without a baseline.
 
 ### 25.6 The tree and its snapshots
 
@@ -6889,8 +6912,14 @@ The block holds:
 - **A footer**: the files the run has changed so far, uncommitted, and
   **Revert run…**.
 
+While the run is proposed or queued, or open before its first step, the
+block carries its **baseline** (§25.5) under its head: "running the
+done-when checks before the run…", then a line per checked item, one
+that proves nothing marked amber. The proposal's card says the same.
+
 An ended run folds to:
-- its result per done-when item;
+- its result per done-when item, a checked one with its baseline before
+  it ("DW-1 failed → passed");
 - the files it left changed;
 - the commits steps made, if any;
 - Revert run;
@@ -7111,6 +7140,17 @@ The build follows §25, with these differences.
   and shows no package or test that ran. Such an item keeps the spec
   from `met`, and a run that would have been done ends partial: "a
   done-when check ran no tests".
+- **A run's baseline is evidence, never a gate** (§25.5). It is kept on
+  the run (`workflow_runs.baseline`: the tree, the revision, each checked
+  item's result, and the items the session was told of, so a baseline run
+  again tells it only what is new). One taken at the proposal stands for
+  the first step while the tree and the revision have not moved; else the
+  checks run again in the tree the first step starts on, once — a tree
+  that moves meanwhile does not send them round again. A checked item's
+  end result carries its baseline (`ItemResult.Before`), which the report
+  and both faces read as before → after. A proposal whose baseline was
+  running when gummi stopped runs it again on the next tick. The driver's
+  NDJSON is unchanged.
 
 **Running.**
 - **The live strip has two moods its design did not draw**: the run's

@@ -170,12 +170,16 @@ A run's block, among the session's turns (§25.9, `workflow.js`): `run-<n>`
 `run-spent`, `run-elapsed`, `run-reason` and the acts
 `run-pause`, `run-resume`, `run-stop`; `run-strip` with one `run-strip-<id>`
 per top-level entry of the recipe; `run-pending` (the run waits on the pinned
-decision); `run-rows` with one `run-row-<key>` per step or folded iteration
+decision); `run-baseline` (while it is proposed or queued, or open before its
+first step: the done-when checks run before the run — `baseline-running`
+while they run, else one `baseline-<DW-n>` per checked item, `data-verdict`,
+amber when it proves nothing); `run-rows` with one `run-row-<key>` per step or folded iteration
 (`data-card`, `data-state`; `sel` when open beside the thread), its
 `run-row-line`, `run-row-flag` (a reading step that changed files) and
 `run-open`; a step's question `run-question` under its row,
 with `run-question-option-<i>` (the recommended first), `run-question-reply`
-and `run-question-send`; an ended run's `run-results` (`run-result-<DW-n>`),
+and `run-question-send`; an ended run's `run-results` (`run-result-<DW-n>`, with
+`run-result-change` saying it before and after: `failed → passed`),
 `run-steps` (its rows, folded), `run-commits`, `run-report`; and `run-files`
 with `run-revert`, which opens `revert-dialog` (`revert-paths`, `revert-note`,
 `revert-cancel`, `revert-confirm`).
@@ -206,7 +210,8 @@ carries its question in the panel as `run-question`, as under its row.
 A run's proposal on its pinned decision (§25.5): `run-proposal` with
 `proposal-tree` (the tree it runs in, and whether it holds uncommitted work),
 `proposal-spec`, `proposal-step-<id>`, `proposal-checks`, `proposal-warnings`,
-`proposal-money`; under its answers, `decision-feedback` and
+`proposal-money`, `proposal-baseline` (the checks run in the tree before the
+run, as `run-baseline` has them); under its answers, `decision-feedback` and
 `decision-feedback-send`.
 
 Memory: `memory`, `memory-src` (where the files live), `memory-global`,

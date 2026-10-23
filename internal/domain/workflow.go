@@ -285,6 +285,50 @@ type ItemResult struct {
 	Checked bool
 	Verdict ItemVerdict
 	Detail  string
+	// Before is how the item's check found the tree before the run's first
+	// step (the run's baseline, RunBaseline), set on a checked item at the
+	// run's end; empty when there was no baseline for it.
+	Before ItemVerdict `json:"Before,omitempty"`
+}
+
+// RunBaseline is the frozen spec's done-when checks run before a run's
+// first step (DESIGN §25.5): a check that already passes, or that runs no
+// tests, proves nothing about the run, and its baseline says so. Evidence
+// for the session and the person, never a gate: nothing waits on what it
+// finds.
+type RunBaseline struct {
+	// Tree is the snapshot of the session's tree the checks ran at, and
+	// SpecRev the spec's revision whose items they were.
+	Tree    string `json:"tree,omitempty"`
+	SpecRev int    `json:"spec_rev,omitempty"`
+	// Results holds each checked item's result; an item judged by a step
+	// has none.
+	Results []ItemResult `json:"results,omitempty"`
+	// Running marks a baseline under way. Started marks one taken once the
+	// run had started, in the tree its first step starts on.
+	Running bool      `json:"running,omitempty"`
+	Started bool      `json:"started,omitempty"`
+	At      time.Time `json:"at,omitzero"`
+	// Err says why the checks could not be run; the run goes on without.
+	Err string `json:"err,omitempty"`
+	// Told lists the items the session was told prove nothing, so a
+	// baseline run again tells it only what is new.
+	Told []string `json:"told,omitempty"`
+}
+
+// Problems lists the baseline's results that prove nothing about the run:
+// a check that already passes, or one that ran no tests.
+func (b *RunBaseline) Problems() []ItemResult {
+	if b == nil {
+		return nil
+	}
+	var out []ItemResult
+	for _, r := range b.Results {
+		if r.Verdict == ItemMet || r.Verdict == ItemUnjudged {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Run is one execution of a workflow on a session.
@@ -321,6 +365,9 @@ type Run struct {
 	// commits nothing, so these are a step's or the session's own.
 	Commits []string
 	Results []ItemResult
+	// Baseline is the done-when checks run before the run's first step, nil
+	// until one has been asked for (§25.5).
+	Baseline *RunBaseline
 	// Until holds each repeat iteration's stop condition as the engine
 	// judged it, keyed by the iteration's path (build/2).
 	Until map[string]UntilJudgement

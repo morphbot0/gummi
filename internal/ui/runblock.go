@@ -317,9 +317,30 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 		add(s.Subtle.Render(r.Reason))
 	}
 	ended := r.State == string(domain.RunDone) || r.State == string(domain.RunPartial) || r.State == string(domain.RunStopped)
+	baseline := func() {
+		b := r.Baseline
+		switch {
+		case b == nil:
+		case b.Running:
+			add(s.Faint.Render("baseline · " + threadfold.BaselineWords))
+		case b.Err != "":
+			add(s.Faint.Render("baseline not run · " + b.Err))
+		default:
+			var parts []string
+			for _, it := range b.Items {
+				if it.Problem {
+					parts = append(parts, s.Warning.Render("⚠ "+it.Line))
+					continue
+				}
+				parts = append(parts, s.Faint.Render(it.Line))
+			}
+			add(s.Subtle.Render("baseline · ") + strings.Join(parts, s.Faint.Render(" · ")))
+		}
+	}
 	switch r.State {
 	case string(domain.RunProposed):
 		add(s.Warning.Render("waits on your answer below"))
+		baseline()
 		return lines
 	case string(domain.RunDenied):
 		lines[len(lines)-1] = strings.Replace(lines[len(lines)-1], "│", "└", 1)
@@ -328,6 +349,7 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 	if len(r.Strip) > 0 {
 		add(runStrip(s, r.Strip, spin))
 	}
+	baseline()
 	if p := r.Pending; p != nil {
 		add(s.Warning.Render("waits on you · ") + s.Base.Render(firstLine(p.Question)) + s.Faint.Render(" — answer it below the thread"))
 	}
@@ -338,11 +360,24 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 	}
 	if ended {
 		if len(r.Results) > 0 {
+			// one line for the lot; a line each once they say before → after
 			var res []string
+			changes := false
 			for _, x := range r.Results {
-				res = append(res, verdictStyle(s, x.Verdict).Render(verdictMark(x.Verdict)+" "+x.Item))
+				l := verdictStyle(s, x.Verdict).Render(verdictMark(x.Verdict) + " " + x.Item)
+				if x.Change != "" {
+					l += s.Faint.Render(" " + x.Change)
+					changes = true
+				}
+				res = append(res, l)
 			}
-			add(strings.Join(res, "  "))
+			if changes {
+				for _, l := range res {
+					add(l)
+				}
+			} else {
+				add(strings.Join(res, "  "))
+			}
 		}
 		if unfolded {
 			rows()

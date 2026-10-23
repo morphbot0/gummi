@@ -90,6 +90,10 @@ type Run struct {
 	// loop at its max, the budget). The decision itself is the
 	// session's pinned decision; the block only says one is pending.
 	Pending *RunPending `json:"pending,omitempty"`
+	// Baseline is the done-when checks run before the run's first step
+	// (§25.5), drawn while the run is proposed or queued, or open with no
+	// step yet; nil otherwise, and for a spec with no checks.
+	Baseline *RunBaseline `json:"baseline,omitempty"`
 	// Files are the paths the run has changed so far, uncommitted, or
 	// those an ended run left changed.
 	Files []string `json:"files,omitempty"`
@@ -196,6 +200,43 @@ type RunResult struct {
 	Verdict string `json:"verdict"`
 	Checked bool   `json:"checked,omitempty"`
 	Detail  string `json:"detail,omitempty"`
+	// Before is a checked item's verdict in the run's baseline, and Change
+	// its result before and after in words ("failed → passed").
+	Before string `json:"before,omitempty"`
+	Change string `json:"change,omitempty"`
+}
+
+// RunBaseline is the run's baseline as its block draws it: still running,
+// or each checked item before the run, those that prove nothing marked.
+type RunBaseline struct {
+	Running bool           `json:"running,omitempty"`
+	Err     string         `json:"err,omitempty"`
+	Items   []BaselineItem `json:"items,omitempty"`
+}
+
+// BaselineItem is one checked item's baseline: "DW-2 already passes
+// before the run" (a Problem), "DW-1 fails before the run".
+type BaselineItem struct {
+	Item    string `json:"item"`
+	Verdict string `json:"verdict"`
+	Line    string `json:"line"`
+	Problem bool   `json:"problem,omitempty"`
+}
+
+// BaselineWords is what a baseline still running says.
+const BaselineWords = "running the done-when checks before the run…"
+
+// foldBaseline is the run's baseline as its block draws it.
+func foldBaseline(b *domain.RunBaseline) *RunBaseline {
+	p := engine.ProposalBaselineOf(b)
+	if p == nil {
+		return nil
+	}
+	out := &RunBaseline{Running: p.Running, Err: Sanitize(firstLineOf(p.Err))}
+	for _, it := range p.Items {
+		out.Items = append(out.Items, BaselineItem{Item: it.Item, Verdict: string(it.Verdict), Line: it.Line, Problem: it.Problem})
+	}
+	return out
 }
 
 // runItems folds the session's runs into their items, the newest last.
@@ -282,9 +323,16 @@ func FoldRun(in RunInput) Run {
 			}
 		}
 	}
+	switch {
+	case run.State == domain.RunProposed, run.State == domain.RunQueued, run.State.Open() && len(r.Rows) == 0:
+		r.Baseline = foldBaseline(run.Baseline)
+	}
 	if run.State.Ended() {
 		for _, res := range run.Results {
-			r.Results = append(r.Results, RunResult{Item: res.Item, Verdict: string(res.Verdict), Checked: res.Checked, Detail: Sanitize(firstLineOf(res.Detail))})
+			r.Results = append(r.Results, RunResult{
+				Item: res.Item, Verdict: string(res.Verdict), Checked: res.Checked, Detail: Sanitize(firstLineOf(res.Detail)),
+				Before: string(res.Before), Change: engine.ResultChange(res),
+			})
 		}
 		for _, c := range run.Commits {
 			r.Commits = append(r.Commits, Sanitize(c))

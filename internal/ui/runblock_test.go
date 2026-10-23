@@ -148,6 +148,29 @@ func TestRunBlockGolden(t *testing.T) {
 	draw("proposed", runBlockLines(s, proposed, "", false, true, "", "", 110))
 	draw("narrow", runBlockLines(s, running, "", false, true, "14m", "", 60))
 	draw("two reviews at work side by side", runBlockLines(s, threadfold.FoldRun(tuiReviewsRun()), "", false, true, "16m", "⠹", 110))
+	// a proposal's baseline (§25.5): still running, then each checked item
+	// before the run, one that proves nothing marked
+	checking := threadfold.FoldRun(threadfold.RunInput{Run: domain.Run{
+		Session: "FF-001", N: 4, Recipe: domain.Recipe{Name: "one"}, Spec: 2, State: domain.RunProposed, CreatedAt: tuiRunAt,
+		Baseline: &domain.RunBaseline{Running: true},
+	}})
+	draw("proposed, its baseline running", runBlockLines(s, checking, "", false, true, "", "", 110))
+	checked := threadfold.FoldRun(threadfold.RunInput{Run: domain.Run{
+		Session: "FF-001", N: 4, Recipe: domain.Recipe{Name: "one"}, Spec: 2, State: domain.RunProposed, CreatedAt: tuiRunAt,
+		Baseline: &domain.RunBaseline{Tree: "aaaa", Results: []domain.ItemResult{
+			{Item: "DW-1", Checked: true, Verdict: domain.ItemUnmet},
+			{Item: "DW-2", Checked: true, Verdict: domain.ItemMet},
+			{Item: "DW-3", Checked: true, Verdict: domain.ItemUnjudged},
+		}},
+	}})
+	draw("proposed, its baseline found two items that prove nothing", runBlockLines(s, checked, "", false, true, "", "", 110))
+	before := tuiEndedRun()
+	before.Run.Results = []domain.ItemResult{
+		{Item: "DW-1", Verdict: domain.ItemMet, Checked: true, Before: domain.ItemUnmet},
+		{Item: "DW-2", Verdict: domain.ItemMet, Checked: true, Before: domain.ItemMet},
+		{Item: "DW-3", Verdict: domain.ItemUnjudged},
+	}
+	draw("ended, before and after", runBlockLines(s, threadfold.FoldRun(before), "", false, true, "1h12m", "", 110))
 	golden.RequireEqual(t, []byte(b.String()))
 }
 

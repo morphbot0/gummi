@@ -447,6 +447,11 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	if err := st.UpdateRun(ctx, run); err != nil {
 		return nil, err
 	}
+	// the run's baseline: the spec's checks in the tree as it is, while the
+	// proposal waits on the person; the call returns at once
+	if _, err := e.askBaselineLocked(ctx, run); err != nil {
+		return nil, err
+	}
 	e.runNote(session, fmt.Sprintf("run %d (%s) proposed on spec %d", run.N, recipeLabel(run), n))
 	e.send(Event{Feature: session, Stage: domain.StageOpen, Kind: EventQuestion})
 	e.workflowEvent(session)
@@ -1156,6 +1161,7 @@ func (e *Engine) WorkflowTick(ctx context.Context) (WorkflowTickResult, error) {
 	}
 	seen := map[domain.FeatureID]bool{}
 	for _, r := range runs {
+		e.rebaseline(ctx, r)
 		if seen[r.Session] {
 			continue
 		}
@@ -1269,6 +1275,19 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 			}
 		}
 		return acts, nil
+	}
+	// the first step starts on a baseline taken in the tree the run starts
+	// in: one taken at the proposal stands while the tree and the spec have
+	// not moved since, else the checks run again first (§25.5). What it
+	// finds holds nothing up.
+	if run.State == domain.RunRunning && !run.Stopping && len(steps) == 0 && !baselineCurrent(run) {
+		done, err := e.askBaselineLocked(ctx, run)
+		if err != nil {
+			return acts, err
+		}
+		if !done {
+			return append(acts, "baseline"), nil
+		}
 	}
 	if e.raisePlanDecision(run, steps) {
 		acts = append(acts, "plan")
@@ -1642,7 +1661,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 			last = s.Output
 		}
 	}
-	results := itemResults(items, doneWhenChecks(ctx, dir, items), last)
+	results := withBaseline(itemResults(items, doneWhenChecks(ctx, dir, items), last), run.Baseline)
 	pass := checkedPass(results)
 	switch {
 	case end == domain.RunDone && !pass && vacuous(results):
@@ -1710,6 +1729,9 @@ func runReport(run *domain.Run, end domain.RunState, why string, items []domain.
 				how = "unjudged"
 			}
 			fmt.Fprintf(&b, "%s %s %s (%s)", verdictMark(r.Verdict), r.Item, says[r.Item], how)
+			if ch := ResultChange(r); ch != "" {
+				b.WriteString(": " + ch)
+			}
 			if r.Detail != "" && r.Verdict != domain.ItemMet {
 				b.WriteString(": " + firstLine(r.Detail))
 			}

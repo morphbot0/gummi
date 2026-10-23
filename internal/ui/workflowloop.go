@@ -25,6 +25,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -241,6 +242,23 @@ func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
 		out = append(out, fit(s.Subtle.Render("checks it will run in the tree")))
 		for _, c := range p.Checks {
 			out = append(out, fit("  "+s.Muted.Render(c.Item)+" "+s.Base.Render(sanitize(c.Cmd))))
+		}
+	}
+	if b := p.Baseline; b != nil {
+		switch {
+		case b.Running:
+			out = append(out, fit(s.Subtle.Render("baseline ")+s.Faint.Render(threadfold.BaselineWords)))
+		case b.Err != "":
+			out = append(out, fit(s.Subtle.Render("baseline ")+s.Faint.Render("not run: "+sanitize(firstLine(b.Err)))))
+		default:
+			out = append(out, fit(s.Subtle.Render("baseline, before the run")))
+			for _, it := range b.Items {
+				if it.Problem {
+					out = append(out, fit("  "+s.Warning.Render("⚠ "+it.Line+" — it proves nothing about the run")))
+					continue
+				}
+				out = append(out, fit("  "+s.Faint.Render(it.Line)))
+			}
 		}
 	}
 	return out

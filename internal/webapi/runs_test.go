@@ -31,7 +31,11 @@ func TestRunShapes(t *testing.T) {
 		Files:    []string{"internal/state/migrate_turns.go"},
 		CanPause: true,
 		CanStop:  true,
-		Results:  []RunResult{{Item: "DW-1", Verdict: "met", Checked: true}, {Item: "DW-2", Verdict: "unmet", Detail: "no v40 test"}},
+		Results: []RunResult{
+			{Item: "DW-1", Verdict: "met", Checked: true, Before: "unmet", Change: "failed → passed"},
+			{Item: "DW-2", Verdict: "unmet", Detail: "no v40 test"},
+		},
+		Baseline: &RunBaseline{Items: []RunBaselineItem{{Item: "DW-1", Verdict: "unmet", Line: "DW-1 fails before the run"}}},
 		Commits:  []string{"9f8e7d6 feat(state): keep the turns"},
 		Report:   true, CanRevert: true,
 		Live: &RunLive{
@@ -84,6 +88,10 @@ func TestRunShapes(t *testing.T) {
 				},
 				Warnings: []string{"parallel reviews holds more than one writing role"},
 				Checks:   []ProposalCheck{{Item: "DW-1", Says: "a v40 session resumes", Cmd: "go test ./internal/engine -run TestMigrateV40"}},
+				Baseline: &RunBaseline{Items: []RunBaselineItem{
+					{Item: "DW-1", Verdict: "unmet", Line: "DW-1 fails before the run"},
+					{Item: "DW-3", Verdict: "unjudged", Line: "DW-3 ran no tests", Problem: true},
+				}},
 				PoolLeft: 1620, Bounded: true, Dirty: true, Branch: "ff/persist-turns",
 			},
 		},

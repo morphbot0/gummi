@@ -152,6 +152,15 @@ reads as `{{run.diff}}`, each step's output and the run's report. It sits
 in the workspace, not the session's tree, so none of it shows in the
 session's diff.
 
+A run's **baseline** needs no setting. When a run is proposed, gummi runs
+its spec's done-when check commands in the session's tree as it is, and
+again before the first step if the tree or the spec has moved since. A
+check that already passes, or a `go test -run` that matches no test, is
+named on the proposal and told to the session; the run's report then
+reads each checked item before and after (`DW-1 failed → passed`). The
+checks run as they do at the run's end, so a slow check makes the first
+step wait for it; nothing is refused or paused over what they find.
+
 ## `.gummi/config.yaml`
 
 Scaffolded on first run. Every key is optional.

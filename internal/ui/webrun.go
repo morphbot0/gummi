@@ -126,7 +126,27 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 		}
 	}
 	for _, res := range r.Results {
-		out.Results = append(out.Results, webapi.RunResult{Item: res.Item, Verdict: res.Verdict, Checked: res.Checked, Detail: res.Detail})
+		out.Results = append(out.Results, webapi.RunResult{
+			Item: res.Item, Verdict: res.Verdict, Checked: res.Checked, Detail: res.Detail, Before: res.Before, Change: res.Change,
+		})
+	}
+	if b := r.Baseline; b != nil {
+		out.Baseline = &webapi.RunBaseline{Running: b.Running, Err: b.Err}
+		for _, it := range b.Items {
+			out.Baseline.Items = append(out.Baseline.Items, webapi.RunBaselineItem{Item: it.Item, Verdict: it.Verdict, Line: it.Line, Problem: it.Problem})
+		}
+	}
+	return out
+}
+
+// webBaseline maps a proposal's baseline onto the wire, nil for none.
+func webBaseline(b *engine.ProposalBaseline) *webapi.RunBaseline {
+	if b == nil {
+		return nil
+	}
+	out := &webapi.RunBaseline{Running: b.Running, Err: threadfold.Sanitize(b.Err)}
+	for _, it := range b.Items {
+		out.Items = append(out.Items, webapi.RunBaselineItem{Item: it.Item, Verdict: string(it.Verdict), Line: it.Line, Problem: it.Problem})
 	}
 	return out
 }
@@ -457,6 +477,7 @@ func (m *Shell) webProposal(ctx context.Context, f domain.Feature) *webapi.RunPr
 		Run: p.Run, Kind: string(p.Kind), Recipe: threadfold.Sanitize(p.Recipe), Description: threadfold.Sanitize(p.Description),
 		Spec: p.Spec, SpecTitle: threadfold.Sanitize(p.SpecTitle), SpecRev: p.SpecRev, Steps: []webapi.ProposalStep{},
 		Warnings: p.Warnings, PoolLeft: p.PoolLeft, Bounded: p.Bounded, Dirty: p.Dirty, Branch: p.Branch,
+		Baseline: webBaseline(p.Baseline),
 	}
 	for _, s := range p.Steps {
 		out.Steps = append(out.Steps, webapi.ProposalStep{

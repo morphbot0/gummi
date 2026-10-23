@@ -46,6 +46,45 @@ type WorkflowProposal struct {
 	Dirty bool
 	// Branch is the session's branch: the tree the run works in.
 	Branch string
+	// Baseline is the proposal's done-when checks run in the tree as it is
+	// (§25.5), nil for a revised plan or a spec with no checks.
+	Baseline *ProposalBaseline
+}
+
+// ProposalBaseline is a proposal's baseline: still running, or each
+// checked item's result before the run. Evidence for the person, never a
+// gate.
+type ProposalBaseline struct {
+	Running bool
+	// Err says why the checks could not be run.
+	Err   string
+	Items []BaselineItem
+}
+
+// BaselineItem is one checked item's baseline: its verdict, the words the
+// faces say it in (BaselineLine), and whether it proves nothing about the
+// run (BaselineProblem).
+type BaselineItem struct {
+	Item    string
+	Verdict domain.ItemVerdict
+	Line    string
+	Problem bool
+}
+
+// ProposalBaselineOf is a run's baseline as its proposal shows it, nil
+// when it has none, or one that ran no check.
+func ProposalBaselineOf(b *domain.RunBaseline) *ProposalBaseline {
+	if b == nil || !b.Running && b.Err == "" && len(b.Results) == 0 {
+		return nil
+	}
+	out := &ProposalBaseline{Running: b.Running, Err: b.Err}
+	if b.Running {
+		return out
+	}
+	for _, r := range b.Results {
+		out.Items = append(out.Items, BaselineItem{Item: r.Item, Verdict: r.Verdict, Line: BaselineLine(r), Problem: BaselineProblem(r)})
+	}
+	return out
 }
 
 // ProposalStep is one entry of a proposal's step tree.
@@ -124,6 +163,9 @@ func (e *Engine) WorkflowProposal(ctx context.Context, session domain.FeatureID,
 				}
 			}
 		}
+	}
+	if d.Kind == domain.RunDecideProposal {
+		p.Baseline = ProposalBaselineOf(run.Baseline)
 	}
 	p.PoolLeft, p.Bounded = e.sessionPoolLeft(ctx, sess)
 	if mgr, err := e.mgr(ctx, &sess); err == nil {

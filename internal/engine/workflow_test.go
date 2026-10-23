@@ -1656,7 +1656,7 @@ func TestACheckThatRanNoTestsIsUnjudged(t *testing.T) {
 	if r.State != domain.RunPartial || domain.ResultsMet(r.Results) || r.Reason != "a done-when check ran no tests" {
 		t.Fatalf("ended %s (%s), results %+v", r.State, r.Reason, r.Results)
 	}
-	if !strings.Contains(r.Report, "– DW-1 out.txt exists (check): the check ran no tests") {
+	if !strings.Contains(r.Report, "– DW-1 out.txt exists (check): ran no tests → ran no tests (ran no tests before the run): the check ran no tests") {
 		t.Fatalf("the report:\n%s", r.Report)
 	}
 	if specs, _ := e.cfg.Store.SessionSpecs(ctx, f.ID); specs[0].State == domain.SpecMet {

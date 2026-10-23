@@ -26,15 +26,15 @@ var ErrRunQueued = errors.New("a run is already queued behind the open one")
 const runCols = `session_id, n, recipe_name, recipe_yaml, recipe, inputs, spec_n, spec_rev, state,
 	spent, start_tree, end_tree, results, report, reason,
 	stopping, out_of_budget, steers, pending, feedback, revision,
-	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max, commits`
+	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max, commits, baseline`
 
 func scanRun(r rowScanner) (domain.Run, error) {
 	var run domain.Run
-	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated, until, onMax, commits string
+	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated, until, onMax, commits, baseline string
 	err := r.Scan(&session, &run.N, &run.RecipeName, &run.RecipeYAML, &recipe, &inputs, &run.Spec, &run.SpecRev, &st,
 		&run.Spent, &run.StartTree, &run.EndTree, &results, &run.Report, &run.Reason,
 		&run.Stopping, &run.OutOfBudget, &steers, &pending, &run.Feedback, &run.Revision,
-		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax, &commits)
+		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax, &commits, &baseline)
 	if err != nil {
 		return run, err
 	}
@@ -47,6 +47,12 @@ func scanRun(r rowScanner) (domain.Run, error) {
 			continue
 		}
 		if err := json.Unmarshal([]byte(j.raw), j.v); err != nil {
+			return run, fmt.Errorf("run %s/%d: %w", session, run.N, err)
+		}
+	}
+	if baseline != "" {
+		run.Baseline = &domain.RunBaseline{}
+		if err := json.Unmarshal([]byte(baseline), run.Baseline); err != nil {
 			return run, fmt.Errorf("run %s/%d: %w", session, run.N, err)
 		}
 	}
@@ -64,9 +70,10 @@ func scanRun(r rowScanner) (domain.Run, error) {
 }
 
 // runJSON is a run's JSON columns: recipe, inputs, results, steers,
-// pending, until, onMax and commits, in that order.
-func runJSON(r *domain.Run) ([8]string, error) {
-	var out [8]string
+// pending, until, onMax, commits and baseline, in that order. Pending and
+// baseline are empty when the run has none.
+func runJSON(r *domain.Run) ([9]string, error) {
+	var out [9]string
 	for i, v := range []any{r.Recipe, r.Inputs, r.Results, r.Steers, nil, r.Until, r.OnMax, r.Commits} {
 		if i == 4 {
 			continue
@@ -83,6 +90,13 @@ func runJSON(r *domain.Run) ([8]string, error) {
 			return out, err
 		}
 		out[4] = string(b)
+	}
+	if r.Baseline != nil {
+		b, err := json.Marshal(r.Baseline)
+		if err != nil {
+			return out, err
+		}
+		out[8] = string(b)
 	}
 	return out, nil
 }
@@ -111,12 +125,12 @@ func (s *Store) CreateRun(ctx context.Context, r *domain.Run) error {
 		r.N = int(last.Int64) + 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_runs (`+runCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(r.Session), r.N, r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State),
 		r.Spent, r.StartTree, r.EndTree, j[2], r.Report, r.Reason,
 		r.Stopping, r.OutOfBudget, j[3], j[4], r.Feedback, r.Revision,
 		r.CreatedAt.UTC().Format(timeFmt), formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), r.UpdatedAt.UTC().Format(timeFmt),
-		r.StartHead, j[5], j[6], j[7]); err != nil {
+		r.StartHead, j[5], j[6], j[7], j[8]); err != nil {
 		return fmt.Errorf("creating run %d on %s: %w", r.N, r.Session, err)
 	}
 	return tx.Commit()
@@ -140,12 +154,12 @@ func (s *Store) updateRun(ctx context.Context, db execer, r *domain.Run) error {
 	res, err := db.ExecContext(ctx, `UPDATE workflow_runs SET recipe_name=?, recipe_yaml=?, recipe=?, inputs=?,
 		spec_n=?, spec_rev=?, state=?, spent=?, start_tree=?, end_tree=?,
 		results=?, report=?, reason=?, stopping=?, out_of_budget=?, steers=?, pending=?, feedback=?,
-		revision=?, started_at=?, ended_at=?, updated_at=?, start_head=?, until_results=?, on_max=?, commits=?
+		revision=?, started_at=?, ended_at=?, updated_at=?, start_head=?, until_results=?, on_max=?, commits=?, baseline=?
 		WHERE session_id=? AND n=?`,
 		r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State), r.Spent,
 		r.StartTree, r.EndTree, j[2], r.Report, r.Reason, r.Stopping, r.OutOfBudget,
 		j[3], j[4], r.Feedback, rev, formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), updated.Format(timeFmt),
-		r.StartHead, j[5], j[6], j[7], string(r.Session), r.N)
+		r.StartHead, j[5], j[6], j[7], j[8], string(r.Session), r.N)
 	if err != nil {
 		return err
 	}

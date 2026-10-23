@@ -41,6 +41,9 @@ type RunBlock struct {
 	Rows []RunStepRow `json:"rows"`
 	// Pending says the run waits on a decision: the session's pinned one.
 	Pending *RunPending `json:"pending,omitempty"`
+	// Baseline is the done-when checks run before the run's first step,
+	// while it is proposed or queued, or open with no step yet.
+	Baseline *RunBaseline `json:"baseline,omitempty"`
 	// Files are what the run has changed so far, uncommitted (or what an
 	// ended run left changed).
 	Files []string `json:"files,omitempty"`
@@ -159,12 +162,36 @@ type RunPending struct {
 }
 
 // RunResult is one done-when item at the run's end: met, unmet or
-// unjudged, Checked when its check command decided it.
+// unjudged, Checked when its check command decided it. Before is a
+// checked item's verdict in the run's baseline, and Change its result
+// before and after in words ("failed → passed").
 type RunResult struct {
 	Item    string `json:"item"`
 	Verdict string `json:"verdict"`
 	Checked bool   `json:"checked,omitempty"`
 	Detail  string `json:"detail,omitempty"`
+	Before  string `json:"before,omitempty"`
+	Change  string `json:"change,omitempty"`
+}
+
+// RunBaseline is a run's done-when checks run before its first step
+// (DESIGN §25.5): still Running, or each checked item's result before the
+// run. Evidence for the person, never a gate.
+type RunBaseline struct {
+	Running bool `json:"running,omitempty"`
+	// Err says why the checks could not be run.
+	Err   string            `json:"err,omitempty"`
+	Items []RunBaselineItem `json:"items,omitempty"`
+}
+
+// RunBaselineItem is one checked item's baseline: its verdict, the line
+// that says it ("DW-2 already passes before the run"), and Problem when it
+// proves nothing about the run.
+type RunBaselineItem struct {
+	Item    string `json:"item"`
+	Verdict string `json:"verdict"`
+	Line    string `json:"line"`
+	Problem bool   `json:"problem,omitempty"`
 }
 
 // StepFace is GET /api/cards/{id}/steps/{card}: a step opened beside the
@@ -305,6 +332,8 @@ type RunProposal struct {
 	Warnings []string       `json:"warnings,omitempty"`
 	// Checks are the done-when check commands the run will execute.
 	Checks []ProposalCheck `json:"checks,omitempty"`
+	// Baseline is those checks run in the tree as it is, before the run.
+	Baseline *RunBaseline `json:"baseline,omitempty"`
 	// PoolLeft is what the session has left, when Bounded by an envelope:
 	// the run spends from it, and estimates nothing.
 	PoolLeft float64 `json:"poolLeft,omitempty"`

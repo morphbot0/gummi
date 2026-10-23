@@ -73,6 +73,9 @@ test.describe('a board served with --terminal', () => {
     await expect(proposal.getByTestId('proposal-step-make')).toContainText('implementer');
     await expect(proposal.getByTestId('proposal-step-read')).toContainText('reviewer');
     await expect(proposal.getByTestId('proposal-checks')).toContainText('test -f made.txt');
+    // its baseline: the check run in the tree before the run, failing as a
+    // done-when check should (a check that already passed would say so)
+    await expect(proposal.getByTestId('baseline-DW-1')).toHaveText('DW-1 fails before the run', { timeout: 30_000 });
     await expect(proposal.getByTestId('proposal-money')).toContainText('left in the session; the run spends from it');
     await expect(proposal).not.toContainText('~$');
     await expect(page.getByTestId('decision-feedback')).toBeVisible();

@@ -33,6 +33,9 @@ func TestTheProposalInThePicker(t *testing.T) {
 			{ID: "validate", Kind: "step", Role: domain.RoleTester, Tier: "standard"},
 		},
 		Checks: []engine.ProposalCheck{{Item: "DW-1", Cmd: "go test ./internal/engine -run TestMigrate"}},
+		Baseline: &engine.ProposalBaseline{Items: []engine.BaselineItem{
+			{Item: "DW-1", Verdict: domain.ItemUnjudged, Line: "DW-1 ran no tests", Problem: true},
+		}},
 	}
 	m.rows = append(m.rows, r)
 	m.sel, m.cardOpen = len(m.rows)-1, true
@@ -42,6 +45,7 @@ func TestTheProposalInThePicker(t *testing.T) {
 		"design, build until approved, validate", "freezes revision 2 when it starts",
 		"$16.20 left in the session; the run spends from it", "the tree holds uncommitted work",
 		"build ↺ ≤3", "implementer", "go test ./internal/engine -run TestMigrate",
+		"baseline, before the run", "⚠ DW-1 ran no tests — it proves nothing about the run",
 		"1. Allow", "2. Always allow", "3. Deny", "4. Feedback",
 	} {
 		if !strings.Contains(got, want) {
@@ -58,5 +62,8 @@ func TestTheProposalInThePicker(t *testing.T) {
 	od := m.webOpenDecision(r)
 	if od == nil || len(od.api.Options) != 4 || od.api.Options[3].Label != "Feedback" || !od.api.Options[3].Chat {
 		t.Fatalf("the web's proposal decision: %+v", od)
+	}
+	if p := webBaseline(r.Proposal.Baseline); p == nil || len(p.Items) != 1 || p.Items[0].Line != "DW-1 ran no tests" || !p.Items[0].Problem {
+		t.Fatalf("the web's proposal baseline: %+v", p)
 	}
 }

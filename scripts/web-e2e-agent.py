@@ -92,7 +92,8 @@ for an implementer or tester, every file a `test -f` check of the spec looks
 for; a reviewer writes {"verdict": "APPROVED"} into review.json where its
 task names it, answers MET: for every done-when item where it is asked to
 validate, and APPROVED otherwise; a scout reports; a planner keeps the plan.
-The session acknowledges the run's report without touching its tree. A
+The session acknowledges the run's report, and its baseline (a check that
+proves nothing), without touching its tree. A
 [workflow] turn that also says [step-asks] marks its spec so, and the run's
 implementer asks its person with ask_user (keep made.txt plain, or add a
 header) before it writes, naming the answer in its output; an answer
@@ -674,6 +675,11 @@ def freeform_turn(turn, text):
         return
     if STEP:
         step_followup(turn, text)
+        return
+    if re.match(r"Workflow run \d+'s baseline", text):
+        # a run's baseline found a check that proves nothing; hearing it
+        # changes nothing in the session's tree
+        turn.say("Noted the baseline; the spec's checks stand for now.")
         return
     if re.match(r"Workflow run \d+ has reported", text):
         # the run's report reaches the session as a turn; reading it

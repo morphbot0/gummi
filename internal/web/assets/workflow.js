@@ -125,7 +125,8 @@ export function runBlock (it) {
     testid: `run-${r.n}`,
     data: { run: String(r.n), state: r.state, rev: r.rev },
     'aria-label': `${r.recipe} run ${r.n}, ${STATE_WORD[r.state] || r.state}`
-  }, head(id, r), r.state === 'proposed' || r.state === 'denied' ? null : body(id, r, ended))
+  }, head(id, r), r.state === 'proposed' ? baselineEl(r.baseline, 'run-baseline') : null,
+  r.state === 'proposed' || r.state === 'denied' ? null : body(id, r, ended))
   return block
 }
 
@@ -160,8 +161,25 @@ function head (id, r) {
     r.reason && r.state !== 'done' ? h('span', { class: 'rb-why', testid: 'run-reason' }, r.reason) : null)
 }
 
+// baselineEl is a run's baseline (§25.5): the done-when checks run before
+// its first step, each checked item as it found it; one that already
+// passes, or ran no tests, proves nothing about the run and says so.
+// Evidence for the person: nothing waits on it.
+function baselineEl (b, testid) {
+  if (!b) return null
+  const k = h('span', { class: 'k' }, 'baseline')
+  if (b.running) return h('div', { class: 'rb-base', testid, data: { running: 'yes' } }, k, ' ', h('span', { class: 'hint', testid: 'baseline-running' }, 'running the done-when checks before the run…'))
+  if (b.err) return h('div', { class: 'rb-base', testid }, k, ' ', h('span', { class: 'hint' }, `not run: ${b.err}`))
+  return h('div', { class: 'rb-base', testid }, k,
+    (b.items || []).map(it => h('span', {
+      class: ['rb-bi', it.problem ? 'warnc' : 'hint'], testid: `baseline-${it.item}`, data: { verdict: it.verdict },
+      title: it.problem ? 'it proves nothing about the run' : null
+    }, it.problem ? `! ${it.line}` : it.line)))
+}
+
 function body (id, r, ended) {
   const parts = [strip(r)]
+  if (r.baseline) parts.push(baselineEl(r.baseline, 'run-baseline'))
   if (r.pending) {
     parts.push(h('div', { class: 'rb-pending', testid: 'run-pending' },
       h('b', null, 'Waits on you'), ' · ', r.pending.question.split('\n')[0],
@@ -252,7 +270,8 @@ function results (r) {
   const word = { met: '✓', unmet: '✕', unjudged: '–' }
   return h('div', { class: 'rb-results', testid: 'run-results' }, r.results.map(x => h('span', {
     class: ['rb-res', `v-${x.verdict}`], testid: `run-result-${x.item}`, title: [x.checked ? 'its check' : 'judged', x.detail].filter(Boolean).join(': ')
-  }, h('span', { 'aria-label': x.verdict }, word[x.verdict] || '·'), ` ${x.item}`)))
+  }, h('span', { 'aria-label': x.verdict }, word[x.verdict] || '·'), ` ${x.item}`,
+  x.change ? h('small', { class: 'hint', testid: 'run-result-change' }, ` ${x.change}`) : null)))
 }
 
 function foot (id, r, ended) {
@@ -536,6 +555,7 @@ export function proposalEl (p) {
       : s.kind === 'parallel' ? `side by side, join ${s.join}` : [s.tier, s.prompt].filter(Boolean).join(' · '))))),
     p.checks?.length ? h('div', { class: 'wfp-checks', testid: 'proposal-checks' }, h('span', { class: 'k' }, 'runs in the tree when it ends'),
       p.checks.map(c => h('div', null, h('b', { class: 'mono' }, c.item), ' ', h('span', { class: 'mono' }, c.cmd)))) : null,
+    baselineEl(p.baseline, 'proposal-baseline'),
     h('div', { class: 'wfp-ticks' },
       p.warnings?.length
         ? h('div', { class: 'warnc', testid: 'proposal-warnings' }, p.warnings.map(w => h('div', null, `! ${w}`)))
