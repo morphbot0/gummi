@@ -173,22 +173,34 @@ thread's settled items (§25.9, `workflow.js`): `run-<n>`
 (`data-state`, `data-rev`; `data-folded="yes"` while an ended run is folded
 to one line: `run-line`, which unfolds it, with `run-line-text`), its
 `run-head` with `run-title`, `run-state`,
-`run-spent`, `run-elapsed`, `run-reason` and the acts
-`run-pause`, `run-resume`, `run-stop`, and on an ended run `run-fold` (▾,
-folds it to its line); `run-strip` with one `run-strip-<id>`
+`run-spent`, `run-elapsed` (the time it worked, pauses left out),
+`run-reason`, `run-phase` (what gummi does between its steps),
+`run-always` with `run-askagain` (on the newest run of a session whose runs
+are always allowed) and the acts `run-pause`, `run-resume`, `run-stop` and
+`run-withdraw` (a queued run), each of the last two opening
+`run-<act>-dialog` (`run-<act>-cancel`, `run-<act>-confirm`), and on an
+ended run `run-fold` (▾, folds it to its line); `run-strip` with one `run-strip-<id>`
 per top-level entry of the recipe; `run-pending` (the run waits on the pinned
 decision); `run-baseline` (while it is proposed or queued, or open before its
 first step: the done-when checks run before the run — `baseline-running`
 while they run, else one `baseline-<DW-n>` per checked item, `data-verdict`,
 amber when it proves nothing); `run-rows` with one `run-row-<key>` per step or folded iteration
 (`data-card`, `data-state`; `sel` when open beside the thread), its
-`run-row-line`, `run-row-flag` (a reading step that changed files) and
-`run-open`; a step's question `run-question` under its row,
-with `run-question-option-<i>` (the recommended first), `run-question-reply`
-and `run-question-send`; an ended run's `run-results` (`run-result-<DW-n>`, with
-`run-result-change` saying it before and after: `failed → passed`),
+`run-row-line`, `run-row-flag` (a reading step that changed files),
+`run-row-took` (how long an ended step took) and `run-open`
+(`data-state="paused"` on a step stopped where it was while its run is
+paused); a step's question `run-question` under its row,
+with `run-question-option-<i>` (the recommended first) — or, on one that
+takes several answers, `run-question-pick-<i>` checkboxes and
+`run-question-send-picked` — `run-question-reply` and `run-question-send`;
+`run-artifacts` with one `run-artifact-<name>` per artifact the recipe
+declares, which opens `artifact-dialog` (`artifact-text`, `artifact-close`)
+once written; an ended run's `run-results` (`run-result-<DW-n>`, with
+`run-result-change` saying it before and after: `failed before the run, now passes`),
 `run-steps` (its rows, folded), `run-commits`, `run-report`; and `run-files`
-with `run-revert`, which opens `revert-dialog` (`revert-paths`, `revert-note`,
+with `run-diff`, which opens `run-diff-dialog` (`run-diff-body` with
+`step-diff-file`s, `run-diff-close`), `run-retry` (Retry failed steps, on
+the newest run that ended partial or stopped), `run-revert`, which opens `revert-dialog` (`revert-paths`, `revert-note`,
 `revert-cancel`, `revert-confirm`), and, on a run whose recipe the session
 wrote inline, `run-save` (Save as recipe…, from the proposal on), which opens
 `save-dialog` (`save-name`, `save-error`, `save-cancel`, `save-confirm`), or
@@ -203,14 +215,16 @@ at work and its action, a step's question, or what a paused strip says),
 block, which flashes), `run-live-open` (the step at work; with several,
 `Open… ▾` opens `run-live-pick` with one `run-live-pick-<id>` each),
 `run-live-answer` (opens the asking step on its question),
-`run-live-topup` and `run-live-resume`. At the top of the thread,
+`run-live-topup` (opens `topup-dialog`: `topup-amount` in dollars,
+`topup-error`, `topup-cancel`, `topup-confirm`) and `run-live-resume`. At the top of the thread,
 `run-above` says the open run's block is scrolled out of view above, and
 jumps to it.
 
 A step opened beside the thread (§25.10): the `tab-step` surface holds
 `step-panel` with `step-head` (`step-crumb`, whose first entry `step-close`
 goes back to the session, `step-title`, `step-live` or `step-state`,
-`step-spent`), the tabs `step-tab-transcript`, `step-tab-diff`,
+`step-spent`), `step-revert` (Revert to before this step…, which opens
+`revert-dialog` for the step), the tabs `step-tab-transcript`, `step-tab-diff`,
 `step-tab-brief` (a step has no terminal tab: its tree is the session's),
 their bodies `step-transcript` (`step-transcript-empty`), `step-diff`
 (`step-diff-file`, `step-diff-none`), `step-brief` (`step-artifacts`), and
@@ -219,7 +233,8 @@ carries its question in the panel as `run-question`, as under its row.
 
 A run's proposal on its pinned decision (§25.5): `run-proposal` with
 `proposal-tree` (the tree it runs in, and whether it holds uncommitted work),
-`proposal-spec`, `proposal-step-<id>`, `proposal-checks`, `proposal-warnings`,
+`proposal-spec`, `proposal-step-<id>`, on a revised plan `proposal-replaces`
+with one `proposal-replaced-<id>` per step it drops, `proposal-checks`, `proposal-warnings`,
 `proposal-money`, `proposal-baseline` (the checks run in the tree before the
 run, as `run-baseline` has them); under its answers, `decision-feedback` and
 `decision-feedback-send`.

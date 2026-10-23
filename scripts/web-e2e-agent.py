@@ -95,7 +95,8 @@ task names it, answers MET: for every done-when item where it is asked to
 validate, and APPROVED otherwise; a scout reports; a planner keeps the plan.
 The session acknowledges the run's report, and its baseline (a check that
 proves nothing), without touching its tree. A
-[workflow] turn that also says [step-asks] marks its spec so, and the run's
+[workflow] turn that also says [step-asks] marks its spec so (or
+[step-asks-multi], whose question takes several answers), and the run's
 implementer asks its person with ask_user (keep made.txt plain, or add a
 header) before it writes, naming the answer in its output; an answer
 that reaches a fresh process (the one that asked has ended) is the step's
@@ -105,7 +106,9 @@ message to a step after it ended is answered "Noted: <its first line>". A
 of the run runs one shell call, then works quietly GUMMI_E2E_STEP_SECONDS
 before it answers (an implementer that asks, again after the answer; a
 step a person talks to after it ended, before it says "Noted"), so steps
-are seen running with nothing streaming. A
+are seen running with nothing streaming. A [workflow] turn that says
+[step-fails-once] marks its spec so too: the run's first implementer ends
+FAILED, and every later one (a person's retry) works. A
 message opening with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
@@ -819,6 +822,10 @@ def workflow_session(turn, text):
     n = re.search(r"\bspec (\d+)\b", started)
     spec = int(n.group(1)) if n else 1
     asks = " [step-asks]" if "[step-asks]" in text else ""
+    if "[step-asks-multi]" in text:
+        asks = " [step-asks] [step-asks-multi]"
+    if "[step-fails-once]" in text:
+        asks += " [step-fails-once]"
     if "[step-slow]" in text:
         asks += " [step-slow]"
     for section, body in (("Problem", "made.txt is missing.%s\n" % asks),
@@ -903,8 +910,21 @@ def workflow_step(turn, brief, answer=""):
             "question": "Keep made.txt plain, or give it a header?",
             "options": [{"label": "Keep it plain (recommended)", "detail": "one line per step"},
                         {"label": "Give it a header"}],
+            **({"multi_select": True} if "[step-asks-multi]" in task else {}),
         }).strip()
         work()
+    if role == "implementer" and "[step-fails-once]" in task:
+        # the first implementer of the run fails, every later one (a
+        # retry) works: the mark is kept in the checkout's git directory,
+        # out of the tree and its diff, across the step's processes
+        git_dir = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], cwd=wd,
+                                 capture_output=True, text=True).stdout.strip()
+        mark = os.path.join(git_dir, "e2e-step-failed-once")
+        if git_dir and not os.path.exists(mark):
+            with open(mark, "w", encoding="utf-8") as fh:
+                fh.write("failed once\n")
+            turn.say("Tried, and the tool it needs was missing.\nFAILED: the first try fails")
+            return
     if role in ("implementer", "tester"):
         files = re.findall(r"check:\s*\"?test -f (\S+?)\"?\s*$", task, re.M) or ["WORKFLOW.md"]
         for f in files:

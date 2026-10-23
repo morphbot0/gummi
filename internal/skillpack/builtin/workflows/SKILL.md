@@ -32,8 +32,9 @@ recipe.
 
 ## Write the spec first
 
-A run is judged against the spec revision it freezes. Before
-`workflow_run`:
+A run is judged against the spec revision it freezes when you propose
+it: finish the spec first, since an edit after the proposal reaches the
+run only as a note. Before `workflow_run`:
 
 1. `spec_start`, then fill Problem, Approach, Done when and Limits with
    `spec_replace_section`. Steps read only the spec, the artifacts and
@@ -105,7 +106,10 @@ than starting blank.
   a narrowed scope. It is not a restart.
 - `workflow_stop` when the run is going the wrong way or the person
   asks. Stopping reverts nothing; the person can Revert run.
-- A step's `ask_user` goes to the person, not to you.
+- A step's `ask_user` goes to the person, not to you. So does the run's
+  own question (a loop at its max, the budget, a run parked when gummi
+  stopped): when the person talks it over with you, do not answer it for
+  them — only they do.
 - **Money:** there is no estimate. The run spends from the session's
   budget and, when that is spent, pauses until the person tops it up.
   Do not promise what a run will cost.
