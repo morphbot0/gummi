@@ -250,7 +250,8 @@ function renderSpec (pane, entry, ctx) {
     }, 'Sections ', h('span', { 'aria-hidden': 'true' }, '▾')))
   }
   if (s.session) {
-    doc.querySelector('.src').after(sessionBar(s, ctx), specRunsEl(s))
+    // a spec with no runs has no runs row: after() would write a null as text
+    doc.querySelector('.src').after(...[sessionBar(s, ctx), specRunsEl(s)].filter(Boolean))
     doc.append(revisionsEl(s))
   }
   pane.append(h('div', { class: 'spec', testid: 'spec' }, doc))

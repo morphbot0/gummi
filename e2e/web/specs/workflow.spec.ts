@@ -299,6 +299,9 @@ test('a spec’s Propose a run asks the session for a run on it', async ({ paire
   await showTab(page, 'spec');
   await page.getByTestId('spec-start-session').click();
   await expect(page.getByTestId('specs-item-1')).toBeVisible();
+  // a spec with no runs yet draws no runs row, and no stray text for one
+  await expect(page.getByTestId('spec-runs')).toHaveCount(0);
+  await expect(page.getByTestId('spec-doc')).not.toContainText('null');
   await page.getByTestId('spec-propose-run').click();
   await expect(page.getByText('Asked the session to propose a run on spec 1')).toBeVisible();
   await backToThread(page);
