@@ -250,6 +250,18 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 			confirmLabel: "Stop",
 			onConfirm:    func() tea.Cmd { return m.runAct(r, n, "stop") },
 		})
+	case "s":
+		switch {
+		case run.SavedAs != "":
+			m.notice = noticeMsg{text: fmt.Sprintf("run %d's recipe is saved already, as %s", run.N, run.SavedAs)}
+			return nil
+		case !run.CanSave:
+			m.notice = noticeMsg{text: fmt.Sprintf("run %d ran a recipe that is kept already: only a recipe written inline is saved", run.N)}
+			return nil
+		}
+		n := run.N
+		m.Overlay.Push(newRecipeNameDialog(n, run.SaveName, func(name string) tea.Cmd { return m.saveRecipe(r, n, name) }))
+		return nil
 	case "v":
 		if !run.CanRevert {
 			m.notice = noticeMsg{text: fmt.Sprintf("run %d has nothing to revert now: it changed nothing, or a step is still running", run.N)}
@@ -310,6 +322,7 @@ func (m *Shell) runBindings() []binding {
 		{key: "p", label: "pause/resume", help: "pause the open run (its steps' backends stop), or resume a paused one", bar: true},
 		{key: "x", label: "stop", help: "stop the run: its steps are interrupted, nothing is reverted", bar: true},
 		{key: "v", label: "revert", help: "put back every path the run changed, to how it was when the run started — a confirm lists them first", bar: true},
+		{key: "s", label: "save recipe", help: "save the run's inline recipe as a workspace recipe (.gummi/workflows/<name>.yaml), named in a prompt; a run of a kept recipe has nothing to save"},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread"},
 		m.threadOutputsBinding(),
 		{key: "esc", label: "composer", help: "back to the composer (also alt+w)", bar: true},
@@ -325,7 +338,7 @@ func (m *Shell) runKeyBindings(r featureRow) []binding {
 	case open:
 		bs = append(bs, binding{key: "alt+w", label: "jump to run", help: "jump to the open run's block, the cursor on its active step: enter opens it, esc comes back; pause, stop or revert a run from there"})
 	case len(m.wf.byCard[r.F.ID]) > 0:
-		bs = append(bs, binding{key: "alt+w", label: "runs", help: "step into the workflow runs' blocks: open a step, pause, stop or revert a run"})
+		bs = append(bs, binding{key: "alt+w", label: "runs", help: "step into the workflow runs' blocks: open a step, pause, stop, revert a run or save its recipe"})
 	}
 	return bs
 }
@@ -343,6 +356,27 @@ func (m *Shell) runAct(r featureRow, n int, act string) tea.Cmd {
 		}
 		return tea.BatchMsg{
 			func() tea.Msg { return noticeMsg{text: fmt.Sprintf("run %d: %s", n, actWord(act))} },
+			func() tea.Msg { return runsReloadMsg{id: id} },
+		}
+	}
+}
+
+// saveRecipe saves run n's inline recipe as the workspace recipe name.
+func (m *Shell) saveRecipe(r featureRow, n int, name string) tea.Cmd {
+	d, err := m.webDocsFor(r)
+	if err != nil {
+		return errNoticeCmd(err.Error())
+	}
+	id := r.F.ID
+	return func() tea.Msg {
+		done, err := d.SaveRecipe(context.Background(), n, name)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return tea.BatchMsg{
+			func() tea.Msg {
+				return noticeMsg{text: fmt.Sprintf("run %d's recipe saved as %s (%s)", n, done.Name, done.Path)}
+			},
 			func() tea.Msg { return runsReloadMsg{id: id} },
 		}
 	}

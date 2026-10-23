@@ -58,6 +58,12 @@ type RunBlock struct {
 	CanResume bool `json:"canResume,omitempty"`
 	CanStop   bool `json:"canStop,omitempty"`
 	CanRevert bool `json:"canRevert,omitempty"`
+	// CanSave offers Save as recipe… for a run whose recipe was written
+	// inline (POST …/runs/{n}/save), SaveName the name it suggests; SavedAs
+	// is the workspace recipe it was saved as, offered no more after.
+	CanSave  bool   `json:"canSave,omitempty"`
+	SaveName string `json:"saveName,omitempty"`
+	SavedAs  string `json:"savedAs,omitempty"`
 	// Live is the open run's live strip, drawn above the composer while
 	// the run is running or paused; absent otherwise.
 	Live *RunLive `json:"live,omitempty"`
@@ -308,6 +314,22 @@ type RevertPreview struct {
 // revert, naming the preview's Tree.
 type RevertRequest struct {
 	Tree string `json:"tree"`
+}
+
+// SaveRecipeRequest is POST /api/cards/{id}/runs/{n}/save: a person
+// saving the run's inline recipe as the workspace recipe Name
+// (.gummi/workflows/<name>.yaml). Answers SaveRecipeDone; a name taken by
+// a workspace or bundled recipe is refused.
+type SaveRecipeRequest struct {
+	Name string `json:"name"`
+}
+
+// SaveRecipeDone is a saved recipe: its name and its file, relative to
+// the workspace.
+type SaveRecipeDone struct {
+	Run  int    `json:"run"`
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // RevertDone is a confirmed revert: the paths put back.

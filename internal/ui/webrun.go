@@ -92,6 +92,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 		Started: r.Started, Ended: r.Ended, Strip: []webapi.RunStripEntry{}, Rows: []webapi.RunStepRow{},
 		Files: r.Files, Commits: r.Commits, Report: r.Report,
 		CanPause: r.CanPause, CanResume: r.CanResume, CanStop: r.CanStop, CanRevert: r.CanRevert,
+		CanSave: r.CanSave, SaveName: r.SaveName, SavedAs: r.SavedAs,
 	}
 	var strip func(e threadfold.StripEntry) webapi.RunStripEntry
 	strip = func(e threadfold.StripEntry) webapi.RunStripEntry {
@@ -450,6 +451,26 @@ func (d *WebDocs) Revert(ctx context.Context, n int, tree string) (webapi.Revert
 		return webapi.RevertDone{}, engineRefusal(err)
 	}
 	return webapi.RevertDone{Run: n, Paths: nonNil(paths)}, nil
+}
+
+// SaveRecipe is POST /api/cards/{id}/runs/{n}/save: the person saving
+// run n's inline recipe as the workspace recipe name. It is a person's
+// act: no agent's tool reaches it.
+func (d *WebDocs) SaveRecipe(ctx context.Context, n int, name string) (webapi.SaveRecipeDone, error) {
+	if !isRunSession(d.f) {
+		return webapi.SaveRecipeDone{}, ErrNoCard
+	}
+	if d.eng == nil {
+		return webapi.SaveRecipeDone{}, ErrDetached
+	}
+	if strings.TrimSpace(name) == "" {
+		return webapi.SaveRecipeDone{}, invalid("a recipe needs a name")
+	}
+	path, err := d.eng.WorkflowSaveRecipe(ctx, d.f.ID, n, name)
+	if err != nil {
+		return webapi.SaveRecipeDone{}, engineRefusal(err)
+	}
+	return webapi.SaveRecipeDone{Run: n, Name: strings.TrimSpace(name), Path: d.rel(path)}, nil
 }
 
 func nonNil(s []string) []string {

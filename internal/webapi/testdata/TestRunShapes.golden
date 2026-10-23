@@ -135,6 +135,8 @@
       "canPause": true,
       "canStop": true,
       "canRevert": true,
+      "canSave": true,
+      "saveName": "deliver-lite",
       "live": {
         "name": "deliver · run 2",
         "mood": "asking",
@@ -264,6 +266,14 @@
       "a.go",
       "b.go"
     ]
+  },
+  "save": {
+    "name": "deliver-lite"
+  },
+  "saved": {
+    "run": 2,
+    "name": "deliver-lite",
+    "path": ".gummi/workflows/deliver-lite.yaml"
   },
   "decision": {
     "ref": "ask:run:FF-12:2:1",

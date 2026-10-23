@@ -14,7 +14,8 @@ package ui
 // its active step, and steps into the blocks: ↑↓ walk a run's head and
 // its step rows, enter opens a step (stepview.go) or unfolds an ended
 // run's steps, p pauses or resumes the run, x stops it and v reverts it,
-// behind a confirm that lists every path it puts back.
+// behind a confirm that lists every path it puts back, and s saves a
+// recipe the session wrote inline as a workspace recipe.
 
 import (
 	"context"
@@ -341,6 +342,9 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 	case string(domain.RunProposed):
 		add(s.Warning.Render("waits on your answer below"))
 		baseline()
+		if r.SavedAs != "" {
+			add(s.Faint.Render("its recipe saved as ") + s.Subtle.Render(r.SavedAs))
+		}
 		return lines
 	case string(domain.RunDenied):
 		lines[len(lines)-1] = strings.Replace(lines[len(lines)-1], "│", "└", 1)
@@ -421,6 +425,12 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 	tail := []string{}
 	if r.Report {
 		tail = append(tail, s.Faint.Render(fmt.Sprintf("report in spec %d", r.Spec)))
+	}
+	switch {
+	case r.SavedAs != "":
+		tail = append(tail, s.Faint.Render("saved as ")+s.Subtle.Render(r.SavedAs))
+	case r.CanSave && sel == "head":
+		tail = append(tail, s.KeyHint.Render("s")+s.Faint.Render(" saves its recipe"))
 	}
 	if hint {
 		tail = append(tail, s.KeyHint.Render("alt+w")+s.Faint.Render(" steps in"))

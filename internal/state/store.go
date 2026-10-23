@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 	on_max         TEXT NOT NULL DEFAULT '{}',
 	commits        TEXT NOT NULL DEFAULT 'null',
 	baseline       TEXT NOT NULL DEFAULT '',
+	saved_as       TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, n)
 );
 CREATE TABLE IF NOT EXISTS workflow_steps (
@@ -1017,6 +1018,9 @@ var migrations = []string{
 	// A workflow run's baseline: the done-when checks run before its first
 	// step (DESIGN §25.5). Empty is no baseline, as on every run from before.
 	`ALTER TABLE workflow_runs ADD COLUMN baseline TEXT NOT NULL DEFAULT ''`,
+	// The workspace recipe a person saved a run's inline recipe as (DESIGN
+	// §25.9). Empty is a run whose recipe nobody saved.
+	`ALTER TABLE workflow_runs ADD COLUMN saved_as TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.

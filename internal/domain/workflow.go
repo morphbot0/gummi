@@ -368,6 +368,9 @@ type Run struct {
 	// Baseline is the done-when checks run before the run's first step, nil
 	// until one has been asked for (§25.5).
 	Baseline *RunBaseline
+	// SavedAs is the workspace recipe a person saved this run's inline
+	// recipe as (.gummi/workflows/<SavedAs>.yaml), empty until one does.
+	SavedAs string
 	// Until holds each repeat iteration's stop condition as the engine
 	// judged it, keyed by the iteration's path (build/2).
 	Until map[string]UntilJudgement

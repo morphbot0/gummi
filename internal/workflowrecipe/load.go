@@ -49,12 +49,35 @@ func WorkflowsDir(workspaceDir string) string {
 	return filepath.Join(workspaceDir, ".gummi", "workflows")
 }
 
+// CheckName refuses, with a sentence, a name no recipe file may have.
+func CheckName(name string) error {
+	if !nameRe.MatchString(name) {
+		return fmt.Errorf("%q is not a recipe name: letters, digits, - and _, starting with a letter or a digit", name)
+	}
+	return nil
+}
+
+// Taken says where a recipe called name already is — the workspace's own
+// (a file there, whether it parses or not) or gummi's bundled one — and
+// reports false when none is.
+func Taken(name, workspaceDir string) (Source, bool) {
+	if workspaceDir != "" {
+		if _, err := os.Stat(filepath.Join(WorkflowsDir(workspaceDir), name+".yaml")); err == nil {
+			return SourceWorkspace, true
+		}
+	}
+	if _, err := bundled.ReadFile("bundled/" + name + ".yaml"); err == nil {
+		return SourceBundled, true
+	}
+	return "", false
+}
+
 // Load finds the recipe called name: the workspace's own
 // (.gummi/workflows/<name>.yaml under workspaceDir) first, then gummi's
 // bundled one, so a workspace may override a bundled recipe by name.
 func Load(name, workspaceDir string) (Found, error) {
-	if !nameRe.MatchString(name) {
-		return Found{}, fmt.Errorf("%q is not a recipe name", name)
+	if err := CheckName(name); err != nil {
+		return Found{}, err
 	}
 	if workspaceDir != "" {
 		data, err := os.ReadFile(filepath.Join(WorkflowsDir(workspaceDir), name+".yaml")) // #nosec G304 -- name is checked against nameRe

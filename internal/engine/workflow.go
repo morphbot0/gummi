@@ -431,6 +431,11 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		return nil, err
 	}
 	_, _ = e.writeRunFile(session, run.N, "recipe.yaml", text)
+	if name == "" {
+		// an inline recipe as the session gave it, which a person may save
+		// (WorkflowSaveRecipe); recipe.yaml follows a revised plan
+		_, _ = e.writeRunFile(session, run.N, proposedRecipeFile, text)
+	}
 	if always, _ := st.WorkflowAlwaysAllow(ctx, session); always {
 		if err := e.allowRunLocked(ctx, run, "the person always allows this session's runs"); err != nil {
 			return nil, err

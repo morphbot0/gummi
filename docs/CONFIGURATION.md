@@ -144,7 +144,11 @@ A workflow recipe (DESIGN §25.4) is a YAML file. gummi reads
 (`deliver`, `investigate` and `fix-until-green`), so a workspace file of
 the same name overrides a bundled one. A session agent may also hand a
 recipe over inline. `.gummi/workflows/` is never created for you; make it
-when you keep a recipe of your own.
+when you keep a recipe of your own, or save one: a run whose recipe the
+session wrote inline offers **Save as recipe…** on its block (`s` in the
+terminal), which writes it to `.gummi/workflows/<name>.yaml` under a name no
+workspace or bundled recipe has. Only a person saves one; the session agent
+cannot write there.
 
 Each run keeps a directory of its own, `.gummi/runs/<session>/<n>/`: the
 recipe as allowed, the artifacts its steps write, the diff files a step

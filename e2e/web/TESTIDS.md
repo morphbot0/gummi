@@ -182,7 +182,10 @@ and `run-question-send`; an ended run's `run-results` (`run-result-<DW-n>`, with
 `run-result-change` saying it before and after: `failed → passed`),
 `run-steps` (its rows, folded), `run-commits`, `run-report`; and `run-files`
 with `run-revert`, which opens `revert-dialog` (`revert-paths`, `revert-note`,
-`revert-cancel`, `revert-confirm`).
+`revert-cancel`, `revert-confirm`), and, on a run whose recipe the session
+wrote inline, `run-save` (Save as recipe…, from the proposal on), which opens
+`save-dialog` (`save-name`, `save-error`, `save-cancel`, `save-confirm`), or
+`run-saved` once it is saved.
 
 An open run's live strip above the composer (§25.9, `workflow.js`), in
 `run-live-slot`: `run-live` (`data-run`, `data-mood`: running, asking,

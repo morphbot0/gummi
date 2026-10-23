@@ -10,7 +10,8 @@ import (
 // A session's workflow runs (DESIGN §25): its specs, a step opened beside
 // the thread — its head and brief, its own diff, a person's message to it
 // and the answer to its question — and what a person does to a run:
-// pause, resume, stop and revert. The reads and writes are the
+// pause, resume, stop and revert, and saving a recipe the session wrote
+// inline as a workspace recipe — a person's act no agent reaches. The reads and writes are the
 // engine's, through ui.WebDocs, off the board's loop; every write tells
 // the pages the session moved.
 
@@ -23,6 +24,7 @@ func (s *Server) runRoutes() {
 	s.api("POST /api/cards/{id}/runs/{n}/{act}", s.handleRunAct)
 	s.api("GET /api/cards/{id}/runs/{n}/revert", s.handleRevertPreview)
 	s.api("POST /api/cards/{id}/runs/{n}/revert", s.handleRevert)
+	s.api("POST /api/cards/{id}/runs/{n}/save", s.handleSaveRecipe)
 }
 
 // runN reads the {n} of a run route, answering the request itself when it
@@ -175,6 +177,31 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := d.Revert(r.Context(), n, body.Tree)
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	s.changed(r.PathValue("id"))
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleSaveRecipe is POST /api/cards/{id}/runs/{n}/save: the person
+// saving the run's inline recipe as the workspace recipe the body names.
+func (s *Server) handleSaveRecipe(w http.ResponseWriter, r *http.Request) {
+	n, ok := runN(w, r)
+	if !ok {
+		return
+	}
+	var body webapi.SaveRecipeRequest
+	if err := readJSON(w, r, &body); err != nil || body.Name == "" {
+		writeError(w, http.StatusBadRequest, "expected {\"name\": …}, the name to save the recipe as")
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	out, err := d.SaveRecipe(r.Context(), n, body.Name)
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return

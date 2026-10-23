@@ -18,6 +18,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/workflowrecipe"
 )
 
 // ItemRun is a workflow run's block.
@@ -109,6 +110,12 @@ type Run struct {
 	CanResume bool `json:"canResume,omitempty"`
 	CanStop   bool `json:"canStop,omitempty"`
 	CanRevert bool `json:"canRevert,omitempty"`
+	// CanSave offers to save the run's inline recipe as a workspace recipe
+	// (a person's act), SaveName the name it suggests; SavedAs is the name
+	// it was saved as, after which it is not offered again.
+	CanSave  bool   `json:"canSave,omitempty"`
+	SaveName string `json:"saveName,omitempty"`
+	SavedAs  string `json:"savedAs,omitempty"`
 	// Live is the open run's live strip, drawn above the composer; nil
 	// for a run that is not running or paused.
 	Live *RunStrip `json:"live,omitempty"`
@@ -343,6 +350,12 @@ func FoldRun(in RunInput) Run {
 	r.CanResume = run.State == domain.RunPaused && !run.Stopping
 	r.CanStop = run.State.Open() && !run.Stopping
 	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0
+	r.SavedAs = Sanitize(run.SavedAs)
+	if r.CanSave = engine.RunSaveRefusal(run) == ""; r.CanSave {
+		if workflowrecipe.CheckName(run.Recipe.Name) == nil {
+			r.SaveName = run.Recipe.Name
+		}
+	}
 	r.Live = liveStrip(in, r, now)
 	r.Rev = runRev(r)
 	return r

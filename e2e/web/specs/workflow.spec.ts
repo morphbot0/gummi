@@ -435,3 +435,40 @@ test('the live strip says a step asks, and Answer opens it on its question', asy
   await expect(page.getByTestId('run-1')).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
   await expect(strip).toHaveCount(0);
 });
+
+// A recipe the session wrote inline is a person's to keep (DESIGN §25.9):
+// Save as recipe… on its block names it, a name a recipe already has is
+// refused in the dialog, and once saved the block says so and offers it no
+// more; the file is the workspace's own recipe, under .gummi/workflows/.
+test('a person saves an inline run’s recipe', async ({ pairedPage: page, server, api, workspace }, info) => {
+  test.setTimeout(150_000);
+  await openSession(page, server, api, 'Keep the recipe');
+  const input = page.getByTestId('composer-input');
+  await input.click();
+  await input.fill('[workflow-inline] make the workflow file');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('decision-option-0')).toContainText('Allow', { timeout: 45_000 });
+  const block = page.getByTestId('run-1');
+  // offered from the proposal on
+  await expect(block.getByTestId('run-save')).toBeVisible();
+  await page.getByTestId('decision-option-0').click();
+  await expect(block).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
+
+  await block.getByTestId('run-save').click();
+  const dialog = page.getByTestId('save-dialog');
+  const name = dialog.getByTestId('save-name');
+  await expect(name).toHaveValue('made-inline');
+  await name.fill('deliver');
+  await dialog.getByTestId('save-confirm').click();
+  await expect(dialog.getByTestId('save-error')).toContainText('bundled recipe called deliver');
+  await expect(dialog).toBeVisible();
+  await name.fill('made-inline');
+  await shot(page, info, 'workflow-save-recipe');
+  await name.press('Enter');
+  await expect(page.getByTestId('toast').filter({ hasText: 'saved as made-inline' })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await expect(block.getByTestId('run-saved')).toHaveText('saved as made-inline', { timeout: 15_000 });
+  await expect(block.getByTestId('run-save')).toHaveCount(0);
+  const file = path.join(workspace.repo, '.gummi', 'workflows', 'made-inline.yaml');
+  expect(fs.readFileSync(file, 'utf8')).toContain('name: made-inline');
+});

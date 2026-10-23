@@ -8,7 +8,8 @@
 // (a run estimates nothing) and the elapsed time, with Pause, Resume and Stop;
 // a strip draws the recipe's top-level entries; a row per step that has
 // run says what it did, with Open; a step's question is answered under
-// its row; the footer lists the files changed and offers Revert run….
+// its row; the footer lists the files changed and offers Revert run…, and
+// Save as recipe… for a recipe the session wrote inline.
 //
 // The step panel (§25.10): Open shows the step beside the thread, on the
 // surface the documents use (a phone's full screen). Its Transcript is the
@@ -126,6 +127,7 @@ export function runBlock (it) {
     data: { run: String(r.n), state: r.state, rev: r.rev },
     'aria-label': `${r.recipe} run ${r.n}, ${STATE_WORD[r.state] || r.state}`
   }, head(id, r), r.state === 'proposed' ? baselineEl(r.baseline, 'run-baseline') : null,
+  r.state === 'proposed' && (r.canSave || r.savedAs) ? h('div', { class: 'rb-foot' }, h('span', { class: 'sp' }), saveEl(id, r)) : null,
   r.state === 'proposed' || r.state === 'denied' ? null : body(id, r, ended))
   return block
 }
@@ -282,7 +284,52 @@ function foot (id, r, ended) {
       : h('span', null, ended ? 'the run left the tree as it found it' : 'nothing changed yet'),
     h('span', { class: 'sp' }),
     r.report ? h('button', { class: 'link', type: 'button', testid: 'run-report', onclick: () => openSpec(r.spec) }, 'report ▸') : null,
-    r.canRevert ? h('button', { class: 'btn', type: 'button', testid: 'run-revert', onclick: () => openRevert(id, r.n) }, 'Revert run…') : null)
+    r.canRevert ? h('button', { class: 'btn', type: 'button', testid: 'run-revert', onclick: () => openRevert(id, r.n) }, 'Revert run…') : null,
+    saveEl(id, r))
+}
+
+// saveEl is a run's recipe as a person keeps it: Save as recipe… on a run
+// whose recipe the session wrote inline, or what it was saved as.
+function saveEl (id, r) {
+  if (r.savedAs) return h('span', { class: 'hint', testid: 'run-saved' }, 'saved as ', h('b', { class: 'mono' }, r.savedAs))
+  if (!r.canSave) return null
+  return h('button', { class: 'btn', type: 'button', testid: 'run-save', onclick: () => openSave(id, r) }, 'Save as recipe…')
+}
+
+// openSave asks the name the run's recipe is saved as, under
+// .gummi/workflows/; a name a recipe already has is refused by the server.
+function openSave (id, r) {
+  const input = h('input', { type: 'text', class: 'mono', testid: 'save-name', 'aria-label': 'Recipe name', placeholder: 'recipe name', value: r.saveName || '', spellcheck: 'false' })
+  const err = h('p', { class: 'warnc', testid: 'save-error', hidden: true })
+  const save = {
+    label: 'Save',
+    primary: true,
+    testid: 'save-confirm',
+    onClick: async () => {
+      const name = input.value.trim()
+      if (!name) { input.focus(); return false }
+      try {
+        const done = await post(cardPath(id, `runs/${r.n}/save`), { name })
+        toast(`Run ${r.n}'s recipe saved as ${done.name}`)
+        ctx.refresh(id)
+      } catch (e) {
+        err.textContent = e.data?.error || e.message
+        err.hidden = false
+        return false
+      }
+    }
+  }
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save.el?.click() } })
+  openModal({
+    title: `Save run ${r.n}'s recipe`,
+    testid: 'save-dialog',
+    card: id,
+    bodyEl: h('div', { class: 'mbody' },
+      h('p', null, 'Kept as a workspace recipe, ', h('span', { class: 'mono' }, '.gummi/workflows/<name>.yaml'), ', as the session wrote it: any session may run it by name.'),
+      input, err),
+    actions: [{ label: 'Cancel', testid: 'save-cancel' }, save]
+  })
+  requestAnimationFrame(() => { input.focus(); input.select() })
 }
 
 // openSpec shows a spec on the Specs tab: a run's report is written there.

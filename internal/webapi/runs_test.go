@@ -37,7 +37,7 @@ func TestRunShapes(t *testing.T) {
 		},
 		Baseline: &RunBaseline{Items: []RunBaselineItem{{Item: "DW-1", Verdict: "unmet", Line: "DW-1 fails before the run"}}},
 		Commits:  []string{"9f8e7d6 feat(state): keep the turns"},
-		Report:   true, CanRevert: true,
+		Report:   true, CanRevert: true, CanSave: true, SaveName: "deliver-lite",
 		Live: &RunLive{
 			Name: "deliver · run 2", Mood: "asking", Who: "implement", Card: "FF-14", Question: "Resume a pruned session?",
 			Steps: []RunLiveStep{{ID: "implement", Path: "build/2/implement", Card: "FF-14", State: "asking"}},
@@ -52,6 +52,8 @@ func TestRunShapes(t *testing.T) {
 		Revert   RevertPreview     `json:"revert"`
 		Confirm  RevertRequest     `json:"confirm"`
 		Reverted RevertDone        `json:"reverted"`
+		Save     SaveRecipeRequest `json:"save"`
+		Saved    SaveRecipeDone    `json:"saved"`
 		Decision Decision          `json:"decision"`
 	}{
 		Item: Item{Key: "run:2", Seq: 41, T: ItemRun, Time: at, Stage: "open", Run: &block},
@@ -74,6 +76,8 @@ func TestRunShapes(t *testing.T) {
 		Revert:   RevertPreview{Run: 2, Paths: []string{"a.go", "b.go"}, Tree: "4b825dc", Note: "This also undoes anything the session changed in these paths since then."},
 		Confirm:  RevertRequest{Tree: "4b825dc"},
 		Reverted: RevertDone{Run: 2, Paths: []string{"a.go", "b.go"}},
+		Save:     SaveRecipeRequest{Name: "deliver-lite"},
+		Saved:    SaveRecipeDone{Run: 2, Name: "deliver-lite", Path: ".gummi/workflows/deliver-lite.yaml"},
 		Decision: Decision{
 			Ref: "ask:run:FF-12:2:1", Kind: DecisionAsk, Question: "Run the deliver workflow on spec S2?", Word: "allow run", Tone: "info", Anchor: AnchorThread,
 			Against: Against{Token: "ask:run:FF-12:2:1", Label: "workflow run 2's allow run"},

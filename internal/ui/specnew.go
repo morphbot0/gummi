@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -16,27 +17,43 @@ import (
 // behavioural difference between the two -- what enter-with-nothing-typed
 // does -- is the same in both (a no-op cancel), so there is no second rule
 // to invent here.
+//
+// The same one-line dialog names a run's recipe when a person saves it
+// (newRecipeNameDialog): its own id, head, placeholder and verb.
 type specTitleDialog struct {
 	input    textinput.Model
 	buttons  *buttonRow
 	focus    int
 	onSubmit func(title string) tea.Cmd
+	id, head string
+	verb     string
 }
 
 func newSpecTitleDialog(onSubmit func(string) tea.Cmd) *specTitleDialog {
+	return newLineDialog("spec-new", "new spec", "title for the new spec", "", "Start", onSubmit)
+}
+
+// newRecipeNameDialog asks the name a run's inline recipe is saved as,
+// filled with the one it suggests.
+func newRecipeNameDialog(n int, suggest string, onSubmit func(string) tea.Cmd) *specTitleDialog {
+	return newLineDialog("run-save", fmt.Sprintf("save run %d's recipe as", n), "recipe name: letters, digits, - and _", suggest, "Save", onSubmit)
+}
+
+func newLineDialog(id, head, placeholder, value, verb string, onSubmit func(string) tea.Cmd) *specTitleDialog {
 	in := textinput.New()
-	in.Placeholder = "title for the new spec"
+	in.Placeholder = placeholder
 	in.CharLimit = 200
 	in.SetWidth(48)
+	in.SetValue(value)
 	in.Focus()
 	return &specTitleDialog{
-		input: in, onSubmit: onSubmit,
-		buttons: newButtonRow(button{label: "Cancel"}, button{label: "Start"}),
+		input: in, onSubmit: onSubmit, id: id, head: head, verb: verb,
+		buttons: newButtonRow(button{label: "Cancel"}, button{label: verb}),
 	}
 }
 
 // ID implements overlay.Dialog.
-func (d *specTitleDialog) ID() string { return "spec-new" }
+func (d *specTitleDialog) ID() string { return d.id }
 
 // submit: an empty title is a cancel, not an error -- matching
 // commentDialog.submit and "an empty title does nothing".
@@ -103,9 +120,9 @@ func (d *specTitleDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 // View implements overlay.Dialog.
 func (d *specTitleDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("new spec") + "\n\n")
+	b.WriteString(s.DialogTitle.Render(d.head) + "\n\n")
 	b.WriteString(d.input.View() + "\n\n")
 	b.WriteString(d.buttons.View(s, d.focus == commentFieldButtons) + "\n\n")
-	b.WriteString(s.Faint.Render("enter start · tab buttons · esc cancel"))
+	b.WriteString(s.Faint.Render("enter " + strings.ToLower(d.verb) + " · tab buttons · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }

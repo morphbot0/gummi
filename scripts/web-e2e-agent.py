@@ -85,7 +85,8 @@ and one containing [tasks-done] completes its checklist.
 A session turn containing [workflow] proposes a workflow run (DESIGN §25):
 it starts a spec (spec_start), writes its Done when as two items -- one
 checked by `test -f made.txt`, one judged -- and calls workflow_run with the
-bundled deliver recipe, or the one [workflow=<name>] names. Each step is
+bundled deliver recipe, or the one [workflow=<name>] names, or (for
+[workflow-inline]) a recipe written out as recipe_yaml. Each step is
 answered by its role, read off its brief: a writing role (contractor,
 implementer, tester, scribe) writes the run's artifacts its task names and,
 for an implementer or tester, every file a `test -f` check of the spec looks
@@ -787,6 +788,27 @@ STEP_RE = re.compile(r"You are step (\S+) of workflow run (\d+) \(([^)]*)\) in g
 STEP = {}
 
 
+# the recipe a [workflow-inline] turn writes out: an implementer makes what
+# the spec's checks look for, a reviewer judges the done-when items
+INLINE_RECIPE = """name: made-inline
+description: Make what the spec asks for, then read it
+steps:
+  - id: make
+    role: implementer
+    prompt: |
+      Make what the spec below asks for.
+
+      {{spec}}
+  - id: read
+    role: reviewer
+    prompt: |
+      Read {{run.diff}} against the spec's done-when items. End with one
+      line per item: MET: DW-n or UNMET: DW-n <why>.
+
+      {{spec}}
+"""
+
+
 def workflow_session(turn, text):
     """A session turn asking for a workflow: a spec with done-when items, then workflow_run."""
     m = re.search(r"\[workflow=([\w-]+)\]", text)
@@ -803,7 +825,11 @@ def workflow_session(turn, text):
                           ("Approach", "The workflow's steps write it.\n"),
                           ("Done when", WORKFLOW_DONE_WHEN)):
         call_tool("spec_replace_section", args={"spec": spec, "section": section, "body": body})
-    result = call_tool("workflow_run", args={"recipe": recipe, "spec": spec})
+    if "[workflow-inline]" in text:
+        # a recipe written out for the work in hand, which a person may save
+        result = call_tool("workflow_run", args={"recipe_yaml": INLINE_RECIPE, "spec": spec})
+    else:
+        result = call_tool("workflow_run", args={"recipe": recipe, "spec": spec})
     turn.say("workflow_run: %s" % result.strip())
 
 

@@ -6765,6 +6765,12 @@ call returns at once, saying the run is proposed.
 - A run allowed while another is open waits as **queued**. It starts
   when the open run ends. Its spec revision is frozen when it starts,
   not when it was allowed.
+- **A recipe the session wrote inline is the person's to keep.** From a
+  proposal on, the run's block offers **Save as recipe…**: a person names
+  it, and gummi writes the recipe as the session gave it to
+  `.gummi/workflows/<name>.yaml`, where any session may then run it by
+  name. The agent cannot: `.gummi/workflows/` is outside its write cage,
+  and no session tool, MCP call or headless path saves one (§25.9).
 - **The baseline.** A check that already passes before a run, or a `go
   test -run` that matches no test, proves nothing about what the run did,
   and its end result alone cannot tell. So gummi runs the spec's done-when
@@ -6910,7 +6916,9 @@ The block holds:
   barred and its dot breathes. Side-by-side steps of a `parallel` are
   each marked so.
 - **A footer**: the files the run has changed so far, uncommitted, and
-  **Revert run…**.
+  **Revert run…**; for a recipe the session wrote inline, **Save as
+  recipe…** (the TUI's `s`), and once saved "saved as <name>" in its
+  place.
 
 While the run is proposed or queued, or open before its first step, the
 block carries its **baseline** (§25.5) under its head: "running the
@@ -7041,7 +7049,6 @@ Review, checks and design are what a recipe chooses, and the bundled
 - **Waiting on a command** without spending model turns, as a step kind.
   A wait on a PR is a person's publishing (§22), never a run's.
 - **Recipes kept outside the workspace**, per person.
-- **Saving an inline recipe** to `.gummi/workflows/` from the thread.
 - **Isolated parallel writers**, as an option a recipe asks for: §24's
   branches and owns check, kept in history.
 
@@ -7140,6 +7147,17 @@ The build follows §25, with these differences.
   and shows no package or test that ran. Such an item keeps the spec
   from `met`, and a run that would have been done ends partial: "a
   done-when check ran no tests".
+- **Saving an inline recipe** (§25.5, §25.9), deferred at first, is a
+  person's act from the run's block: `Engine.WorkflowSaveRecipe`, reached
+  through `WebDocs.SaveRecipe` by the TUI's `s` (a one-line prompt) and
+  the page's `POST /api/cards/{id}/runs/{n}/save`. It writes the recipe as
+  the session proposed it (kept as `proposed.yaml` in the run's directory,
+  since a revised plan rewrites `recipe.yaml`), refuses a name that is no
+  recipe name (`workflowrecipe.CheckName`) or one a workspace or bundled
+  recipe has (`workflowrecipe.Taken`), and offers nothing on a run of a
+  named recipe or one that was denied. The name is kept on the run
+  (`workflow_runs.saved_as`), so the block says it was saved after a
+  restart and offers it no more. The suggested name is the recipe's own.
 - **A run's baseline is evidence, never a gate** (§25.5). It is kept on
   the run (`workflow_runs.baseline`: the tree, the revision, each checked
   item's result, and the items the session was told of, so a baseline run
