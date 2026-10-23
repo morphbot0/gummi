@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 )
 
 // stageGlyph is the card marker: readable by shape as well as color.
@@ -37,44 +36,26 @@ func stageGlyph(s domain.Stage) string {
 	return "?"
 }
 
-// cardBusy reports whether a card has a real busy source: its
-// gummi-checks baseline is running, a one-shot scribe pass (check
-// discovery or the envelope estimate) is in flight, its live engine
-// session is mid-turn, or another gummi process is driving it mid-turn.
-// Busy() alone decides the local-session side, regardless of scheduling
-// state — a StateInteractive chat session mid-reply is just as busy as a
-// StateRunning autonomous one, matching thread.go's own gate (snap.Busy,
-// no state filter) so a card's board row and its own thread view never
-// disagree about whether it's working.
+// cardBusy reports whether a card has a real busy source: a consult line
+// is being sent, its session is mid-turn, or another gummi process is
+// driving it mid-turn.
 //
-// A row driven abroad is, by ForeignDriver's own pid exclusion, never
-// also backed by a local session, and baselining and scribing are local,
-// in-process actions.
-//
-// It is a pure function of (m.rows, m.sessionFor(row.F.ID), m.baselining,
-// m.scribing, m.consultSending) — no other mutable state feeds it — so it
-// renders identically whenever called twice within one frame.
+// It is a pure function of (m.rows, the card's session,
+// m.consultSending) — no other mutable state feeds it — so it renders
+// identically whenever called twice within one frame.
 func (m *Shell) cardBusy(r featureRow) bool {
-	if m.baselining[r.F.ID] {
-		return true
-	}
-	if m.scribing[r.F.ID] > 0 {
-		return true
-	}
 	if m.consultSending[r.F.ID] != "" {
 		return true
 	}
 	if m.freeformTurnBusy(r) {
 		return true
 	}
-	sess := m.sessionFor(r.F.ID)
-	return (sess != nil && sess.Busy()) || (r.DrivenAbroad && r.Foreign.Busy)
+	return r.DrivenAbroad && r.Foreign.Busy
 }
 
-// freeformTurnBusy reports a freeform card whose turn is in flight. Its
-// session is the engine's freeform one, not a stage session, so sessionFor
-// does not see it — and a card whose agent is writing is not idle, on the
-// board row, the header's running count or the page.
+// freeformTurnBusy reports a freeform card whose turn is in flight: a
+// card whose agent is writing is not idle, on the board row, the header's
+// running count or the page.
 func (m *Shell) freeformTurnBusy(r featureRow) bool {
 	if !r.F.IsFreeform() || m.engine == nil {
 		return false
@@ -107,17 +88,6 @@ func (m *Shell) freeformWatching(r featureRow) bool {
 	}
 	ff := m.engine.Freeform(r.F.ID)
 	return ff != nil && ff.Watching()
-}
-
-// scribeSettled decrements a card's in-flight scribe-pass count by one,
-// removing the entry entirely once it reaches zero so "in flight" stays
-// testable as key-presence (m.baselining's own idiom).
-func (m *Shell) scribeSettled(id domain.FeatureID) {
-	if m.scribing[id] <= 1 {
-		delete(m.scribing, id)
-		return
-	}
-	m.scribing[id]--
 }
 
 // needsAttention reports whether a card has a pending item in the
@@ -228,39 +198,12 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		tint = s.Info
 	}
 	id := tint.Render(cardLead(r.F))
-	if m.isFoldedChild(m.rowIndex(r.F.ID)) {
-		id = faint.Render("└") + " " + id
-	}
 	badge := ""
-	// a card the Advance gate would block on an unmet direct dependency
-	// shows a blocked badge alongside the severity badge — read-only
-	// feedback on the gate, never a state it owns.
-	if r.DepBlocked {
-		badge = " " + s.Warning.Render("⛔")
-	}
 	// a card another gummi process is driving: this board can watch it
 	// (enter / t) but must not touch it, and says so rather than
 	// presenting an actively-changing card as idle.
 	if r.DrivenAbroad {
 		badge += " " + s.Info.Render("◉ elsewhere")
-	}
-	// autopilot currently has this card between stages — an open period on
-	// the same event log the card thread draws, never the cursor glyph
-	// (reserved as the focus marker) and never the Info tier (already
-	// carrying the spinner, the elsewhere badge, the gates badge and the PR
-	// badge on this line). It sits next to the elsewhere badge because the
-	// two are closest in meaning: both say a machine, not the person
-	// reading, currently has the card.
-	if r.AutopilotDriving {
-		badge += " " + s.Subtle.Render("◐ autopilot")
-	}
-	// an autopilot card runs its gates unattended, which is worth flagging
-	// at a glance — it is the opted-in state, and the only one where the
-	// board is moving without you. Attended is the default (and what
-	// empty reads as), so it badges nothing: a marker on every card is
-	// not a marker.
-	if r.F.GateApproval == domain.GateAutopilot {
-		badge += " " + s.Info.Render("⚡")
 	}
 	if sev := r.F.Severity; sev != "" {
 		badge += " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
@@ -272,9 +215,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	// carry one.
 	if r.F.IsDiagnosis() {
 		badge += " " + s.CardIDResearch.Render("dx")
-	}
-	if g := goalRowTag(s, r, m.goalOpen[r.F.ID]); g != "" {
-		badge += " " + g
 	}
 	// A stacked card says where it sits and what it forks from. It is a
 	// map lookup, never a git call: loadRows derived it.
@@ -289,14 +229,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		badge += " " + st.Render("⛁"+stackTag(sr))
 	}
 	title := s.CardTitle.Render(r.F.Title)
-	// the user's own explicit "stop for now" — independent of needsAttention
-	// and cardBusy, since a paused card can still sit on an unresolved gate
-	// from before it was paused. A parked card (never started) has no
-	// session at all and renders no mark, so the two read distinctly.
-	paused := ""
-	if sess := m.sessionFor(r.F.ID); sess != nil && sess.State() == engine.StatePaused {
-		paused = " " + s.Warning.Render("⏸")
-	}
 	tag := ""
 	if r.F.Profile != "" {
 		profile := s.ProfileTag
@@ -323,10 +255,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	landed := ""
 	if r.Landed || r.F.LandedSHA != "" {
 		landed = " " + s.Success.Render("landed")
-	} else if r.F.GoalDropped() {
-		// a card its goal dropped stays listed under the goal; its ending
-		// is the drop, not a hand-off anyone chose
-		landed = " " + faint.Render("⊘ dropped")
 	} else if r.F.HandedOff() {
 		// The other half of the same permanent question. Without it a
 		// deliberate hand-off and an abandoned card read identically in
@@ -364,7 +292,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		repo = " " + s.Repo(r.F.Repo).Render(r.F.Repo)
 	}
 	prefix := cursor + num + " " + glyph + " " + id + repo + badge + " "
-	tail := func() string { return loop + paused + tag + wtMark + landed + pr + cost }
+	tail := func() string { return loop + tag + wtMark + landed + pr + cost }
 	dropOrder := []*string{&cost, &tag, &wtMark, &pr, &landed}
 	for i := 0; i < len(dropOrder) && ansi.StringWidth(prefix+tail()) > w-8; i++ {
 		*dropOrder[i] = ""
@@ -380,7 +308,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 // boardGlyphLegend explains the board row's glyph vocabulary: the four
 // stage shapes (stageGlyph), the queued marker, and the badges cardLine
 // appends after the id. It exists because the round 2 UX drive found no
-// legend anywhere — a row can carry any of ○ ● ◐ ✔ ⚡ ⎇ ✗ ⏸ ✉ ⟲ ~ and the
+// legend anywhere — a row can carry any of ○ ● ◐ ✔ ⎇ ✗ ✉ ⟲ ~ and the
 // ? help overlay documents keys only, never what the marks mean.
 //
 // Shaped as [][2]string, the same pair helpRows (keymap.go) produces, so
@@ -397,11 +325,9 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 // fold them into this same legend or its own.
 func boardGlyphLegend() [][2]string {
 	return [][2]string{
-		{"○ ● ◐ ✔", "stage: todo · in progress · review/verify · done"},
-		{"⚡", "autopilot gate-approval (gates cross unattended)"},
+		{"● ✔", "a session open · done (○ ◐ mark a retired workflow card's stage)"},
 		{"⎇", "worktree present"},
-		{"⏸", "paused — a run the user stopped"},
-		{"✉ ✗ ? $", "needs you: gate · run failure · question · budget"},
+		{"✉ ✗ ? $", "needs you: a decision · run failure · question · budget"},
 		{"landed", "the branch was squash-merged onto the base branch"},
 		{"handed off", "the card was closed with its branch deliberately kept — nothing landed"},
 	}
@@ -519,7 +445,7 @@ func formatCount(super domain.SuperState, n int) string {
 func (m *Shell) closeOutText() string {
 	var ready, holding int
 	for _, r := range m.rows {
-		if r.F.Stage == domain.StageVerify && !r.F.VerifiedAt.IsZero() && !r.F.InGoal() {
+		if r.F.Stage == domain.StageVerify && !r.F.VerifiedAt.IsZero() {
 			ready++
 		}
 		if r.Landed {

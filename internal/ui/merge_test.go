@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -20,82 +19,7 @@ import (
 // feature branch, so there is something to squash-merge.
 func mergeFixture(t *testing.T) (*Shell, string, string) {
 	t.Helper()
-	m, root, wt := unverifiedFixture(t)
-	// a card lands from verify once it has passed it (merge.go's
-	// landingRefusal), so the one these tests land has
-	stampVerifiedTip(t, m, "FD-001")
-	m = pump(t, m, m.loadRows)
-	return m, root, wt
-}
-
-// stampVerifiedTip stamps id verified on the branch tip it has now — the
-// revision a landing checks (domain.Feature.MayLandAt).
-func stampVerifiedTip(t *testing.T, m *Shell, id domain.FeatureID) {
-	t.Helper()
-	ctx := context.Background()
-	f, err := m.store.GetFeature(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	head, err := m.wt.Head(ctx, &f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := m.store.SetVerifiedAt(ctx, id, fixedTime, head); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// passVerify stamps the selected-first card's verify pass, as the verify
-// gate does when the pass is clean (markVerified), and reloads the rows.
-func passVerify(t *testing.T, m *Shell) *Shell {
-	t.Helper()
-	stampVerifiedTip(t, m, m.rows[0].F.ID)
-	return pump(t, m, m.loadRows)
-}
-
-// unverifiedFixture is a card at verify with a commit on its branch that
-// has not finished a verify pass.
-func unverifiedFixture(t *testing.T) (*Shell, string, string) {
-	t.Helper()
-	m, root, wt := implementFixture(t)
-	if _, err := m.store.Transition(context.Background(), "FD-001", domain.StageVerify, "test"); err != nil {
-		t.Fatal(err)
-	}
-	m = pump(t, m, m.loadRows)
-	return m, root, wt
-}
-
-// Landing asks for the floor the verify stop's own landing answer asks
-// for, whichever key or request asks: a card at verify that never
-// finished a verify pass does not land from the menu; one whose pass
-// failed lands only as the person's overrule the stop offers ("land
-// anyway"), which the menu reaches too; a verified one lands.
-func TestTheMenuLandsOnTheVerifyFloor(t *testing.T) {
-	m, _, _ := unverifiedFixture(t)
-	f := m.rows[0].F
-	if why := m.landingRefusal(f); why == "" {
-		t.Fatal("a card that never ran verify may land")
-	}
-	m = pressMerge(t, m)
-	if _, ok := m.Overlay.Top().(*commitMsgDialog); ok {
-		t.Fatal("m opened the landing on a card that never ran verify")
-	}
-	// the pass finished and failed: "land anyway" is on offer, and the
-	// menu's landing is that overrule
-	m.rows[0].Exited, m.rows[0].ExitVerdict = true, verdictFail
-	m.inbox.addEscalated(f.ID, attnGate, "verify FAILED — read the evidence and bounce or overrule")
-	if !slices.ContainsFunc(stageActions(m.nextInputFor(m.rows[0])), func(a nextAction) bool { return a.id == "advance" && a.label == "land anyway" }) {
-		t.Fatalf("the failed verify offers no land anyway: %+v", stageActions(m.nextInputFor(m.rows[0])))
-	}
-	if why := m.landingRefusal(m.rows[0].F); why != "" {
-		t.Errorf("land anyway after a failed verify is refused: %s", why)
-	}
-	// verified
-	m2, _, _ := mergeFixture(t)
-	if why := m2.landingRefusal(m2.rows[0].F); why != "" {
-		t.Errorf("a verified card is refused: %s", why)
-	}
+	return implementFixture(t)
 }
 
 // implementFixture is a card at implement with a commit on its branch:
@@ -302,7 +226,7 @@ func TestCommitMsgDraftDoesNotClobber(t *testing.T) {
 	m, root, _ := mergeFixture(t)
 	m = attachDraftEngine(t, m, draftFenced(t, "feat(ui): draft that must lose"))
 	// open the dialog but hold the draft until after the user types
-	model, draftCmd := m.Update(mergeReadyMsg{f: m.rows[0].F, thenDone: false})
+	model, draftCmd := m.Update(mergeReadyMsg{f: m.rows[0].F})
 	m = model.(*Shell)
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
 		t.Fatalf("mergeReadyMsg did not open the dialog (notice %q)", m.notice.text)
@@ -344,7 +268,7 @@ func TestCommitMsgEscCancelsInflight(t *testing.T) {
 	m, _, _ := mergeFixture(t)
 	m = attachDraftEngine(t, m, draftFenced(t, "feat(ui): stale take"))
 	// open the dialog and grab the in-flight draft cmd without draining it
-	model, draftCmd := m.Update(mergeReadyMsg{f: m.rows[0].F, thenDone: false})
+	model, draftCmd := m.Update(mergeReadyMsg{f: m.rows[0].F})
 	m = model.(*Shell)
 	if m.Overlay.Top() == nil {
 		t.Fatal("mergeReadyMsg did not open the dialog")
@@ -436,45 +360,27 @@ func TestSquashMergeRefusedWhenLanded(t *testing.T) {
 	}
 }
 
-func TestSquashMergeCommitsDirtyBranchAsFinalCheckpoint(t *testing.T) {
-	m, root, wt := mergeFixture(t)
-	// uncommitted rework plus a brand-new untracked file: gummi owns the
-	// branch's commits, so both are swept into a final checkpoint
+func TestSquashMergeRefusesLooseWork(t *testing.T) {
+	m, _, wt := mergeFixture(t)
+	// uncommitted rework plus a brand-new untracked file: the branch's
+	// commits are the person's own, so loose work is theirs to commit with
+	// a message, never swept into a canned checkpoint
 	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x // rework\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(wt, "extra.go"), []byte("package x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	before := gitOut(t, wt, "rev-parse", "HEAD")
 	m = pressMerge(t, m)
-	if got := gitOut(t, wt, "log", "-1", "--format=%s"); got != "FD-001: final checkpoint" {
-		t.Errorf("branch tip = %q, want the final checkpoint", got)
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); ok || !m.notice.isErr || !strings.Contains(m.notice.text, "uncommitted work") {
+		t.Fatalf("loose work went to the landing dialog (notice %q)", m.notice.text)
 	}
-	if out := gitOut(t, wt, "status", "--porcelain"); out != "" {
-		t.Errorf("worktree still dirty after checkpoint:\n%s", out)
+	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != before {
+		t.Errorf("the refusal committed the loose work: %s → %s", before, got)
 	}
-	// ...but that checkpoint is work no verify has seen, so it does not
-	// land on the strength of the pass before it
-	if _, ok := m.Overlay.Top().(*commitMsgDialog); ok || !m.notice.isErr || !strings.Contains(m.notice.text, "re-verify") {
-		t.Fatalf("loose work after verify went to the landing dialog (notice %q)", m.notice.text)
-	}
-	// verified on the new tip, it lands — rework and the new file both
-	stampVerifiedTip(t, m, "FD-001")
-	m = pump(t, m, m.loadRows)
-	m = pressMerge(t, m)
-	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
-		t.Fatalf("a re-verified tip did not open the landing dialog (notice %q)", m.notice.text)
-	}
-	typeMessage(t, m, "FD-001: rework and extras")
-	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
-		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
-	}
-	if got, err := os.ReadFile(filepath.Join(root, "feat.go")); err != nil || !strings.Contains(string(got), "rework") {
-		t.Errorf("rework missing from main: %q, %v", got, err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "extra.go")); err != nil {
-		t.Errorf("untracked file missing from main: %v", err)
+	if out := gitOut(t, wt, "status", "--porcelain"); out == "" {
+		t.Error("the loose work is gone")
 	}
 }
 
@@ -498,102 +404,6 @@ func TestSquashMergeReentryRefused(t *testing.T) {
 	}
 }
 
-// atVerify walks the fixture feature's record to the verify stage so g
-// exercises the verify→done gate.
-func atVerify(t *testing.T, m *Shell) *Shell {
-	t.Helper()
-	ctx := context.Background()
-	if m.rows[0].F.Stage != domain.StageVerify {
-		if _, err := m.store.Transition(ctx, "FD-001", domain.StageVerify, "test"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return pump(t, m, m.loadRows)
-}
-
-func TestAdvanceToDoneRoutesThroughMerge(t *testing.T) {
-	m, root, _ := mergeFixture(t)
-	m = atVerify(t, m)
-	m.sel = 0
-	m = pressAdvance(t, m)
-	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
-		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
-	}
-	typeMessage(t, m, "FD-001: rebase me")
-	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-	if !strings.Contains(m.notice.text, "→ done") || m.notice.isErr {
-		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
-	}
-	f, _ := m.store.GetFeature(context.Background(), "FD-001")
-	if f.Stage != domain.StageDone {
-		t.Errorf("stage = %s, want done", f.Stage)
-	}
-	if _, err := os.Stat(filepath.Join(root, "feat.go")); err != nil {
-		t.Errorf("feature work missing from main: %v", err)
-	}
-}
-
-func TestAdvanceToDoneCancelledStaysAtVerify(t *testing.T) {
-	m, _, _ := mergeFixture(t)
-	m = atVerify(t, m)
-	m.sel = 0
-	m = pressAdvance(t, m)
-	if m.Overlay.Top() == nil {
-		t.Fatal("g at verify did not open the commit-message dialog")
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	f, _ := m.store.GetFeature(context.Background(), "FD-001")
-	if f.Stage != domain.StageVerify {
-		t.Errorf("stage after cancelled merge = %s, want verify", f.Stage)
-	}
-}
-
-func TestAdvanceToDoneLandedBranchSkipsMerge(t *testing.T) {
-	m, root, wt := rebaseFeatureFixture(t)
-	landFeature(t, m, root, wt) // commits + merges --no-ff into main
-	m = atVerify(t, m)
-	m.sel = 0
-	m = pressAdvance(t, m)
-	if m.Overlay.Top() != nil {
-		t.Fatal("landed branch still opened the merge dialog")
-	}
-	f, _ := m.store.GetFeature(context.Background(), "FD-001")
-	if f.Stage != domain.StageDone {
-		t.Errorf("stage = %s, want done (notice %q)", f.Stage, m.notice.text)
-	}
-}
-
-func TestAdvanceToDoneMergeConflictStaysAtVerify(t *testing.T) {
-	m, root, wt := mergeFixture(t)
-	// conflicting README.md edits on both sides
-	if err := os.WriteFile(filepath.Join(wt, "README.md"), []byte("feature version\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git(t, wt, "add", ".")
-	git(t, wt, "commit", "-qm", "feature readme")
-	stampVerifiedTip(t, m, "FD-001") // the tip that lands is the one verified
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("main version\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git(t, root, "add", ".")
-	git(t, root, "commit", "-qm", "main readme")
-	m = atVerify(t, m)
-	m.sel = 0
-	m = pressAdvance(t, m)
-	if m.Overlay.Top() == nil {
-		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
-	}
-	typeMessage(t, m, "FD-001: rebase me")
-	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-	if !m.notice.isErr || !strings.Contains(m.notice.text, "README.md") {
-		t.Fatalf("conflict notice = %q (err=%v)", m.notice.text, m.notice.isErr)
-	}
-	f, _ := m.store.GetFeature(context.Background(), "FD-001")
-	if f.Stage != domain.StageVerify {
-		t.Errorf("stage after conflicted merge = %s, want verify", f.Stage)
-	}
-}
-
 func TestSquashMergeConflictNoticeNamesFile(t *testing.T) {
 	m, root, wt := mergeFixture(t)
 	// conflicting README.md edits on both sides
@@ -602,7 +412,6 @@ func TestSquashMergeConflictNoticeNamesFile(t *testing.T) {
 	}
 	git(t, wt, "add", ".")
 	git(t, wt, "commit", "-qm", "feature readme")
-	stampVerifiedTip(t, m, "FD-001") // the tip that lands is the one verified
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("main version\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

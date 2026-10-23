@@ -6,64 +6,74 @@ import { expect, GummiServer, test } from '../fixtures/test';
 
 test.describe.configure({ mode: 'serial' });
 
-test('a default card plans, implements and verifies with real checks', async ({ workspace: ws }) => {
-  const id = await ws.seedDesignGate('Add a wave helper');
-  expect(id).toMatch(/^FD-\d+$/);
+test("a session's turn edits its tree, and the diff is real", async ({ workspace: ws }) => {
+  const id = await ws.seedSession('Add a wave helper');
+  expect(id).toMatch(/^FF-\d+$/);
 
-  let st = await ws.status(id);
-  expect(st.stage).toBe('plan');
-  const spec = await ws.gummiOK(['spec', id]);
-  for (const section of ['## Problem', '## Chosen approach', '## Implementation notes', '## Verification plan']) {
-    expect(spec.stdout).toContain(section);
-  }
-  expect(spec.stdout).toContain('```gummi-checks');
-  expect(spec.stdout).toContain('go build ./...');
-
-  const r = await ws.approve(id);
-  expect(r.events.map((e) => e.event)).toContain('verified');
-  st = await ws.status(id);
-  expect(st.stage).toBe('verify');
-  expect(st.verified).toBe(true);
-
-  // the implementer's change is real and committed on the card's branch
-  const files = await ws.git('-C', ws.worktree(id), 'show', '--name-only', '--format=', 'HEAD~1', 'HEAD');
-  expect(files).toMatch(/fd\d+\.go/);
+  const st = await ws.status(id);
+  expect(st.kind).toBe('freeform');
+  expect(st.running).toBe(false);
+  expect(await ws.git('-C', ws.worktree(id), 'status', '--porcelain')).toContain('NOTES.md');
   const diff = await ws.gummiOK(['diff', id]);
-  expect(diff.stdout).toContain(`func ${id.replace('-', '').replace('FD', 'Fd')}()`);
+  expect(diff.stdout).toContain('Add a wave helper');
 });
 
-test('[fail-check] fails a real check at verify', async ({ workspace: ws }) => {
-  const id = await ws.seedVerifyFailed('Add a regressing helper');
-  const st = await ws.status(id);
-  expect(st.stage).toBe('verify');
-  expect(st.verified).toBe(false);
-  expect(st.escalation?.kind).toBe('verify');
-  expect(ws.agentLog()).toContain('test: FAIL (exit');
+test('[workflow] an always-allowed run runs to its report, with real checks', async ({ workspace: ws }) => {
+  const r = await ws.drive(['run', '--envelope', '50', '[workflow] make the workflow file']);
+  expect(r.code, r.stdout + r.stderr).toBe(0);
+  const kinds = r.events.map((e) => e.event);
+  expect(kinds.at(-1)).toBe('done');
+  expect(kinds).not.toContain('question');
+
+  // the run's states ride the stream, and it ends done with its report
+  const runs = r.events.filter((e) => e.event === 'workflow');
+  expect(runs.map((e) => e.state)).toContain('running');
+  const last = runs.at(-1)!;
+  expect(last.state).toBe('done');
+  expect(last.recipe).toBe('deliver');
+  expect(String(last.report)).not.toBe('');
+  // what the done line spent is the pool's: the session's turns and the steps'
+  const done = r.events.at(-1)!;
+  expect(Number(done.spent_credits)).toBeGreaterThan(0);
+
+  // the spec's done-when check ran against what the steps wrote
+  const spec = await ws.gummiOK(['spec', r.id]);
+  expect(spec.stdout).toContain('```gummi-done-when');
+  expect(spec.stdout).toContain('test -f made.txt');
+  expect(await ws.git('-C', ws.worktree(r.id), 'status', '--porcelain')).toContain('made.txt');
+  expect(ws.agentLog()).toContain('You are step ');
 });
 
-test('[fail-verify] fails verify with every check passing', async ({ workspace: ws }) => {
-  const id = await ws.seedVerifyFailed('Add a wrong helper', { how: 'verdict' });
-  const st = await ws.status(id);
-  expect(st.escalation?.kind).toBe('verify');
-  expect(ws.agentLog()).not.toContain('FAIL (exit');
+test("[step-asks] a step's question needs you, and a resume answers it", async ({ workspace: ws }) => {
+  const r = await ws.drive(['run', '--envelope', '50', '[workflow] [step-asks] make the workflow file']);
+  const q = r.events.find((e) => e.event === 'question');
+  expect(q, r.stdout).toBeTruthy();
+  expect(q!.kind).toBe('workflow_ask');
+  expect(q!.run).toBe(1);
+  expect(String(q!.step)).toMatch(/implement$/);
+  expect(q!.options).toEqual(['Keep it plain (recommended)', 'Give it a header']);
+
+  const answered = await ws.answer(r.id, 'Keep it plain (recommended)');
+  expect(answered.events.at(-1)?.event).toBe('done');
+  // the process that asked ended with `gummi run`; the answer reaches the
+  // step's card as a turn of its own, and the step does its task with it
+  expect(ws.agentLog()).toContain('The person said: Keep it plain (recommended).');
+  expect(answered.events.filter((e) => e.event === 'workflow').at(-1)?.state).toBe('done');
 });
 
-test('[ask] stops on an open question, and the answer lands in the spec', async ({ workspace: ws }) => {
+test('[ask] stops on an open question, and the answer reaches the session', async ({ workspace: ws }) => {
   const ask = await ws.seedAsk('Add a choosy helper');
-  expect(ask.options).toEqual(['A new file (recommended)', 'Extend the existing file']);
+  expect(ask.question).toBe('Which way?');
+  expect(ask.options).toEqual(['Left', 'Right']);
   let st = await ws.status(ask.id);
-  expect(st.stage).toBe('plan');
   expect(st.escalation?.kind).toBe('ask');
 
-  const r = await ws.answer(ask.id, 'Extend the existing file');
-  expect(r.events.at(-1)?.event).toBe('stopped');
-  // the answer closed the question; the run then stopped at the design
-  // gate --until names, which is a decision of its own, waiting on you
+  const r = await ws.answer(ask.id, 'Right');
+  expect(r.events.at(-1)?.event).toBe('done');
+  // a resume is a new process: the answer reaches the session as a turn
+  expect(r.events.some((e) => e.event === 'reply' && String(e.text).includes('Decided with the user: Right'))).toBe(true);
   st = await ws.status(ask.id);
-  expect(st.escalation?.kind).toBe('gate');
-  expect(st.escalation?.reason).toContain('where the run was asked to stop');
-  const spec = await ws.gummiOK(['spec', ask.id]);
-  expect(spec.stdout).toContain('Decided with the user: Extend the existing file');
+  expect(st.escalation).toBeFalsy();
 });
 
 test('a landed card is done and on main', async ({ workspace: ws }) => {
@@ -73,24 +83,18 @@ test('a landed card is done and on main', async ({ workspace: ws }) => {
   expect(await ws.git('log', '-1', '--format=%s', 'main')).toContain('feat: add a nod helper');
 });
 
-test('backlog, bug and research cards', async ({ workspace: ws }) => {
-  const backlog = await ws.seedBacklog(['Add a wave helper', 'Add a shrug helper']);
-  expect(backlog).toHaveLength(2);
-  const bug = await ws.seedBug('Greet panics on an empty name', { severity: 'high' });
-  for (const id of [...backlog, bug]) expect((await ws.status(id)).stage).toBe('todo');
-
-  const rs = await ws.seedResearch('How does the module greet');
-  expect(rs).toMatch(/^RS-\d+$/);
-  const st = await ws.status(rs);
-  expect(st.kind).toBe('research');
-  expect(st.stage).toBe('plan');
-  const doc = await ws.gummiOK(['spec', rs]);
-  expect(doc.stdout).toContain('## Direction');
-  expect(doc.stdout).toContain('Survey `greet.go`');
+test('session cards', async ({ workspace: ws }) => {
+  const sessions = await ws.seedSessions(['Add a wave helper', 'Add a shrug helper']);
+  expect(sessions).toHaveLength(2);
+  for (const id of sessions) {
+    const st = await ws.status(id);
+    expect(st.kind).toBe('freeform');
+    expect(st.running).toBe(false);
+  }
 });
 
-test('fake gh answers pr link/status/comments and bug import', async ({ workspace: ws }) => {
-  const id = await ws.seedVerified('Add a farewell helper');
+test('fake gh answers pr link/status/comments', async ({ workspace: ws }) => {
+  const id = await ws.seedReady('Add a farewell helper');
   await ws.linkPR(id, 7);
   const status = await ws.gummiOK(['pr', 'status', id]);
   expect(status.stdout).toContain('e2e/tiny#7');
@@ -101,11 +105,8 @@ test('fake gh answers pr link/status/comments and bug import', async ({ workspac
   expect(threads.threads).toHaveLength(1); // the resolved one is dropped
   expect(threads.threads[0].root_body_first_line).toBe('Should this helper take a name?');
 
-  const bugs = await ws.importBugs({ comments: true });
-  expect(bugs).toHaveLength(2); // #103 is closed
-
   const calls = ws.ghCalls().map((c) => c.slice(0, 2).join(' '));
-  expect(calls).toEqual(expect.arrayContaining(['pr view', 'api repos/e2e/tiny', 'api graphql', 'issue list', 'issue view']));
+  expect(calls).toEqual(expect.arrayContaining(['pr view', 'api repos/e2e/tiny', 'api graphql']));
 
   // a test can swap an answer for its own workspace
   await ws.setGh('repo.json', { allow_squash_merge: false });
@@ -119,10 +120,10 @@ test.describe('slow', () => {
 
   test('[slow] streams its reply in deltas', async ({ workspace: ws }) => {
     const started = Date.now();
-    await ws.seedDesignGate('[slow] Add a lazy helper');
-    expect(Date.now() - started).toBeGreaterThan(1_500); // plan + critique, ~1s each
+    await ws.seedSession('[slow] Add a lazy helper');
+    expect(Date.now() - started).toBeGreaterThan(500); // one turn, paced over the slow second
     const deltas = ws.agentLog().split('\n').filter((l) => l.startsWith('OUT') && l.includes('"type": "text"'));
-    expect(deltas.length).toBeGreaterThan(10);
+    expect(deltas.length).toBeGreaterThan(3); // its reply in pieces, not one message
   });
 });
 

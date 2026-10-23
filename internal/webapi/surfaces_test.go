@@ -4,48 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/exp/golden"
-
-	"github.com/morphis/gummi/internal/engine"
 )
-
-func TestGoalShape(t *testing.T) {
-	n := 3000
-	golden.RequireEqual(t, marshal(t, struct {
-		List   Goals             `json:"list"`
-		Page   Goal              `json:"page"`
-		Create GoalCreateRequest `json:"create"`
-		Action GoalActionRequest `json:"action"`
-		Done   Outcome           `json:"done"`
-	}{
-		List: Goals{Goals: []GoalSummary{{
-			Row:   Row{ID: "GL-001", Kind: "goal", Type: "Goal", Title: "Stable board", Stage: "implement", Status: StatusRunning, Spend: 410, Envelope: 3000},
-			State: "running", Met: 1, DoneWhen: 3, Landed: 2, Cards: 4, Spent: 410,
-		}}},
-		Page: Goal{
-			Report: engine.GoalReport{
-				ID: "GL-001", Title: "Stable board", Stage: "implement", Lanes: 2,
-				Budget:   engine.GoalReportBudget{Envelope: 3000, Total: 410},
-				DoneWhen: []engine.DoneWhenStatus{{ID: "DW-1", Says: "the board loads", How: "check: go test ./...", Status: engine.DoneWhenMet}},
-				Cards:    []engine.GoalReportCard{{ID: "FD-004", Kind: "feature", Title: "Loader", State: "landed", Stage: "done", Envelope: 600, Spent: 212}},
-			},
-			State: "running",
-			Cards: []Row{{ID: "FD-004", Kind: "feature", Type: "Feature", Title: "Loader", Stage: "done", Status: StatusDone, Goal: &RowGoal{ID: "GL-001", Title: "Stable board"}}},
-			Log:   []GoalLogEntry{{Seq: 7, At: at, Action: "decision", Ref: "D-1", Detail: "cache the rows", By: "lead"}},
-			Notebook: GoalNotebook{
-				References: []GoalReference{{Name: "prd.md"}},
-				Findings:   []GoalFinding{{Ref: "F-1", Claim: "rows load in 40ms", Card: "FD-004", Status: "holds"}},
-			},
-			Actions: []Action{
-				{ID: GoalActionNote, Label: "note to the lead", Needs: ActionNeedsMessage},
-				{ID: GoalActionReverse, Label: "reverse a decision", Needs: ActionNeedsDecision},
-				{ID: GoalActionBudget, Label: "raise the budget", Key: "u", Needs: ActionNeedsNumber, Default: "3000"},
-			},
-		},
-		Create: GoalCreateRequest{Description: "Make the board stable", Envelope: &n, After: "GL-000", References: []string{"docs/prd.md"}, Autopilot: true},
-		Action: GoalActionRequest{Text: "focus on the loader", Ref: "D-1", Why: "too slow"},
-		Done:   Outcome{OK: true, Text: "GL-001 created", ID: "GL-001"},
-	}))
-}
 
 func TestStackShape(t *testing.T) {
 	pos := 1
@@ -112,41 +71,6 @@ func TestReposShape(t *testing.T) {
 			Commands:    []string{"git push origin 9f3c21a0b1c2:refs/heads/main", "git push origin --delete feat/loader"},
 			Fingerprint: "0f3a9c21d4e5b6a7",
 		},
-	}))
-}
-
-func TestIngestShape(t *testing.T) {
-	golden.RequireEqual(t, marshal(t, struct {
-		Request IngestRequest     `json:"request"`
-		Run     IngestRun         `json:"run"`
-		Edit    IngestEditRequest `json:"edit"`
-	}{
-		Request: IngestRequest{Markdown: "# PRD\n", Name: "prd.md", Profile: "balanced"},
-		Run: IngestRun{
-			ID: "1", State: IngestReview, Source: ".gummi/ingest/prd.md", Profile: "balanced", Envelope: 2000,
-			Steps:     []IngestStep{{Kind: "note", Text: "architect reading prd.md"}, {Kind: "tool", Text: "read prd.md"}},
-			Proposals: []IngestProposal{{Index: 0, Kind: "feature", Title: "Loader", OneLiner: "load rows", SourceRefs: []string{"§2"}, OpenQuestions: []string{"cache?"}}},
-			Coverage:  &IngestCoverage{Mapped: 3, OutOfScope: 1, Unmapped: 1},
-			Unmapped:  []string{"offline mode — not covered"},
-			Created:   []CardRef{{ID: "FD-020", Title: "Loader", Stage: "todo"}},
-		},
-		Edit: IngestEditRequest{Index: 0, Op: IngestEditRename, Title: "Row loader"},
-	}))
-}
-
-func TestBugsShape(t *testing.T) {
-	golden.RequireEqual(t, marshal(t, struct {
-		List    Bugs        `json:"list"`
-		Request BugsRequest `json:"request"`
-		Created BugsCreated `json:"created"`
-	}{
-		List: Bugs{
-			Source:    "github",
-			Proposals: []BugProposal{{Ref: "https://github.com/o/r/issues/7", Number: 7, Title: "Crash on empty board", Severity: "high", State: "open", Labels: []string{"bug"}, Author: "octo"}},
-			Skipped:   []BugSkipped{{Ref: "https://github.com/o/r/issues/3", Card: "BG-001", Title: "Old crash"}},
-		},
-		Request: BugsRequest{Repo: "o/r", Label: "bug", Limit: 80, Refs: []string{"https://github.com/o/r/issues/7"}},
-		Created: BugsCreated{Created: []CardRef{{ID: "BG-002", Title: "Crash on empty board", Stage: "todo"}}},
 	}))
 }
 

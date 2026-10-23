@@ -78,7 +78,7 @@ func TestTheChosenTargetIsRememberedOnceThePROpens(t *testing.T) {
 				t.Fatal(e)
 			}
 			log, _ := os.ReadFile(filepath.Join(w.fake, "log"))
-			if !strings.Contains(string(log), "pr create --repo "+tc.choice+" --head me:feat/rate-limit") {
+			if !strings.Contains(string(log), "pr create --repo "+tc.choice+" --head me:ff/rate-limit") {
 				t.Fatalf("gh was not asked to open the PR in %s:\n%s", tc.choice, log)
 			}
 			if got := w.git("config", "--get", tc.key); got != tc.val {

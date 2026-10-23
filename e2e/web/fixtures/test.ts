@@ -32,7 +32,7 @@ interface Fixtures {
    * Option: runs against the fresh workspace BEFORE the server starts, so a
    * test's cards exist when the board first loads:
    *
-   *   test.use({ seed: { run: async (ws) => { await ws.seedDesignGate('Add a wave helper'); } } });
+   *   test.use({ seed: { run: async (ws) => { await ws.seedReady('Add a wave helper'); } } });
    */
   seed: Seed | null;
   /** Option: extra environment for every gummi process (agent pacing etc.). */

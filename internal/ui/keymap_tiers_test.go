@@ -33,13 +33,9 @@ func openSurfaces(t *testing.T) map[string]*Shell {
 	withDiff := populatedShell(100, 30)
 	withDiff.diff = newDiffView(f, "diff --git a/x b/x\n@@ -1 +1 @@\n+x\n", nil)
 
-	withDeps := populatedShell(100, 30)
-	withDeps.deps = &depPicker{f: f}
-
 	return map[string]*Shell{
 		"spec": withSpec,
 		"diff": withDiff,
-		"deps": withDeps,
 	}
 }
 
@@ -81,27 +77,6 @@ func TestHelpReachesEveryOpenSurfaceThatIsNotTyping(t *testing.T) {
 				t.Fatalf("? on %s: help overlay open = %v, want %v", name, opened, !typing[name])
 			}
 		})
-	}
-}
-
-// TestHelpTypesIntoTheBugImportFilter guards the same exception on the
-// bug import, whose filter is a text field only while it has focus:
-// with the list focused ? must open help, with the filter focused it
-// must reach the filter.
-func TestHelpTypesIntoTheBugImportFilter(t *testing.T) {
-	m := populatedShell(100, 30)
-	m.bugIngest = &bugIngestView{filtering: true}
-	if m.textEntry() != true {
-		t.Fatal("a focused bug-import filter must count as text entry")
-	}
-	m.handleKey(tea.KeyPressMsg{Code: '?', Text: "?"})
-	if m.Overlay.Contains("help") {
-		t.Fatal("? opened help over a focused filter instead of typing into it")
-	}
-	m.bugIngest.filtering = false
-	m.handleKey(tea.KeyPressMsg{Code: '?', Text: "?"})
-	if !m.Overlay.Contains("help") {
-		t.Fatal("? with the list focused must open help")
 	}
 }
 
@@ -171,13 +146,11 @@ func TestNoSurfaceRebindsTab(t *testing.T) {
 	f := domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StagePlan}
 	content := "## Problem\n\nA line.\n"
 	tables := map[string][]binding{
-		"board":  m.boardBindings(),
-		"inbox":  m.inboxBindings(),
-		"stats":  m.wsStatsBindings(),
-		"spec":   (&specView{f: f, content: content, doc: spec.Parse(content), cursor: 1}).bindings(),
-		"diff":   newDiffView(f, "diff --git a/x b/x\n@@ -1 +1 @@\n+x\n", nil).bindings(),
-		"deps":   (&depPicker{f: f}).bindings(),
-		"ingest": ingestRunBindings,
+		"board": m.boardBindings(),
+		"inbox": m.inboxBindings(),
+		"stats": m.wsStatsBindings(),
+		"spec":  (&specView{f: f, content: content, doc: spec.Parse(content), cursor: 1}).bindings(),
+		"diff":  newDiffView(f, "diff --git a/x b/x\n@@ -1 +1 @@\n+x\n", nil).bindings(),
 	}
 	for name, bs := range tables {
 		for _, b := range bs {

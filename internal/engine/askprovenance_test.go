@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -45,21 +44,17 @@ func TestCapturedAnswerNamesItsAnswerer(t *testing.T) {
 			Workspace: ws, Model: "fake-model",
 		})
 
-		f := feature(1, "Dark mode", domain.StagePlan)
-		putFeature(t, store, f)
+		f := freeformCard(1, "Dark mode")
+		createFeature(t, store, f)
 		seedDraft(t, e, f)
-		s, err := e.Attach(context.Background(), f)
-		if err != nil {
-			e.Close()
-			t.Fatalf("by %q: Attach: %v", c.by, err)
-		}
+		attach(t, e, f)
 		waitFor(t, e, EventQuestion)
 
 		if err := e.AnswerAs(context.Background(), f.ID, "per-device", c.by); err != nil {
 			e.Close()
 			t.Fatalf("by %q: AnswerAs: %v", c.by, err)
 		}
-		raw, err := os.ReadFile(s.SpecPath())
+		raw, err := os.ReadFile(specDraftPath(e, f))
 		e.Close()
 		if err != nil {
 			t.Fatalf("by %q: read spec: %v", c.by, err)

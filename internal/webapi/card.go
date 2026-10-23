@@ -29,9 +29,6 @@ type Card struct {
 	// resolved the way its next turn will resolve them; nil on a card in
 	// the workflow, whose stages take theirs from its profile.
 	Session *SessionModel `json:"session,omitempty"`
-	// Delegation is what a session's person has let it spend on cards it
-	// creates; nil while they have not opted it in.
-	Delegation *Delegation `json:"delegation,omitempty"`
 	// Files is where the page may open the card's worktree files from;
 	// nil while the card has no worktree on this machine.
 	Files *Files `json:"files,omitempty"`
@@ -106,6 +103,9 @@ type Decision struct {
 	// Multi marks a question that takes several of its options at once:
 	// the answer names them comma-separated ("0,2").
 	Multi bool `json:"multi,omitempty"`
+	// Proposal is a workflow run's proposal or revised plan, set on the
+	// decision that asks to allow it: the card the page draws it as.
+	Proposal *RunProposal `json:"proposal,omitempty"`
 }
 
 // Against is a decision's revision: an opaque token for the server, and a
@@ -156,7 +156,6 @@ const (
 	ActionNeedsMessage ActionNeeds = "message"
 	ActionNeedsNumber  ActionNeeds = "number"
 	ActionNeedsProfile ActionNeeds = "profile"
-	ActionNeedsCards   ActionNeeds = "cards"
 	// ActionNeedsConfirm: the action asks a yes before it acts. The page
 	// collects nothing first: it sends the action bare, shows the question
 	// the "confirm" question answers with, and sends its token back
@@ -164,8 +163,6 @@ const (
 	ActionNeedsConfirm ActionNeeds = "confirm"
 	// ActionNeedsRepo: the repository picker (ActionRequest.Repo).
 	ActionNeedsRepo ActionNeeds = "repo"
-	// ActionNeedsMode: the autopilot switch's mode (ActionRequest.Mode).
-	ActionNeedsMode ActionNeeds = "mode"
 	// ActionNeedsText: one line of text (ActionRequest.Message), such as a
 	// pull request's URL or number; empty is an answer too when Detail
 	// says so.
@@ -173,12 +170,6 @@ const (
 	// ActionNeedsModel: a session's agent and model (ActionRequest.Backend
 	// and ActionRequest.Model), picked from Form.Sessions or typed.
 	ActionNeedsModel ActionNeeds = "model"
-	// ActionNeedsSpec: writing a spec from a session asks for the spec's
-	// title (ActionRequest.Message), the brief the session's conversation
-	// distilled into (ActionRequest.Brief, prefilled by
-	// GET /api/cards/{id}/writespec-draft), its profile (ActionRequest.
-	// Profile, from Choices) and its budget (ActionRequest.Number).
-	ActionNeedsSpec ActionNeeds = "spec"
 	// ActionNeedsSchedule: a heartbeat for this card. The page opens its
 	// schedule form aimed at the card and writes through /api/schedules;
 	// the action itself takes no request.
@@ -222,7 +213,6 @@ const (
 	RouteSteer    Route = "steer"
 	RouteConsult  Route = "consult"
 	RouteFreeform Route = "freeform"
-	RouteGoalNote Route = "goalnote"
 	RouteAnswer   Route = "answer"
 	RouteVerb     Route = "verb"
 	RouteBlocked  Route = "blocked"
@@ -230,11 +220,6 @@ const (
 	// its answers right now ("/rebase" at a gate). The TUI opens its menu
 	// filtered by the word; the page opens the card's actions.
 	RouteMenu Route = "menu"
-	// RouteRead: a line typed at a stop that no answer takes words for. It
-	// is sent as a line, and the board reads it to place it (a routed
-	// re-entry, or a message) exactly as the TUI's enter does — it is never
-	// the highlighted answer.
-	RouteRead Route = "read"
 )
 
 // Composer is the card's composer state, and the answer to POST
@@ -245,12 +230,6 @@ type Composer struct {
 	// will do ("steers the implementer mid-turn").
 	Says  string `json:"says"`
 	Route Route  `json:"route"`
-	// Read marks an answer line the board reads before it goes anywhere:
-	// words typed at a stop are placed first, and the reading is put to
-	// the person as a question of its own, so enter does not yet give the
-	// answer they go with. Says says so; the page shows it in place of the
-	// answer's own label.
-	Read bool `json:"read,omitempty"`
 	// Images is whether the card's current agent (its backend and,
 	// where knowable, its model) can take images with a turn. The page
 	// offers the composer's attach control only when this is true.
@@ -402,27 +381,18 @@ type ActionRequest struct {
 	Method string `json:"method,omitempty"`
 	// KeepBranch asks that an action which closes the card (a landing, a
 	// hand-off) leave its worktree and branch standing (AnswerRequest.KeepBranch).
-	KeepBranch bool     `json:"keepBranch,omitempty"`
-	Number     *int     `json:"number,omitempty"`
-	Profile    string   `json:"profile,omitempty"`
-	Cards      []string `json:"cards,omitempty"`
+	KeepBranch bool   `json:"keepBranch,omitempty"`
+	Number     *int   `json:"number,omitempty"`
+	Profile    string `json:"profile,omitempty"`
 	// Confirm is the token(s) of the confirmation(s) the server asked on an
 	// earlier try ("confirm" question) and the person said yes to (AnswerRequest.Confirm).
 	Confirm string `json:"confirm,omitempty"`
 	// Repo is the repository picker's answer.
 	Repo string `json:"repo,omitempty"`
-	// Mode is the autopilot switch's answer: "autopilot" or "attended".
-	// Empty takes the one the card's menu entry names.
-	Mode string `json:"mode,omitempty"`
 	// Backend and Model are the model switch's answer: the agent and model
 	// a session runs on from its next turn.
 	Backend string `json:"backend,omitempty"`
 	Model   string `json:"model,omitempty"`
-	// Brief is the writespec request's handoff brief: the person's edited
-	// text, prefilled from GET /api/cards/{id}/writespec-draft. It has a
-	// field of its own because Message carries the spec's title, and a
-	// multi-paragraph brief is not an input any other action takes.
-	Brief string `json:"brief,omitempty"`
 	// Against is the pinned decision's Against.Token as the page showed
 	// it: an action is refused with 409 "moved" if the card moved since.
 	// On a card that pins a decision it is required, except for the
@@ -432,47 +402,17 @@ type ActionRequest struct {
 
 // DecisionIndependentActions are the card actions that neither answer nor
 // move past a pinned decision, so they run without an Against: the menu
-// entries that change what the card waits for, what it may spend, which
+// entries that change what the card may spend, which
 // profile or repository it runs under and which pull request it is linked
 // to (and, for a session, which model it runs on and committing its
 // worktree), and the ones that copy
 // or remove it (each of those asks its own
 // question first). Every other action — a crossing, a landing, a
-// send-back, a run, a pause, a rebase, a hand-off, the autopilot switch —
-// and every composer line (SendRequest) sent while a decision is pinned
+// send-back, a run, a pause, a rebase, a hand-off — and every composer line (SendRequest) sent while a decision is pinned
 // must carry the token the page showed, and is refused with 409 "moved"
 // without one. An action that is also one of the pinned decision's
 // options is never independent.
 var DecisionIndependentActions = []string{
-	"deps", "profile", "envelope", "repo", "prlink", "prunlink", "prpull",
+	"profile", "envelope", "repo", "prlink", "prunlink", "prpull",
 	"duplicate", "delete", "clean", "model", "commit",
-}
-
-// WritespecDraft is the handoff brief a writespec dialog opens on. Filling
-// it is an agent turn — envelope spend, minutes, an appended transcript
-// exchange — so starting it is POST /api/cards/{id}/writespec-draft, and
-// reading it is GET on the same path, which never starts anything. The
-// dialog POSTs once when it opens and GETs again when the card's update
-// says the brief has landed.
-type WritespecDraft struct {
-	// Brief is the draft itself: the session's own four-section answer
-	// (asked · decided · done · remaining) when a live session answered,
-	// else the conversation laid out from the persisted transcript.
-	Brief string `json:"brief"`
-	// Source says which kind of draft this is — "live" or "assembled" —
-	// so a degraded draft is never mistaken for the session's own words.
-	Source string `json:"source"`
-	// Drafting says the session's own brief is still being written: the
-	// brief and source are empty, and the dialog waits for the card's
-	// update before it reads again.
-	Drafting bool `json:"drafting,omitempty"`
-}
-
-// Delegation is a session's delegation (domain.Delegation): the credits it
-// may give cards it creates, whether the person is still asked about each
-// one, and what is left to give.
-type Delegation struct {
-	Budget     int     `json:"budget"`
-	ConfirmAll bool    `json:"confirmAll"`
-	Left       float64 `json:"left"`
 }

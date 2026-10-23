@@ -164,34 +164,39 @@ func waitBoard(t *testing.T, b *Bridge, ok func(webapi.Board) bool) webapi.Board
 // listener — and reports what an engine event changed, all without
 // writing a byte of output.
 func TestHeadlessShellReactsToEngineEvents(t *testing.T) {
-	b, log, eng, f, out := headlessBoard(t, agent.NewFake("on it"))
+	sess := domain.Feature{
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Dark mode", Slug: "dark-mode",
+		Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind,
+	}
+	b, log, eng, f, out := headlessBoardFor(t, agent.NewFake("on it"), sess)
 
 	// Init's row load landed: a board change was reported, and the row is
 	// readable through the bridge.
 	log.waitFor(t, "board", func(c webapi.Change) bool { return c.Kind == webapi.ChangeBoard })
 	board := waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	if board.Rows[0].ID != "FD-001" || board.Rows[0].Stage != "plan" || board.Rows[0].Status != webapi.StatusIdle {
-		t.Fatalf("board rows = %+v, want FD-001 idle at plan", board.Rows)
+	if board.Rows[0].ID != "FF-001" || board.Rows[0].Status != webapi.StatusIdle {
+		t.Fatalf("board rows = %+v, want FF-001 idle", board.Rows)
 	}
 
 	// The engine listener is live: a turn on the card reaches the hook.
 	ctx := context.Background()
-	if _, err := eng.Attach(ctx, f); err != nil {
+	ff, err := eng.OpenFreeform(ctx, f)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := eng.Send(ctx, f.ID, "hello"); err != nil {
+	if err := ff.Send(ctx, "hello"); err != nil {
 		t.Fatal(err)
 	}
-	log.waitFor(t, "card", func(c webapi.Change) bool { return c.Kind == webapi.ChangeCard && c.ID == "FD-001" })
-	log.waitFor(t, "live", func(c webapi.Change) bool { return c.Kind == webapi.ChangeLive && c.ID == "FD-001" })
+	log.waitFor(t, "card", func(c webapi.Change) bool { return c.Kind == webapi.ChangeCard && c.ID == "FF-001" })
+	log.waitFor(t, "live", func(c webapi.Change) bool { return c.Kind == webapi.ChangeLive && c.ID == "FF-001" })
 
 	var card webapi.Card
 	var ok bool
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { card, ok = m.WebCard("FD-001"); return nil }); err != nil {
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { card, ok = m.WebCard("FF-001"); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if !ok || card.Title != "Dark mode" || card.Branch == "" {
-		t.Errorf("card = %+v (ok %v), want the head of FD-001", card, ok)
+		t.Errorf("card = %+v (ok %v), want the head of FF-001", card, ok)
 	}
 	b.Stop()
 	if out.Len() != 0 {
@@ -286,13 +291,13 @@ func TestInboxChangesReachTheHookAndTheRow(t *testing.T) {
 	log := newChangeLog()
 	m.SetChangeHook(log.add)
 
-	m.inbox.addEscalated("FD-001", attnGate, "Approve the design?")
+	m.inbox.add("FD-001", attnQuestion, "Persist where?")
 	log.waitFor(t, "card", func(c webapi.Change) bool { return c.Kind == webapi.ChangeCard && c.ID == "FD-001" })
 
 	b := m.WebBoard()
 	if b.Counts.Needs != 1 || b.Rows[0].Status != webapi.StatusNeeds ||
-		b.Rows[0].Needs == nil || b.Rows[0].Needs.Question != "Approve the design?" || b.Rows[0].Needs.Color != "warn" {
-		t.Errorf("row = %+v needs %+v, want an escalated gate", b.Rows[0], b.Rows[0].Needs)
+		b.Rows[0].Needs == nil || b.Rows[0].Needs.Question != "Persist where?" || b.Rows[0].Needs.Color != "info" {
+		t.Errorf("row = %+v needs %+v, want an open question", b.Rows[0], b.Rows[0].Needs)
 	}
 	if b.Rows[1].Status != webapi.StatusTodo || b.Rows[2].Status != webapi.StatusDone {
 		t.Errorf("statuses = %s, %s; want todo, done", b.Rows[1].Status, b.Rows[2].Status)

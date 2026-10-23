@@ -11,53 +11,33 @@ import (
 )
 
 // HandOff ends a card without landing it: the branch stays exactly where
-// it is, and the card moves to done.
+// it is, and the card closes at done.
 //
-// It is the third ending a verified card has, beside gummi's own squash
-// merge and a landing on GitHub. The work is finished; who merges it is a
-// separate question, and hand-off is the person answering "not gummi" —
-// they will push the branch, open the PR by hand, cherry-pick two commits
-// out of it, or leave it sitting there. Before this existed the only way
-// to say that was `delete`, which destroys the branch, so the honest
-// answer cost the work.
+// It is the second ending a card has, beside gummi's own squash merge.
+// The work is finished; who merges it is a separate question, and
+// hand-off is the person answering "not gummi" — they will push the
+// branch, open the PR by hand, cherry-pick two commits out of it, or
+// leave it sitting there. Before this existed the only way to say that
+// was `delete`, which destroys the branch, so the honest answer cost the
+// work.
 //
-// Three steps, in this order:
-//
-//  1. Commit whatever is loose in the worktree. The branch IS the
-//     deliverable here — nothing downstream is going to squash it onto
-//     main and sweep the remainder in — so uncommitted work left behind
-//     is work lost to the next `clean` or `delete`. This is the same
-//     final checkpoint the merge path takes, for the same reason. A
-//     freeform card is the exception: gummi never commits its work for it
-//     (DESIGN §19.3), so what it left loose stays in the worktree, which
-//     `Remove` refuses to delete while it is dirty.
-//  2. Stamp HandedOffAt. It is written BEFORE the transition, because it
-//     is what gives Advance permission to cross the verify→done gate
-//     with a branch still ahead of main (advance.go's fourth skip),
-//     rather than a record written afterwards about what happened.
-//  3. Advance. Every other floor at that gate still applies — open %%
-//     threads, open diff annotations, the bug omission gate, a research
-//     card's document floor. A hand-off waives the landing and nothing
-//     else, so a card that could not be finalized cannot be handed off
-//     out of trouble either; the returned AdvanceResult carries that
-//     refusal verbatim for the caller to render.
-//
-// On a refusal at step 3 the stamp stays. That is deliberate and it is
-// the cheapest of the three possible behaviours to reason about: the
-// stamp says "this card is not gummi's to land", which remains true while
-// the person resolves the blocker, and the next Advance — from the board,
-// the CLI, or here — crosses without asking the question again. Landing
-// the card after all clears it (ClearHandedOffAt).
-func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string) (AdvanceResult, error) {
+// Nothing is committed for the agent (DESIGN §19.3): what a session left
+// loose stays in the worktree, which `Remove` refuses to delete while it
+// is dirty. Waiving the landing waives no floor: unresolved diff comments
+// and a session's open workflow run hold the card open, checked before
+// the stamp, because a refused hand-off of a card that stays open must
+// not leave it badged as handed off. A legacy workflow card closes the same way — it is never run
+// again, and this is how a person puts it away with its branch kept.
+func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string) (HandOffResult, error) {
 	f, err := e.cfg.Store.GetFeature(ctx, id)
 	if err != nil {
-		return AdvanceResult{}, err
+		return HandOffResult{}, err
 	}
 	if f.Stage == domain.StageDone {
-		return AdvanceResult{Feature: f, From: f.Stage, Status: StatusNoop}, nil
+		return HandOffResult{Feature: f, Status: HandOffNoop}, nil
 	}
 	if f.Kind == domain.KindResearch {
-		return AdvanceResult{}, fmt.Errorf("%s carries no branch — advance it instead", id)
+		return HandOffResult{}, fmt.Errorf("%s carries no branch to hand off", id)
 	}
 
 	// A landed branch has already left by the other door. Saying so beats
@@ -69,87 +49,49 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 	// path must not trust a bool that may be wrong. A hand-off asks the
 	// same question for a weaker reason — only to avoid stamping a card
 	// that is already on the base — and a drifted branch is by definition
-	// not sitting on it. The person is taking the branch as it is; what
-	// the base did since the fork is theirs to reconcile before they push,
-	// and the confirm says so. Refusing would offer exactly two exits, a
-	// rebase and a delete, neither of which is the verb they chose.
+	// not sitting on it.
 	//
-	// A main-checkout freeform card has no branch and no worktree, so
-	// neither the landed check nor the checkpoint applies: its loose work
-	// is in the person's checkout and stays there whatever happens here,
-	// and committing it would sweep in whatever else the checkout holds —
-	// not gummi's call, on a card minted to have no protection at all.
-	mainCheckout := f.IsFreeform() && f.MainCheckout
-	if !mainCheckout {
+	// A main-checkout card has no branch and no worktree, so the landed
+	// check does not apply: its loose work is in the person's checkout
+	// and stays there whatever happens here.
+	if !f.MainCheckout {
 		wt, err := e.mgr(ctx, &f)
 		if err != nil {
-			return AdvanceResult{}, err
+			return HandOffResult{}, err
 		}
 		if landed, err := landedOrDrifted(ctx, wt, &f); err != nil {
-			return AdvanceResult{}, err
+			return HandOffResult{}, err
 		} else if landed {
-			// the branch it landed on, not the literal "main": a card of a goal
-			// lands on the goal branch, and a `master` repo has never been
-			// called main.
-			return AdvanceResult{}, fmt.Errorf("%s already landed on %s — there is nothing to hand off", id, wt.BaseBranch(ctx))
-		}
-
-		// No checkpoint for a freeform card: every commit on a session's
-		// branch is one somebody made on purpose, and its loose work is
-		// kept where it is, in the worktree the hand-off leaves standing.
-		if !f.IsFreeform() {
-			if exists, err := wt.Exists(ctx, &f); err != nil {
-				return AdvanceResult{}, err
-			} else if exists {
-				// AsIs: the ordinary checkpoint refuses on fork drift, to keep a
-				// landing coherent. Nothing lands here, and the loose work would
-				// otherwise be lost with the branch the person is about to take.
-				if _, err := wt.CommitAllAsIs(ctx, &f, string(id)+": final checkpoint"); err != nil {
-					return AdvanceResult{}, err
-				}
-			}
+			return HandOffResult{}, fmt.Errorf("%s already landed on %s — there is nothing to hand off", id, wt.BaseBranch(ctx))
 		}
 	}
 
-	// A freeform card has no gate to cross and no stage to advance — it
-	// holds StageOpen, which has no outgoing edge (DESIGN §19) — so its
-	// hand-off IS its ending and the store closes it directly. Waiving the
-	// landing still waives no floor: the one floor a freeform card has is
-	// its unresolved diff comments, and it is checked right here rather
-	// than inherited from Advance — before the stamp, because a refused
-	// hand-off of a card that stays open must not leave it badged as
-	// handed off.
-	if f.IsFreeform() {
-		if _, diffOpen, _, berr := e.GateBlockers(ctx, id); berr != nil {
-			return AdvanceResult{}, berr
-		} else if diffOpen > 0 {
-			return AdvanceResult{Feature: f, From: f.Stage, Status: StatusBlockedDiff, Blockers: diffOpen}, nil
+	if diffOpen, err := e.OpenDiffComments(ctx, id); err != nil {
+		return HandOffResult{}, err
+	} else if diffOpen > 0 {
+		return HandOffResult{Feature: f, Status: HandOffBlockedDiff, Blockers: diffOpen}, nil
+	}
+	// a workflow run still changing the tree holds the close, as an agent
+	// mid-turn does (DESIGN §25.14); a proposal nobody answered goes with it
+	if isSession(f) {
+		if why := e.RunHoldsClose(ctx, id); why != "" {
+			return HandOffResult{}, fmt.Errorf("%s cannot be handed off: %s", f.Name(), why)
+		}
+		if err := e.withdrawProposals(ctx, id, "the session was handed off"); err != nil {
+			return HandOffResult{}, err
 		}
 	}
 
 	now := time.Now().UTC()
 	if err := e.cfg.Store.SetHandedOffAt(ctx, id, now); err != nil {
-		return AdvanceResult{}, err
+		return HandOffResult{}, err
 	}
-
-	if f.IsFreeform() {
-		closed, cerr := e.cfg.Store.CloseFreeform(ctx, id, actor)
-		if cerr != nil {
-			return AdvanceResult{}, cerr
-		}
-		closed.HandedOffAt = now
-		return AdvanceResult{
-			Feature: closed, From: domain.StageOpen, To: domain.StageDone,
-			Status: StatusAdvanced,
-		}, nil
-	}
-
-	res, err := e.Advance(ctx, id, actor)
+	closed, err := e.cfg.Store.CloseCard(ctx, id, actor)
 	if err != nil {
-		return res, err
+		return HandOffResult{}, err
 	}
-	res.Feature.HandedOffAt = now
-	return res, nil
+	closed.HandedOffAt = now
+	return HandOffResult{Feature: closed, Status: HandOffClosed}, nil
 }
 
 // landedOrDrifted is Landed with fork drift read as "not landed": the

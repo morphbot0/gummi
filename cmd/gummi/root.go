@@ -41,19 +41,12 @@ func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "print the version and exit")
 
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(ingestCmd)
-	rootCmd.AddCommand(bugsCmd)
-	rootCmd.AddCommand(depsCmd)
 	rootCmd.AddCommand(stackCmd)
 	rootCmd.AddCommand(scheduleCmd)
 	rootCmd.AddCommand(curatorCmd)
 	rootCmd.AddCommand(prCmd, pushCmd)
 	rootCmd.AddCommand(runCmd)
-	rootCmd.AddCommand(researchCmd)
-	rootCmd.AddCommand(diagnoseCmd)
-	rootCmd.AddCommand(goalCmd)
 	rootCmd.AddCommand(resumeCmd)
-	rootCmd.AddCommand(verifyCmd)
 	rootCmd.AddCommand(mergeCmd)
 	rootCmd.AddCommand(squashCmd)
 	rootCmd.AddCommand(commitCmd)
@@ -71,7 +64,6 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(webCmd)
 	rootCmd.AddCommand(mcpCmd)
-	rootCmd.AddCommand(experimentCmd)
 }
 
 // runBoardCobra is the root command's RunE. --version/-v short-circuits to

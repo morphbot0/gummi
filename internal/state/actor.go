@@ -43,3 +43,14 @@ func PersonName(actor string) string {
 // card's objective (DESIGN §19.11): not a person, so a thread draws them
 // as gummi's and never as the person's.
 const ActorObjective = "objective"
+
+// ActorCrew is the actor of the turns a crew sent (DESIGN §24) before
+// workflows replaced crews: a node's brief and reworks, and the report its
+// session got. Nothing sends one now; an old transcript still carries
+// them, and a thread draws them as the crew's.
+const ActorCrew = "crew"
+
+// ActorWorkflow is the actor of the turns a workflow run sends (DESIGN
+// §25): a step's brief and steers, and the report its session gets. A
+// thread draws them as the workflow's.
+const ActorWorkflow = "workflow"

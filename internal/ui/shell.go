@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image/color"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,10 +21,8 @@ import (
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/publish"
-	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/layout"
 	"github.com/morphis/gummi/internal/ui/logo"
 	"github.com/morphis/gummi/internal/ui/overlay"
@@ -33,16 +30,6 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/webapi"
 	"github.com/morphis/gummi/internal/worktree"
-)
-
-// SortMode selects how the board's todo column is ordered. It is an
-// ephemeral, in-memory toggle (never persisted): SortCreation shows
-// cards in creation order, SortSeverity ranks bugs by severity.
-type SortMode int
-
-const (
-	SortCreation SortMode = iota
-	SortSeverity
 )
 
 // Shell is gummi's top-level Bubble Tea model. It owns the screen
@@ -90,7 +77,15 @@ type Shell struct {
 	repoInstalled uint64
 
 	rows []featureRow
-	sel  int
+	// children are the hidden child cards of the sessions on the board (a
+	// workflow step's), by id: never rows, but the web face reads a step's
+	// thread by its card (webrun.go).
+	children map[domain.FeatureID]domain.Feature
+	// webStep is what the web last saw of each step card's session
+	// (emitStepChange), so a delta that moves nothing in its run's block
+	// does not send its session's page to read it again.
+	webStep map[domain.FeatureID]string
+	sel     int
 	// tab picks which of gummi's top-level tabs owns the main pane
 	// (tabs.go): board, stats, or inbox. cardOpen is the board tab's own
 	// page-within-a-tab — the selected card opened full width — and
@@ -117,43 +112,16 @@ type Shell struct {
 	// one writer).
 	openOnLoad domain.FeatureID
 
-	// rebaseHeld is the stop a card was waiting at when an agent rebase
-	// was dispatched on it (rebase.go's agentRebase): a resolve session
-	// that ends without resolving puts it back, since that decision still
-	// stands.
-	rebaseHeld map[domain.FeatureID]attnItem
-	// rebaseDirty: the agent rebase in flight for a card carried its
-	// uncommitted work across (autostash), so the judge accepts a dirty
-	// worktree afterwards (rebase.go's judgeRebase)
-	rebaseDirty map[domain.FeatureID]bool
 	// landConflicts are the files a card's last landing conflicted in
 	// (merge.go's landFeature), so its decision offers the rebase
 	// that resolves them rather than the landing that just failed. A
-	// rebase clears it (rebaseFeature); one that resolves nothing sets it
-	// again (rebaseSettled).
+	// rebase clears it (rebaseFeature).
 	landConflicts map[domain.FeatureID][]string
-	// quitCut are the cards the last quit stopped mid-stage
-	// (quitresume.go), so a paused one says the quit cut it.
-	quitCut map[domain.FeatureID]bool
 
-	// bounceNotes holds the line the composer aimed at a decision's
-	// bounce answer: the card is rewound now, but its reborn work stage
-	// only runs when someone starts it, so the note waits in memory and
-	// rides that run's kickoff (runStage) — the same delivery and the
-	// same lifetime the headless driver's --bounce note takes. Lost when
-	// the process exits, exactly as the driver's is.
-	bounceNotes map[domain.FeatureID]string
-	inboxSel    int      // cursor into m.inbox.list(), the inbox tab's own selection
-	sortMode    SortMode // todo-column ordering toggle (ephemeral, not persisted)
-	notice      noticeMsg
-	spec        *specView      // non-nil while the spec surface is open
-	diff        *diffView      // non-nil while the diff surface is open
-	ingest      *ingestView    // non-nil while the ingest review surface is open
-	ingestRun   *ingestRunView // non-nil while an ingest pass is decomposing (one at a time)
-	deps        *depPicker     // non-nil while the dependency picker is open
-
-	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
-	bugIngesting bool           // a bug import is fetching (one at a time)
+	inboxSel int // cursor into m.inbox.list(), the inbox tab's own selection
+	notice   noticeMsg
+	spec     *specView // non-nil while the spec surface is open
+	diff     *diffView // non-nil while the diff surface is open
 
 	mergePrep map[domain.FeatureID]bool // cards whose landing preconditions are being checked (one landing per card at a time)
 	// ghWork is what the board is waiting on GitHub for, per card
@@ -225,21 +193,6 @@ type Shell struct {
 	// a follow-up question doesn't need retyping `ask`. Reset by blur,
 	// the same as threadFreeForm.
 	threadAsk bool
-	// autopilotAnswering names the cards whose open decision autopilot has
-	// already taken and is in the middle of delivering — the interval
-	// between dispatching the answer and the answer event landing. It is
-	// what the pinned decision marks itself with (decision.go).
-	//
-	// Deliberately not "this card's mode would answer a decision of this
-	// kind": a card sitting idle on gates is not being taken by anyone —
-	// autopilot only ever starts a stage it crossed into itself — so
-	// marking it from the rule table alone would be a standing lie about
-	// a card nothing is going to move.
-	autopilotAnswering map[domain.FeatureID]bool
-
-	// The goal loop (goalloop.go): goals queued for a tick by this update,
-	// goals whose tick is running, and goals owed one more when it lands.
-	goalTickQueue map[domain.FeatureID]bool
 	// stackTickQueue is the same seam for stacks (stackboard.go): a card
 	// whose branch moved wakes its stack, and the engine replays the
 	// cards above it. Coalesced per stack, drained by Update.
@@ -250,9 +203,16 @@ type Shell struct {
 	repoBranches map[string][]string
 	// stackRows is each stacked card's position and staleness, derived in
 	// loadRows (it asks git) and read by cardLine (which may not).
-	stackRows     map[domain.FeatureID]stackRow
-	goalTicking   map[domain.FeatureID]bool
-	goalTickAgain map[domain.FeatureID]bool
+	stackRows map[domain.FeatureID]stackRow
+	// workflowTicking and workflowTickAgain coalesce workflow ticks
+	// (workflowloop.go).
+	workflowTicking   bool
+	workflowTickAgain bool
+	// wf is what the terminal holds of the open session's workflow runs
+	// (runblock.go), and stepv a step opened over its thread
+	// (stepview.go), nil when none is.
+	wf    runState
+	stepv *stepView
 	// sizedFor is how many landed rows worktreeSizeText was measured
 	// against, so a reload that did not change the set does not re-walk
 	// every worktree on disk. -1 until the first measurement.
@@ -267,17 +227,6 @@ type Shell struct {
 	// ephemeral, like sortMode: the board opens with history folded away,
 	// which is the state that makes the list about today.
 	archiveOpen bool
-	// goalOpen names the goals whose cards are unfolded under them on the
-	// board. Folded is the default: a goal is one row until you look.
-	goalOpen map[domain.FeatureID]bool
-	// goalPage is the mounted goal page (goalpage.go), nil when closed.
-	goalPage *goalPageView
-	// goalReturn is the goal whose page sent the reader into the card
-	// they are watching, so esc goes back to it (goalpage.go's
-	// backToGoalPage). Empty whenever the open card was reached any other
-	// way — the board, the inbox, a notice — since esc there has always
-	// meant the board.
-	goalReturn domain.FeatureID
 	// stats is the mounted stats tab (statsview.go), nil when closed:
 	// where the selected card's credits and hours went.
 	stats *statsView
@@ -307,25 +256,6 @@ type Shell struct {
 	// (AttachCardLocks). Nil leaves the board's git verbs unlocked.
 	locks *state.CardLocks
 	inbox *inbox // needs-attention queue
-	// checks is keyed by feature and scoped to the stage the run happened
-	// on: a manual `v` run is only ever "the current result" for the stage
-	// it ran against, so an entry from a stage the card has since moved
-	// off of must stop counting as current rather than being cleared from
-	// every one of the several call sites a stage can change at.
-	checks     map[domain.FeatureID]stagedChecks
-	baselining map[domain.FeatureID]bool // a baseline check run is in flight
-	// scribing counts the one-shot scribe passes (check discovery, envelope
-	// estimate, the re-entry read) currently in flight against a card. A count, not a flag,
-	// because the shell dispatches both together and either can outlive the
-	// other. A settled card is removed from the map, not left at zero, so
-	// "in flight" is testable as key-presence — cardBusy/spinnerActive rely
-	// on that.
-	scribing map[domain.FeatureID]int
-	// scribeWarned is the cards whose scribe failure the board already
-	// put on screen: the passes that fail together (discovery and the
-	// landing draft) say it once, not twice.
-	scribeWarned map[domain.FeatureID]bool
-	rounds       map[roundKey]int // automatic loop round counters, keyed by (id, round_kind)
 	// cardEvents caches the card-event log (state.CardEvent, card_events
 	// table) per feature, loaded lazily by loadCardEvents and applied to
 	// the selected row's featureRow.Events at render time (msgs.go). It is
@@ -333,19 +263,6 @@ type Shell struct {
 	// open card page — loading every card's log on each board refresh
 	// would be unbounded IO.
 	cardEvents map[domain.FeatureID][]state.CardEvent
-	// excusedChecks caches, per feature, the names of the repo checks that
-	// were ALREADY failing when the card's branch was born
-	// (state.ExcusedChecks over the stored baseline). Loaded lazily beside
-	// cardEvents, for the same reason and on the same trigger: it is read
-	// only by the open card's page, and a per-card store read on every
-	// board refresh is exactly the IO-per-frame the row snapshot exists to
-	// avoid. Absent entry and empty slice both mean "nothing excused",
-	// which is the ordinary case.
-	excusedChecks map[domain.FeatureID][]string
-	// excusedOn is, per feature, the commit its excused checks were
-	// measured on (state.ExcusedOn) — an excusal is a claim about that
-	// commit — loaded beside excusedChecks.
-	excusedOn map[domain.FeatureID]string
 	// threadScroll is how many lines back from the newest the card
 	// thread's body is scrolled. Zero is the bottom, which is where a
 	// card opens and where it stays as a live stage streams — counting
@@ -382,65 +299,14 @@ type Shell struct {
 	pendingScrollAnchorCard  domain.FeatureID
 	pendingScrollAnchorEvent int
 	// lastSeen is how far through each card's event log this machine has
-	// already read (state's card_last_seen), and anchorTo names the one
-	// card whose thread should open on its newest unread period instead
-	// of on its newest line.
-	//
-	// The anchor is a one-shot: it is set when a card's events land and
-	// consumed by the next real render, because that render is the only
-	// place that knows how many rows the period's opening rule ended up
-	// being from the bottom. Everything about the body's height — folding,
-	// wrapping, whether a session is live — is decided there.
+	// already read (state's card_last_seen).
 	lastSeen map[domain.FeatureID]int64
 	// pendingSeen holds marks written by markSeen before fetchLastSeen's
-	// reply lands. It exists so that mark can't flip lastSeen non-nil for
-	// every *other* card too: markSeen's anchor check gates on lastSeen ==
-	// nil to mean "not loaded yet, don't know, don't anchor" per card, and
-	// if writing card A's mark lazily initialised lastSeen to {}, card B
-	// opened later in the same window would read lastSeen[B] == 0 —
-	// indistinguishable from "loaded, confirmed unread" — and false-anchor
-	// (BG-056 review). Kept separate until lastSeenMsg merges it in.
+	// reply lands, so that mark can't flip lastSeen non-nil for every
+	// *other* card too (BG-056 review). Kept separate until lastSeenMsg
+	// merges it in.
 	pendingSeen map[domain.FeatureID]int64
-	anchorTo    domain.FeatureID
-	// anchorFrom is the event index the anchored period opens at. The
-	// period is resolved once, by markSeen, and carried here rather than
-	// asked again at render time — markSeen advances the read mark in the
-	// same breath as it sets the anchor, so putting the question a second
-	// time afterwards puts it to a card that has just been marked read,
-	// and the answer is always "nothing unread". Carrying the decision is
-	// what stops the two halves disagreeing about a question only one of
-	// them is still in a position to answer.
-	anchorFrom int
 
-	// narration caches the one model-written claim a card's narration can
-	// carry, keyed by the card state it describes (citations.go). It is
-	// per-process and per-card: a card this process never drove has no
-	// entry, which is exactly what "render cached only" means for a card
-	// another process owns. narrating holds the key of a pass in flight,
-	// so a re-render while a model is thinking cannot start a second one.
-	narration map[domain.FeatureID]narrationEntry
-	narrating map[domain.FeatureID]string
-
-	// specJump/diffJump are pending citation targets: where the surface
-	// a citation opens should land once its content arrives. Both are
-	// consumed by the load handlers and cleared there, because a jump is
-	// something that happens on arrival, not a position the page holds
-	// (thread.go's anchorTo makes the same argument for the third).
-	specJump string
-	diffJump diffTarget
-	// chips are the chips up, one per card: a typed line the card has read
-	// whose reading is an act, waiting for the reader to take it or take
-	// the line back (chip.go). Withdrawn by esc, by any edit to the
-	// composer, and by the card moving under it. Per card, because a web
-	// board is answering several cards at once and one card's chip is
-	// never another's to take or lose.
-	chips map[domain.FeatureID]*reentryReading
-	// reentryRead is the moment before that one: a line that has been
-	// sent out to be read and has not come back yet (reentry.go). It
-	// holds the chip's own slot while it waits, so the seconds a model
-	// call takes are seconds the screen accounts for rather than seconds
-	// the reader spends wondering whether enter registered.
-	reentryRead *reentryRead
 	// consultSending holds, per card, a line handed to the consult session
 	// and not yet delivered — opening a session is a model call, and the
 	// thread says so for as long as it runs (consultBlock). Cleared by
@@ -448,24 +314,15 @@ type Shell struct {
 	consultSending map[domain.FeatureID]string
 	// rewound is the line alt+z last put back in a freeform card's composer:
 	// pressed again over it, rewind goes one message further back.
-	rewound map[domain.FeatureID]string
-	// chatting marks a card whose thread's newest exchange is a consult
-	// answer: a line typed next continues that conversation and is not
-	// read again (chat.go). Ended by a row picked, a verb, the card
-	// moving, or leaving the page.
-	chatting     map[domain.FeatureID]bool
-	roundStore   rounds.Store // persistence seam for rounds (defaults to store)
-	profileNames []string     // profile names for the new-card dialog
-	repoNames    []string     // configured managed-repo names for the new-card dialog
+	rewound      map[domain.FeatureID]string
+	profileNames []string // profile names for the new-card dialog
+	repoNames    []string // configured managed-repo names for the new-card dialog
 	// lastRepo is the repository the last card was created in: the
-	// new-card dialog's preselect. pendingCard is a dialog parked while
-	// the issue picker it opened is up (carddoor.go).
-	lastRepo    string
-	pendingCard *cardForm
+	// new-card dialog's preselect.
+	lastRepo string
 	// ghIssue and remoteOrigin are the new-card dialog's GitHub and git
 	// seams; nil uses gh and git. Tests stub both.
 	ghIssue      func(ctx context.Context, dir, ownerRepo string, n int) (domain.BugProposal, error)
-	ghIssues     func(ctx context.Context, src engine.GitHubSource) (engine.BugIngestResult, error)
 	remoteOrigin func(dir string) string
 	envelope     int              // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier // bell/desktop hook for needs-attention events
@@ -473,15 +330,10 @@ type Shell struct {
 	// and its question apart: the web face's push notifications
 	// (AddAttentionNotifier).
 	attention []AttentionNotifier
-	// pausing marks a pause asked for and not yet taken (pauseRun).
-	pausing map[domain.FeatureID]bool
 	// headless is a Shell hosted by a Bridge (bridge.go): no screen, so a
 	// dialog nobody is answering is never seen, and what the TUI would
 	// have asked in one is asked of the web face instead (webintent.go).
 	headless bool
-	// resumeOffer is the quit-resume question a headless board holds for
-	// the web face instead of opening its dialog (quitresume.go).
-	resumeOffer *quitResumeOffer
 	// today is the board's spend since local midnight, measured off the
 	// loop after a row load (webboard.go) for the web face's header.
 	today todaySpend
@@ -549,25 +401,6 @@ type Shell struct {
 	// webWatching is the same for a freeform card's open watch: the turn
 	// that starts or settles one moves the board row's "watching" word too.
 	webWatching map[domain.FeatureID]bool
-	// webIngest is the ingest run as the web face names it (webingest.go).
-	webIngest webIngestState
-}
-
-// roundKey is the fast-path round-counter map's key: one entry per
-// (feature, round kind), matching the keyed store row.
-type roundKey struct {
-	id   domain.FeatureID
-	kind domain.RoundKind
-}
-
-// round reads the fast-path count for (id, kind), defaulting to 0.
-func (m *Shell) round(id domain.FeatureID, kind domain.RoundKind) int {
-	return m.rounds[roundKey{id, kind}]
-}
-
-// setRound writes the fast-path count for (id, kind).
-func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
-	m.rounds[roundKey{id, kind}] = n
 }
 
 // NewShell builds a detached shell (splash + empty board).
@@ -577,15 +410,8 @@ func NewShell(t theme.Theme, version string) *Shell {
 		styles:         styles,
 		version:        version,
 		now:            time.Now,
-		checks:         map[domain.FeatureID]stagedChecks{},
-		baselining:     map[domain.FeatureID]bool{},
-		scribing:       map[domain.FeatureID]int{},
-		scribeWarned:   map[domain.FeatureID]bool{},
 		consultSending: map[domain.FeatureID]string{},
-		rounds:         map[roundKey]int{},
 		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
-		excusedChecks:  map[domain.FeatureID][]string{},
-		excusedOn:      map[domain.FeatureID]string{},
 		threadDrafts:   map[domain.FeatureID]string{},
 		copilotHint:    true,
 		motionEnabled:  true,
@@ -613,9 +439,6 @@ func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace
 	m.store, m.wt, m.ws = store, wt, ws
 	m.loadName()
 	m.resolveBaseBranches()
-	// the rounds persistence seam defaults to the real store; tests may
-	// swap in a failing store to prove the fail-closed path.
-	m.roundStore = store
 }
 
 // repoSnapshot is one read of the workspace's repositories: the names a
@@ -748,7 +571,7 @@ func (m *Shell) openRepoPicker(id domain.FeatureID) {
 	if i < 0 {
 		return
 	}
-	if r := m.rows[i]; r.F.IsGoal() || r.F.Home || r.HasWorktree {
+	if r := m.rows[i]; r.F.Home || r.HasWorktree {
 		return
 	}
 	if len(m.repoNames) == 0 {
@@ -788,7 +611,7 @@ func readBranches(ctx context.Context, wt *worktree.Pool) (map[string]string, ma
 // resolved to nothing and for a Shell that was never attached (the test
 // scaffolds), so a sentence built from it is never missing a word.
 func (m *Shell) baseBranch(f domain.Feature) string {
-	if name := m.goalBranchOf(f); name != "" {
+	if name := m.parentBranchOf(f); name != "" {
 		return name
 	}
 	if f.Base != "" && (f.StackID == "" || f.StackPos == 0) {
@@ -812,59 +635,28 @@ func (m *Shell) repoBaseBranch(f domain.Feature) string {
 	return worktree.DefaultBaseBranchName
 }
 
-// conducted answers featureRow.conducted for a caller holding only the
-// feature, off the card's own loaded row — the row is where the goal's
-// liveness is resolved (loadRows). A card with no row loaded falls back to
-// its own half of the predicate.
-func (m *Shell) conducted(f domain.Feature) bool {
-	if i := m.rowIndex(f.ID); i >= 0 {
-		return m.rows[i].conducted()
-	}
-	return f.Conducted()
-}
-
-// goalBranchOf names the goal branch f lands on, or "" for a card that
-// lands on its repository's trunk.
-//
-// A goal's cards do not land on main: they resolve to a manager rooted at
-// the goal's worktree, so their branches fork from and squash-merge onto
-// the goal branch (worktree.Pool.ManagerFor). Every sentence built from
-// baseBranch used to name the trunk anyway — a landed card of a goal cut
-// from `setup-publishing` read "Landed on setup-publishing", which is
-// where the GOAL lands, one merge later and under the goal's own message.
-//
-// It reads the goal card off the loaded rows, which is where the branch
-// name lives; loadRows resolves the same rule from the features it is
-// already holding, since the rows it is building are not on the Shell yet.
-func (m *Shell) goalBranchOf(f domain.Feature) string {
-	if f.ParentID != "" {
-		// a card a freeform session created forks from and lands on that
-		// card's branch while it is open (worktree.Pool.ManagerFor)
-		if i := m.rowIndex(f.ParentID); i >= 0 && m.rows[i].F.Stage != domain.StageDone {
-			return m.rows[i].F.BranchName()
+// rowIndex is the index of card id in m.rows, -1 when it is not loaded.
+func (m *Shell) rowIndex(id domain.FeatureID) int {
+	for i, r := range m.rows {
+		if r.F.ID == id {
+			return i
 		}
-		return ""
 	}
-	if f.GoalID == "" {
-		return ""
-	}
-	i := m.rowIndex(f.GoalID)
-	if i < 0 {
-		return ""
-	}
-	return goalLandingBranch(m.rows[i].F)
+	return -1
 }
 
-// goalLandingBranch is that rule stated on the goal card itself: its
-// branch while the goal is live, and nothing once the goal is done —
-// a finished goal's trees are removed and its cards resolve to their own
-// repository again (worktree.Pool.managerForGoalCard), so the trunk is
-// the honest answer from then on.
-func goalLandingBranch(goal domain.Feature) string {
-	if !goal.IsGoal() || goal.Stage == domain.StageDone {
+// parentBranchOf names the branch f lands on when that is not its
+// repository's trunk: a card a freeform session created forks from and
+// lands on that card's branch while it is open (worktree.Pool.ManagerFor).
+// "" for every other card.
+func (m *Shell) parentBranchOf(f domain.Feature) string {
+	if f.ParentID == "" {
 		return ""
 	}
-	return goal.GoalBranchName()
+	if i := m.rowIndex(f.ParentID); i >= 0 && m.rows[i].F.Stage != domain.StageDone {
+		return m.rows[i].F.BranchName()
+	}
+	return ""
 }
 
 // baseBranchOf is baseBranch keyed by card id, for the callers that hold
@@ -1069,7 +861,7 @@ func (m *Shell) probeOpenReviewThreads(ctx context.Context, f domain.Feature) (i
 	if m.engine == nil {
 		return 0, f.PullRequest.URL, nil
 	}
-	_, diffOpen, _, err := m.engine.GateBlockers(ctx, f.ID)
+	diffOpen, err := m.engine.OpenDiffComments(ctx, f.ID)
 	if err != nil {
 		return 0, "", err
 	}
@@ -1094,121 +886,6 @@ func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
 	d.baseBranch = m.baseBranch(f)
 	m.Overlay.Push(d)
 	return d.startDraft(false)
-}
-
-// reconstructInbox is the needs-attention queue's fallback source at
-// startup, covering whatever the durable decision_open records
-// (seedInboxFromDecisions, dispatched ahead of this from the
-// openDecisionsMsg handler) did not: a card driven by a pre-decision
-// binary, or one whose stop predates this change. Derived from durable
-// session state: a failed run (paused with a stored error) → failure; a
-// settled autonomous stage → a budget park if its activity recorded an
-// exhaustion, else a review-&-advance gate.
-//
-// Every add here goes through seed, not add/put: it must not clobber a
-// feature the decision seeding (or a live engine event racing it) already
-// gave an item, since both of those are fresher than this inference.
-func (m *Shell) reconstructInbox() {
-	if m.engine == nil {
-		return
-	}
-	for id, s := range m.engine.Sessions() {
-		if m.goalOf(id) != "" {
-			continue // a goal card's stops are its goal's, never yours
-		}
-		snap := s.Snapshot()
-		switch {
-		case snap.Err != nil:
-			m.inbox.seed(attnItem{Feature: id, Kind: attnFailure, Text: sanitize(snap.Err.Error())})
-		case snap.State != engine.StateDone || !autonomousStage(snap.Feature.Stage):
-			// running/queued/interactive sessions raise their own items live
-			continue
-		case exhaustedActivity(snap.Activity):
-			m.inbox.seed(attnItem{Feature: id, Kind: attnBudget, Text: budgetAttentionText(snap.Feature.Stage, false)})
-		case unsettledCritique(snap):
-			// A critique that did not clear its gate is not a gate
-			// anyone should be invited to approve. Live, a changes
-			// verdict never raises one at all — the loop bounces
-			// straight into a rework round — so a card is only ever
-			// found in this state because the process stopped between
-			// the verdict and the round it was going to feed.
-			// Reconstructing it as a plain gate said "review & advance"
-			// over a verdict that had just said the opposite, and left
-			// the card unbounceable on top (bounceStage's plan arm is
-			// legal only on an escalated gate — msgs.go).
-			//
-			// Escalated, because that is what this stop is: the loop did
-			// not settle it, and it is waiting on a person's judgement
-			// rather than on their approval.
-			m.inbox.seed(attnItem{
-				Feature: id, Kind: attnGate, Escalated: true,
-				Text: unsettledGateReason(snap.Feature.Stage, sessionVerdict(snap)),
-			})
-		default:
-			// gateReason, not a hardcoded "review & advance": a card that
-			// reached its verify gate while the TUI was closed is reconstructed
-			// here, and telling that reader to "advance" it hides that the next
-			// keypress lands the branch on main (reviewloop.go).
-			//
-			// The outcome word comes from VerifiedAt, not from the
-			// session's own verdict: the stamp is the store's record that
-			// the gate was crossed clean, where the verdict is only what
-			// the session concluded. An unstamped card gets "verify
-			// finished" — still told that the next press lands it, without
-			// claiming a result nothing recorded. (A verdict that did not
-			// settle is read one case up, where it decides whether this is
-			// a gate at all.)
-			m.inbox.seed(attnItem{
-				Feature: id, Kind: attnGate,
-				Text: gateReason(snap.Feature.Stage, id.Kind(), !snap.Feature.VerifiedAt.IsZero(), m.baseBranch(snap.Feature)),
-			})
-		}
-	}
-}
-
-// exhaustedActivity reports whether a restored session's activity feed
-// records a budget stop (the marker exhaust writes), so the reconstructed
-// item is a budget park rather than a plain gate.
-func exhaustedActivity(activity []string) bool {
-	for _, a := range activity {
-		if strings.Contains(a, "budget exhausted") || strings.Contains(a, "budget reached") {
-			return true
-		}
-	}
-	return false
-}
-
-// raiseEscalation is raiseAttention for gates an automatic loop gave up
-// on (round cap, unclear verdict): the item carries the escalation flag
-// so surfaces tint it as needs-you rather than finished-clean. Every
-// escalation is a gate — the loop stopped at a decision only the human
-// can take — and it is recorded as one, the same seam the driver's
-// escalations raise through.
-func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
-	m.raiseEscalationAs(id, state.ParkReasonGaveUp, text)
-}
-
-// raiseBlocked is the escalation of a verify the environment could not
-// run. The park carries state.ParkReasonBlocked, which is what lets a goal
-// wait for such a card instead of giving up on it.
-func (m *Shell) raiseBlocked(id domain.FeatureID, text string) {
-	m.raiseEscalationAs(id, state.ParkReasonBlocked, text)
-}
-
-func (m *Shell) raiseEscalationAs(id domain.FeatureID, reason, text string) {
-	// a goal card's stop is its goal's to handle: record it where the goal
-	// reads it and wake the goal, but never queue it for you
-	if g := m.goalOf(id); g != "" {
-		m.logPark(id, reason, text)
-		m.logDecisionAs(id, decisionKindForStage(m.recordStage(id)), text, true)
-		m.queueGoalTick(g)
-		return
-	}
-	if m.inbox.addEscalated(id, attnGate, text) {
-		m.alert(id, text)
-		m.logPark(id, reason, text)
-		m.logDecisionAs(id, decisionKindForStage(m.recordStage(id)), text, true)
-	}
 }
 
 // raiseAttention adds a needs-attention item and, when it is a new alert
@@ -1246,40 +923,12 @@ func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) 
 // so parking after a blocked Advance must add the inbox item without
 // minting a second decision row for the same stop.
 func (m *Shell) parkAttentionItem(id domain.FeatureID, kind attnKind, text string) bool {
-	if g := m.goalOf(id); g != "" {
-		// silent, like raiseEscalation's goal arm: the goal hears it
-		m.logPark(id, state.ParkReasonNeedsYou, text)
-		m.queueGoalTick(g)
-		return false
-	}
 	if !m.inbox.add(id, kind, text) {
 		return false
 	}
 	m.alert(id, text)
 	m.logPark(id, state.ParkReasonNeedsYou, text)
 	return true
-}
-
-// rewordGateDecision points the card's standing open gate decision at
-// text — the blocker Advance named — after a crossing attempted on the
-// card's behalf was refused. The row was opened by the attempt itself
-// (autopilotCrossGate) in the crossing's inviting wording, and it is the
-// record every waiting-on-you surface reads (status's escalation reason,
-// the startup inbox seed, the thread's pinned decision), so leaving it
-// standing as-is keeps inviting an approval the gate just refused.
-// Rewording in place keeps one row for the one stop and the id the
-// landing crossing answers; when no such row stands — a crossing the
-// `A` dialog attempted pre-opens nothing — a fresh one is opened
-// instead, so every blocked stop still leaves the row §10.18 requires.
-// Best-effort and silent, like logDecision beside it.
-func (m *Shell) rewordGateDecision(id domain.FeatureID, text string) {
-	if m.store == nil {
-		return
-	}
-	reworded, err := m.store.RewordOpenGateDecision(context.Background(), id, text)
-	if err == nil && !reworded {
-		m.logDecision(id, state.DecisionKindGate, text)
-	}
 }
 
 // logDecision records a card's open decision in its own history
@@ -1321,38 +970,14 @@ func (m *Shell) logPark(id domain.FeatureID, reason, detail string) {
 	_ = m.store.AppendPark(context.Background(), id, m.recordStage(id), reason, detail, "", time.Now())
 }
 
-// markSeen decides whether this card has unread autopilot history worth
-// opening on, and records that it has now been read.
-//
-// The order matters and is the whole of the subtlety here: the anchor is
-// computed against the mark as it was *before* this look, and the mark
-// is moved afterwards. Reading them the other way round would mean a
-// card was always already seen by the time anything asked, and the
-// divider would never fire once.
-//
-// Only the card actually on screen anchors. Events load for the selected
-// card alone, but a card can be selected without its page being open,
-// and moving the board's cursor past a card is not reading it.
+// markSeen records that this card's log has been read up to its newest
+// event.
 func (m *Shell) markSeen(id domain.FeatureID, events []state.CardEvent) tea.Cmd {
-	// m.lastSeen is nil until fetchLastSeen's reply lands (see lastSeenMsg
-	// below); that is "not loaded yet", distinct from "loaded, nothing
-	// seen". A card opened in that window has no read position to compare
-	// against, so it must not anchor as unread — computing the anchor
-	// against a lazily-zeroed map would treat every such card as unread,
-	// even one read in a previous session (BG-056).
-	if m.cardOpen && m.lastSeen != nil {
-		if r, ok := m.selected(); ok && r.F.ID == id {
-			if st, unread := threadfold.UnseenStretch(threadfold.LiveStretches(r.F, events, m.ws), events, m.lastSeen[id]); unread {
-				m.anchorTo, m.anchorFrom = id, st.From
-			}
-		}
-	}
 	seq := newestSeq(events)
 	// Marks made before lastSeen has loaded go into pendingSeen instead of
-	// lazily initialising lastSeen itself — doing the latter would make
-	// this card's write flip lastSeen non-nil for every other card too,
-	// reviving the same false-unread-anchor bug one level down (BG-056
-	// review).
+	// lazily initialising lastSeen itself — m.lastSeen is nil until
+	// fetchLastSeen's reply lands, which is "not loaded yet", distinct
+	// from "loaded, nothing seen" (BG-056).
 	if m.lastSeen != nil {
 		if seq <= m.lastSeen[id] {
 			return nil
@@ -1393,40 +1018,6 @@ type lastSeenMsg struct {
 func (m *Shell) fetchLastSeen() tea.Msg {
 	seqs, err := m.store.LastSeenSeqs(context.Background())
 	return lastSeenMsg{seqs: seqs, err: err}
-}
-
-// logAutopilot records the card changing hands: the machine starting to
-// drive it unattended (state.AutopilotTookOver) or giving it back
-// (state.AutopilotHandedBack). Best-effort and silent for the same
-// reason logPark above is — the user has already seen the switch move,
-// and a failed history write is not worth a second message contradicting
-// nothing.
-//
-// Only the gesture that would otherwise leave no trace writes a handback
-// here: turning the switch off. Every other way a card comes back to you
-// already writes something the reader treats as the end of the period —
-// a park or pause row, or a turn you typed — so recording those again
-// here would put two endings on one ending. A handback with no period open is harmless: the reader has
-// nothing to close and ignores it.
-//
-// by is whose gesture it was (humanActor, read on the loop when the
-// gesture was made): a named person at the web face is recorded by name.
-func (m *Shell) logAutopilot(id domain.FeatureID, event, reason, mode, by string) {
-	if m.store == nil {
-		return
-	}
-	_ = m.store.AppendAutopilotBy(context.Background(), id, m.recordStage(id),
-		event, reason, mode, by, "", time.Now())
-}
-
-// logPause records a person stopping a card's run by hand
-// (state.EventPause), by whose actor. Best-effort and silent, like
-// logPark: the pause has happened and the notice already said so.
-func (m *Shell) logPause(id domain.FeatureID, by string) {
-	if m.store == nil {
-		return
-	}
-	_ = m.store.AppendPause(context.Background(), id, m.recordStage(id), by, time.Now())
 }
 
 // logRebase records a card's branch rebased onto its base
@@ -1504,91 +1095,6 @@ func (m *Shell) recordStage(id domain.FeatureID) domain.Stage {
 	return m.stageOf(id)
 }
 
-// autopilotModeFor reads a card's stored gate-approval mode: the store
-// itself first (storedFeature — a hand-over writes the mode and starts
-// the card in one command, so the row can still read attended when the
-// first stage ends), then the board's own row, then — for a card neither
-// knows — the engine session's own copy of the feature.
-func (m *Shell) autopilotModeFor(id domain.FeatureID) string {
-	if f, ok := m.storedFeature(id); ok {
-		return f.GateApproval
-	}
-	for _, r := range m.rows {
-		if r.F.ID == id {
-			return r.F.GateApproval
-		}
-	}
-	if m.engine != nil {
-		if s := m.engine.Get(id); s != nil {
-			return s.Snapshot().Feature.GateApproval
-		}
-	}
-	return ""
-}
-
-// markAutopilotAnswering / clearAutopilotAnswering bracket the interval
-// the pinned decision reports as autopilot's. Both run on the Update
-// goroutine (the dispatch, and the message the dispatched command sends
-// back), so the map needs no lock of its own.
-func (m *Shell) markAutopilotAnswering(id domain.FeatureID) {
-	if m.autopilotAnswering == nil {
-		m.autopilotAnswering = map[domain.FeatureID]bool{}
-	}
-	m.autopilotAnswering[id] = true
-}
-
-func (m *Shell) clearAutopilotAnswering(id domain.FeatureID) {
-	delete(m.autopilotAnswering, id)
-}
-
-// autopilotAnsweredMsg closes the interval markAutopilotAnswering opened,
-// whatever the answer's outcome was: the decision is no longer autopilot's
-// to take, either because it took it or because the attempt failed and
-// the card is the human's again.
-type autopilotAnsweredMsg struct {
-	id     domain.FeatureID
-	notice noticeMsg
-	// park is the needs-you text to queue when the answer did not land:
-	// the agent is still blocked on its question, so something has to
-	// point the user at it. Empty when the answer went through.
-	park string
-}
-
-// autopilotAnswerAsk answers id's live pending ask with rec as autopilot.
-// AnswerAs talks to the agent backend (it delivers the answer as a fresh
-// turn), which is exactly the IO the no-IO-in-Update contract keeps out
-// of Update itself, so it runs inside the returned command rather than
-// where handleEngineEvent decided to call it. It opens no decision row of
-// its own: the engine's ask path already opened one when it raised the
-// question (DESIGN §6.3), and the answer event AnswerAs records carries
-// that same id, closing it exactly as a human's answer would.
-func (m *Shell) autopilotAnswerAsk(id domain.FeatureID, rec, question string) tea.Cmd {
-	m.markAutopilotAnswering(id)
-	name := m.cardName(id)
-	return func() tea.Msg {
-		if err := m.engine.AnswerAs(context.Background(), id, rec, state.ActorAutopilot); err != nil {
-			// the agent is still blocked on the question, so the card has
-			// to reach the queue after all — park is what says so.
-			return autopilotAnsweredMsg{
-				id:     id,
-				notice: noticeMsg{text: sanitize(err.Error()), isErr: true},
-				park:   question,
-			}
-		}
-		return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: name + ": auto-answered: " + rec}}
-	}
-}
-
-// decisionKindForStage maps a stopped card's stage to the decision kind
-// its stop records: a failed verify escalates as the verify decision it
-// is; every other give-up is a gate the human judges.
-func decisionKindForStage(stage domain.Stage) string {
-	if stage == domain.StageVerify {
-		return state.DecisionKindVerify
-	}
-	return state.DecisionKindGate
-}
-
 // Styles exposes the derived style set to panes.
 
 // attached reports whether a workspace is wired in.
@@ -1600,18 +1106,14 @@ func (m *Shell) Init() tea.Cmd {
 	if m.attached() {
 		cmds = append(cmds, m.loadRows)
 		// Seed the needs-attention queue from the durable decision_open
-		// records (openDecisionsMsg's handler in update, which also runs
-		// reconstructInbox as the session-inference fallback) rather than
-		// rebuilding it by inference alone. Store.OpenDecisions hits the
+		// records (openDecisionsMsg's handler in update). Store.OpenDecisions hits the
 		// database, and Init runs on the Update goroutine — see
 		// attachChat's no-IO-in-Update contract — so the query has to be a
 		// dispatched command, not a direct call.
 		//
 		// A store is all it needs: the record outliving the process that
 		// raised it is the whole point of it, so a board with no agent
-		// wired still learns what a headless run left waiting. The session
-		// inference behind it is the part that needs an engine, and it
-		// no-ops without one.
+		// wired still learns what a headless run left waiting.
 		cmds = append(cmds, m.fetchOpenDecisions)
 		if m.publishEnabled {
 			cmds = append(cmds, m.detectPublish)
@@ -1626,15 +1128,6 @@ func (m *Shell) Init() tea.Cmd {
 		cmds = append(cmds, m.fetchLastSeen)
 	}
 	if m.engine != nil {
-		if !m.attached() {
-			// no store to query, so the inference is the only source there
-			// is — a scaffold-only shape, but it must still seed something.
-			m.reconstructInbox()
-		}
-		// offer to pick up any card the board stopped by quitting
-		// (quitresume.go) — once, here, and nowhere else: nothing may
-		// restart a card without this dialog's own confirm.
-		m.maybeOfferQuitResume()
 		cmds = append(cmds, m.listenEngineCmd())
 	}
 	if m.copilotHint {
@@ -1645,7 +1138,7 @@ func (m *Shell) Init() tea.Cmd {
 		// badges them (and withholds the actions that would fight them)
 		// instead of presenting a card it cannot touch as idle.
 		cmds = append(cmds, foreignTick())
-		cmds = append(cmds, goalPollTick())
+		cmds = append(cmds, workflowPollTick())
 		// The stats tab's own slow refresh. It reads the record rather
 		// than the event stream, so nothing wakes it when a running lane
 		// grows or a wait is answered — a tick does, only while the tab
@@ -1687,21 +1180,15 @@ type (
 )
 
 // threadShowsFailure reports whether the card page is open on id with its
-// thread already rendering that card's live session error inline
-// (liveStageBlock's snap.Err branch, thread.go) — the same "is the card
-// page open on this feature" test EventQuestion uses just below to decide
-// whether a question needs queuing, borrowed here so a failure the thread
-// already prints does not also get a second, multi-row copy in the notice
-// band above the status bar (F9). It must not go the other way: a failure
-// on a card the thread is NOT currently showing (a different card open, or
-// none) still needs the notice, since nothing else on screen says it
-// happened.
+// thread already rendering that card's session error inline (thread.go's
+// snap.Err branch), so a failure the thread already prints does not also
+// get a second, multi-row copy in the notice band (F9). A failure on a card
+// the thread is NOT showing still needs the notice.
 func (m *Shell) threadShowsFailure(id domain.FeatureID) bool {
-	if !m.cardOpen || m.sel < 0 || m.sel >= len(m.rows) || m.rows[m.sel].F.ID != id {
+	if m.engine == nil || !m.cardOpen || m.sel < 0 || m.sel >= len(m.rows) || m.rows[m.sel].F.ID != id {
 		return false
 	}
-	r := m.rows[m.sel]
-	return !r.DrivenAbroad && m.sessionFor(id) != nil
+	return !m.rows[m.sel].DrivenAbroad && m.engine.Freeform(id) != nil
 }
 
 // crossCardOpen reports whether a card page is open on a card other than
@@ -1726,23 +1213,7 @@ func (m *Shell) crossCardOpen(id domain.FeatureID) bool {
 // needs-attention queue, and the automatic review loop. It returns a
 // command for any automatic follow-up (review→fix→review), or nil.
 func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
-	m.goalCardEvent(ev)
 	switch ev.Kind {
-	case engine.EventGoal:
-		// a goal asked to be conducted: it entered implement, took a note,
-		// was sent back or stopped
-		return tea.Batch(m.goalTickCmd(ev.Feature), m.loadRows)
-	case engine.EventBriefReady:
-		// a freeform card's handoff brief has landed. An open writespec
-		// dialog for it reads the brief in, wherever it sits on the stack
-		// (help or a confirm pushed over it does not hide the brief);
-		// otherwise the person is told it is ready to review, since the
-		// dialog that asked for it is gone.
-		if m.writespecFor(ev.Feature) != nil {
-			return m.refetchWritespec(ev.Feature)
-		}
-		m.alert(ev.Feature, "handoff brief finished — write a spec to review it")
-		return nil
 	case engine.EventObjective:
 		// a session's objective settled: the one notification it gives
 		// (DESIGN §19.11), with the auditor's last word on it
@@ -1752,12 +1223,10 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			}
 		}
 		return m.loadRows
-	case engine.EventDelegateCreated:
-		// a freeform session created a card under its delegation: it was
-		// minted on autopilot, and the board starts it the way a goal's
-		// start does — the session that asked for it is not the one to
-		// drive it.
-		return tea.Batch(m.loadRows, m.delegateStartCmd(ev.Feature))
+	case engine.EventWorkflow:
+		// something a workflow run's conductor reads changed: tick the
+		// runs, and reload so the session's decisions are current
+		return tea.Batch(m.workflowTickCmd(), m.loadRows)
 	case engine.EventCardCreated:
 		// a card was minted or filed onto the open board by a caller that
 		// touches no session machinery — a goal's lead — the only
@@ -1806,37 +1275,11 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		}
 	case engine.EventExhausted:
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.
-		// Clear the persisted plan-rounds count first, and only zero the
-		// in-memory counter once the write succeeds — a failed write must
-		// not re-grant budget on resume (the next entry rehydrates the
-		// persisted, nonzero value).
-		//
-		// With a card page open on another card, none of the four notice
-		// writes below land: each names this event's card, and the page
-		// being read is not its. The round-store failure arms are gated
-		// too — a failing store is systemic, so a run of exhausted cards
-		// would otherwise bark the same error onto every other card's
-		// page in a row — while every raiseAttention, both counter
-		// writes and the row reload stay unconditional.
+		// With a card page open on another card, the notices below do not
+		// land: each names this event's card, and the page being read is
+		// not its. Every raiseAttention and the row reload stay
+		// unconditional.
 		crossCard := m.crossCardOpen(ev.Feature)
-		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindPlan); err != nil {
-			if !crossCard {
-				m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
-			}
-			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
-		} else {
-			m.setRound(ev.Feature, domain.RoundKindPlan, 0)
-		}
-		// same write-through for the review-loop counter: a failed write
-		// must not lose the burned rounds recorded in the store.
-		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindReview); err != nil {
-			if !crossCard {
-				m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
-			}
-			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
-		} else {
-			m.setRound(ev.Feature, domain.RoundKindReview, 0)
-		}
 		if ev.Committed {
 			// wrap-up exhaustion: the stage's work is committed, so this
 			// reads as ready-to-advance with top-up as the alternative —
@@ -1868,36 +1311,6 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// read the row rather than the live session.
 		return m.loadRows
 	case engine.EventQuestion:
-		// A card whose stored mode answers its own questions (§10.17: full
-		// only — gates still stops for a question) takes the recommended
-		// option itself, whether or not anyone is looking at the card page
-		// right now: a decision must not resolve differently because a
-		// human happened to be on screen (the same reason the design
-		// forbids a countdown). This has to run before the cardOpen check
-		// below, which is about where a *parked* question is shown, not
-		// whether one gets parked at all.
-		if autopilotAnswers(m.autopilotModeFor(ev.Feature), decisionAsk) {
-			// a goal card's question goes to its goal's lead
-			if m.goalOf(ev.Feature) != "" {
-				if s := m.engine.Get(ev.Feature); s != nil {
-					if ask := s.Snapshot().PendingAsk; ask != nil {
-						return m.goalAnswerAsk(ev.Feature, ask)
-					}
-				}
-			}
-			if s := m.engine.Get(ev.Feature); s != nil {
-				if ask := s.Snapshot().PendingAsk; ask != nil {
-					if rec := engine.RecommendedOption(ask); rec != "" {
-						// the question travels with the command: if the answer
-						// fails to land the agent is still blocked on it, and
-						// the queue is the only thing that would say so.
-						return m.autopilotAnswerAsk(ev.Feature, rec, "asks: "+ask.Question)
-					}
-				}
-			}
-			// no live ask, or RecommendedOption came back empty: nothing
-			// safe to answer with, so fall through and park like today.
-		}
 		// The agent asked something: queue it, always. This used to skip
 		// the queue whenever the card page happened to be open on the
 		// asking card, on the grounds that its pinned decision already
@@ -1910,11 +1323,16 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// the agent sits blocked on a human. The item is cleared when the
 		// answer lands, so the redundancy while you are looking straight
 		// at the question costs one row and is at least true.
-		q := "the agent has a question — attach to answer"
-		if s := m.engine.Get(ev.Feature); s != nil {
-			if a := s.Snapshot().PendingAsk; a != nil {
-				q = "asks: " + a.Question
+		q := "the agent has a question"
+		if ff := m.engine.Freeform(ev.Feature); ff != nil {
+			if s := ff.Session(); s != nil {
+				if a := s.Snapshot().PendingAsk; a != nil {
+					q = "asks: " + a.Question
+				}
 			}
+		}
+		if _, d := m.engine.WorkflowDecision(context.Background(), ev.Feature); d != nil {
+			q = "the workflow run asks: " + d.Question
 		}
 		m.raiseAttention(ev.Feature, attnQuestion, q)
 	case engine.EventAnnotations:
@@ -1926,43 +1344,6 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			return m.reloadDiff()
 		}
 		return m.refreshBlockers(ev.Feature)
-	case engine.EventIdle:
-		s := m.engine.Get(ev.Feature)
-		if s == nil || s.Interactive || s.State() != engine.StateDone {
-			// An interactive turn ending is the moment the design stage's
-			// writes land — and it used to return here having refreshed
-			// nothing, which is how the plan gate came to insist that two
-			// fully written sections were still blank while offering only
-			// to re-run the stage that had written them. The autonomous
-			// arm below reaches loadRows eventually; this one never did.
-			if s != nil {
-				return m.refreshBlockers(ev.Feature)
-			}
-			return nil
-		}
-		// a finished rebase-resolve session is judged by the git state it
-		// left, never by the verdict loop of the stage it borrowed.
-		if s.Snapshot().Rebase {
-			return m.judgeRebase(ev.Feature)
-		}
-		// review/implement completions may drive the automatic loop;
-		// anything the loop doesn't consume becomes a generic gate item.
-		if handled, cmd := m.onAutonomousDone(ev.Feature, ev.Stage); handled {
-			return cmd
-		}
-		// verify never reaches here — onAutonomousDone consumes it and
-		// raises its own gate on the clean-pass arm — so the outcome word
-		// is dead for this call. It is false rather than true so that if
-		// that ever stops being true, the wording degrades to "verify
-		// finished" instead of silently asserting a pass.
-		text := gateReason(ev.Stage, ev.Feature.Kind(), false, m.baseBranchOf(ev.Feature))
-		if cmd, attempted := m.autopilotCrossGate(s.Snapshot().Feature, text); attempted {
-			return cmd
-		}
-		m.raiseAttention(ev.Feature, attnGate, text)
-		// the session may have edited the artifact or committed; reload so
-		// the gate's row state (landed, open-comment counts) is fresh
-		return m.loadRows
 	}
 	return nil
 }
@@ -2063,9 +1444,6 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	if tick := m.drainGoalTicks(); tick != nil {
-		cmd = tea.Batch(cmd, tick)
-	}
 	if tick := m.drainStackTicks(); tick != nil {
 		cmd = tea.Batch(cmd, tick)
 	}
@@ -2078,7 +1456,13 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if cmd, ok := m.updateGoal(msg); ok {
+	if msg, ok := msg.(statsLoadedMsg); ok {
+		return m, m.statsLoaded(msg)
+	}
+	if cmd, ok := m.updateWorkflow(msg); ok {
+		return m, cmd
+	}
+	if cmd, ok := m.updateRuns(msg); ok {
 		return m, cmd
 	}
 	if cmd, ok := m.updateStack(msg); ok {
@@ -2128,6 +1512,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and an index alone would quietly point somewhere else.
 		was := m.selectedID()
 		m.rows = msg.rows
+		m.children = msg.children
 		m.stackRows = msg.stacks
 		m.restoreSel(was)
 		var jump tea.Cmd
@@ -2158,26 +1543,24 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// figure that is one landing stale is still the right order of
 		// magnitude for the decision it informs.
 		cmds := []tea.Cmd{jump}
+		if m.cardOpen {
+			// a run's decision, its state and its spend all move with the
+			// rows: its blocks are read again beside them
+			cmds = append(cmds, m.loadRuns(m.selectedID()))
+		}
 		if n := landedRows(m.rows); n != m.sizedFor {
 			m.sizedFor = n
 			cmds = append(cmds, m.refreshWorktreeSize())
 		}
-		if r, ok := m.selected(); ok {
-			cmds = append(cmds, m.ensureNarration(r))
-		}
-		cmds = append(cmds, m.measureToday(), m.resumeHeldGates())
+		cmds = append(cmds, m.measureToday())
 		return m, tea.Batch(cmds...)
 
 	case openDecisionsMsg:
-		// The record is the primary source: seed from it first, then let
-		// reconstructInbox's session inference fill whatever it didn't
-		// cover (a pre-decision card, or a query that came back empty). A
-		// failed query has nothing to seed from, so reconstructInbox runs
-		// alone and the notice says the queue may be short a few items
+		// The record is the source: a failed query has nothing to seed
+		// from, and the notice says the queue may be short a few items
 		// rather than silently pretending it is complete.
 		if msg.err != nil {
 			m.notice = noticeMsg{text: "needs-you queue: " + sanitize(msg.err.Error()), isErr: true}
-			m.reconstructInbox()
 			return m, nil
 		}
 		before := m.inboxIDs()
@@ -2188,7 +1571,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.seedInboxFromDecisions(msg.decisions)
 		default:
 			m.seedInboxFromDecisions(msg.decisions)
-			m.reconstructInbox()
 		}
 		// A card is probed for fork drift only once it is stopped on a
 		// person (stoppedDrift), and the rows may have loaded before this
@@ -2263,13 +1645,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// while the commit-message dialog collects the landing message
 			m.notice = noticeMsg{text: sanitize(msg.warn), isErr: true}
 		}
-		f, thenDone := msg.f, msg.thenDone
+		f := msg.f
 		var d *commitMsgDialog
 		d = newCommitMsgDialog(f, func(message string, method domain.LandMethod) tea.Cmd {
-			if f.IsGoal() {
-				return m.landGoal(f, message)
-			}
-			return m.landFeature(f, message, method, thenDone, d.keepBranch)
+			return m.landFeature(f, message, method, d.keepBranch)
 		}, func(dctx context.Context, feature domain.Feature, fresh bool) (string, error) {
 			// best-effort: a nil engine or any drafting failure yields an
 			// empty draft, never a hard error or a delayed dialog; dctx
@@ -2277,19 +1656,15 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.engine == nil {
 				return "", nil
 			}
-			if feature.IsGoal() {
-				// a goal lands as a merge commit gummi writes from its cards
-				return m.engine.GoalMergeMessage(dctx, feature), nil
-			}
 			// fresh=false takes the message the verify gate pre-drafted for
 			// this branch, so the common landing opens on a filled box
 			// instead of on a ~60s pass; Redraft passes true.
 			return m.engine.LandingMessage(dctx, feature, fresh)
 		})
 		d.baseBranch = m.baseBranch(f) // see openSquashDialog's own wiring
-		// the cards a closing takes the worktree and branch of: the ones
-		// this landing closes (or finds closed), outside a stack or a goal
-		d.closes = (thenDone || f.Stage == domain.StageDone) && !f.IsGoal() && !f.InGoal() && !f.Stacked() && !f.MainCheckout
+		// the cards a closing takes the worktree and branch of: every card
+		// a landing closes, outside a stack
+		d.closes = !f.Stacked() && !f.MainCheckout
 		m.Overlay.Push(d)
 		// start the draft pass off the render loop; the dialog is already
 		// open and editable, and the draft fills only while unmodified.
@@ -2366,12 +1741,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleSessionModelsMsg(msg)
 		return m, nil
 
-	case writespecDraftMsg:
-		// the dialog asked for the handoff brief; a late reply after it
-		// was dismissed is dropped (the card check inside answers for it)
-		m.handleWritespecDraftMsg(msg)
-		return m, nil
-
 	case prChecksReadyMsg:
 		return m, m.deliverPRChecks(msg)
 
@@ -2424,38 +1793,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case autopilotSettledMsg:
-		// whatever the crossing came back as, autopilot is done holding
-		// this decision (autopilot.go's autopilotSettled) — then the inner
-		// message is handled exactly as if it had arrived on its own.
-		m.clearAutopilotAnswering(msg.id)
-		if msg.inner == nil {
-			return m, nil
-		}
-		return m.update(msg.inner)
-
-	case autopilotAnsweredMsg:
-		m.clearAutopilotAnswering(msg.id)
-		if msg.park != "" {
-			// the answer never reached the agent — a session swapped out
-			// from under the command, an empty recommendation — and the
-			// agent is still blocked on the question. Park it the way the
-			// non-autopilot path would have, or the card waits on a
-			// question with nothing on screen pointing at it.
-			m.parkAttentionItem(msg.id, attnQuestion, msg.park)
-		}
-		m.notice = msg.notice
-		return m, nil
-
-	case autopilotContinueMsg:
-		// the crossing landed; the stage behind it is autopilot's to start
-		// (msgs.go's autopilotContinueMsg says why this is the idle
-		// decision being answered rather than a second gate crossing).
-		m.clearAutopilotAnswering(msg.id)
-		m.notice = noticeMsg{text: msg.note}
-		m.inbox.remove(msg.id)
-		return m, tea.Batch(m.loadRows, m.autopilotRun(msg.id, msg.to))
-
 	case landConflictMsg:
 		// the landing hit conflicts: the decision leads with the rebase
 		// that resolves them (merge.go's landConflictMsg)
@@ -2463,38 +1800,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.landConflicts = map[domain.FeatureID][]string{}
 		}
 		m.landConflicts[msg.id] = msg.files
-		model, cmd := m.update(msg.notice)
-		// on autopilot nobody is there to press r, so the rebase the
-		// decision leads with starts now (autopilotAnswers: every stop
-		// but budget is the mode's to answer)
-		if m.store != nil {
-			if f, err := m.store.GetFeature(context.Background(), msg.id); err == nil && autopilotAnswers(f.GateApproval, decisionVerify) {
-				return model, tea.Batch(cmd, m.rebaseFeature(f))
-			}
-		}
-		return model, cmd
-
-	case sentBackMsg:
-		// the send-back landed; on autopilot the stage it reached runs
-		// (reentry.go's sentBackMsg)
-		model, cmd := m.update(msg.notice)
-		return model, tea.Batch(cmd, m.continueSentBack(msg.id, msg.to))
-
-	case autopilotGateBlockedMsg:
-		// autopilotCrossGate (autopilot.go) already opened the gate's
-		// decision row before attempting the crossing, so parking here
-		// uses parkAttentionItem, not raiseAttention — logging the
-		// decision a second time for the one stop would leave a
-		// duplicate open row for what is a single park. But the row it
-		// opened speaks the crossing's own inviting wording, and the
-		// crossing was just refused: re-word it to the blocker Advance
-		// named — the same text the card parks with — so the card's
-		// waiting-on-you record stops inviting an approval the gate
-		// refuses.
-		m.clearAutopilotAnswering(msg.id)
-		m.parkAttentionItem(msg.id, attnGate, msg.text)
-		m.rewordGateDecision(msg.id, msg.text)
-		return m, m.loadRows
+		return m.update(msg.notice)
 
 	case handOffReadyMsg:
 		// the preflight passed (or did not): open the confirm that names
@@ -2512,7 +1818,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cancelLabel:  "Cancel",
 			confirmLabel: "Hand off",
 			question:     "hand off " + f.Name() + "?",
-			detail:       handOffDetail(f, m.baseBranch(f), msg.dependents, msg.drift, msg.goes),
+			detail:       handOffDetail(f, m.baseBranch(f), msg.drift, msg.goes),
 		}
 		if msg.goes {
 			d.option = keepBranchOption
@@ -2537,79 +1843,17 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.markMergePrep(msg.f.ID)
 		m.notice = noticeMsg{text: msg.f.Name() + ": landing on main…"}
-		return m, m.prepareMerge(msg.f, true)
+		return m, m.prepareMerge(msg.f)
 
 	case rebaseConflictMsg:
-		// an autopilot card answers its own hand-off: the agent rebase
-		// starts without the confirm an attended card waits on
-		if autopilotAnswers(msg.f.GateApproval, decisionVerify) {
-			return m, m.agentRebase(msg)
-		}
 		m.offerAgentRebase(msg)
 		return m, nil
-
-	case rebaseSettledMsg:
-		return m, m.rebaseSettled(msg)
 
 	case rebasedMsg:
 		if msg.cleared {
 			m.driftCleared(msg.id)
 		}
-		model, cmd := m.Update(msg.notice)
-		return model, tea.Batch(cmd, m.rebaselineCmd(msg.id))
-
-	case worktreeEnteredMsg:
-		// show the transition notice, reload, and run the background
-		// one-shot passes: check discovery and/or the envelope estimate.
-		// The approval succeeded, so its attention item is resolved here.
-		m.inbox.remove(msg.id)
-		m.notice = noticeMsg{text: msg.note}
-		cmds := []tea.Cmd{m.loadRows, m.reloadOpenCardEvents(msg.id)}
-		if msg.discover {
-			cmds = append(cmds, m.discoverChecks(msg.id))
-		}
-		if msg.continueTo != "" {
-			// autopilot's own crossing: the stage behind the gate is its to
-			// start, alongside the one-shot passes rather than after them —
-			// discovery and the estimate read the artifact the crossing
-			// just promoted, and neither is a precondition of running.
-			m.clearAutopilotAnswering(msg.id)
-			cmds = append(cmds, m.autopilotRun(msg.id, msg.continueTo))
-		}
-		return m, tea.Batch(cmds...)
-
-	case checksDiscoveredMsg:
-		// discovery settled (wrote a block, found one already there, or
-		// failed): baseline whatever block the artifact now carries.
-		m.scribeSettled(msg.id)
-		switch {
-		case msg.n > 0:
-			// plural (reviewloop.go) is "" for exactly one check and "s"
-			// otherwise — "check(s)" read as literal punctuation on
-			// screen instead of agreeing with msg.n the way every other
-			// count on this notice's neighbors does.
-			m.notice = noticeMsg{text: fmt.Sprintf("%s: discovered %d repo check%s into the %s",
-				msg.id, msg.n, plural(msg.n), artifactNoun(msg.id.Kind()))}
-		case msg.missing:
-			// Discovery is best-effort, and it used to fail in silence: a
-			// card crossed its gate with no block and verify later passed
-			// on whatever the reviewer chose to run. The card's thread
-			// carries the durable note (engine.noteNoChecks); this is the
-			// moment somebody is looking.
-			//
-			// Not isErr: the crossing that fired discovery succeeded, and
-			// an error notice arriving in its wake reads to a web answer
-			// as that answer being refused (webIntent.noticed).
-			m.scribeWarned[msg.id] = m.scribeWarned[msg.id] || msg.err != nil
-			m.notice = noticeMsg{id: msg.id, text: noChecksNotice(msg.id, msg.err)}
-		case msg.err != nil:
-			m.warnScribeFailure(msg.id, msg.err)
-		}
-		m.baselining[msg.id] = true
-		return m, tea.Batch(m.baselineChecks(msg.id), spinnerTick())
-
-	case reentryClassifiedMsg:
-		return m, m.applyReentry(msg)
+		return m.Update(msg.notice)
 
 	case consultSentMsg:
 		delete(m.consultSending, msg.id)
@@ -2618,26 +1862,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case narrationDoneMsg:
-		m.applyNarration(msg)
-		return m, nil
-
-	case baselineDoneMsg:
-		delete(m.baselining, msg.id)
-		switch {
-		case msg.err != nil:
-			m.notice = noticeMsg{text: m.cardName(msg.id) + ": gummi-checks baseline failed — " + sanitize(msg.err.Error()), isErr: true, aside: true}
-		case len(msg.results) > 0:
-			// the results live in the store (BaselineFails via loadRows), not
-			// in m.checks — that map is manual verify runs, and a baseline
-			// bleeding into it would mislabel the dashboard and the
-			// failed-check guidance at verify.
-			m.notice = baselineNotice(m.cardName(msg.id), msg.results)
-			// the baseline follows an approval that already crossed
-			m.notice.aside = true
-		}
-		return m, m.loadRows
-
 	case blockersMsg:
 		// fold the recomputed counts into the row the page reads. Nothing
 		// else about the row is touched: this arrives while a session may
@@ -2645,20 +1869,21 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// would roll back whatever landed in between.
 		for i := range m.rows {
 			if m.rows[i].F.ID == msg.id {
-				m.rows[i].OpenSpecQs = msg.openSpecQs
 				m.rows[i].OpenDiffComments = msg.openDiffComments
-				m.rows[i].Undrafted = msg.undrafted
 				break
 			}
 		}
 		return m, nil
+
+	case specStartedMsg:
+		return m, m.loadSessionSpec(msg.f, msg.n)
 
 	case specLoadedMsg:
 		if msg.err != nil {
 			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}
 			return m, nil
 		}
-		sv := &specView{f: msg.f, path: msg.path, content: msg.content, doc: spec.Parse(msg.content), cursor: 1}
+		sv := &specView{f: msg.f, path: msg.path, content: msg.content, doc: spec.Parse(msg.content), cursor: 1, n: msg.n, specs: msg.specs}
 		// Open where the card is. The thread pins the artifact with the
 		// section this stage is about — "⌄ spec · Implementation notes"
 		// and the key that opens it — and the decision's own rows name it
@@ -2667,17 +1892,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// reader hunt for the thing they were just pointed at, in a
 		// document long enough that the hunt is the work. A document
 		// without that heading (a fresh draft) keeps the top.
-		// A citation outranks the stage's own section: the reader asked
-		// for a specific place and is owed that place, not the one the
-		// page would have chosen for them. Consumed here and cleared,
-		// because a jump happens on arrival rather than being a position
-		// the page holds.
 		want := currentSpecSection(msg.f.Kind, msg.f.Stage)
-		jumped := false
-		if m.specJump != "" {
-			want, jumped = m.specJump, true
-			m.specJump = ""
-		}
 		if line, ok := spec.HeadingLine(msg.content, want); ok {
 			sv.cursor = line
 		}
@@ -2689,20 +1904,14 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// dropped the reader mid-document with the blockers off-screen at
 		// L76 and L105, reachable only by walking n through every
 		// resolution and template placeholder between (round 3 §3.5: seven
-		// presses to reach the first one). A citation still wins — that is
-		// a place the reader asked for by name.
-		if !jumped {
-			if line, ok := firstBlockingComment(sv); ok {
-				sv.cursor = line
-			}
+		// presses to reach the first one).
+		if line, ok := firstBlockingComment(sv); ok {
+			sv.cursor = line
 		}
-		if m.spec != nil && m.spec.path == msg.path && !jumped {
+		if m.spec != nil && m.spec.path == msg.path {
 			// reload in place: keep the cursor, clamped in case the doc
 			// shrank. The window follows the cursor, so that is the whole
-			// of the position to carry over. A citation is the exception —
-			// it is a deliberate move to somewhere else, and carrying the
-			// old cursor over it would make the key do nothing on the
-			// surface it was already looking at.
+			// of the position to carry over.
 			sv.cursor = min(m.spec.cursor, len(sv.doc.Lines))
 		}
 		m.spec = sv
@@ -2727,18 +1936,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		dv := newDiffView(msg.f, msg.diff, msg.anns)
 		dv.drift = msg.drift
-		if !m.diffJump.empty() {
-			// the same rule the artifact's citation follows: the reader
-			// asked for a hunk, so land on it and forget where the
-			// surface was before.
-			target := m.diffJump
-			m.diffJump = diffTarget{}
-			if line := diffLineFor(msg.diff, target); line > 0 {
-				dv.setCursor(line)
-				m.diff = dv
-				return m, m.refreshBlockers(msg.f.ID)
-			}
-		}
 		if m.diff != nil && m.diff.f.ID == msg.f.ID {
 			// reload in place: keep the cursor, clamped in case the diff
 			// shrank (e.g. after a fix-up run). The window follows the
@@ -2749,105 +1946,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// same reason as specLoadedMsg: adding or resolving a diff comment
 		// arrives here as a reload, and the gate's count lives on the row.
 		return m, m.refreshBlockers(msg.f.ID)
-
-	case verifyResultMsg:
-		// aside: the run happened whatever it found, so a web intent that
-		// sees a failing result passes it on rather than reading the verify
-		// as refused (the bridge toasts it, emitChanges)
-		if msg.err != nil {
-			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true, id: msg.feature, aside: true}
-			return m, nil
-		}
-		m.checks[msg.feature] = stagedChecks{stage: msg.stage, results: msg.results, at: m.now()}
-		passed := 0
-		for _, r := range msg.results {
-			if r.OK {
-				passed++
-			}
-		}
-		m.notice = noticeMsg{
-			text:  m.cardName(msg.feature) + " verify: " + strconv.Itoa(passed) + "/" + strconv.Itoa(len(msg.results)) + " passed",
-			isErr: passed != len(msg.results),
-			id:    msg.feature,
-			aside: true,
-		}
-		return m, nil
-
-	case ingestStepMsg:
-		// live progress from the running pass; keep listening on the same
-		// stream (a finished/discarded run just drains silently).
-		if m.ingestRun != nil {
-			m.ingestRun.apply(msg.step)
-		}
-		return m, listenIngestSteps(msg.ch)
-
-	case ingestStreamClosedMsg:
-		return m, nil
-
-	case ingestLoadedMsg:
-		m.ingestRun = nil
-		if msg.err != nil {
-			m.notice = noticeMsg{text: "ingest: " + sanitize(msg.err.Error()), isErr: true}
-			return m, nil
-		}
-		// the user explicitly asked for this decomposition and has been
-		// waiting on it, so it takes the foreground: the review surface
-		// installs over whatever the board tab held.
-		m.spec, m.diff = nil, nil
-		if msg.decomposeFor != "" && len(msg.res.Proposals) == 0 {
-			// every `## Slices` row is already settled (or there were none) —
-			// mirrors the headless auto-trigger's zero-slice no-op instead of
-			// opening a review surface with nothing to approve.
-			m.notice = noticeMsg{text: m.cardName(msg.decomposeFor) + ": nothing unsettled to decompose"}
-			return m, nil
-		}
-		if msg.decomposeFor != "" {
-			m.ingest = newDecomposeReviewView(msg.res, msg.decomposeFor)
-		} else {
-			m.ingest = newIngestView(msg.res, msg.profile, msg.envelope, msg.repo)
-		}
-		m.notice = noticeMsg{text: "proposed " + strconv.Itoa(len(msg.res.Proposals)) + " feature(s) — review & approve"}
-		return m, nil
-
-	case depsLoadedMsg:
-		if msg.err != nil {
-			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
-			return m, nil
-		}
-		// a reload from a closed picker (esc'd while the edge write was in
-		// flight) still refreshes the board; only apply the candidate set
-		// while the picker is open on the same card.
-		if msg.reload {
-			if m.deps != nil && m.deps.f.ID == msg.f.ID {
-				m.deps.cands = msg.cands
-				m.deps.removeOnly = msg.removeOnly
-				m.deps.setCursor(m.deps.cursor)
-			}
-			return m, m.loadRows
-		}
-		// initial open: install the surface for the selected card, snapped
-		// onto the first navigable row (buildCands sets the cursor while
-		// reading, which the open message doesn't carry).
-		m.deps = &depPicker{f: msg.f, cands: msg.cands, removeOnly: msg.removeOnly}
-		m.deps.setCursor(0)
-		return m, nil
-
-	case bugIngestLoadedMsg:
-		m.bugIngesting = false
-		if msg.err != nil {
-			m.notice = noticeMsg{text: "import: " + sanitize(msg.err.Error()), isErr: true}
-			m.restorePendingCard()
-			return m, nil
-		}
-		if len(msg.res.Proposals) == 0 && len(msg.res.Skipped) == 0 {
-			m.notice = noticeMsg{text: "no issues to import"}
-			m.restorePendingCard()
-			return m, nil
-		}
-		m.spec, m.diff, m.ingest = nil, nil, nil
-		m.bugIngest = newBugIngestView(msg.res, msg.params)
-		m.notice = noticeMsg{text: "fetched " + strconv.Itoa(len(msg.res.Proposals)) + " issue(s) — enter fills the form"}
-		return m, nil
 
 	case weekReportMsg:
 		if d, ok := m.Overlay.Top().(*weekDialog); ok {
@@ -2912,26 +2010,20 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.today.due = false
 		return m, m.measureToday()
 
-	case pausedMsg:
-		delete(m.pausing, msg.id)
-		return m.update(msg.inner)
-
 	case engineEventMsg:
 		cmd := m.handleEngineEvent(msg.ev)
 		// engine events otherwise carry no payload the view needs — they
 		// just signal "re-render from Snapshot" — so keep listening, plus
 		// any automatic review-loop follow-up and, when the event means
 		// the open card's event log grew, a reload of it.
-		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev), m.measureToday())
+		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev), m.openRunsChanged(msg.ev), m.measureToday())
 
 	case engineClosedMsg:
 		// the agent backend shut down unexpectedly. There is no pane left
 		// to freeze — a card's own thread renders its session's error —
 		// but anyone with a live session was watching something that just
 		// stopped, so say why.
-		if m.engine != nil && len(m.engine.Sessions()) > 0 {
-			m.notice = noticeMsg{text: "agent backend stopped", isErr: true}
-		}
+		m.notice = noticeMsg{text: "agent backend stopped", isErr: true}
 		return m, nil
 
 	case lastSeenMsg:
@@ -2956,11 +2048,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case excusedChecksMsg:
-		m.excusedChecks[msg.id] = msg.names
-		m.excusedOn[msg.id] = msg.on
-		return m, nil
-
 	case cardEventsMsg:
 		// a late reply for a card the page has since moved off (esc, or a
 		// second J/K before the first load landed) is dropped: the cache
@@ -2969,19 +2056,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// racing behind the current selection.
 		if msg.err == nil {
 			m.cardEvents[msg.id] = msg.events
-			// The code-vs-plan pass is dispatched here, and this is the
-			// only seam where it can be: its cache key is built from the
-			// log, and the log only exists in memory from this moment on
-			// (citations.go). It is also exactly the right moment —
-			// this fires when a card page opens and again whenever the
-			// card's log moves, which is the whole of "the state a claim
-			// describes has changed". ensureNarration's own key makes
-			// every repeat free.
-			cmds := []tea.Cmd{m.markSeen(msg.id, msg.events)}
-			if r, ok := m.rowByID(msg.id); ok {
-				cmds = append(cmds, m.ensureNarration(r))
-			}
-			return m, tea.Batch(cmds...)
+			return m, m.markSeen(msg.id, msg.events)
 		}
 		return m, nil
 
@@ -3015,150 +2090,26 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	// Focused() at once — a card page stays open across a tab switch and
 	// nothing blurs its input — so an ungated test here answered for
 	// whichever branch came first, and this one did.
+	if m.boardSurfacesLive() && m.cardOpen && m.stepv != nil {
+		if m.stepv.composing {
+			var cmd tea.Cmd
+			m.stepv.input, cmd = m.stepv.input.Update(msg)
+			return cmd
+		}
+		return nil
+	}
 	if m.boardSurfacesLive() && m.cardOpen && m.threadInput.Focused() {
 		return m.handleThreadPaste(msg)
 	}
-	if bv := m.bugIngest; bv != nil && bv.filtering {
-		bv.filter, _ = bv.filter.Update(msg)
-		bv.setCursor(bv.cursor) // reclamp: the visible set may have shrunk
-	}
 	return nil
 }
 
-// quitCmd is the shared exit path for q and ctrl+c. Quitting with
-// autonomous work live stops sessions mid-turn; ask first so the user
-// who means it can still get out. A live session on an autopilot card
-// (GateApproval anything but GateAttended) is not lost work in the same way:
-// StopForQuit records where it stopped, and it picks back up on reopen
-// (quitresume.go) — so it gets its own wording, naming the cards and
-// saying so, never implying they keep going once the terminal closes
-// (they don't — there is no background execution). A card driven by
-// hand still loses its in-flight turn and its spend, uncommitted on
-// disk; that warning is unchanged. Idle quit stays a single keypress,
-// and a second press while the confirm is already up means it —
-// otherwise ctrl+c, hoisted above the overlay, could only ever re-raise
-// the dialog it just opened.
+// quitCmd is the shared exit path for q and ctrl+c. Nothing runs when no
+// one is at the keyboard — a session's turn is the person's — so quitting
+// asks nothing: a session's conversation outlives the process, and its
+// next turn respawns a backend carrying it.
 func (m *Shell) quitCmd() tea.Cmd {
-	if m.Overlay.Contains("confirm-quit") {
-		return m.quitNow()
-	}
-	question, detail := "", ""
-	confirmLabel, cancelLabel := "Quit", "Stay"
-	autopilotLive, plainLive := m.liveAutopilotSplit()
-	switch {
-	case len(autopilotLive) > 0:
-		question = autopilotQuitQuestion(autopilotLive)
-		detail = "they stop where they are and pick up when you reopen."
-		if len(plainLive) > 0 {
-			detail += " quitting also stops " + strings.Join(plainLive, ", ") +
-				" mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk; reopening offers to pick them back up."
-		}
-		confirmLabel, cancelLabel = "Stop them and quit", "Cancel"
-	case len(plainLive) > 0:
-		question = "quit with live sessions " + strings.Join(plainLive, ", ") + "?"
-		detail = "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk; reopening offers to pick them back up"
-	// an ingest or bug-import pass is not an engine session, so
-	// liveAutopilotSplit never saw it. Both cost a paid architect pass,
-	// and esc already confirms before discarding one — quitting past
-	// that silently would make the confirm theatre.
-	case m.ingestRun != nil:
-		question = "quit while a decompose is running?"
-		detail = "the architect pass is paid for and its proposals are not written anywhere yet — quitting loses them"
-	case m.ingest != nil:
-		question = fmt.Sprintf("quit with %d unsaved proposal(s)?", len(m.ingest.props))
-		detail = "they came from a paid architect pass over " + m.ingest.source + " and nothing has been created yet"
-	case m.bugIngesting:
-		question = "quit while a bug import is fetching?"
-		detail = "the fetch is in flight — quitting drops it"
-	case m.bugIngest != nil && m.bugIngest.edited:
-		question = "quit with unsaved import edits?"
-		detail = "your renamed titles and one-liners are not kept — re-importing fetches the issues as they are on GitHub"
-	default:
-		return m.quitNow()
-	}
-	m.Overlay.Push(&confirmDialog{
-		id:           "confirm-quit",
-		cancelLabel:  cancelLabel,
-		confirmLabel: confirmLabel,
-		question:     question,
-		detail:       detail,
-		onConfirm:    m.quitNow,
-	})
-	return nil
-}
-
-// quitNow is quitCmd's actual exit: it stops every live autopilot
-// session (best-effort, and a no-op when there is nothing to stop — see
-// engine.Engine.StopForQuit) and quits.
-func (m *Shell) quitNow() tea.Cmd {
-	if m.engine != nil {
-		m.engine.StopForQuit(context.Background())
-	}
 	return tea.Quit
-}
-
-// liveAutopilotSplit splits the board's live (StateRunning)
-// sessions by whether their card is on autopilot — domain.Feature.GateMode
-// anything but domain.GateAttended, same as everywhere else the field is
-// interpreted.
-//
-// GateMode, not the raw field: empty reads as GateAttended (its own doc
-// says so, and ValidGateApproval stores it), so the bare comparison this
-// used to make listed every card `bugs new` minted under "running on
-// autopilot" in the quit dialog — cards whose own page said "autopilot:
-// off". autopilot holds bare ids, sorted — all the quit dialog needs to
-// name them; plain mirrors the old liveSessions' "<id> (<stage>)" labels,
-// so a hand-driven session's wording stays exactly what it was.
-func (m *Shell) liveAutopilotSplit() (autopilot, plain []string) {
-	if m.engine == nil {
-		return nil, nil
-	}
-	for id, s := range m.engine.Sessions() {
-		if s.State() != engine.StateRunning {
-			continue
-		}
-		if s.Feature.GateMode() == domain.GateAttended {
-			plain = append(plain, fmt.Sprintf("%s (%s)", m.cardName(id), s.Feature.Stage))
-			continue
-		}
-		autopilot = append(autopilot, string(id))
-	}
-	sort.Strings(autopilot)
-	sort.Strings(plain)
-	return autopilot, plain
-}
-
-// autopilotQuitQuestion words the quit dialog's title line for one or
-// more autopilot cards, e.g. "2 cards are running on autopilot — FD-047,
-// FD-044."
-func autopilotQuitQuestion(ids []string) string {
-	verb := "cards are"
-	if len(ids) == 1 {
-		verb = "card is"
-	}
-	return fmt.Sprintf("%d %s running on autopilot — %s.", len(ids), verb, strings.Join(ids, ", "))
-}
-
-// resumeAfterTopUp restarts a card that had stopped for want of budget,
-// once its envelope has been raised and the user has said yes to the
-// separate resume question.
-//
-// It re-reads the card rather than reusing the row the dialog was built
-// from: that snapshot still carries the old, exhausted envelope, and
-// resuming against it would put the run straight back into the wall it
-// just stopped at.
-func (m *Shell) resumeAfterTopUp(id domain.FeatureID) tea.Cmd {
-	if m.store == nil {
-		return nil
-	}
-	f, err := m.store.GetFeature(context.Background(), id)
-	if err != nil {
-		return func() tea.Msg { return noticeMsg{text: sanitize(err.Error()), isErr: true} }
-	}
-	return tea.Batch(
-		m.resumeCard(f),
-		func() tea.Msg { return noticeMsg{text: m.cardName(id) + ": budget raised — resuming", reload: true} },
-	)
 }
 
 // handleKey routes one key press. Its shape is the keymap's tiers made
@@ -3207,14 +2158,14 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.boardSurfacesLive() {
 		// the card page's tabs, answered before any of the three surfaces
 		// they switch between gets the key (cardtabs.go)
+		if m.cardOpen && m.stepv != nil {
+			// a step opened over the thread answers first: its own tabs,
+			// its line to the agent, and the way back (stepview.go)
+			m.clearTransientNotice()
+			return m.handleStepKey(msg)
+		}
 		if m.cardOpen {
 			if cmd, ok := m.cardTabKey(key); ok {
-				return cmd
-			}
-			// the narration's citations, in the same tier and for the
-			// same reason: a claim opened from the thread must still be
-			// openable from the surface it just landed on.
-			if cmd, ok := m.cardCitationKey(key); ok {
 				return cmd
 			}
 		}
@@ -3235,18 +2186,6 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.clearTransientNotice()
 			return m.handleDiffKey(key)
 		}
-		if m.ingest != nil {
-			return m.handleIngestKey(key)
-		}
-		if m.bugIngest != nil {
-			return m.handleBugIngestKey(msg)
-		}
-		if m.deps != nil {
-			return m.handleDepsKey(key)
-		}
-		if m.goalPage != nil {
-			return m.handleGoalPageKey(key)
-		}
 		if m.stats != nil {
 			m.clearTransientNotice()
 			return m.handleStatsKey(key)
@@ -3254,6 +2193,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.logv != nil {
 			m.clearTransientNotice()
 			return m.handleLogKey(key)
+		}
+		if m.cardOpen && m.wf.focus {
+			m.clearTransientNotice()
+			return m.handleRunKey(key)
 		}
 		if m.cardOpen && m.threadInput.Focused() {
 			return m.handleThreadInputKey(msg)
@@ -3351,10 +2294,13 @@ func (m *Shell) textEntry() bool {
 	// from someone typing prose", and that reason does not hold when a
 	// review surface, not the composer, is what the user is actually
 	// looking at and typing into.
-	if m.cardOpen && m.threadInput.Focused() && m.spec == nil && m.diff == nil {
-		return true
+	if m.cardOpen && m.stepv != nil {
+		return m.stepv.composing
 	}
-	return m.bugIngest != nil && m.bugIngest.filtering
+	if m.cardOpen && m.wf.focus {
+		return false
+	}
+	return m.cardOpen && m.threadInput.Focused() && m.spec == nil && m.diff == nil
 }
 
 // boardKey answers the board's keys. It is split out from handleKey so
@@ -3468,54 +2414,13 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "p":
 		if r, ok := m.selected(); ok {
-			// On a freeform card there is no autonomous session to park —
-			// its own is interactive — but a turn in flight is exactly what
-			// a reader who can see it going the wrong way wants to stop, and
-			// stopping it is the only thing p could usefully mean while one
-			// is running. The dependency picker below is still what p opens
-			// between turns.
+			// a turn in flight is exactly what a reader who can see it
+			// going the wrong way wants to stop
 			if cmd, handled := m.interruptFreeform(r.F); handled {
 				return cmd
 			}
-			// p pauses the card's own autonomous session (running, or a
-			// finished one p can park) — the existing pause binding —
-			// and otherwise opens the dependency picker for the selected card.
-			if s := m.sessionFor(r.F.ID); s != nil && !s.Interactive {
-				return m.pauseRun(r.F)
-			}
-			if n := closedRefusal(r, "there is nothing left for it to wait on"); n != nil {
-				m.notice = *n
-				return nil
-			}
-			m.clearTransientNotice()
-			return m.openDeps(r.F)
-		}
-	case "v":
-		if r, ok := m.selected(); ok {
-			if n := verifyRefusal(r); n != nil {
-				m.notice = *n
-				return nil
-			}
-			return m.runChecks(r.F)
-		}
-	case "P":
-		// the goal's page, from the goal row or from any of its cards —
-		// a reader watching one card wants the next one, and the page is
-		// where the cards are. It was reachable only through the action
-		// inventory, which is a poor place for the one surface a person
-		// opens to look in on a running goal.
-		if r, ok := m.selected(); ok {
-			m.clearTransientNotice()
-			goal := r.F
-			if !goal.IsGoal() {
-				i := m.rowIndex(r.F.GoalID)
-				if i < 0 {
-					m.notice = noticeMsg{text: r.F.Name() + " is not in a goal — nothing to open", isErr: true, id: r.F.ID}
-					return nil
-				}
-				goal = m.rows[i].F
-			}
-			return m.openGoalPage(goal)
+			m.notice = noticeMsg{text: r.F.Name() + ": nothing running to stop", id: r.F.ID}
+			return nil
 		}
 	case "t":
 		if r, ok := m.selected(); ok {
@@ -3526,11 +2431,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			m.clearTransientNotice()
 			if !cardHasArtifact(r) {
-				// A freeform card has no document to open (DESIGN §19). The
-				// key is filtered out of this card's bindings, so nothing
+				// A card with no document (or no spec) to open (DESIGN §19).
+				// The key is filtered out of this card's bindings, so nothing
 				// advertises it here — but the handler still answers, the way
 				// every other withheld key on this board does.
-				m.notice = noticeMsg{text: r.F.Name() + ": a freeform card has no document — its thread is the record", id: r.F.ID}
+				m.notice = noticeMsg{text: r.F.Name() + ": " + noArtifactReason(r), id: r.F.ID}
 				return nil
 			}
 			return m.openSpec(r.F)
@@ -3555,62 +2460,29 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			return m.attachRaw(r.F)
 		}
-	case "A":
-		if r, ok := m.selected(); ok {
-			// A is not in foreignBlockedKeys (it is not a card verb the
-			// action inventory lists), so it carries the top guard's rule
-			// itself: how far a card runs on its own is the driver's
-			// setting, and a conducted card's driver is its goal's lead —
-			// changing it here would have the conductor and the reader
-			// disagreeing about when that card stops.
-			if r.watchOnly() {
-				m.notice = noticeMsg{
-					text:  fmt.Sprintf("%s is driven by %s — read-only here (enter watches it)", r.F.Name(), r.watchDriver()),
-					isErr: true,
-				}
-				return nil
-			}
-			return m.openAutopilot(r.F)
-		}
 	case "j", "down":
 		m.moveSel(1)
 	case "k", "up":
 		m.moveSel(-1)
 	case "pgup":
-		if order := m.displayOrder(m.sortMode); len(order) > 0 {
+		if order := m.displayOrder(); len(order) > 0 {
 			m.sel = order[0]
 			m.syncActionFocus()
 		}
 	case "pgdown":
-		if order := m.displayOrder(m.sortMode); len(order) > 0 {
+		if order := m.displayOrder(); len(order) > 0 {
 			m.sel = order[len(order)-1]
 			m.syncActionFocus()
 		}
 	case "n":
-		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFeature}))
-	case "B":
-		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindBug}))
-	case "R":
-		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindResearch}))
+		m.Overlay.Push(m.openCardForm())
 	case "T":
 		// Stack a new card on TOP of the selected one. This is the whole
 		// of setting a stack up: the stack is created by the act of
 		// stacking a second card onto a first, so there is no "new
 		// stack" dialog to find and the common case costs one key.
-		//
-		// T and not S — S is the severity sort, and one key wearing two
-		// meanings on the same surface is the defect the keymap's own
-		// comments keep recording.
 		if cmd := m.openStackForm(); cmd != nil {
 			return cmd
-		}
-	case "S":
-		if m.sortMode == SortSeverity {
-			m.sortMode = SortCreation
-			m.notice = noticeMsg{text: "todo: creation order"}
-		} else {
-			m.sortMode = SortSeverity
-			m.notice = noticeMsg{text: "todo: by severity"}
 		}
 	case "W":
 		// The one screen that answers "was running this worth it". It
@@ -3634,57 +2506,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		// what landing left behind. Uppercase for the bigger act, and the
 		// pair is the mnemonic.
 		return m.openCloseOut()
-	case "I":
-		if m.engine == nil {
-			m.notice = noticeMsg{text: m.noAgent(" — ingestion needs one"), isErr: true}
-			return nil
-		}
-		if m.ingestRun != nil {
-			// one pass at a time; I brings a backgrounded feed forward
-			m.ingestRun.hidden = false
-			m.notice = noticeMsg{text: "an ingest is already decomposing — showing its progress"}
-			return nil
-		}
-		m.Overlay.Push(newIngestForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.startIngest))
-	case "esc":
-		if m.ingestRun != nil && !m.ingestRun.hidden {
-			// background the feed; the pass keeps running and the review
-			// surface still takes the foreground when it lands.
-			m.ingestRun.hidden = true
-		}
-	case "G":
-		if m.engine == nil {
-			m.notice = noticeMsg{text: m.noAgent(" — bug import needs the engine"), isErr: true}
-			return nil
-		}
-		if m.bugIngesting {
-			m.notice = noticeMsg{text: "an import is already running — wait for it", isErr: true}
-			return nil
-		}
-		// the door with bug preset, then straight into browse: the form
-		// parks while the picker is up and comes back filled.
-		d := m.openCardForm(domain.CardType{Kind: domain.KindBug})
-		if d.repo.needsChoice() {
-			d.errText = "choose a repository to browse its issues"
-			d.setFocus(cardStopRepo)
-			m.Overlay.Push(d)
-			return nil
-		}
-		return m.browseIssues(d, d.repo.name())
-	case "g":
-		if r, ok := m.selected(); ok {
-			if r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {
-				// FD-081: a done RS card has nothing left to advance — g
-				// re-runs decompose instead, the board-key counterpart to
-				// the headless --request-changes re-run.
-				return m.startDecomposeReRun(r.F)
-			}
-			return m.advanceStage(r.F.ID)
-		}
-	case "b":
-		if r, ok := m.selected(); ok {
-			return m.bounceStage(r.F.ID, "")
-		}
 	case "u":
 		if r, ok := m.selected(); ok {
 			if n := envelopeRefusal(r); n != nil {
@@ -3693,19 +2514,10 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			m.Overlay.Push(newEnvelopeDialog(r.F, func(to int) tea.Cmd {
 				return m.setEnvelope(r.F.ID, to)
-			}, func() tea.Cmd {
-				return m.resumeAfterTopUp(r.F.ID)
 			}))
 		}
 	case "o":
 		if r, ok := m.selected(); ok {
-			if r.F.IsGoal() {
-				// A goal's home repo is derived from its cards at its plan
-				// gate, not chosen: retargeting it here would be moving the
-				// branch its cards fork from out from under them.
-				m.notice = noticeMsg{text: r.F.Name() + ": a goal's repository follows its cards — set each card's `repo:` in the goal doc", isErr: true}
-				return nil
-			}
 			if r.HasWorktree {
 				m.notice = noticeMsg{text: r.F.Name() + ": repo is fixed once a worktree exists", isErr: true}
 				return nil
@@ -3737,53 +2549,14 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			return m.rebaseFeature(r.F)
 		}
-	case "w":
-		if r, ok := m.selected(); ok {
-			// the freeform card's third ending: continue its work as a
-			// feature. The key is filtered off every other card's table
-			// (keymap.go), so the handler answers it only where the row is
-			// offered — and names the card that has no use for it
-			// elsewhere, the way every other withheld key here does.
-			if !r.F.IsFreeform() {
-				m.notice = noticeMsg{text: r.F.Name() + ": only a session continues as a spec — this card runs through its stages", isErr: true, id: r.F.ID}
-				return nil
-			}
-			if r.F.Stage != domain.StageOpen {
-				m.notice = noticeMsg{text: r.F.Name() + " is closed: a session continues as a spec only while it is open", isErr: true, id: r.F.ID}
-				return nil
-			}
-			if r.F.Home {
-				m.notice = noticeMsg{text: r.F.Name() + " is an agent: it is in no repository, so there is no branch for a spec to continue on", isErr: true, id: r.F.ID}
-				return nil
-			}
-			if m.engine == nil {
-				m.notice = noticeMsg{text: m.noAgent(" (writing a spec asks the session for a handoff brief)"), isErr: true, id: r.F.ID}
-				return nil
-			}
-			m.clearTransientNotice()
-			return m.openWritespec(r.F)
-		}
 	case "h":
 		if r, ok := m.selected(); ok {
 			if n := branchVerbRefusal(r, "hand-off"); n != nil {
 				m.notice = *n
 				return nil
 			}
-			// Stage-shaped, like the driver's own precondition: hand-off is
-			// an ENDING, and a card that has not finished has nothing to end
-			// — it has work to do, or a `D` coming. The other verbs on this
-			// screen are things you do to a card mid-flight; this one closes
-			// it, so it asks the same question the landing gate asks.
-			if r.F.IsGoal() && r.F.Stage != domain.StageVerify {
-				return m.confirmAbandonGoal(r.F)
-			}
-			// A freeform card is the one card whose hand-off is not gated on
-			// a stage, because it has none: only the person can say when its
-			// work is finished, and saying so IS the ending (DESIGN §19).
-			if r.F.Stage != domain.StageVerify && !r.F.IsFreeform() {
-				m.notice = noticeMsg{text: r.F.Name() + ": hand-off ends a verified card — this one is at " + string(r.F.Stage), isErr: true}
-				return nil
-			}
+			// only the person can say when a card's work is finished, and
+			// saying so IS the ending (DESIGN §19)
 			return m.prepareHandOff(r.F)
 		}
 	case "m":
@@ -3802,20 +2575,9 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			m.markMergePrep(r.F.ID)
 			m.notice = noticeMsg{text: r.F.Name() + ": preparing merge…"}
-			// m and the verify gate land the same branch the same way, so
-			// they must leave the card in the same state: a card AT verify
-			// goes to done with the landing. Derived from the stage rather
-			// than hardcoded per key — hardcoding false here is what stranded
-			// a landed card at verify forever, and hardcoding true would be
-			// worse, jumping a card that never reached verify straight past
-			// the quality floor. branchVerbRefusal above has already refused
-			// the cards with no branch to land at all.
-			// A freeform card goes to done with its landing too, and for the
-			// same reason a verified one does: landing IS its ending, and
-			// there is no later stage for it to be stranded at. It cannot
-			// jump a quality floor by doing so — it never had one to cross
-			// (domain.Feature.MayLand).
-			return m.prepareMerge(r.F, r.F.Stage == domain.StageVerify || r.F.IsFreeform())
+			// a card goes to done with its landing: landing IS its
+			// ending (domain.Feature.MayLand)
+			return m.prepareMerge(r.F)
 		}
 	case "z":
 		if r, ok := m.selected(); ok {
@@ -3865,11 +2627,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			f := r.F
 			detail := f.Title + " — removes worktree, branch, and record"
-			// a goal's cards go with it (deleteFeature says why), so the
-			// dialog says so before the key that cannot be undone.
-			if n := m.goalCardCount(f); n > 0 {
-				detail += ", and the same for its " + itoa(n) + " card" + plural(n)
-			}
 			m.Overlay.Push(&confirmDialog{
 				card:         f.ID,
 				id:           "confirm-delete",
@@ -3921,7 +2678,7 @@ func (m *Shell) mainPage() int {
 
 // moveSel moves the selection through the board's display order.
 func (m *Shell) moveSel(delta int) {
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	if len(order) == 0 {
 		return
 	}
@@ -3946,39 +2703,20 @@ func (m *Shell) moveSel(delta int) {
 // jumpSel selects the nth visible card (1-based), matching the numbers
 // shown on the board.
 func (m *Shell) jumpSel(n int) {
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	if n >= 1 && n <= len(order) {
 		m.sel = order[n-1]
 		m.syncActionFocus()
 	}
 }
 
-// displayOrder lists row indices in board display order (grouped by
-// super-state). With sort == SortSeverity the todo column is ordered by
-// severity (critical first) with creation time as a stable tiebreaker;
-// every other column keeps chronological order regardless.
-func (m *Shell) displayOrder(mode SortMode) []int {
+// displayOrder lists row indices in board display order: grouped by
+// super-state, chronological within each.
+func (m *Shell) displayOrder() []int {
 	var order []int
-	// a goal's cards sit folded under their goal, not in the groups; a card
-	// whose goal is not loaded falls back to its own group
-	goals := map[domain.FeatureID]bool{}
-	for _, r := range m.rows {
-		if r.F.IsGoal() {
-			goals[r.F.ID] = true
-		}
-	}
-	children := map[domain.FeatureID][]int{}
-	for i, r := range m.rows {
-		if r.F.GoalID != "" && goals[r.F.GoalID] {
-			children[r.F.GoalID] = append(children[r.F.GoalID], i)
-		}
-	}
 	for _, super := range domain.SuperStates {
 		var idxs []int
 		for i, r := range m.rows {
-			if r.F.GoalID != "" && goals[r.F.GoalID] {
-				continue
-			}
 			// A folded archive row is not in the order at all, which is
 			// what keeps the jump numbers contiguous and stops alt+j/alt+k
 			// from walking through the graveyard — half of what made the
@@ -3991,42 +2729,9 @@ func (m *Shell) displayOrder(mode SortMode) []int {
 				idxs = append(idxs, i)
 			}
 		}
-		if super == domain.SuperTodo && mode == SortSeverity {
-			sort.SliceStable(idxs, func(a, b int) bool {
-				ra, rb := severityRank(m.rows[idxs[a]].F.Severity), severityRank(m.rows[idxs[b]].F.Severity)
-				if ra != rb {
-					return ra > rb
-				}
-				return m.rows[idxs[a]].F.CreatedAt.Before(m.rows[idxs[b]].F.CreatedAt)
-			})
-		}
-		for _, idx := range idxs {
-			order = append(order, idx)
-			if id := m.rows[idx].F.ID; m.goalOpen[id] {
-				kids := children[id]
-				sort.SliceStable(kids, func(a, b int) bool { return m.rows[kids[a]].F.Num < m.rows[kids[b]].F.Num })
-				order = append(order, kids...)
-			}
-		}
+		order = append(order, idxs...)
 	}
 	return order
-}
-
-// severityRank maps a severity to its sort rank: critical ranks highest
-// (4), an unclassified (empty) severity ranks lowest (0).
-func severityRank(sev domain.Severity) int {
-	switch sev {
-	case domain.SeverityCritical:
-		return 4
-	case domain.SeverityHigh:
-		return 3
-	case domain.SeverityMedium:
-		return 2
-	case domain.SeverityLow:
-		return 1
-	default:
-		return 0
-	}
 }
 
 // selectedID names the card the cursor is on, or "" when the board has
@@ -4071,7 +2776,7 @@ func (m *Shell) restoreSel(id domain.FeatureID) {
 // So the board opened with the cursor parked on done work, at the bottom
 // of a list it had scrolled past everything to reach.
 func (m *Shell) selectFirstDisplayed() {
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	if len(order) == 0 {
 		m.sel = 0
 		return
@@ -4095,8 +2800,7 @@ func (m *Shell) boardPaneFocused() bool {
 	if m.actionFocused {
 		return false
 	}
-	return m.spec == nil && m.diff == nil && m.ingest == nil &&
-		m.bugIngest == nil && m.deps == nil && (m.ingestRun == nil || m.ingestRun.hidden)
+	return m.spec == nil && m.diff == nil
 }
 
 // View implements tea.Model: compute the buffer, paint the panes, the
@@ -4233,189 +2937,20 @@ func (m *Shell) noticeInBand() bool {
 	return strings.Contains(m.notice.text, "\n") || (m.notice.isErr && len(m.notice.text) > noticeThreshold)
 }
 
-// attachOrRun handles `enter`: it starts (or watches) the stage's run.
-// Every stage runs an agent now, so the only card this can refuse is one
-// sitting somewhere with no agent action at all — todo or done.
+// attachOrRun handles `enter` on the board: a card another process owns
+// can only be watched. Nothing else runs on a keypress — a session's turn
+// starts with a line typed on its card, and a retired workflow card never
+// runs again.
 func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
-	// another process owns this card: the only thing this board can
-	// honestly do with enter is watch it.
 	if _, ok := m.foreignFor(f.ID); ok {
 		return m.watchForeign(f)
-	}
-	// its goal's lead owns this one: the conductor starts it, answers it
-	// and lands it (§17), so running the stage by hand here would put a
-	// second driver on a card that already has one. enter opens it to
-	// watch, which is the same answer, one level in.
-	if m.conducted(f) {
-		return m.watchConducted(f)
 	}
 	if m.engine == nil {
 		m.notice = noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)"), isErr: true}
 		return nil
 	}
-	if !autonomousStage(f.Stage) {
-		m.notice = noticeMsg{text: f.Name() + " is in " + string(f.Stage) + " — nothing to run", isErr: true}
-		return nil
-	}
-	return m.runStage(f)
-}
-
-// seedRounds hydrates the in-memory round counter for kind from the store
-// on loop entry, so a resumed (or relaunched) loop resumes with the rounds
-// already burned instead of a fresh budget. A failed read returns the
-// error and leaves the fast-path map untouched; the caller aborts dispatch
-// rather than proceeding on a guessed-zero count.
-func (m *Shell) seedRounds(f domain.Feature, kind domain.RoundKind) error {
-	n, err := rounds.Load(context.Background(), m.roundStore, f.ID, kind)
-	if err != nil {
-		return err
-	}
-	m.setRound(f.ID, kind, n)
+	m.notice = noticeMsg{text: f.Name() + " is in " + string(f.Stage) + " — nothing to run", isErr: true}
 	return nil
-}
-
-// runStage enqueues an autonomous run for a feature's stage; the engine
-// schedules and kicks it off. Activity streams into the thread's live
-// stage block; `p` pauses it. On an already-running session, enter opens
-// the card page as the observer: the full scrollable transcript is the
-// thread's body now, with steering via the composer.
-func (m *Shell) runStage(f domain.Feature) tea.Cmd {
-	return m.runStageWithNote(f, "")
-}
-
-// runStageWithNote is runStage with a note appended to the stage kickoff:
-// the composer's prose aimed at the run (a decision's run answer) or a
-// bounce's stashed note. engine.RunWith is Run's note-carrying path —
-// the kickoff the fresh session opens with says what it starts from.
-func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
-	if m.engine == nil {
-		// A detached shell (no engine attached) has nothing to dispatch
-		// to. Say so rather than dereferencing nothing: this is now
-		// reachable from the work stage's own gate, where "send it back
-		// with changes" re-runs the stage.
-		m.notice = noticeMsg{text: f.Name() + ": " + m.noAgent(" — nothing to re-run the stage with"), isErr: true}
-		return nil
-	}
-	// entering the plan stage hydrates the loop's round counter from the
-	// store, so a resumed plan resumes with the rounds already burned. A
-	// failed read aborts dispatch rather than guessing at a fresh budget.
-	if f.Stage == domain.StagePlan {
-		if err := m.seedRounds(f, domain.RoundKindPlan); err != nil {
-			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
-			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
-			return nil
-		}
-	}
-	// the review loop spans review → work(fix/investigate) → review, and
-	// any of those can be the resume landing point, so seed the counter on
-	// each of them. Investigate is research's work leg — a resume landing
-	// on the RS work leg must not re-grant the review budget either.
-	if f.Stage == domain.StageImplement ||
-		f.Stage == domain.StagePlan {
-		if err := m.seedRounds(f, domain.RoundKindReview); err != nil {
-			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
-			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
-			return nil
-		}
-	}
-	if s := m.engine.Get(f.ID); s != nil {
-		switch s.State() {
-		case engine.StateRunning:
-			// already running: the thread is the watch surface. Opening
-			// the card page (when it somehow isn't) is all there is to do
-			// — the pane enter used to attach as an observer is gone. It
-			// opens through openCard, not by setting the flag, so the
-			// history the live block sits on top of is loaded too.
-			if !m.cardOpen {
-				return m.openCard()
-			}
-			return nil
-		case engine.StateDone:
-			// A finished session on a stage that ends with a critique
-			// resumes the loop at its position instead of re-running the
-			// stage's writer: a finished writer means the (possibly
-			// reworked) output is already on disk, so the next leg is the
-			// critique; a finished critique means the loop is awaiting the
-			// judge's rework-or-approve decision. Other stages just re-run
-			// (status quo).
-			if _, ok := engine.CritiqueRoundKind(f.Stage); ok {
-				if s.Snapshot().Critique {
-					// A critique that passed with a required section still
-					// blank did not finish the job: the writer, not the
-					// human, is the missing step, and re-raising the gate
-					// only stacks another decision approving cannot cross.
-					// Run the writer with the blank sections named; the
-					// loop re-critiques when it is done. The human asked
-					// for this run, so the round cap does not apply here.
-					if names := m.undraftedGate(f); len(names) > 0 {
-						return m.redraftUndrafted(f.ID, names)
-					}
-					// A clean critique has nothing left to resume: its
-					// gate is already raised, so judging it again only
-					// re-raised the gate the person was looking at, and
-					// "start the architect" did nothing. Asking to run the
-					// stage there is asking for its writer. So is a line
-					// sent with the ask, whatever the critique said — it
-					// is meant for the writer, and resuming the judge
-					// dropped it.
-					if note == "" && sessionVerdict(s.Snapshot()) != verdictPass {
-						return m.onCritiqueStageDone(f.ID, f.Stage)
-					}
-					break
-				}
-				return m.critiqueStep(f.ID, f.Stage, true, "resuming "+string(f.Stage)+" critique (output already written)")
-			}
-		case engine.StatePaused:
-			// An interrupted critique resumes as a critique: the stage's
-			// output is already written, so restarting its writer would
-			// burn a full pass to redo finished work. A mid-flight writer
-			// still falls through to engine.Run (status-quo restart).
-			if _, ok := engine.CritiqueRoundKind(f.Stage); ok && s.Snapshot().Critique {
-				return func() tea.Msg {
-					if err := m.engine.RunCritique(f, ""); err != nil {
-						return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true}
-					}
-					return noticeMsg{text: f.Name() + " resuming " + string(f.Stage) + " critique (output already written)", clearInbox: f.ID}
-				}
-			}
-		}
-	}
-	// A stashed bounce note rides the reborn work stage's kickoff — the
-	// only delivery the rewind's note has (shell.go's bounceNotes), the
-	// driver's --bounce note lifetime in miniature. A note the decision's
-	// own answer carries wins this kickoff; the stash then still rides
-	// the next one rather than being silently dropped.
-	if note == "" {
-		if stashed, ok := m.bounceNotes[f.ID]; ok &&
-			(f.Stage == domain.StageImplement || f.Stage == domain.StagePlan) {
-			delete(m.bounceNotes, f.ID)
-			note = stashed
-		}
-	}
-	// Run schedules and spawns the backend synchronously; do it in a command
-	// so a slow agent launch can't freeze the TUI.
-	eng := m.engine
-	return func() tea.Msg {
-		if err := eng.RunWith(f, note); err != nil {
-			return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true, id: f.ID}
-		}
-		if eng.Get(f.ID) == nil {
-			// RunWith reports success for a run it did not schedule (one
-			// already under way that ended in between); a request that
-			// started nothing says so rather than leaving the card idle
-			// under an answer that looked taken.
-			return noticeMsg{text: f.Name() + ": " + string(f.Stage) + " did not start — try again", isErr: true, id: f.ID}
-		}
-		// no bare "queued" text: the ⬤ running pill
-		// (runCounts) already says it, computed live from engine state on
-		// every render, so they can't go stale the way this free-text
-		// notice did once the run left the queue. A note riding the
-		// kickoff still gets its own line — nothing else says that.
-		if note != "" {
-			return noticeMsg{text: f.Name() + " — your line rides the kickoff", clearInbox: f.ID}
-		}
-		return noticeMsg{clearInbox: f.ID}
-	}
 }
 
 // openThread opens the card's page. It used to be openTranscript, which
@@ -4433,70 +2968,9 @@ func (m *Shell) openThread(f domain.Feature) tea.Cmd {
 	return m.openCard()
 }
 
-// pauseRun stops a feature's autonomous session, freeing its slot.
-func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
-	s := m.engine.Get(f.ID)
-	if s == nil || s.Interactive {
-		return nil
-	}
-	// Pause interrupts the agent (IPC/network); run it in a command. Until
-	// it lands the card is pausing — asked, not yet taken — which the web
-	// face's rail says (pausingMsg settles it either way).
-	if m.pausing == nil {
-		m.pausing = map[domain.FeatureID]bool{}
-	}
-	m.pausing[f.ID] = true
-	id, by := f.ID, m.humanActor()
-	return func() tea.Msg {
-		if err := m.engine.Pause(context.Background(), f.ID); err != nil {
-			return pausedMsg{id: id, inner: noticeMsg{text: sanitize(err.Error()), isErr: true}}
-		}
-		// A pause raises no attention, so it leaves no park row, and it
-		// is not a turn anyone typed: without a row of its own the thread
-		// on every face and device would say nothing happened, and a
-		// period of autopilot it ended would stay open until the next
-		// thing anyone did on the card. The pause row is both the receipt
-		// naming who stopped it and the period's end (threadfold).
-		m.logPause(f.ID, by)
-		// Pausing stops the *agent*; it does not answer the *question* a
-		// pending attention item is asking, and clearing the item
-		// unconditionally used to conflate the two. A card parked at a
-		// finished gate (attnGate) is the sharpest case: BG-002 passed
-		// verify, the user chose "stop here — park it", and the inbox
-		// went on to say "nothing needs you" while a landable branch sat
-		// waiting for the one action gummi never automates (§1.1). An
-		// attnFailure and an attnBudget are the same shape — a session
-		// erroring or hitting its envelope is a stop pausing an
-		// already-non-running session does not resolve either, so both
-		// must survive too. attnQuestion is the one kind that genuinely
-		// goes away: the item exists only because a live agent was
-		// waiting on an answer, and pausing stops that very agent, so
-		// there is nothing left to answer. Only that kind clears here.
-		clear := domain.FeatureID("")
-		if it, ok := m.inbox.get(f.ID); ok && it.Kind == attnQuestion {
-			clear = f.ID
-		}
-		return pausedMsg{id: id, inner: noticeMsg{text: f.Name() + " paused", clearInbox: clear}}
-	}
-}
-
-// pausedMsg settles a pause: whatever the pause came back as, the card is
-// no longer pausing, and the inner message is handled as if it had come
-// on its own.
-type pausedMsg struct {
-	id    domain.FeatureID
-	inner tea.Msg
-}
-
 // parkVerb is fireVerb's landing spot for the composer's "park" verb
-// (threadinput.go): pausing the card's own autonomous session, the exact
-// action boardVerb's "p" case takes when one is live and non-interactive
-// (pauseRun, right above). It never falls through to the dependency
-// picker the way "p" does off a live session — verbKeys' doc comment has
-// the why, in short: "p" is a reused board key with two board-only
-// meanings, but a word typed on purpose only ever means the one thing. On
-// a card with nothing to pause, this says so instead of opening something
-// the user never asked for.
+// (threadinput.go): stopping the session's turn in flight, the act
+// boardVerb's "p" takes. On a card with nothing to stop, it says so.
 func (m *Shell) parkVerb() tea.Cmd {
 	r, ok := m.selected()
 	if !ok {
@@ -4509,19 +2983,8 @@ func (m *Shell) parkVerb() tea.Cmd {
 	if cmd, handled := m.interruptFreeform(r.F); handled {
 		return cmd
 	}
-	if s := m.sessionFor(r.F.ID); s != nil && !s.Interactive {
-		return m.pauseRun(r.F)
-	}
 	m.notice = noticeMsg{text: r.F.Name() + ": nothing running to park"}
 	return nil
-}
-
-// sessionFor returns the engine session bound to a feature, or nil.
-func (m *Shell) sessionFor(id domain.FeatureID) *engine.Session {
-	if m.engine == nil {
-		return nil
-	}
-	return m.engine.Get(id)
 }
 
 // consultFor returns the feature's consult session if one has ever been
@@ -4558,44 +3021,6 @@ func (m *Shell) loadCardEvents(id domain.FeatureID) tea.Cmd {
 	return func() tea.Msg {
 		evs, err := m.store.Events(context.Background(), id)
 		return cardEventsMsg{id: id, events: evs, err: err}
-	}
-}
-
-// excusedChecksMsg delivers one card's excused check names — the checks
-// that were already failing on its fresh branch — loaded by
-// loadExcusedChecks.
-type excusedChecksMsg struct {
-	id    domain.FeatureID
-	names []string
-	on    string // the commit they were measured failing on, "" when unrecorded
-}
-
-// loadExcusedChecks reads one card's check baseline and reduces it to the
-// names engine.checkReport writes off as "FAIL (pre-existing)" at verify.
-//
-// That carve-out is correct — only regressions should count against a
-// card — but it left the card page saying "Verify passed — the branch is
-// ready to land" for a repo whose `lint` has been red for a month, with
-// nothing anywhere saying the gate had been given away. The names are a
-// durable fact derivable from the baseline alone, so surfacing them costs
-// one read and no new writes.
-//
-// It is fired exactly where loadCardEvents is (card page open, selection
-// moved on it) and cached the same way, so the render path never reads
-// the store. A detached shell has nothing to read.
-func (m *Shell) loadExcusedChecks(id domain.FeatureID) tea.Cmd {
-	if m.store == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		baseline, err := m.store.CheckBaseline(context.Background(), id)
-		if err != nil {
-			// a missing or unreadable baseline is not worth a notice: the
-			// clause it feeds is an addition to a sentence that is already
-			// correct without it, and most cards have no baseline at all.
-			return nil
-		}
-		return excusedChecksMsg{id: id, names: state.ExcusedChecks(baseline), on: state.ExcusedOn(baseline)}
 	}
 }
 
@@ -4667,17 +3092,8 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 		m.notice = noticeMsg{text: m.noAgent(" — budgets meter agent spend"), isErr: true}
 		return nil
 	}
-	actor := m.humanActor()
 	name := m.cardName(id)
 	return func() tea.Msg {
-		if id.Kind() == domain.KindGoal {
-			// a goal's budget is its ceiling: only raised, and the goal is
-			// told, so a wrap-up it forced can be reconsidered
-			if err := m.engine.RaiseGoalBudget(engine.WithActor(context.Background(), actor), id, to); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-			return noticeMsg{text: fmt.Sprintf("%s: goal budget raised to %s", name, domain.FormatDollars(float64(to))), reload: true}
-		}
 		if err := m.engine.RaiseEnvelope(context.Background(), id, to); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
@@ -4713,39 +3129,6 @@ func budgetAttentionText(stage domain.Stage, committed bool) string {
 	return string(stage) + " hit its budget — top it up or park it from the inbox"
 }
 
-// setGateApproval persists a card's gate-approval mode — the write half
-// of the autopilot overlay's confirm (autopilot.go's startAutopilot).
-// Like SetVerifiedAt/SetGateApproval on the store side
-// this is a side-channel write: it touches neither a session nor the
-// stage, so — unlike deleteFeature/cleanupLanded — it carries no card
-// lock, the same call shape as setRepo and setEnvelope above.
-func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
-	name := m.cardName(id)
-	return func() tea.Msg {
-		if err := m.store.SetGateApproval(context.Background(), id, mode); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		// The confirmation reads back in the words the choice was made in.
-		// Two modes, so two sentences — no table to look them up in.
-		text := fmt.Sprintf("%s: attended — every gate stops for you", name)
-		if autopilotModeFor(mode) == domain.GateAutopilot {
-			text = fmt.Sprintf("%s: autopilot — it runs to a verified branch on its own", name)
-		}
-		return noticeMsg{text: text, reload: true}
-	}
-}
-
-// autonomousStage reports whether a stage runs an autonomous agent
-// (as opposed to interactive chat or no agent).
-func autonomousStage(s domain.Stage) bool {
-	switch s {
-	case domain.StagePlan, domain.StageImplement, domain.StageVerify:
-		return true
-	default:
-		return false
-	}
-}
-
 func (m *Shell) mainView(w, h int) string {
 	if m.boardSurfacesLive() {
 		// With a card page open, the artifact and the diff are that page's
@@ -4753,6 +3136,10 @@ func (m *Shell) mainView(w, h int) string {
 		// bar naming where it is and how to get back (cardtabs.go).
 		// Reached from the backlog list there is no page underneath and no
 		// bar — the same surface, mounted without a card page around it.
+		if m.stepv != nil && m.cardOpen {
+			// a step opened over the thread, with its own crumb back
+			return m.stepViewRender(w, h)
+		}
 		if m.spec != nil {
 			if m.cardOpen {
 				return m.cardSurface(cardTabArtifact, w, h, m.specViewRender)
@@ -4776,21 +3163,6 @@ func (m *Shell) mainView(w, h int) string {
 				return m.cardSurface(cardTabLog, w, h, m.logViewRender)
 			}
 			return m.logViewRender(w, h)
-		}
-		if m.ingest != nil {
-			return m.ingestViewRender(w, h)
-		}
-		if m.bugIngest != nil {
-			return m.bugIngestViewRender(w, h)
-		}
-		if m.deps != nil {
-			return m.depPickerView(w, h)
-		}
-		if m.goalPage != nil {
-			return m.goalPageRender(w, h)
-		}
-		if m.ingestRun != nil && !m.ingestRun.hidden {
-			return m.ingestRunRender(w, h)
 		}
 	}
 	switch m.tab {
@@ -4828,9 +3200,6 @@ func (m *Shell) statusView(w int) string {
 			kind = statusbar.KindAlert
 		}
 		pills = append(pills, statusbar.Pill{Text: m.copilot.pill(), Kind: kind})
-	}
-	if m.ingestRun != nil {
-		pills = append(pills, statusbar.Pill{Text: m.spinner() + " ingest", Kind: statusbar.KindNeutral})
 	}
 	if len(m.mergePrep) > 0 {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " merging", Kind: statusbar.KindNeutral})
@@ -4915,4 +3284,15 @@ func (m *Shell) brand() string {
 		return "gummi"
 	}
 	return "gummi · " + m.name
+}
+
+// rowByID is the board's row for id as it is now, or false for a card
+// that is gone.
+func (m *Shell) rowByID(id domain.FeatureID) (featureRow, bool) {
+	for i := range m.rows {
+		if m.rows[i].F.ID == id {
+			return m.rows[i], true
+		}
+	}
+	return featureRow{}, false
 }

@@ -1,100 +1,33 @@
-// Package driver is gummi's headless run loop: it drives one feature
-// through the same engine gate floor the TUI uses (engine.Advance,
-// engine.Run/RunWith/RunCritique, engine.Attach), but with no human at
-// the keyboard. Each invocation runs the engine forward until the caller
-// must decide, then returns a typed Outcome the CLI maps to an exit code
-// and a final NDJSON line. Any point a human would resolve — a design
-// question, a rerun/critique cap, budget exhaustion, a stalled stage —
-// becomes a durable, resumable escalation with a non-zero exit, never a
-// silent auto-proceed (DESIGN §8.2, deterministic failure over silent
-// degradation). The driver changes *who* approves a gate, not *whether*
-// the quality floor runs.
+// Package driver is gummi's headless session loop, behind `gummi run` and
+// `gummi resume`: a session (a freeform card) started from a prompt, or
+// picked back up, kept moving with no person at the keyboard.
+//
+// The person running `gummi run` always allows the session's workflow
+// runs (DESIGN §25.11), so a run the session proposes starts without
+// asking, the envelope its only cap. Everything else that needs a person
+// stops the run instead of being decided for them: the session's
+// ask_user question, a run's decision (a proposal, on a session not
+// always allowed, a revised plan, a repeat at its max, the budget), a
+// step's own question, a paused run, the envelope running dry, a quiet
+// past the timeout. Each stop is a typed
+// Outcome the CLI maps to an exit code, after an NDJSON line that says
+// what to run next. The run is done when the session is idle with no
+// workflow run open or queued.
 package driver
 
-// Status is the terminal classification of a run/resume invocation. Each
-// maps to a stable process exit code (ExitCode) so a calling agent can
-// branch on the result without parsing stdout.
-type Status string
+import "github.com/morphis/gummi/internal/cardops"
 
-const (
-	// StatusVerified: a verified branch is ready. gummi never merges it.
-	//
-	// It used to be spelled "done", which collided with the card's own
-	// done — the stage a card reaches when it is CLOSED. Both were
-	// correct and they meant different things, so a caller reading one
-	// table and not the other learned the difference from a pipeline that
-	// shipped nothing. The run reaches verified; only a card is ever done.
-	StatusVerified Status = "verified"
-	// StatusError: a setup or agent failure. Often nothing partial landed
-	// (a pre-id validation/setup failure), but a mid-run agent-turn failure
-	// can occur after earlier stages committed durable progress — that case
-	// is one `resume <id>` from possibly finishing. The exit code is 1
-	// regardless; the error event's `resumable`/`stage` fields tell the two
-	// apart (check `status <id>`).
-	StatusError Status = "error"
-	// StatusQuestion: a delegated ask_user question, or a caller design
-	// gate awaiting --approve/--request-changes. Resume to continue.
-	StatusQuestion Status = "question"
-	// StatusBlocked: open %%/diff threads block a gate. Resolve them (or
-	// resume --request-changes) before the gate can cross.
-	StatusBlocked Status = "blocked"
-	// StatusEscalation: a rerun/critique cap was hit, or a stage returned
-	// no clear verdict. The card stays durable + resumable.
-	StatusEscalation Status = "escalation"
-	// StatusExhausted: the credit envelope ran dry. Raise it, then resume.
-	StatusExhausted Status = "exhausted"
-	// StatusTimeout: a stage went quiet past the inactivity budget — a
-	// likely hang. Durable + resumable.
-	StatusTimeout Status = "timeout"
-	// StatusStopped: --until reached its deliberate stop before crossing a
-	// design gate. A clean, resumable halt — exit 0, distinguished from done
-	// only by the event name.
-	StatusStopped Status = "stopped"
-	// StatusSaid: --say reported what a line would do and stopped without
-	// acting. Exit 0: nothing happened, and that was the point.
-	StatusSaid Status = "said"
-	// StatusStalled: a goal stopped because its agent backend could not
-	// serve it — a provider quota, a rate limit, an overload. Nothing was
-	// dropped and nothing is wrong with the work: the same resume
-	// continues it once the backend is available. It takes the error
-	// code, because the run produced nothing, and says on the stream what
-	// the backend said, which usually names when it comes back.
-	StatusStalled Status = "stalled"
-	// StatusNoted: a goal-only decision — a note, a wrap-up, a reversal —
-	// was handed to a goal another process is conducting. It is recorded
-	// for that conductor and this invocation drove nothing. Exit 0: the
-	// three verbs exist to reach a goal WHILE it runs, so finding it
-	// running is their success case, not their failure.
-	StatusNoted Status = "noted"
+// Status and Outcome are cardops's: the driver and the card operations
+// share one exit-status table.
+type (
+	Status  = cardops.Status
+	Outcome = cardops.Outcome
 )
 
-// ExitCode is the process exit status for a terminal Status. verified is 0;
-// error keeps the conventional 1; the decision boundaries take distinct
-// codes so a caller can branch on them.
-func (s Status) ExitCode() int {
-	switch s {
-	case StatusVerified, StatusStopped, StatusSaid, StatusNoted:
-		return 0
-	case StatusError:
-		return 1
-	case StatusQuestion:
-		return 2
-	case StatusBlocked:
-		return 3
-	case StatusEscalation:
-		return 4
-	case StatusExhausted:
-		return 5
-	case StatusTimeout:
-		return 6
-	default:
-		return 1
-	}
-}
-
-// Outcome is the terminal result of drive. ID is the feature the run
-// governed (empty only when creation itself failed before an ID existed).
-type Outcome struct {
-	Status Status
-	ID     string
-}
+const (
+	StatusDone      = cardops.StatusDone
+	StatusError     = cardops.StatusError
+	StatusNeedsYou  = cardops.StatusNeedsYou
+	StatusExhausted = cardops.StatusExhausted
+	StatusTimeout   = cardops.StatusTimeout
+)

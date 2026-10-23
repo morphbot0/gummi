@@ -15,7 +15,7 @@ func buildConfig(t *testing.T, extra []string) map[string]any {
 
 func buildConfigPerm(t *testing.T, extra []string, permission Permission) map[string]any {
 	t.Helper()
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, "", permission)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, nil, permission)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 		"no sock":    {"FD-011", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, "", PermissionAllowAll)
+			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, nil, PermissionAllowAll)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,7 +137,7 @@ func TestBuildOpencodeConfigExtraReads(t *testing.T) {
 // pattern map), while read stays open — the deny is structural, so
 // enforce/warn/off sandbox modes cannot re-arm the write tools.
 func TestBuildOpencodeConfigReadOnly(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, "", PermissionAllowAll)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, nil, PermissionAllowAll)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestBuildOpencodeConfigOpensTheScratchDir(t *testing.T) {
 	const scratch = "/ws/.gummi/state/scratch/FD-025"
 	perm := func(readOnly bool, extra []string) map[string]any {
 		t.Helper()
-		raw, err := buildOpencodeConfig("/tmp/wt", "", "FD-025", "/opt/gummi", extra, readOnly, scratch, PermissionAllowAll)
+		raw, err := buildOpencodeConfig("/tmp/wt", "", "FD-025", "/opt/gummi", extra, readOnly, []string{scratch}, PermissionAllowAll)
 		if err != nil {
 			t.Fatalf("buildOpencodeConfig: %v", err)
 		}
@@ -262,7 +262,7 @@ func TestBuildOpencodeConfigGuardedOnlyAsksOnTopOfTheCage(t *testing.T) {
 // would otherwise reach it.
 func TestBuildOpencodeConfigDeniesTheQuestionTool(t *testing.T) {
 	for _, mode := range []Permission{PermissionAllowAll, PermissionGuarded} {
-		raw, err := buildOpencodeConfig("/tmp/wt", "", "", "/opt/gummi", nil, false, "", mode)
+		raw, err := buildOpencodeConfig("/tmp/wt", "", "", "/opt/gummi", nil, false, nil, mode)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,4 +286,35 @@ func keys(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A workflow step's run directory (SessionOpts.WriteDirs) is opened beside
+// the scratch dir, to edit, write, read and external_directory alike, so
+// the step can write the artifacts its brief names; nothing else outside
+// the worktree is.
+func TestBuildOpencodeConfigOpensAStepsRunDir(t *testing.T) {
+	const scratch, runDir = "/ws/.gummi/state/scratch/FF-002", "/ws/.gummi/runs/FF-001/2"
+	raw, err := buildOpencodeConfig("/tmp/wt", "", "FF-002", "/opt/gummi", []string{"/ws/skill"}, false, []string{scratch, runDir}, PermissionAllowAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	p := m["permission"].(map[string]any)
+	for _, key := range []string{"edit", "write", "read"} {
+		cage, _ := p[key].(map[string]any)
+		if cage[runDir+"/**"] != "allow" || cage[scratch+"/**"] != "allow" || cage["/**"] != "deny" {
+			t.Errorf("%s = %v, want the run dir and scratch allowed, every other absolute path denied", key, p[key])
+		}
+	}
+	// external_directory is "allow" outright with read allowances, as before;
+	// without them it opens the two directories alone
+	raw, _ = buildOpencodeConfig("/tmp/wt", "", "FF-002", "/opt/gummi", nil, false, []string{"", runDir}, PermissionAllowAll)
+	_ = json.Unmarshal(raw, &m)
+	ext, _ := m["permission"].(map[string]any)["external_directory"].(map[string]any)
+	if ext["*"] != "deny" || ext[runDir+"/**"] != "allow" || len(ext) != 2 {
+		t.Errorf("external_directory = %v, want the run dir alone", ext)
+	}
 }

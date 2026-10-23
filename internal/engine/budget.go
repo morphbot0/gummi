@@ -13,11 +13,7 @@ import (
 // exceeding the budget (DESIGN §5.1 layer 1).
 const capHeadroom = 0.90
 
-// budgetThresholds are the spend fractions at which the model is nudged
-// (DESIGN §5.1 layer 2). 100% is the exhaustion checkpoint.
-var budgetThresholds = []int{50, 80, 95}
-
-// stageBudget returns the credit budget for a feature's current stage:
+// sessionBudget returns the credit budget for a card's current session:
 // what's left of its envelope (layer 3), or the flat config value for a
 // feature without one (layer 1/2 behavior). Every stage draws from the
 // same envelope — there are no per-stage allocations. Review and verify
@@ -30,37 +26,19 @@ var budgetThresholds = []int{50, 80, 95}
 // smaller cap cannot be held anyway — the turn overshoots it either way.
 // Exhaustion semantics are unchanged: an envelope with nothing left
 // still returns 0 and gates.
-func (e *Engine) stageBudget(f domain.Feature, creditRate float64) float64 {
+func (e *Engine) sessionBudget(f domain.Feature, creditRate float64) float64 {
+	if e.stepOf(context.Background(), f) != nil {
+		// a step spends from its session's pool (§25.7)
+		return e.stepBudget(context.Background(), f)
+	}
 	if f.Budget.Envelope > 0 {
 		cur := e.currentFeature(f)
-		// RS cards (FD-081) reserve a decompose floor upfront: a
-		// non-decompose stage (shape, etc.) may only spend down to that
-		// floor, never into it, so decompose is guaranteed
-		// DecomposeReserveCredits of headroom on its first pass. This
-		// reads spend through CreditEquivalentAt/DecomposeCreditEquivalentAt
-		// (never Spend.Credits raw) so hosted and BYOK spend are treated
-		// identically.
-		if cur.Kind == domain.KindResearch {
-			nonDecompose := cur.Spend.CreditEquivalentAt(creditRate) - cur.Spend.DecomposeCreditEquivalentAt(creditRate)
-			return cur.Budget.Remaining(nonDecompose + domain.DecomposeReserveCredits)
-			// Deliberately skips the shared turnReserve floor-up below: with
-			// TurnReserveCredits defaulting to the same value as
-			// DecomposeReserveCredits, flooring a small positive remainder up
-			// to a full turn would let a non-decompose session spend into the
-			// reserved block — exactly what the floor exists to prevent.
+		spent := cur.Spend.CreditEquivalentAt(creditRate)
+		if cur.IsFreeform() && !cur.IsChild() {
+			// a session and its workflow runs draw from one envelope (§24.7a)
+			spent += e.legacyCrewsSpent(context.Background(), cur.ID) + e.sessionRunsSpent(context.Background(), cur.ID)
 		}
-		// A goal's own stages (its plan, review and verify) spend what its
-		// cards do not hold — the reserve included, which exists for them.
-		if cur.IsGoal() {
-			if view, err := e.goalView(context.Background(), cur); err == nil {
-				b := view.Ledger.OwnBudget()
-				if reserve := e.turnReserve(); b > 0 && b < reserve {
-					b = reserve
-				}
-				return max(0, b)
-			}
-		}
-		b := cur.Budget.Remaining(cur.Spend.CreditEquivalentAt(creditRate))
+		b := cur.Budget.Remaining(spent)
 		if reserve := e.turnReserve(); b > 0 && b < reserve {
 			b = reserve
 		}
@@ -93,7 +71,7 @@ func (e *Engine) currentFeature(f domain.Feature) domain.Feature {
 
 // seedCardSpend stamps a spawning session with the card's spend as the
 // store holds it right now, priced at the session's own adapter rate —
-// the same figure stageBudget just subtracted from the envelope. From
+// the same figure sessionBudget just subtracted from the envelope. From
 // here recordUsage moves it by each booked sample, so a render path has
 // the store's running total without a read of its own (Session.cardSpent).
 func (e *Engine) seedCardSpend(s *Session) {
@@ -151,70 +129,6 @@ func CompileDiffComments(anns []domain.DiffAnnotation, resolveTool bool) string 
 			"tool with its [id]; unresolved comments keep the gate blocked."
 	}
 	return turn
-}
-
-// budgetMetered is the clause every budget hint shares. A model cannot
-// see what it has spent — usage is metered by the backend and booked by
-// gummi — so asking it to "estimate whether it can finish" asked for a
-// figure it has no way to compute, and it guessed: a stage stopped early
-// with most of its budget left, or kept going on a remaining figure it
-// had worked out wrong. gummi does the arithmetic and says when it
-// matters (nudge); the model's part is only to act on it.
-const budgetMetered = `gummi meters what you spend and will tell you here as you ` +
-	`pass 50%, 80% and 95% of it. You cannot see your own spend, so do not ` +
-	`estimate it, ration your work against it, or stop early on a guess about it`
-
-// budgetHint is the session-start system instruction telling the model
-// its budget (DESIGN §5.1 layer 2, "at session start"). Tailored for
-// stages that edit files (implement, fix).
-func budgetHint(budget float64) string {
-	return `This stage has a budget of ` + domain.FormatDollars(budget) + `. ` + budgetMetered + `. ` +
-		`Work efficiently: prefer targeted reads over broad exploration, ` +
-		`batch related edits, and avoid speculative refactors. When gummi ` +
-		`tells you to checkpoint, write what's done, what's left and where to ` +
-		`resume into the spec's progress section, then stop.`
-}
-
-// budgetHintReadMostly is the variant used by stages that don't edit
-// files (plan critique, verify). The "batch edits / avoid refactors"
-// clause is noise there, and critique specifically needs breadth to
-// walk closure tables and cited rules — a read-restriction hint
-// pulls in the wrong direction.
-func budgetHintReadMostly(budget float64) string {
-	return `This stage has a budget of ` + domain.FormatDollars(budget) + `. ` + budgetMetered + `. ` +
-		`When gummi tells you to checkpoint, write what's done, what's left and ` +
-		`where to resume into the artifact, then stop.`
-}
-
-// nudge builds the mid-session budget update injected at a threshold.
-//
-// Every one of them names the artifact, because writing to it is the only
-// thing that survives running dry. A stage whose whole output is one write
-// at the end — a research survey, a verify's evidence — can spend its
-// entire envelope doing real work and leave nothing behind: on the lxd
-// autopilot drive a survey read 73 files, took the 80% nudge's "wrap up or
-// checkpoint soon" as advice about pace, and ended with its Findings
-// section still the template's placeholder. "Wrap up" did not say what to
-// wrap up INTO.
-func nudge(pct int, spent, budget float64) string {
-	left := budget - spent
-	if left < 0 {
-		left = 0
-	}
-	switch {
-	case pct >= 95:
-		return fmt.Sprintf("[budget] %d%% consumed, ~%s left — checkpoint now: "+
-			"write what's done, what's left, and where to resume into the artifact, "+
-			"then stop.", pct, domain.FormatDollars(left))
-	case pct >= 80:
-		return fmt.Sprintf("[budget] %d%% consumed, ~%s left — write what you "+
-			"have into the artifact NOW, while there is room to write it. A stage that "+
-			"runs dry having written nothing has produced nothing, whatever it read.",
-			pct, domain.FormatDollars(left))
-	}
-	return fmt.Sprintf("[budget] %d%% consumed, ~%s left — keep the artifact "+
-		"current as you go, so what you have learned survives if this stage runs out.",
-		pct, domain.FormatDollars(left))
 }
 
 // budgetHintFreeform is the budget instruction for a freeform card's

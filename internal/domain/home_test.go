@@ -20,7 +20,7 @@ func TestAnAgentIsAMainCheckoutCardInNoRepository(t *testing.T) {
 	for name, breakIt := range map[string]func(*Feature){
 		"main-checkout": func(f *Feature) { f.MainCheckout = false },
 		"repository":    func(f *Feature) { f.Repo = "api" },
-		"delegated":     func(f *Feature) { f.ParentID = "FF-9" },
+		"parented":      func(f *Feature) { f.ParentID = "FF-9" },
 	} {
 		g := *f
 		breakIt(&g)

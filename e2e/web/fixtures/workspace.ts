@@ -15,14 +15,14 @@ import { agentScript, fakeGh, fakeGhData, fakeSsh, gummiBin } from './paths';
  *   repo/    the git repository and its .gummi workspace (cwd of every gummi)
  *   tmp/     TMPDIR for gummi and everything it runs
  *   gh/      this workspace's copy of fixtures/gh — fake-gh's answers
- *   bin/gh   a symlink to fake-gh, first on PATH (bug import runs plain `gh`)
+ *   bin/gh   a symlink to fake-gh, first on PATH (for anything that runs plain `gh`)
  *   logs/    agent.log (every protocol frame), gh.log (every gh argv),
  *            server logs
  *   config/  XDG_CONFIG_HOME, so the user's own gummi config never leaks in
  *
- * Seeding helpers drive the real CLI (`gummi run`, `resume`, `research`,
- * `merge`, `ingest`, `bugs`), so a seeded card is in exactly the state the
- * product puts it in. They need no web server and are safe to call while
+ * Seeding helpers drive the real CLI (`gummi run`, `resume`, `merge`) or,
+ * where there is no verb, a board of their own (viaBoard), so a seeded card
+ * is in exactly the state the product puts it in. They need no web server and are safe to call while
  * one runs (the CLI takes only per-card locks), though a running board
  * picks the change up on its own schedule.
  */
@@ -188,7 +188,7 @@ export class Workspace {
     return JSON.parse(r.stdout) as CardStatus;
   }
 
-  /** The card's worktree (feature and bug cards; research has none). */
+  /** The card's worktree under .gummi/worktrees. */
   worktree(id: string): string {
     return path.join(this.repo, '.gummi', 'worktrees', id);
   }
@@ -226,114 +226,97 @@ export class Workspace {
   // ------------------------------------------------------------------
 
   /**
-   * A feature parked at its design gate: plan ran, the critique passed, the
-   * spec has every section and a passing gummi-checks block, nothing is
-   * implemented. `gummi run --gate-approval attended --until plan`.
+   * A session started by `gummi run` from title and driven until its first
+   * turn is answered: the scripted agent's turn edits a file, so its diff
+   * is not empty. Returns the session's id.
    */
-  async seedDesignGate(title: string, opts: RunOpts = {}): Promise<string> {
-    const r = await this.drive(['run', '--gate-approval', 'attended', '--until', 'plan', ...runFlags(opts), title]);
-    expectEvent(r, 'stopped');
+  async seedSession(title: string, opts: RunOpts = {}): Promise<string> {
+    const r = await this.drive(['run', ...runFlags(opts), title]);
+    expectEvent(r, 'done');
     return r.id;
   }
 
   /**
-   * A feature whose architect is waiting on an ask_user question with two
-   * options ("A new file (recommended)", "Extend the existing file"). The
-   * title gets the [ask] keyword if it lacks it.
+   * A session whose work is committed on its branch — ready to land.
+   * `gummi run`, then `gummi commit` of what its turn left in the tree.
+   */
+  async seedReady(title: string, opts: RunOpts = {}): Promise<string> {
+    const id = await this.seedSession(title, opts);
+    await this.gummiOK(['commit', id, '-m', commitSubject(title)]);
+    return id;
+  }
+
+  /**
+   * A session whose agent is waiting on an ask_user question with two
+   * options ("Left", "Right"). The [ask] keyword rides a line of its own
+   * under the title, so the card keeps the title it was given.
    */
   async seedAsk(title: string, opts: RunOpts = {}): Promise<{ id: string; question: string; options: string[]; decision: string }> {
-    const r = await this.drive(['run', '--gate-approval', 'attended', '--until', 'plan', ...runFlags(opts), withKeyword(title, '[ask]')]);
+    const r = await this.drive(['run', ...runFlags(opts), title.includes('[ask]') ? title : `${title}\n\n[ask]`]);
     const q = expectEvent(r, 'question');
     return { id: r.id, question: String(q.q), options: q.options as string[], decision: String(q.decision) };
   }
 
-  /**
-   * A feature driven all the way to a verified branch (stage verify,
-   * verified: true) — ready to land. `gummi run --gate-approval autopilot`.
-   */
-  async seedVerified(title: string, opts: RunOpts = {}): Promise<string> {
-    const r = await this.drive(['run', '--gate-approval', 'autopilot', ...runFlags(opts), title]);
-    expectEvent(r, 'verified');
-    return r.id;
-  }
-
-  /**
-   * A feature whose verify stage failed and escalated to a person
-   * (escalation.kind "verify"). how "check" (default) fails a real
-   * gummi-checks command at verify ([fail-check]); "verdict" has every check
-   * pass and the verifier fail it anyway ([fail-verify]).
-   */
-  async seedVerifyFailed(title: string, opts: RunOpts & { how?: 'check' | 'verdict' } = {}): Promise<string> {
-    const keyword = opts.how === 'verdict' ? '[fail-verify]' : '[fail-check]';
-    const r = await this.drive(['run', '--gate-approval', 'autopilot', ...runFlags(opts), withKeyword(title, keyword)]);
-    const esc = expectEvent(r, 'escalation');
-    if (esc.stage !== 'verify') throw new Error(`expected a verify escalation, got ${JSON.stringify(esc)}\n${r.stdout}`);
-    return r.id;
-  }
-
-  /** A verified feature landed on main with `gummi merge` (stage done). */
-  async seedLanded(title: string, message = `feat: ${title.toLowerCase()}`, opts: RunOpts = {}): Promise<string> {
-    const id = await this.seedVerified(title, opts);
+  /** A ready session landed on main with `gummi merge` (stage done). */
+  async seedLanded(title: string, message = commitSubject(title), opts: RunOpts = {}): Promise<string> {
+    const id = await this.seedReady(title, opts);
     await this.gummiOK(['merge', id, '-m', message]);
     return id;
   }
 
   /**
-   * Feature cards in the backlog (stage todo), minted through `gummi ingest`
-   * of a document with one `## ` heading per title — the scripted architect
-   * proposes one feature per heading.
+   * Sessions (freeform cards), one per title, each with its title as its
+   * opening turn and that turn answered. A session has no CLI verb of its
+   * own yet, so this mints them through a board of its own (viaBoard).
+   * `extra` is sent with each card (e.g. `{ repo: 'lxd' }`).
    */
-  async seedBacklog(titles: string[]): Promise<string[]> {
-    const doc = path.join(this.root, 'tmp', `backlog-${Date.now()}.md`);
-    await fs.promises.writeFile(doc, `# Backlog\n\n${titles.map((t) => `## ${t}\n\nDo ${t.toLowerCase()}.\n`).join('\n')}`);
-    const r = await this.gummiOK(['ingest', '--yes', doc]);
-    return mintedIds(r.stdout, 'FD');
-  }
-
-  /** A bug card in the backlog (stage todo), made by hand with `gummi bugs new`. */
-  async seedBug(title: string, opts: { severity?: string; desc?: string } = {}): Promise<string> {
-    const r = await this.gummiOK([
-      'bugs', 'new', '--yes', '--title', title,
-      '--one-liner', title.toLowerCase(),
-      '--severity', opts.severity ?? 'medium',
-      '--desc', opts.desc ?? `${title}.`,
-    ]);
-    return mintedIds(r.stdout, 'BG')[0];
+  async seedSessions(titles: string[], extra: Record<string, unknown> = {}): Promise<string[]> {
+    return this.viaBoard(titles.map((title) => ({ kind: 'freeform', title, ...extra })));
   }
 
   /**
-   * Bug cards imported from fake-gh's issues.json (open issues labelled
-   * "bug": #101 and #102 by default) with `gummi bugs ingest`.
+   * Make cards through `POST /api/cards`, as the new-card form does, on a
+   * board started for it on a free port with no pairing; wait for every
+   * card's opening turn (a session's) to settle; stop the board again.
+   * Call it before the test's server starts (a seed's run), never beside
+   * it: the board's instance lock admits one.
    */
-  async importBugs(opts: { comments?: boolean } = {}): Promise<string[]> {
-    const args = ['bugs', 'ingest', '--repo', 'e2e/tiny', '--yes'];
-    if (opts.comments) args.push('--comments');
-    const r = await this.gummiOK(args);
-    return mintedIds(r.stdout, 'BG');
+  private async viaBoard(cards: Array<Record<string, unknown>>): Promise<string[]> {
+    const { GummiServer } = await import('./server');
+    const server = await GummiServer.start(this, { args: ['--no-pairing'] });
+    try {
+      const call = async (method: string, pathname: string, body?: unknown) => {
+        const res = await fetch(server.url + pathname, {
+          method,
+          headers: { Origin: server.url, 'Content-Type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`${method} ${pathname} → ${res.status}: ${text}`);
+        return text ? JSON.parse(text) : undefined;
+      };
+      const ids: string[] = [];
+      for (const card of cards) {
+        const c = await call('POST', '/api/cards', card);
+        ids.push(String(c?.id ?? c?.card?.id));
+      }
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        const rows: Array<{ id: string; status: string }> = (await call('GET', '/api/board')).rows;
+        const busy = ids.filter((id) => rows.find((r) => r.id === id)?.status === 'running');
+        if (busy.length === 0) break;
+        if (Date.now() > deadline) throw new Error(`cards still running their opening turn: ${busy.join(', ')}`);
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return ids;
+    } finally {
+      await server.stop();
+    }
   }
 
-  /**
-   * A research card parked at its design gate (Questions, Constraints and
-   * Direction written). `gummi research --until plan`. Only the plan stage
-   * can run on the headless backend: later research stages need a
-   * read-only cage it cannot enforce, so gummi refuses them.
-   */
-  async seedResearch(brief: string, opts: RunOpts = {}): Promise<string> {
-    const r = await this.drive(['research', '--gate-approval', 'attended', '--until', 'plan', ...runFlags(opts), withKeyword(brief, '[research]')]);
-    expectEvent(r, 'stopped');
-    return r.id;
-  }
-
-  /** Approve a design gate and drive on to a verified branch (or the next stop). */
-  async approve(id: string): Promise<DriveResult> {
-    return this.drive(['resume', id, '--approve']);
-  }
-
-  /** Answer an open ask_user question; `untilPlan` stops again at the design gate. */
-  async answer(id: string, text: string, opts: { untilPlan?: boolean } = {}): Promise<DriveResult> {
-    const args = ['resume', id, '--answer', text];
-    if (opts.untilPlan !== false) args.push('--until', 'plan');
-    return this.drive(args);
+  /** Answer a stopped session's open question with `gummi resume --answer`. */
+  async answer(id: string, text: string): Promise<DriveResult> {
+    return this.drive(['resume', id, '--answer', text]);
   }
 
   /**
@@ -390,9 +373,10 @@ export interface DriveResult extends Exec {
   events: DriverEvent[];
 }
 
-/** Flags every seeding helper forwards to `gummi run` / `research`. */
+/** Flags every seeding helper forwards to `gummi run`. */
 export interface RunOpts {
   envelope?: number;
+  repo?: string;
   profile?: string;
   base?: string;
   ref?: string;
@@ -419,8 +403,15 @@ function runFlags(o: RunOpts): string[] {
   if (o.envelope !== undefined) f.push('--envelope', String(o.envelope));
   if (o.profile) f.push('--profile', o.profile);
   if (o.base) f.push('--base', o.base);
+  if (o.repo) f.push('--repo', o.repo);
   if (o.ref) f.push('--ref', o.ref);
   return f;
+}
+
+/** A Conventional Commits subject a landing or commit accepts, from a title. */
+export function commitSubject(title: string): string {
+  const words = title.toLowerCase().replace(/\[[^\]]*\]/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return `feat: ${words || 'work'}`;
 }
 
 function withKeyword(title: string, keyword: string): string {
@@ -445,11 +436,6 @@ function expectEvent(r: DriveResult, name: string): DriverEvent {
   const e = r.events.findLast((ev) => ev.event === name);
   if (!e) throw new Error(`expected a "${name}" event from ${r.id}, got:\n${r.stdout}\n${r.stderr}`);
   return e;
-}
-
-/** Card ids from the "  FD-008  Title" lines ingest/bugs print. */
-function mintedIds(stdout: string, prefix: string): string[] {
-  return [...stdout.matchAll(new RegExp(`^\\s+(${prefix}-\\d+)\\s{2,}`, 'gm'))].map((m) => m[1]);
 }
 
 function readIfExists(p: string): string {

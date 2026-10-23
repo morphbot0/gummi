@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -107,23 +106,6 @@ func (s Spend) CreditEquivalentAt(ratePer1K float64) float64 {
 	return float64(s.InputTokens+s.OutputTokens) / 1000 * ratePer1K
 }
 
-// DecomposeCreditEquivalentAt mirrors CreditEquivalentAt over the
-// decompose-only scalars (FD-081): the metered credits from the
-// decompose pass, or a token-derived equivalent for BYOK, at the same
-// per-1K rate the caller prices the rest of the feature's spend at.
-// Store.AddDecomposeSpend always grows this in lockstep with the
-// overall total, so this is guaranteed <= CreditEquivalentAt(ratePer1K)
-// at every rate.
-func (s Spend) DecomposeCreditEquivalentAt(ratePer1K float64) float64 {
-	if s.DecomposeCredits > 0 {
-		return s.DecomposeCredits
-	}
-	if ratePer1K <= 0 {
-		ratePer1K = ByokCreditsPer1KTokens
-	}
-	return float64(s.DecomposeInputTokens+s.DecomposeOutputTokens) / 1000 * ratePer1K
-}
-
 // estimateHeadroom pads the historical median so an estimated envelope
 // isn't sized right at the typical cost — a feature a bit above the median
 // still finishes without a top-up.
@@ -137,16 +119,6 @@ const estimateHeadroom = 1.25
 // (Config.TurnReserve); this is the default.
 const TurnReserveCredits = 30
 
-// DecomposeReserveCredits (FD-081) is the credit floor an RS card's
-// envelope reserves upfront for its decompose pass. Non-decompose stages
-// cannot spend into it (see Engine.stageBudget's KindResearch branch);
-// the decompose pass itself debits from it via
-// Spend.DecomposeCreditEquivalentAt, and an insufficient remainder exits
-// exhausted with no partial mint rather than spending past it. Sized the
-// same as TurnReserveCredits — one agentic turn's worth of headroom is
-// enough for the transient decompose pass this reserves for.
-const DecomposeReserveCredits = 30
-
 // MinEnvelope floors every estimated envelope. Estimation signals skew
 // low — a scribe guesses from the spec without seeing the agent's real
 // exploration cost, and a thin history medians over unrepresentative
@@ -154,32 +126,6 @@ const DecomposeReserveCredits = 30
 // costs a human round-trip. Estimates only; an explicit envelope the
 // user chose is honored as given, and (0,0) still means unbudgeted.
 const MinEnvelope = 150
-
-// EstimateEnvelope proposes a feature's credit envelope from the actual
-// spend of previously completed features — the historical-spend signal
-// of plan-time estimation (DESIGN §5.1). It takes the median
-// credit-equivalent spend of the samples (robust to the odd runaway
-// feature), adds headroom, and rounds up to a tidy 10, so a repo's
-// features get budgets sized to what work there actually costs rather
-// than a flat default. Returns (0, 0) when there is no spend to learn
-// from, leaving the caller's existing envelope untouched.
-func EstimateEnvelope(history []Spend) (envelope float64, samples int) {
-	vals := make([]float64, 0, len(history))
-	for _, s := range history {
-		if c := s.CreditEquivalent(); c > 0 {
-			vals = append(vals, c)
-		}
-	}
-	if len(vals) == 0 {
-		return 0, 0
-	}
-	sort.Float64s(vals)
-	med := vals[len(vals)/2]
-	if len(vals)%2 == 0 {
-		med = (vals[len(vals)/2-1] + vals[len(vals)/2]) / 2
-	}
-	return math.Max(roundUpTo10(med*estimateHeadroom), MinEnvelope), len(vals)
-}
 
 // roundUpTo10 rounds a credit figure up to a tidy multiple of 10.
 func roundUpTo10(v float64) float64 { return math.Ceil(v/10) * 10 }

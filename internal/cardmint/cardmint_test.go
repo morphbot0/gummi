@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -45,177 +44,14 @@ func readSeq(t *testing.T, path string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-func TestMintFeatureQuickRoute(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	ctx := context.Background()
-
-	f, err := Mint(ctx, store, ws, Input{
-		Kind:        domain.KindFeature,
-		Description: "Add a card_new tool\n\nSo hosted agents can mint cards too.",
-		Envelope:    2400,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Title != "Add a card_new tool" {
-		t.Errorf("title = %q", f.Title)
-	}
-	if f.Kind != domain.KindFeature {
-		t.Errorf("kind = %q", f.Kind)
-	}
-	if f.GateApproval != domain.GateAttended {
-		t.Errorf("gate approval = %q, want empty-default %q", f.GateApproval, domain.GateAttended)
-	}
-	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-	raw, err := os.ReadFile(draft)
-	if err != nil {
-		t.Fatalf("expected a seeded draft: %v", err)
-	}
-	if !strings.Contains(string(raw), "So hosted agents can mint cards too.") {
-		t.Errorf("draft missing seeded problem text:\n%s", raw)
-	}
-	// persisted, not just returned.
-	got, err := store.GetFeature(ctx, f.ID)
-	if err != nil || got.ID != f.ID {
-		t.Fatalf("GetFeature(%s) = %+v, %v", f.ID, got, err)
-	}
-}
-
-// TestMintBugSeedsBugTemplate: a bug description with overflow text seeds
-// the bug report template (## Summary), not the feature spec template
-// (## Problem) — cardmint.Mint's seeded-draft branch used to call
-// spec.SeededTemplate unconditionally for every non-research kind, so a
-// card_new-minted bug came out feature-shaped.
-func TestMintBugSeedsBugTemplate(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Kind:        domain.KindBug,
-		Description: "Repro bug\n\nThis is a multi-line description used to trigger the seeded draft path.",
-		Envelope:    2400,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Kind != domain.KindBug {
-		t.Errorf("kind = %q", f.Kind)
-	}
-	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-	raw, err := os.ReadFile(draft)
-	if err != nil {
-		t.Fatalf("expected a seeded draft: %v", err)
-	}
-	content := string(raw)
-	if !strings.Contains(content, "## Summary") {
-		t.Errorf("draft missing bug template's Summary section:\n%s", content)
-	}
-	if strings.Contains(content, "## Problem") {
-		t.Errorf("draft has feature template's Problem section, want bug shape:\n%s", content)
-	}
-	if !strings.Contains(content, "This is a multi-line description used to trigger the seeded draft path.") {
-		t.Errorf("draft missing seeded summary text:\n%s", content)
-	}
-}
-
-// TestMintNoOverflowNoDraft: a title-only description (nothing beyond the
-// first line) with no Acceptance text seeds no draft at all.
-func TestMintNoOverflowNoDraft(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "Just a title", Envelope: 2400,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-	if _, err := os.Stat(draft); !os.IsNotExist(err) {
-		t.Errorf("expected no draft, stat err = %v", err)
-	}
-}
-
-// TestMintAcceptanceAloneSeedsDraft: Acceptance text alone (no problem
-// overflow) is still enough to warrant a draft.
-func TestMintAcceptanceAloneSeedsDraft(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "Just a title", Envelope: 2400,
-		Acceptance: "it must not panic",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-	raw, err := os.ReadFile(draft)
-	if err != nil {
-		t.Fatalf("expected a seeded draft: %v", err)
-	}
-	if !strings.Contains(string(raw), "it must not panic") {
-		t.Errorf("draft missing seeded acceptance text:\n%s", raw)
-	}
-}
-
-// TestMintResearch: research uses SplitDescription (no seed/draft), always
-// takes the full route regardless of Full, and renders straight to the RS
-// artifact path instead of a draft.
-func TestMintResearch(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindResearch, Description: "grounded look at auth", Envelope: 2400,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Kind != domain.KindResearch {
-		t.Errorf("kind = %q", f.Kind)
-	}
-	artifact := filepath.Join(ws.Root, f.ArtifactPath())
-	raw, err := os.ReadFile(artifact)
-	if err != nil {
-		t.Fatalf("expected a research artifact: %v", err)
-	}
-	if !strings.Contains(string(raw), "grounded look at auth") {
-		t.Errorf("artifact missing brief text:\n%s", raw)
-	}
-	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-	if _, err := os.Stat(draft); !os.IsNotExist(err) {
-		t.Errorf("research should not seed a draft, stat err = %v", err)
-	}
-}
-
-// A research card titled "Research: …" does not say research twice in
-// every name it carries (research/research-compare-…); the title keeps
-// the word. A title that is only the word keeps it as its slug.
-func TestMintResearchDoesNotDoubleTheWord(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindResearch, Description: "Research: compare greeting libraries", Envelope: 2400,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Slug != "compare-greeting-libraries" || f.Title != "Research: compare greeting libraries" {
-		t.Errorf("slug = %q, title = %q", f.Slug, f.Title)
-	}
-	if b := f.BranchName(); strings.Contains(b, "research-research") || strings.Contains(b, "research/research") {
-		t.Errorf("branch name doubles the word: %s", b)
-	}
-	g, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindResearch, Description: "Research", Envelope: 2400})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if g.Slug != "research" {
-		t.Errorf("a title that is only the word slugs to %q", g.Slug)
-	}
-}
-
 // TestMintRejectsUnknownRepoBeforeMinting: an unconfigured repo fails, and
-// fails before a sequence number is consumed — matching both prior
-// duplicates' behavior (createFeature, Materialize's requireRepo).
+// fails before a sequence number is consumed.
 func TestMintRejectsUnknownRepoBeforeMinting(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	seq := readSeq(t, ws.SeqFile())
 
 	_, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400,
+		Description: "should not exist", Envelope: 2400,
 		Repo:        "nope",
 		RequireRepo: func(string) error { return errors.New("repository \"nope\" is not configured") },
 	})
@@ -248,7 +84,7 @@ func nameIsA(name string) error {
 func TestMintNilRequireRepoFailsClosed(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	_, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400, Repo: "a",
+		Description: "should not exist", Envelope: 2400, Repo: "a",
 	})
 	if err == nil {
 		t.Fatal("expected an error minting with Repo set and RequireRepo nil")
@@ -267,7 +103,7 @@ func TestMintRejectsUnnamedRepoWhenThereIsNoDefault(t *testing.T) {
 	seq := readSeq(t, ws.SeqFile())
 
 	_, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400,
+		Description: "should not exist", Envelope: 2400,
 		RequireRepo: nameIsA,
 	})
 	if err == nil {
@@ -283,7 +119,7 @@ func TestMintRejectsUnnamedRepoWhenThereIsNoDefault(t *testing.T) {
 func TestMintAcceptsKnownRepo(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "lives in repo a", Envelope: 2400,
+		Description: "lives in repo a", Envelope: 2400,
 		Repo:        "a",
 		RequireRepo: func(name string) error { return nameIsA(name) },
 	})
@@ -303,7 +139,7 @@ func TestMintAcceptsKnownRepo(t *testing.T) {
 func TestMintEmptyRepoWithNoChecker(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "default repo", Envelope: 2400,
+		Description: "default repo", Envelope: 2400,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -313,19 +149,15 @@ func TestMintEmptyRepoWithNoChecker(t *testing.T) {
 	}
 }
 
-// TestMintPropagatesGateApprovalAndRef: an explicit GateApproval and
-// ExternalRef both persist untouched.
-func TestMintPropagatesGateApprovalAndRef(t *testing.T) {
+// TestMintPropagatesTheRef: an ExternalRef persists untouched.
+func TestMintPropagatesTheRef(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "checkpointed card", Envelope: 2400,
-		GateApproval: domain.GateAttended, ExternalRef: "gh-123",
+		Description: "checkpointed card", Envelope: 2400,
+		ExternalRef: "gh-123",
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if f.GateApproval != domain.GateAttended {
-		t.Errorf("gate approval = %q, want %q", f.GateApproval, domain.GateAttended)
 	}
 	if f.ExternalRef != "gh-123" {
 		t.Errorf("external ref = %q, want gh-123", f.ExternalRef)
@@ -337,11 +169,11 @@ func TestMintPropagatesGateApprovalAndRef(t *testing.T) {
 func TestMintSequenceIncrements(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
-	f1, err := Mint(ctx, store, ws, Input{Kind: domain.KindFeature, Description: "first", Envelope: 2400})
+	f1, err := Mint(ctx, store, ws, Input{Description: "first", Envelope: 2400})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f2, err := Mint(ctx, store, ws, Input{Kind: domain.KindBug, Description: "second", Envelope: 2400})
+	f2, err := Mint(ctx, store, ws, Input{Description: "second", Envelope: 2400})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,193 +182,17 @@ func TestMintSequenceIncrements(t *testing.T) {
 	}
 }
 
-// TestMintBugSeverityAndSections: a bug's severity lands on the card and
-// in its report header; headings typed into the description route into
-// the report's sections through the same parser the GitHub import uses;
-// an imported issue's comments and provenance ride alongside.
-func TestMintBugSeverityAndSections(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Kind:        domain.KindBug,
-		Description: "Login loops\n\nSSO users bounce back.\n\n## Steps to reproduce\n1. log in\n\n## Expected\nthe dashboard",
-		Envelope:    2400,
-		Severity:    domain.SeverityHigh,
-		Source:      "github",
-		ExternalRef: "https://github.com/o/r/issues/42",
-		Discussion:  "**b:** same here",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Severity != domain.SeverityHigh {
-		t.Errorf("card severity = %q, want high", f.Severity)
-	}
-	got, err := store.GetFeature(context.Background(), f.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Severity != domain.SeverityHigh || got.ExternalRef != "https://github.com/o/r/issues/42" {
-		t.Errorf("persisted severity/ref = %q %q", got.Severity, got.ExternalRef)
-	}
-	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)))
-	if err != nil {
-		t.Fatalf("expected a seeded draft: %v", err)
-	}
-	content := string(raw)
-	for _, want := range []string{"## Reproduction\n\n1. log in", "the dashboard", "**b:** same here", "github", "issues/42"} {
-		if !strings.Contains(content, want) {
-			t.Errorf("draft missing %q:\n%s", want, content)
-		}
-	}
-
-	// comments alone are enough to warrant a bug draft
-	f2, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindBug, Description: "Just a title", Envelope: 1, Discussion: "**a:** hi"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f2))); err != nil {
-		t.Errorf("discussion-only bug seeded no draft: %v", err)
-	}
-}
-
-// TestMintFeatureAcceptanceHeading: a feature description's `## Acceptance`
-// section seeds the Verification plan and leaves the Problem, while the
-// rest of the text stays verbatim (no other heading is recognised).
-func TestMintFeatureAcceptanceHeading(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Kind:        domain.KindFeature,
-		Description: "Dark mode\n\nThe console is white at night.\n\n## Steps to reproduce\nnot a bug heading here\n\n## Acceptance\n- a toggle in settings",
-		Envelope:    2400,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)))
-	if err != nil {
-		t.Fatalf("expected a seeded draft: %v", err)
-	}
-	content := string(raw)
-	if !strings.Contains(content, "- a toggle in settings") {
-		t.Errorf("acceptance not seeded:\n%s", content)
-	}
-	if !strings.Contains(content, "## Steps to reproduce\nnot a bug heading here") {
-		t.Errorf("feature overflow was not kept verbatim:\n%s", content)
-	}
-	if strings.Contains(strings.SplitN(content, "## Verification", 2)[0], "a toggle in settings") {
-		t.Errorf("acceptance text left in the Problem section:\n%s", content)
-	}
-}
-
-func TestMintGoalAlwaysSeedsItsDoc(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	ctx := context.Background()
-
-	g, err := Mint(ctx, store, ws, Input{Kind: domain.KindGoal, Description: "Export works offline", Envelope: 4000})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if g.ID.Kind() != domain.KindGoal || !strings.HasPrefix(string(g.ID), "GL-") {
-		t.Fatalf("goal id = %s", g.ID)
-	}
-	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&g)))
-	if err != nil {
-		t.Fatalf("a goal is minted with its doc even from one line: %v", err)
-	}
-	obj, ok := spec.ViewSection(string(raw), spec.GoalSectionObjective)
-	if !ok || strings.TrimSpace(obj) != "Export works offline" {
-		t.Fatalf("objective = %q", obj)
-	}
-
-	c, err := Mint(ctx, store, ws, Input{Kind: domain.KindFeature, Description: "local cache", Envelope: 600, Goal: g.ID, FoundBy: g.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.GoalID != g.ID || c.FoundBy != "" {
-		t.Fatalf("a goal card belongs to its goal and is not found by it: %+v", c)
-	}
-	back, _ := store.GetFeature(ctx, c.ID)
-	if back.GoalID != g.ID {
-		t.Fatalf("goal link not persisted")
-	}
-
-	doc := "# custom\n\n## Objective\n\nmine\n"
-	g2, err := Mint(ctx, store, ws, Input{Kind: domain.KindGoal, Description: "Second goal", Envelope: 100, GoalDoc: doc})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ = os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&g2)))
-	if string(raw) != doc {
-		t.Fatalf("a supplied goal doc is used verbatim, got %q", raw)
-	}
-
-	if _, err := Mint(ctx, store, ws, Input{Kind: domain.KindGoal, Description: "nested", Goal: g.ID}); err == nil {
-		t.Fatalf("a goal cannot be minted into a goal")
-	}
-}
-
-// TestMintDiagnosisSeedsTheDiagnosisDocument: the mode reaches the store
-// and picks the template, so a diagnosis card opens on its own contract
-// rather than on the survey's.
-func TestMintDiagnosisSeedsTheDiagnosisDocument(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	ctx := context.Background()
-	f, err := Mint(ctx, store, ws, Input{
-		Kind: domain.KindResearch, Mode: domain.ModeDiagnosis,
-		Description: "The picker drops answers\n\nSeen twice today, both on a tall window.",
-		Envelope:    300,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Mode != domain.ModeDiagnosis || !f.IsDiagnosis() {
-		t.Fatalf("minted card mode = %q", f.Mode)
-	}
-	got, err := store.GetFeature(ctx, f.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Mode != domain.ModeDiagnosis {
-		t.Errorf("the mode did not survive the store: %q", got.Mode)
-	}
-	raw, err := os.ReadFile(filepath.Join(ws.Root, f.ArtifactPath()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(raw)
-	if _, ok := spec.ViewSection(body, "Symptom"); !ok {
-		t.Errorf("the diagnosis card got the survey template:\n%s", body)
-	}
-	sym, _ := spec.ViewSection(body, "Symptom")
-	if !strings.Contains(sym, "Seen twice today") {
-		t.Errorf("the description did not seed the symptom: %q", sym)
-	}
-}
-
-// TestMintDropsAModeOnANonResearchKind: a surface that presets the type
-// row and then moves it must not mint a bug carrying a research mode.
-func TestMintDropsAModeOnANonResearchKind(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindBug, Mode: domain.ModeDiagnosis, Description: "Login loops", Envelope: 300})
-	if err != nil {
-		t.Fatalf("the mint should drop the mode, not fail: %v", err)
-	}
-	if f.Mode != domain.ModeSurvey {
-		t.Errorf("a bug card kept mode %q", f.Mode)
-	}
-}
-
-// A newly minted card gets the per-kind branch spelling — the kind of
+// A newly minted card gets the current branch spelling — the kind of
 // work and the label, no card id.
 func TestMintUsesTheKindBranchScheme(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindBug, Description: "flaky login test", Envelope: 100,
+		Description: "flaky login test", Envelope: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := f.BranchName(), "bug/flaky-login-test"; got != want {
+	if got, want := f.BranchName(), "ff/flaky-login-test"; got != want {
 		t.Errorf("BranchName() = %q, want %q", got, want)
 	}
 	if f.BranchScheme != domain.DefaultBranchScheme {
@@ -551,7 +207,7 @@ func TestMintUsesTheKindBranchScheme(t *testing.T) {
 func TestMintRefusesACollidingBranch(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	first, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindBug, Description: "flaky login test", Envelope: 100,
+		Description: "flaky login test", Envelope: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -560,7 +216,7 @@ func TestMintRefusesACollidingBranch(t *testing.T) {
 
 	// A different title that slugifies identically.
 	_, err = Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindBug, Description: "Flaky login test!", Envelope: 100,
+		Description: "Flaky login test!", Envelope: 100,
 	})
 	if err == nil {
 		t.Fatal("a second card wanting the same branch should be refused")
@@ -568,36 +224,10 @@ func TestMintRefusesACollidingBranch(t *testing.T) {
 	if !strings.Contains(err.Error(), string(first.ID)) {
 		t.Errorf("error %q should name the card that owns the branch", err)
 	}
-	if !strings.Contains(err.Error(), "bug/flaky-login-test") {
+	if !strings.Contains(err.Error(), "ff/flaky-login-test") {
 		t.Errorf("error %q should name the branch", err)
 	}
 	if got := readSeq(t, ws.SeqFile()); got != seq {
 		t.Errorf("seq advanced on a refused mint: %s -> %s", seq, got)
-	}
-}
-
-// The prefix separates the kinds, so a feature and a bug may share a
-// label — and a research card never collides at all, having no branch.
-func TestMintAllowsSameLabelAcrossKinds(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	ctx := context.Background()
-	if _, err := Mint(ctx, store, ws, Input{
-		Kind: domain.KindBug, Description: "rate limits", Envelope: 100,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	f, err := Mint(ctx, store, ws, Input{
-		Kind: domain.KindFeature, Description: "rate limits", Envelope: 100,
-	})
-	if err != nil {
-		t.Fatalf("a feature should be free to share a bug's label: %v", err)
-	}
-	if got := f.BranchName(); got != "feat/rate-limits" {
-		t.Errorf("BranchName() = %q, want feat/rate-limits", got)
-	}
-	if _, rerr := Mint(ctx, store, ws, Input{
-		Kind: domain.KindResearch, Description: "rate limits", Envelope: 100,
-	}); rerr != nil {
-		t.Errorf("a research card has no branch and must never collide: %v", rerr)
 	}
 }

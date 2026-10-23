@@ -33,7 +33,7 @@ func TestAnOpenDiffCommentHoldsAFreeformLanding(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	ctx := context.Background()
@@ -62,36 +62,6 @@ func TestAnOpenDiffCommentHoldsAFreeformLanding(t *testing.T) {
 	}
 }
 
-// A workflow card that never reached verify does not land from the board
-// either (merge.go's landingRefusal; domain.Feature.MayLand).
-func TestAnUnverifiedCardDoesNotLandFromTheBoard(t *testing.T) {
-	m, root := newWorkspace(t)
-	m.SetCopilotHint(false)
-	m = pump(t, m, m.Init())
-	ctx := context.Background()
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "x", Slug: "x", Stage: domain.StageImplement}
-	if err := m.store.CreateFeature(ctx, &f); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.wt.Ensure(ctx, &f); err != nil {
-		t.Fatal(err)
-	}
-	commitWork(t, root, string(f.ID))
-	m = pump(t, m, m.loadRows)
-	before := headSHA(t, root)
-	m.sel = 0
-	m = press(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
-	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
-		t.Logf("m refused: %q", m.notice.text)
-		return
-	}
-	typeMessage(t, m, "feat: unverified")
-	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-	if headSHA(t, root) != before {
-		t.Errorf("a card at implement landed on main (MayLand: %v; notice %q)", f.MayLand(), m.notice.text)
-	}
-}
-
 // A freeform card may land as a merge commit, which keeps every commit on
 // its branch in main's history, so loose work is never swept into a canned
 // checkpoint: the landing is refused until the person commits it.
@@ -99,7 +69,7 @@ func TestALooseFreeformCardDoesNotLandUnderACheckpointCommit(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	ctx := context.Background()

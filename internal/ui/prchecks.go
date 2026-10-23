@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/pr"
 )
 
@@ -65,88 +64,34 @@ func (m *Shell) readPRChecks(f domain.Feature) tea.Cmd {
 	}
 }
 
-// deliverPRChecks routes the failing checks to whoever writes the card's
-// code. A freeform card has one session and it is the writer. A workflow
-// card's writer is its implement stage: live when that is running, a fresh
-// run carrying the checks in its kickoff when it is not, and from verify
-// the card goes back over its rerun edge first — the same route a person's
-// "request changes" takes. A critique, a rebase or a verify in flight is
-// not interrupted: the checks are not stored, so the person sends them
-// again once it has finished.
+// deliverPRChecks hands the failing checks to the card's session, the one
+// writer a card has. A retired workflow card is never run again, so
+// nothing takes them; the checks are not stored, so nothing is lost.
 func (m *Shell) deliverPRChecks(msg prChecksReadyMsg) tea.Cmd {
 	f, turn := msg.f, msg.turn
 	what := fmt.Sprintf("%d failing check%s", msg.n, plural(msg.n))
-	if m.engine == nil && f.Stage != domain.StageVerify {
+	if m.engine == nil {
 		text := f.Name() + ": no agent engine to hand the failing checks to"
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 	}
-	if f.IsFreeform() {
-		return func() tea.Msg {
-			ctx := context.Background()
-			ff, err := m.engine.OpenFreeform(ctx, f)
-			if err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-			if err := ff.Send(ctx, turn); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-			return noticeMsg{text: fmt.Sprintf("%s: sent %s to its session", f.Name(), what), reload: true}
-		}
+	if !f.IsFreeform() {
+		text := f.Name() + " is a retired workflow card — nothing runs it to take the failing checks"
+		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 	}
-	running := false
-	if s := m.session(f.ID); s != nil && s.State() == engine.StateRunning {
-		running = true
-		snap := s.Snapshot()
-		if snap.Critique || snap.Rebase || f.Stage != domain.StageImplement {
-			pass := string(f.Stage)
-			switch {
-			case snap.Critique:
-				pass += " critique"
-			case snap.Rebase:
-				pass = "a rebase"
-			}
-			text := fmt.Sprintf("%s: %s is running — send the failing checks again when it has finished", f.Name(), pass)
-			return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
+	return func() tea.Msg {
+		ctx := context.Background()
+		ff, err := m.engine.OpenFreeform(ctx, f)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
+		if err := ff.Send(ctx, turn); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s: sent %s to its session", f.Name(), what), reload: true}
 	}
-	switch f.Stage {
-	case domain.StageImplement:
-		if running {
-			return func() tea.Msg {
-				if err := m.engine.Send(context.Background(), f.ID, turn); err != nil {
-					return noticeMsg{text: sanitize(err.Error()), isErr: true}
-				}
-				return noticeMsg{text: fmt.Sprintf("%s: sent %s to the running implement agent", f.Name(), what), reload: true}
-			}
-		}
-		m.dropSession(f.ID)
-		return func() tea.Msg {
-			if err := m.engine.RunWith(f, turn); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-			return noticeMsg{text: fmt.Sprintf("%s: re-running implement with %s", f.Name(), what), reload: true}
-		}
-	case domain.StageVerify:
-		return m.bounceStage(f.ID, turn)
-	}
-	text := fmt.Sprintf("%s is in %s — failing checks go to a session, or to a card in implement or verify", f.Name(), f.Stage)
-	return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 }
 
-// prChecksDetail says what sending the failing checks does from stage: a
-// card at verify has no writer to hand them to until it goes back.
-func prChecksDetail(stage domain.Stage) string {
-	if stage == domain.StageVerify {
-		return "read the PR's failing checks and their logs, and send the card back to implement to fix them"
-	}
+// prChecksDetail says what sending the failing checks does.
+func prChecksDetail() string {
 	return "read the PR's failing checks and their logs, and hand them to the session to fix"
-}
-
-// session is the card's stage session, nil when it has none or the board
-// runs without an engine.
-func (m *Shell) session(id domain.FeatureID) *engine.Session {
-	if m.engine == nil {
-		return nil
-	}
-	return m.engine.Get(id)
 }

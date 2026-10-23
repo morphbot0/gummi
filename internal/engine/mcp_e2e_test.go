@@ -11,12 +11,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 )
 
@@ -59,7 +57,7 @@ type mcpChild struct {
 }
 
 func startChild(t *testing.T, socket string) *mcpChild {
-	return startChildFor(t, socket, "FD-001")
+	return startChildFor(t, socket, "FF-001")
 }
 
 func startChildFor(t *testing.T, socket, featureID string) *mcpChild {
@@ -146,25 +144,24 @@ func (c *mcpChild) call(section string, args string) (text string, isErr bool) {
 	return text, isErr
 }
 
-// mcpE2ESetup builds a live in-test engine with a non-ClientTools fake,
-// attaches a Spec-stage session (binding the MCP socket), and returns the
-// engine, the socket path, and the session.
+// mcpE2ESetup builds a live in-test engine with a fake that takes its
+// tools over MCP, opens a session with a spec (binding the MCP socket),
+// and returns the engine, the socket path, and the session.
 func mcpE2ESetup(t *testing.T) (*Engine, string, *Session) {
 	t.Helper()
-	e := newEngine(t, &fakeNoTools{agent.NewFake("ack")})
-	f := feature(1, "Dark mode", domain.StagePlan)
+	ag := agent.NewFake("ack")
+	ag.Caps.MCPTools = true
+	e := newEngine(t, ag)
+	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
-	s, err := e.Attach(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, f)
 	socket := mcpSockPath(e.cfg.Workspace, f.ID)
 	t.Cleanup(func() { s.stop() })
 	return e, socket, s
 }
 
-// initialize over MCP stdio succeeds; tools/list mirrors stageTools for
-// the live Spec-stage feature in order.
+// initialize over MCP stdio succeeds; tools/list leads with the session's
+// own tools and carries its spec tools.
 func TestMCPEndToEndListAndSpecView(t *testing.T) {
 	_, socket, _ := mcpE2ESetup(t)
 	child := startChild(t, socket)
@@ -181,13 +178,16 @@ func TestMCPEndToEndListAndSpecView(t *testing.T) {
 	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"tools/list"}`)
 	resp = child.receive(id)
 	tools := resp["result"].(map[string]any)["tools"].([]any)
-	want := []string{"ask_user", "spec_annotate", "spec_view", "spec_replace_section"}
-	if len(tools) != len(want) {
-		t.Fatalf("tools length = %d, want %d", len(tools), len(want))
+	var names []string
+	for _, tl := range tools {
+		names = append(names, tl.(map[string]any)["name"].(string))
 	}
-	for i, w := range want {
-		if tools[i].(map[string]any)["name"] != w {
-			t.Fatalf("tool[%d] = %v, want %s", i, tools[i].(map[string]any)["name"], w)
+	if len(names) < 2 || names[0] != "ask_user" || names[1] != "resolve_annotation" {
+		t.Fatalf("tools = %v, want ask_user and resolve_annotation first", names)
+	}
+	for _, w := range []string{"spec_annotate", "spec_view", "spec_replace_section"} {
+		if !slices.Contains(names, w) {
+			t.Fatalf("tools = %v, want %s among them", names, w)
 		}
 	}
 	if tools[0].(map[string]any)["inputSchema"] == nil {
@@ -229,7 +229,7 @@ func TestMCPEndToEndAskUserRoundTrip(t *testing.T) {
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
-	if err := e.Answer(context.Background(), "FD-001", "dark"); err != nil {
+	if err := e.Answer(context.Background(), "FF-001", "dark"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -282,7 +282,7 @@ func TestMCPEndToEndConcurrency(t *testing.T) {
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
-	if err := e.Answer(context.Background(), "FD-001", "picked"); err != nil {
+	if err := e.Answer(context.Background(), "FF-001", "picked"); err != nil {
 		t.Fatal(err)
 	}
 	if resp := child.receive(slow); resp["result"] == nil {
@@ -334,73 +334,5 @@ func TestMCPEndToEndUnknownMethod(t *testing.T) {
 	er := resp["error"].(map[string]any)
 	if int(er["code"].(float64)) != -32601 {
 		t.Fatalf("error code = %v, want -32601", er["code"])
-	}
-}
-
-// mcpE2EReadonlySetup builds a live in-test engine with a read-only
-// autonomous research investigate session (fake advertises
-// ReadOnlyEnforce so the engine admits it), binding the MCP socket, and
-// returns the engine, the socket path, and the session.
-func mcpE2EReadonlySetup(t *testing.T) (*Engine, string, *Session) {
-	t.Helper()
-	fk := agent.NewFake("ack")
-	fk.Caps.ReadOnlyEnforce = true
-	e := newEngine(t, &fakeNoTools{fk})
-	f := feature(1, "rs investigate", domain.StageImplement)
-	f.ID = domain.FeatureID("RS-001")
-	f.Kind = domain.KindResearch
-	seedDraft(t, e, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	s := e.Get("RS-001")
-	if s == nil {
-		t.Fatal("no session for research investigate")
-	}
-	socket := mcpSockPath(e.cfg.Workspace, f.ID)
-	t.Cleanup(func() { s.stop() })
-	return e, socket, s
-}
-
-// TestMCPEndToEndReadonlySurface: a read-only research session reaches its
-// document over MCP. The surface used to be stripped of
-// spec_replace_section and spec_annotate, and a call naming one was
-// refused, "so the MCP shim cannot rewrite the main checkout" — which it
-// never could: the tool writes the artifact at its workspace home, through
-// the engine. The strip is what left a research survey unable to write its
-// Findings at all (see TestReadOnlyResearchWritesItsDocument).
-func TestMCPEndToEndReadonlySurface(t *testing.T) {
-	_, socket, s := mcpE2EReadonlySetup(t)
-	child := startChildFor(t, socket, "RS-001")
-
-	id := child.nextID()
-	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
-	child.receive(id)
-
-	id = child.nextID()
-	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"tools/list"}`)
-	resp := child.receive(id)
-	tools := resp["result"].(map[string]any)["tools"].([]any)
-	names := make([]string, 0, len(tools))
-	for _, tl := range tools {
-		names = append(names, tl.(map[string]any)["name"].(string))
-	}
-	for _, want := range []string{"spec_view", "spec_replace_section"} {
-		if !slices.Contains(names, want) {
-			t.Fatalf("read-only tools/list lost %s: %v — a research survey cannot "+
-				"write the document it exists to produce", want, names)
-		}
-	}
-
-	text, _ := child.call("spec_replace_section", `{"section":"Problem","body":"the survey found this"}`)
-	if strings.Contains(text, "not available") {
-		t.Fatalf("spec_replace_section over MCP was refused on a research session: %q", text)
-	}
-	after, err := os.ReadFile(s.SpecPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(after), "the survey found this") {
-		t.Fatalf("the survey's write never reached the document:\n%s", after)
 	}
 }

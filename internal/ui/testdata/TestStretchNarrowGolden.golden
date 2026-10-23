@@ -1,11 +1,10 @@
 
-FD-042 · dark mode   [thrifty]   autopilot: off
+FD-042 · dark mode   [thrifty]
 
 todo ─ plan ─  implement  ─ verify ─ done
 
 ⌄ spec · Implementation notes ────────────────── alt+s
 
-── autopilot took over ────────────────────── 23:40 ──
 plan · architect · 1 turn · $1.80 ──────────── ✓ 00:04
   ✓ autopilot answered “q?” — stream rows, don't buff…
   ✓ autopilot crossed plan → implement          00:04
@@ -14,21 +13,22 @@ plan · architect · 1 turn · $1.80 ──────────── ✓ 00
 
   implementer  00:10
     wired the theme layer through the pane.
-── autopilot parked it ────────────────────── 00:11 ──
-  implement finished, review it
-  2 gates · 1 answer
-
+  · parked — implement finished, review it
   you  00:20
     hold on, I want to look at the diff first
   implementer  00:21
     sure — nothing else is running.
 
 
- Before that, autopilot crossed 2 gates and took 1
- answer without you. [alt+a]
+ This is a retired workflow card: gummi no longer
+ runs it. Hand it off to keep its branch, or land it
+ on your read of its diff.
 
 gummi
  nothing is running — choose what happens next.
-▸ 1. run implement — no active run — start the stage
+▸ 1. read the diff
+  what the card left on its branch
+  2. hand off — close the retired card and keep gum…
+  3. land it on main — land the branch — one squash…
 
-┃ message the agent, /approve /verify /diff…, or ↑  
+┃ ask about this retired card, /diff /land…, or ↑   

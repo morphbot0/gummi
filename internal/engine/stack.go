@@ -254,41 +254,12 @@ func (e *Engine) stackRestackOne(ctx context.Context, view StackView, a stack.Ac
 		return nil, fmt.Errorf("restacking %s onto %s: %w", f.ID, a.Base, err)
 	}
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventUpdated})
-	// The card's base just moved, so what its baseline excused was
-	// measured on a commit it no longer forks from (rebaseline.go). The
-	// re-measure runs the repo's checks, so it goes off the tick.
-	e.wg.Add(1)
-	bg := context.WithoutCancel(ctx)
-	go func() {
-		defer e.wg.Done()
-		if note := e.rebaselineNote(bg, f); note != "" {
-			e.cardNote(bg, f.ID, f.Stage, note)
-			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventUpdated})
-		}
-	}()
 	return nil, nil
 }
 
-// sessionHoldsTree reports whether a card's session may still touch its
-// worktree, so a replay must wait for it: one working or waiting for a
-// slot, or a conversation with an agent attached. A session that finished,
-// was paused, or was restored from a process that is gone stays in the
-// engine's map for its thread and holds nothing — reading it as running
-// kept every card that had ever run in this process out of every replay.
-func sessionHoldsTree(s *Session) bool {
-	if s == nil {
-		return false
-	}
-	switch s.State() {
-	case StateRunning:
-		return true
-	}
-	return s.Live()
-}
-
-// freeformHoldsTree is sessionHoldsTree for a freeform card, whose
-// conversation lives in e.freeform rather than in the stage sessions'
-// map. Only a turn in flight holds the tree. An open session keeps its
+// freeformHoldsTree reports whether a card's session may still touch its
+// worktree, so a replay must wait for it. Only a turn in flight holds the
+// tree. An open session keeps its
 // backend attached between turns for as long as the card is open — that
 // is what a session is (DESIGN §19) — and nothing writes the worktree
 // while it waits on its person, so reading the attachment as "may still
@@ -336,7 +307,6 @@ func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackVie
 	}
 	view := StackView{byID: make(map[domain.FeatureID]domain.Feature, len(members))}
 	snap := stack.View{ID: st.ID, Name: st.Name, Repo: st.Repo}
-	live := e.Sessions()
 	for _, f := range members {
 		view.byID[f.ID] = f
 		if f.StackPos == 0 {
@@ -347,7 +317,7 @@ func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackVie
 			ID:      f.ID,
 			Pos:     f.StackPos,
 			Branch:  f.BranchName(),
-			Running: sessionHoldsTree(live[f.ID]) || e.freeformHoldsTree(f.ID) || e.oneShotBusy(f.ID),
+			Running: e.freeformHoldsTree(f.ID),
 		}
 		mgr, merr := e.pool.ManagerFor(ctx, &f)
 		if merr == nil {

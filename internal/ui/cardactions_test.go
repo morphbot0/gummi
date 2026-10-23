@@ -9,21 +9,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
-	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
-
-// testProfileEngine builds a bare engine carrying only profiles — enough
-// for CardProfiles-driven UI checks that never touch a store, worktree,
-// or live agent.
-func testProfileEngine(t *testing.T, profiles config.Profiles) *engine.Engine {
-	t.Helper()
-	e := engine.New(engine.Config{Profiles: profiles})
-	t.Cleanup(func() { e.Close() })
-	return e
-}
 
 // idsOf flattens an action list to its id sequence for compact table
 // expectations, mirroring nextsteps_test.go's keysOf.
@@ -46,32 +34,22 @@ func cardRow(kind domain.Kind, stage domain.Stage, landed, hasWorktree bool) fea
 }
 
 func TestCardActionsForOrdering(t *testing.T) {
-	// StageVerify with a failed check: the answer set ranks bounce then
-	// advance — the reverse of their order in the fixed action table, so
-	// a literal reordering only happens if the "seed the ordering from
-	// nextActions" contract actually holds.
-	in := nextInput{
-		stage:       domain.StageVerify,
-		kind:        domain.KindFeature,
-		attn:        attnGate,
-		failedCheck: "lint",
-	}
-	r := cardRow(domain.KindFeature, domain.StageVerify, false, true)
+	// A session with work on its branch: the answer set ranks diff, merge
+	// and hand-off, which the action list promotes in that order ahead of
+	// its folded tail.
+	in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true}
+	r := freeformRow(12, "drop the leaked pty fd", true)
 
 	acts := cardActionsFor(in, r)
-	got := idsOf(acts)
-	// The promoted tier is exactly the ranked entries in nextActions'
-	// order; the fold holds the rest in board order. Reading surfaces
-	// (spec, diff) and plumbing (verify, attach, the autopilot switch)
-	// are in the tail now rather than ranked among the answers — they are
-	// the card page's tabs and its inventory, not answers to "what now".
-	tail := "run deps spec diff verify envelope gate ask inbox attach rebase handoff merge squash prlink duplicate delete"
-	want := "bounce advance " + tail
-	if got != want {
-		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
+	if got, want := idsOf(foldedOnly(acts, false)), "diff merge handoff"; got != want {
+		t.Fatalf("promoted tier:\n got  %q\n want %q", got, want)
 	}
-	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != tail {
-		t.Fatalf("unexpected folded tail: %q", gotFolded)
+	// the fold holds the rest, and none of the promoted rows twice
+	for _, a := range foldedOnly(acts, true) {
+		switch a.id {
+		case "diff", "merge", "handoff":
+			t.Errorf("%q is both promoted and folded", a.id)
+		}
 	}
 }
 
@@ -91,14 +69,12 @@ func TestCardActionsForFoldsTheTail(t *testing.T) {
 	// The whole point of the fold: a mid-flow card offers a dozen-odd
 	// actions, and only the handful nextActions ranks earn a row before
 	// you ask for the rest.
-	in := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, verdict: verdictPass}
-	r := cardRow(domain.KindFeature, domain.StageVerify, false, true)
+	in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true}
+	r := freeformRow(12, "drop the leaked pty fd", true)
 
 	acts := cardActionsFor(in, r)
 	promoted := foldedOnly(acts, false)
-	// hand-off rides between them: on a clean verify the answer set is
-	// the three endings-or-rework, and it is the second of them.
-	if got, want := idsOf(promoted), "advance handoff bounce"; got != want {
+	if got, want := idsOf(promoted), "diff merge handoff"; got != want {
 		t.Fatalf("promoted tier:\n got  %q\n want %q", got, want)
 	}
 	if n := len(foldedOnly(acts, true)); n < foldMin {
@@ -336,13 +312,13 @@ func TestCardActionListViewAccountsForEveryRow(t *testing.T) {
 		row  featureRow
 	}{
 		{
-			name: "mid-run",
-			in:   nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: engine.StateRunning},
-			row:  cardRow(domain.KindFeature, domain.StageImplement, false, true),
+			name: "mid-turn",
+			in:   nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true, freeformBusy: true},
+			row:  freeformRow(42, "json export", true),
 		},
 		{
-			name: "gate",
-			in:   nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate},
+			name: "retired",
+			in:   nextInput{stage: domain.StagePlan, kind: domain.KindFeature, hasWorktree: true},
 			row:  cardRow(domain.KindFeature, domain.StagePlan, false, true),
 		},
 	}
@@ -418,14 +394,14 @@ func TestBG053ExplainerFollowsHighlightedRowNotFooter(t *testing.T) {
 }
 
 func TestCardActionsDialogWideGolden(t *testing.T) {
-	in := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: engine.StateRunning}
-	l := newCardActionList(cardActionsFor(in, cardRow(domain.KindFeature, domain.StageImplement, false, true)))
+	in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true, freeformBusy: true}
+	l := newCardActionList(cardActionsFor(in, freeformRow(42, "json export", true)))
 	d := newCardActionsDialog("FD-042", l, func(int, bool) {}, func(cardAction) tea.Cmd { return nil })
 	golden.RequireEqual(t, []byte(d.View(theme.New(theme.GummiDark()), 100, 16)))
 }
 
 func TestCardActionsDialogNarrowGolden(t *testing.T) {
-	in := nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate}
+	in := nextInput{stage: domain.StagePlan, kind: domain.KindFeature, hasWorktree: true}
 	l := newCardActionList(cardActionsFor(in, cardRow(domain.KindFeature, domain.StagePlan, false, true)))
 	d := newCardActionsDialog("FD-042", l, func(int, bool) {}, func(cardAction) tea.Cmd { return nil })
 	golden.RequireEqual(t, []byte(d.View(theme.New(theme.GummiDark()), 40, 16)))
@@ -455,105 +431,25 @@ func TestCardActionListViewUnfocusedKeepsMarker(t *testing.T) {
 }
 
 func TestCardActionsForSessionState(t *testing.T) {
-	cases := []struct {
-		name    string
-		sess    engine.SessionState
-		hasPaus bool // pause id expected
-		hasDeps bool // deps on p expected (p pauses while a stage session exists)
-	}{
-		{"no session offers deps not pause", "", false, true},
-		{"running session offers pause, and deps only from the list", engine.StateRunning, true, false},
-		{"paused session offers pause, and deps only from the list", engine.StatePaused, true, false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			in := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: c.sess}
-			r := cardRow(domain.KindFeature, domain.StageImplement, false, true)
-			acts := cardActionsFor(in, r)
-			var gotPause, gotDeps, anyDeps bool
-			for _, a := range acts {
-				if a.id == "pause" {
-					gotPause = true
-				}
-				if a.id == "deps" && a.key == "p" {
-					gotDeps = true
-				}
-				if a.id == "deps" {
-					anyDeps = true
-				}
-			}
-			// the picker itself is reachable in every one of these states:
-			// a card at its design gate still holds its finished session,
-			// and that gate is where a plan finds out what it waits on
-			if !anyDeps {
-				t.Error("no dependencies entry at all")
-			}
-			if gotPause != c.hasPaus {
-				t.Errorf("pause present = %v, want %v", gotPause, c.hasPaus)
-			}
-			if gotDeps != c.hasDeps {
-				t.Errorf("deps present = %v, want %v", gotDeps, c.hasDeps)
-			}
-		})
-	}
-}
-
-// bounce is the rerun-edge action: at verify it rewinds the work stage,
-// at implement it rewinds the plan that produced it. Plan offers it only
-// once its critique loop has escalated — this table's plan rows carry no
-// escalation, so they see none (a fresh plan has nothing to bounce).
-func TestCardActionsForBounceGate(t *testing.T) {
-	stages := []domain.Stage{
-		domain.StageTodo, domain.StagePlan, domain.StagePlan, domain.StagePlan,
-		domain.StageImplement, domain.StageVerify, domain.StageDone,
-	}
-	for _, stage := range stages {
-		in := nextInput{stage: stage, kind: domain.KindFeature}
-		r := cardRow(domain.KindFeature, stage, false, true)
-		acts := cardActionsFor(in, r)
-		want := stage == domain.StageVerify || stage == domain.StageImplement
-		got := false
-		for _, a := range acts {
-			if a.id == "bounce" {
-				got = true
+	r := freeformRow(12, "drop the leaked pty fd", true)
+	for _, busy := range []bool{false, true} {
+		in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true, freeformBusy: busy}
+		var gotPause bool
+		for _, a := range cardActionsFor(in, r) {
+			if a.id == "pause" {
+				gotPause = true
 			}
 		}
-		if got != want {
-			t.Errorf("stage %s: bounce present = %v, want %v", stage, got, want)
+		if gotPause != busy {
+			t.Errorf("busy=%v: pause present = %v", busy, gotPause)
 		}
-	}
-}
-
-func TestCardActionsForDoneStageExcludesAdvanceExceptResearch(t *testing.T) {
-	f := cardRow(domain.KindFeature, domain.StageDone, false, false)
-	in := nextInput{stage: domain.StageDone, kind: domain.KindFeature}
-	for _, a := range cardActionsFor(in, f) {
-		if a.id == "advance" {
-			t.Error("a done feature should not offer advance")
-		}
-	}
-
-	rs := cardRow(domain.KindResearch, domain.StageDone, false, false)
-	inr := nextInput{stage: domain.StageDone, kind: domain.KindResearch}
-	found := false
-	for _, a := range cardActionsFor(inr, rs) {
-		if a.id == "advance" {
-			found = true
-			if a.label != "decompose" {
-				t.Errorf("a done research card's advance label = %q, want decompose", a.label)
-			}
-		}
-	}
-	if !found {
-		t.Error("a done research card should still offer advance (decompose)")
 	}
 }
 
 // TestCardActionsForPRLinkUnlinkPullGating spans DrivenAbroad, Landed,
-// HasWorktree, and PullRequest.Empty() combinations, asserting the offered
-// set matches the Chosen approach table exactly: prlink only before a link
-// exists, on a card that could otherwise merge locally; prunlink and
-// prpull only once linked; and none of the three on a card another gummi
+// HasWorktree, and PullRequest.Empty() combinations on a retired card:
+// prunlink and prpull only once linked (prpull only with a branch), no
+// prlink from the menu, and none of the three on a card another gummi
 // process is driving.
 func TestCardActionsForPRLinkUnlinkPullGating(t *testing.T) {
 	linked := domain.PullRequestRef{Repo: "o/r", Number: 1, URL: "https://github.com/o/r/pull/1"}
@@ -572,15 +468,16 @@ func TestCardActionsForPRLinkUnlinkPullGating(t *testing.T) {
 		landed, hasWT, linked, abroad  bool
 		wantLink, wantUnlink, wantPull bool
 	}{
-		{"unlinked, worktree, not landed: link only", false, true, false, false, true, false, false},
-		{"linked, worktree, not landed: unlink+pull, not link", false, true, true, false, false, true, true},
+		// linking a PR is the CLI's (gummi pr link) and the web page's; the
+		// menu no longer offers it
+		{"unlinked, worktree, not landed: none", false, true, false, false, false, false, false},
+		{"linked, worktree, not landed: unlink+pull", false, true, true, false, false, true, true},
 		{"linked, landed: unlink+pull still offered (m is what refuses, not these)", true, true, true, false, false, true, true},
-		{"unlinked, landed: none — prlink needs !Landed", true, true, false, false, false, false, false},
-		{"unlinked, no worktree row: none — prlink also needs r.HasWorktree", false, false, false, false, false, false, false},
-		// prpull's own gate is `!Empty() && needsWT` — needsWT comes from
-		// the kind carrying a branch, not r.HasWorktree (whether a
-		// worktree actually got created), so it stays offered here.
-		{"linked, no worktree row: unlink+pull — prpull doesn't gate on r.HasWorktree", false, false, true, false, false, true, true},
+		{"unlinked, landed: none", true, true, false, false, false, false, false},
+		{"unlinked, no worktree row: none", false, false, false, false, false, false, false},
+		// a retired card carries a branch only while its worktree is here,
+		// so pulling a review needs one; unlinking does not
+		{"linked, no worktree row: unlink only", false, false, true, false, false, true, false},
 		{"driven abroad, unlinked, worktree: none of the three", false, true, false, true, false, false, false},
 		{"driven abroad, linked, worktree: none of the three", false, true, true, true, false, false, false},
 	}
@@ -615,47 +512,5 @@ func TestCardActionsForPRActionsExcludedFromForeignSafe(t *testing.T) {
 		if foreignSafeActions[id] {
 			t.Errorf("%q must not be in foreignSafeActions — it writes to the card", id)
 		}
-	}
-}
-
-// TestCardActionsIncludesProfileWhenConfigured: the Shell-level
-// m.cardActions() — not the pure cardActionsFor — carries the
-// profile-switch row once an engine with a declared profile is wired in.
-func TestCardActionsIncludesProfileWhenConfigured(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0-test")
-	m.engine = testProfileEngine(t, config.Profiles{
-		Default:  "solo",
-		Profiles: map[string]config.Profile{"solo": {"implementer": {Model: "m"}}},
-	})
-	m.rows = []featureRow{{F: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}}
-	m.sel = 0
-
-	acts := m.cardActions()
-	if !hasID(acts.actions, "profile") {
-		t.Errorf("cardActions() = %v, want a profile row with a profile configured", idsOf(acts.actions))
-	}
-}
-
-// hasID reports whether a cardAction with id is present.
-func hasID(acts []cardAction, id string) bool {
-	for _, a := range acts {
-		if a.id == id {
-			return true
-		}
-	}
-	return false
-}
-
-// TestCardActionsOmitsProfileWithNoEngine: with no engine attached, there
-// is nothing to pick a profile from, so the row is simply absent — not a
-// disabled/unavailable entry.
-func TestCardActionsOmitsProfileWithNoEngine(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0-test")
-	m.rows = []featureRow{{F: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}}
-	m.sel = 0
-
-	acts := m.cardActions()
-	if hasID(acts.actions, "profile") {
-		t.Errorf("cardActions() = %v, want no profile row with no engine attached", idsOf(acts.actions))
 	}
 }

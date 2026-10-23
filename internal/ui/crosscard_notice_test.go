@@ -2,18 +2,14 @@ package ui
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"strings"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
-	"github.com/morphis/gummi/internal/state"
 )
 
 // The transient notice is the reading surface's own channel: with a card
@@ -32,9 +28,8 @@ import (
 func twoCardBoard(t *testing.T) (*Shell, *bytes.Buffer) {
 	t.Helper()
 	m, _ := chatWorkspace(t, agent.NewFake("hi"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
-	m = typeString(t, m, "Second card")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	mkFeature(t, m.store, 2, "Second card", domain.StageTodo)
+	m = pump(t, m, m.loadRows)
 	var buf bytes.Buffer
 	m.SetNotifier(notify.New(notify.Bell, &buf))
 	m.notice = noticeMsg{}
@@ -80,14 +75,11 @@ func TestCrossCardFailureStaysOffTheOpenCard(t *testing.T) {
 		}
 	})
 	t.Run("the open card's own inline rendering still suppresses", func(t *testing.T) {
-		m, _ := chatWorkspace(t, agent.NewFake("hi"))
-		m = openAndAttach(t, m)
-		if m.sessionFor("FD-001") == nil {
-			t.Fatal("setup: no session attached to FD-001")
-		}
+		m, eng := sessionWorkspace(t, agent.NewFake("hi"))
+		settleChat(t, eng)
 		m.notice = noticeMsg{}
 		m = pump(t, m, m.handleEngineEvent(engine.Event{
-			Kind: engine.EventError, Feature: "FD-001", Err: errors.New("backend refused"),
+			Kind: engine.EventError, Feature: sessionID, Err: errors.New("backend refused"),
 		}))
 		if m.notice.text != "" || m.notice.isErr {
 			t.Errorf("notice = %q (err=%v), want none — the thread renders this failure inline", m.notice.text, m.notice.isErr)
@@ -170,43 +162,6 @@ func TestCrossCardBudgetStaysOffTheOpenCard(t *testing.T) {
 			t.Errorf("bell fired %q, want one BEL", buf.String())
 		}
 	})
-	t.Run("round store write fails", func(t *testing.T) {
-		m, buf := setup(t)
-		m.roundStore = &failRoundStore{failWrite: true}
-		m = pump(t, m, m.handleEngineEvent(engine.Event{
-			Kind: engine.EventExhausted, Feature: "FD-002", Stage: domain.StagePlan, Committed: false,
-		}))
-		// the two reset-failure arms are gated beside the budget arms: a
-		// failing store is systemic, so its error must not bark onto the
-		// card being read either
-		if m.notice.text != "" || m.notice.isErr {
-			t.Errorf("notice = %q (err=%v), want none on a page reading FD-001", m.notice.text, m.notice.isErr)
-		}
-		// the reset failure still raised as a genuinely new alert — the
-		// one BEL — and left the durable failure decision behind. The
-		// inbox's one-item-per-card slot now shows the budget stop that
-		// raised after it (newest wins), so the failure's own raise is
-		// read off the decision record instead.
-		if buf.String() != "\a" {
-			t.Errorf("bell fired %q, want one BEL", buf.String())
-		}
-		if _, ok := m.inbox.get("FD-002"); !ok {
-			t.Error("FD-002's inbox item missing after the failing reset")
-		}
-		dec, err := m.store.OpenDecisions(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		var failed bool
-		for _, d := range dec["FD-002"] {
-			if d.Kind == state.DecisionKindFailure {
-				failed = true
-			}
-		}
-		if !failed {
-			t.Errorf("no open failure decision for FD-002: %+v", dec["FD-002"])
-		}
-	})
 }
 
 func TestSameCardBudgetNoticeStays(t *testing.T) {
@@ -233,23 +188,6 @@ func TestSameCardBudgetNoticeStays(t *testing.T) {
 		}))
 		if !m.notice.isErr || !strings.Contains(m.notice.text, "budget exhausted at plan") {
 			t.Errorf("notice = %q (err=%v), want the budget stop on its own card", m.notice.text, m.notice.isErr)
-		}
-	})
-	t.Run("round store write fails", func(t *testing.T) {
-		m := setup(t)
-		m.setRound("FD-001", domain.RoundKindPlan, 1)
-		m.roundStore = &failRoundStore{failWrite: true}
-		m = pump(t, m, m.handleEngineEvent(engine.Event{
-			Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StagePlan, Committed: false,
-		}))
-		// the reset-failure arms write on the card's own page too; the
-		// budget arm writes last, so its text is the one left standing —
-		// and the counter the failed reset protects is untouched
-		if !m.notice.isErr || !strings.Contains(m.notice.text, "budget exhausted at plan") {
-			t.Errorf("notice = %q (err=%v), want the budget stop kept on its own card", m.notice.text, m.notice.isErr)
-		}
-		if got := m.round("FD-001", domain.RoundKindPlan); got != 1 {
-			t.Errorf("m.round(plan) after a failed reset = %d, want 1 (count not lost)", got)
 		}
 	})
 }

@@ -57,38 +57,38 @@ func TestParseInput(t *testing.T) {
 		// "/verb" is ALWAYS a verb.
 		{
 			name: "slash plus a verb is a command",
-			in:   "/approve",
-			want: parsedInput{Kind: verbCommand, Verb: "approve", Text: "/approve"},
+			in:   "/land",
+			want: parsedInput{Kind: verbCommand, Verb: "land", Text: "/land"},
 		},
 		{
 			name: "leading/trailing whitespace is trimmed before matching",
-			in:   "  /approve  ",
-			want: parsedInput{Kind: verbCommand, Verb: "approve", Text: "/approve"},
+			in:   "  /land  ",
+			want: parsedInput{Kind: verbCommand, Verb: "land", Text: "/land"},
 		},
 		{
-			name: "matching is case-insensitive: /Approve",
-			in:   "/Approve",
-			want: parsedInput{Kind: verbCommand, Verb: "approve", Text: "/Approve"},
+			name: "matching is case-insensitive: /Land",
+			in:   "/Land",
+			want: parsedInput{Kind: verbCommand, Verb: "land", Text: "/Land"},
 		},
 		{
-			name: "matching is case-insensitive: /APPROVE",
-			in:   "/APPROVE",
-			want: parsedInput{Kind: verbCommand, Verb: "approve", Text: "/APPROVE"},
+			name: "matching is case-insensitive: /LAND",
+			in:   "/LAND",
+			want: parsedInput{Kind: verbCommand, Verb: "land", Text: "/LAND"},
 		},
 		{
 			name: "a slashed verb with a remainder carries it, trimmed",
-			in:   "/changes the pill needs the dim token",
-			want: parsedInput{Kind: verbCommand, Verb: "changes", Remainder: "the pill needs the dim token", Text: "/changes the pill needs the dim token"},
+			in:   "/rebase onto the new main",
+			want: parsedInput{Kind: verbCommand, Verb: "rebase", Remainder: "onto the new main", Text: "/rebase onto the new main"},
 		},
 		{
 			name: "extra internal whitespace before the remainder is trimmed",
-			in:   "/verify    the csv path",
-			want: parsedInput{Kind: verbCommand, Verb: "verify", Remainder: "the csv path", Text: "/verify    the csv path"},
+			in:   "/ask    the csv path",
+			want: parsedInput{Kind: verbCommand, Verb: "ask", Remainder: "the csv path", Text: "/ask    the csv path"},
 		},
 		{
 			name: "a space between the slash and the verb still resolves it",
-			in:   "/ verify the csv path",
-			want: parsedInput{Kind: verbCommand, Verb: "verify", Remainder: "the csv path", Text: "/ verify the csv path"},
+			in:   "/ ask the csv path",
+			want: parsedInput{Kind: verbCommand, Verb: "ask", Remainder: "the csv path", Text: "/ ask the csv path"},
 		},
 
 		// "/" plus anything else opens the menu, pre-filtered.

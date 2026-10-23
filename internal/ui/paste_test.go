@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // paste feeds a bracketed-paste message through the shell, as the
@@ -21,7 +20,7 @@ func TestPasteIntoFeatureForm(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
 
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openSessionForm(t, m)
 	m = paste(t, m, "Dark ")
 	m = typeString(t, m, "mo")
 	m = paste(t, m, "de")
@@ -34,7 +33,7 @@ func TestPasteIntoFeatureForm(t *testing.T) {
 	}
 
 	// paste while the options row is focused must not touch the input
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = openSessionForm(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = paste(t, m, "stray")
 	form := m.Overlay.Top().(*cardForm)
@@ -44,6 +43,8 @@ func TestPasteIntoFeatureForm(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// a dialog without an input swallows the paste instead of leaking it
+	m.cardOpen = false // creating the session opened its page; ? is the board's
+	m.blurThreadInput()
 	m = press(t, m, tea.KeyPressMsg{Code: '?', Text: "?"})
 	m = paste(t, m, "leak")
 	if !m.Overlay.HasDialogs() {
@@ -51,67 +52,8 @@ func TestPasteIntoFeatureForm(t *testing.T) {
 	}
 }
 
-func TestPasteIntoBugForm(t *testing.T) {
-	m, _ := newWorkspace(t)
-	m = pump(t, m, m.Init())
-
-	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
-	m = paste(t, m, "Login loops")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if len(m.rows) != 1 || m.rows[0].F.Kind != domain.KindBug {
-		t.Fatalf("rows after paste+create: %+v", m.rows)
-	}
-	if m.rows[0].F.Slug != "login-loops" {
-		t.Fatalf("bad slug: %q", m.rows[0].F.Slug)
-	}
-}
-
-func TestPasteIntoTextPrompt(t *testing.T) {
-	m, _ := newWorkspace(t)
-	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
-	m = typeString(t, m, "Dark mode")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	// rename via the text prompt, pasting the new title
-	m.Overlay.Push(newTextPrompt("rename", "", "title",
-		func(s string) error { _, err := domain.Slugify(s); return err },
-		func(s string) tea.Cmd { return nil }))
-	m = paste(t, m, "Bright mode")
-	d := m.Overlay.Top().(*textPromptDialog)
-	if got := d.input.Value(); got != "Bright mode" {
-		t.Fatalf("prompt value = %q", got)
-	}
-}
-
-func TestPasteIntoBugIngestFilter(t *testing.T) {
-	m := &Shell{}
-	m.bugIngest = samplePicker()
-
-	// the picker opens with the filter already focused, so a paste lands
-	// directly in it.
-	m.Update(tea.PasteMsg{Content: "crash"})
-	if got := m.bugIngest.filter.Value(); got != "crash" {
-		t.Fatalf("filter value = %q", got)
-	}
-	if len(m.bugIngest.visible()) != 1 {
-		t.Fatalf("visible after pasted filter = %d, want 1", len(m.bugIngest.visible()))
-	}
-
-	// esc leaves the filter for the list; a paste there is dropped.
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	m.Update(tea.PasteMsg{Content: "stray"})
-	if got := m.bugIngest.filter.Value(); got != "crash" {
-		t.Fatalf("paste landed in the filter while list-focused: %q", got)
-	}
-}
-
 func TestPasteIntoComposer(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("Two options."))
-	m = openAndAttach(t, m)
-	if m.sessionFor("FD-001") == nil {
-		t.Fatal("enter did not attach a session")
-	}
+	m, eng := sessionWorkspace(t, agent.NewFake("Two options."))
 	settleChat(t, eng)
 
 	m = paste(t, m, "line one\nline two")

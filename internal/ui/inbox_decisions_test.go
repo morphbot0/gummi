@@ -150,41 +150,6 @@ func TestSeedInboxRanksBudgetOverGate(t *testing.T) {
 	}
 }
 
-// TestSeedInboxSkipsAbandonedDecision: a decision whose stage the card
-// has since moved past is abandoned (Store.OpenDecisions' own contract) —
-// it seeds nothing.
-func TestSeedInboxSkipsAbandonedDecision(t *testing.T) {
-	ws, store, wt := uiRepo(t)
-	ctx := context.Background()
-	f := mkFeature(t, store, 1, "moved on", domain.StageImplement)
-	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
-		ID: "gate:1", Kind: state.DecisionKindGate, Question: "review is ready for your decision.",
-	}, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	// the card moves on to a later stage — the gate was crossed over the
-	// decision without an answer event ever being recorded, which is
-	// exactly what abandons it.
-	if _, err := store.Transition(ctx, f.ID, domain.StageVerify, "user"); err != nil {
-		t.Fatal(err)
-	}
-	decisions, err := store.OpenDecisions(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(decisions[f.ID]) != 0 {
-		t.Fatalf("OpenDecisions reported %+v for a card that moved on, want none", decisions[f.ID])
-	}
-
-	m := NewShell(theme.GummiDark(), "v0-test")
-	m.Attach(store, wt, ws)
-	m.seedInboxFromDecisions(decisions)
-
-	if m.inbox.len() != 0 {
-		t.Fatalf("inbox len = %d, want 0 — the decision moved on with the stage", m.inbox.len())
-	}
-}
-
 // TestInitSeedsDecisionsWithoutAnEngine: the record outliving the process
 // that raised it is the point of it, so a board with no agent wired still
 // learns what a headless run left waiting. The query needs a store, not
@@ -219,32 +184,6 @@ func TestInitSeedsDecisionsWithoutAnEngine(t *testing.T) {
 
 	if _, ok := m.inbox.get(f.ID); !ok {
 		t.Fatalf("an engine-less board did not seed the headless run's stop: %+v", m.inbox.list())
-	}
-}
-
-// A goal card's stops are its goal's to handle: a restart must not seed
-// them into your inbox when the live board kept them out of it.
-func TestSeedInboxSkipsGoalCards(t *testing.T) {
-	ws, store, wt := uiRepo(t)
-	ctx := context.Background()
-	f := mkFeature(t, store, 1, "goal card", domain.StageVerify)
-	if err := store.SetGoal(ctx, f.ID, "GL-009", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
-		ID: "gate:1", Kind: state.DecisionKindGate, Question: "verify passed — review & land",
-	}, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	decisions, err := store.OpenDecisions(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := NewShell(theme.GummiDark(), "v0-test")
-	m.Attach(store, wt, ws)
-	m.seedInboxFromDecisions(decisions)
-	if m.inbox.len() != 0 {
-		t.Fatalf("a goal card's stop is not yours: %+v", m.inbox.list())
 	}
 }
 

@@ -75,7 +75,7 @@ func (m *Shell) collapseFeature(f domain.Feature, message string) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: f.Name() + " squash failed: " + err.Error(), isErr: true}
 		}
-		base, err := worktree.ResolveCollapseBase(ctx, m.store, mgr, &f)
+		base, err := worktree.ResolveCollapseBase(ctx, mgr, &f)
 		if err != nil {
 			return noticeMsg{text: f.Name() + " squash failed: " + err.Error(), isErr: true}
 		}

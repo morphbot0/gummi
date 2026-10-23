@@ -12,7 +12,6 @@ import (
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 	"github.com/morphis/gummi/internal/worktree"
@@ -39,13 +38,8 @@ func (m *Shell) WebBoard() webapi.Board {
 	if m.today.measured && m.today.day == m.now().Format(time.DateOnly) {
 		b.Today.Spent = m.today.credits
 	}
-	b.Resume = m.webResumeOffer()
-	titles := make(map[domain.FeatureID]string, len(m.rows))
 	for _, r := range m.rows {
-		titles[r.F.ID] = r.F.Title
-	}
-	for _, r := range m.rows {
-		row := m.webRow(r, titles)
+		row := m.webRow(r)
 		switch row.Status {
 		case webapi.StatusNeeds:
 			b.Counts.Needs++
@@ -57,8 +51,8 @@ func (m *Shell) WebBoard() webapi.Board {
 	return b
 }
 
-// webRow projects one board row. titles resolves a goal id to its title.
-func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.Row {
+// webRow projects one board row.
+func (m *Shell) webRow(r featureRow) webapi.Row {
 	f := r.F
 	row := webapi.Row{
 		ID:        string(f.ID),
@@ -71,7 +65,6 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		Profile:   f.Profile,
 		Repo:      f.Repo,
 		Home:      webHome(m.ws, f),
-		Autopilot: f.GateApproval == domain.GateAutopilot,
 		Elsewhere: r.DrivenAbroad,
 		Severity:  string(f.Severity),
 		Landed:    r.Landed || f.LandedSHA != "",
@@ -83,12 +76,6 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 	if c := m.liveCardContext(f.ID); c.Tokens > 0 {
 		row.Context = &webapi.AgentContext{Tokens: c.Tokens, Limit: c.Limit}
 	}
-	if f.GoalID != "" {
-		row.Goal = &webapi.RowGoal{ID: string(f.GoalID), Title: titles[f.GoalID]}
-	}
-	for _, id := range r.DepBlockers {
-		row.Waits = append(row.Waits, string(id))
-	}
 	if st, ok := m.stackRows[f.ID]; ok {
 		// the board counts from 1 at the bottom ("2/4"); the contract
 		// counts from 0, so the page can index with it.
@@ -97,21 +84,22 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 	if o := m.freeformObjective(r); o != nil {
 		row.Objective = string(o.State)
 	}
-	sess := m.sessionFor(f.ID)
 	it, needs := m.inbox.get(f.ID)
 	switch {
 	case needs:
 		// needs-you outranks busy, the TUI row's own precedence: a person
 		// can act on a raised gate, not on a check still running under it.
 		row.Status = webapi.StatusNeeds
-		row.Needs = webNeeds(it, f.Stage, m.flooredVerifyPass(f.ID))
+		row.Needs = webNeeds(it)
 	case m.cardBusy(r):
 		row.Status = webapi.StatusRunning
-		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r), Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}
+		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r)}
 	case m.freeformWatching(r):
 		row.Status = webapi.StatusWatching
-	case sess != nil && sess.State() == engine.StatePaused:
-		row.Status = webapi.StatusPaused
+	case r.DecidingRun != nil:
+		// a run's decision is the session's, whether or not the inbox
+		// heard of it (a restart re-reads the run, not the queue)
+		row.Status = webapi.StatusNeeds
 	default:
 		switch f.Stage.SuperState() {
 		case domain.SuperTodo:
@@ -121,6 +109,11 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		default:
 			row.Status = webapi.StatusIdle
 		}
+	}
+	if d := r.DecidingRun; d != nil && row.Status == webapi.StatusNeeds {
+		// worded as the run's: the inbox's generic "the agent has a
+		// question" is about a live ask the run does not have
+		row.Needs = &webapi.RowNeeds{Kind: webapi.NeedsQuestion, Color: "info", Question: "workflow: " + d.Pending.Question, Word: workflowDecisionWord(d.Pending)}
 	}
 	return row
 }
@@ -147,56 +140,24 @@ func webKind(f domain.Feature) domain.Kind {
 }
 
 // webNeeds projects a needs-you item, with the word the rail heads it
-// with: a failed verify is raised as an escalated gate, and reads as what
-// it is rather than as the gate it was raised as. flooredPass marks a
-// stop that is a pass gummi's own floor refused rather than a verify that
-// failed — the word says the overrule, not a failure that never happened.
-func webNeeds(it attnItem, stage domain.Stage, flooredPass bool) *webapi.RowNeeds {
+// with.
+func webNeeds(it attnItem) *webapi.RowNeeds {
 	n := &webapi.RowNeeds{Question: it.Text}
 	switch it.Kind {
 	case attnFailure:
 		n.Kind, n.Color, n.Word = webapi.NeedsFailure, "err", "failed"
-		if stage == domain.StageVerify {
-			n.Word = "verify failed"
-		}
 	case attnQuestion:
 		n.Kind, n.Color, n.Word = webapi.NeedsQuestion, "info", "question"
 	case attnBudget:
 		n.Kind, n.Color, n.Word = webapi.NeedsBudget, "warn", "budget"
 	default:
-		n.Kind, n.Color, n.Word = webapi.NeedsGate, "ok", gateWord(stage)
+		// a stop a retired workflow card left recorded
+		n.Kind, n.Color, n.Word = webapi.NeedsGate, "ok", "needs you"
 		if it.Escalated {
 			n.Color = "warn"
-			if stage == domain.StageVerify {
-				if flooredPass {
-					n.Word = "verify overruled"
-				} else {
-					n.Word, n.Color = "verify failed", "err"
-				}
-			}
 		}
 	}
 	return n
-}
-
-// flooredVerifyPass reports whether a card's raised verify stop is a pass
-// gummi's own floor refused rather than a verify that failed. False with
-// no session — the stop's wording, which names the overrule when there is
-// one, still reaches the row through the item's text.
-func (m *Shell) flooredVerifyPass(id domain.FeatureID) bool {
-	s := m.sessionFor(id)
-	if s == nil {
-		return false
-	}
-	return flooredPass(s.Snapshot())
-}
-
-// gateWord names a stage's gate the way the page heads it.
-func gateWord(stage domain.Stage) string {
-	if stage == domain.StagePlan {
-		return "design gate"
-	}
-	return string(stage) + " gate"
 }
 
 // todaySpend is the board's spend since local midnight, with when it was
@@ -272,20 +233,6 @@ func (m *Shell) todaySpent(msg todaySpentMsg) {
 		return
 	}
 	m.today = todaySpend{credits: msg.credits, at: msg.at, day: msg.day, measured: true, total: msg.total, due: m.today.due}
-}
-
-// webResumeOffer projects the held quit-resume question.
-func (m *Shell) webResumeOffer() *webapi.ResumeOffer {
-	m.settleQuitResume()
-	o := m.resumeOffer
-	if o == nil {
-		return nil
-	}
-	out := &webapi.ResumeOffer{Since: o.since, At: o.at, Cards: make([]webapi.CardRef, 0, len(o.cards))}
-	for _, c := range o.cards {
-		out.Cards = append(out.Cards, webapi.CardRef{ID: string(c.Feature.ID), Title: c.Feature.Title, Stage: string(c.Feature.Stage)})
-	}
-	return out
 }
 
 // WebSettings is GET /api/settings: what the settings dialog holds.

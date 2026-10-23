@@ -40,8 +40,7 @@ func TestUnlabelledAskOptionIsNotSilentlyUnanswerable(t *testing.T) {
 // caller, from no decision at all — visibleDecision returns nil for both
 // — so enter is a no-op with no explanation.
 func TestUndrawnDecisionSaysWhyEnterDidNothing(t *testing.T) {
-	m, eng := chatWorkspace(t, askingFake())
-	m = openAndAttach(t, m)
+	m, eng := sessionWorkspace(t, askingFake())
 	waitAsk(t, eng)
 	m = pump(t, m, nil)
 
@@ -61,7 +60,7 @@ func TestUndrawnDecisionSaysWhyEnterDidNothing(t *testing.T) {
 
 	m.notice.text = ""
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if eng.Get("FD-001").Snapshot().PendingAsk != nil && m.notice.text == "" {
+	if eng.Freeform(sessionID).Snapshot().PendingAsk != nil && m.notice.text == "" {
 		t.Fatal("enter dropped the answer and said nothing")
 	}
 }

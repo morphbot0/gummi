@@ -73,20 +73,6 @@ func feature(num int, title string, stage domain.Stage) domain.Feature {
 	}
 }
 
-// bugFeature builds a bug-kind work item (BG-002) parked at Fix, the same
-// way feature does, so tests can cover the artifact-path naming across
-// kinds.
-func bugFeature(title string) domain.Feature {
-	const num = 2
-	id, _ := domain.NewID(domain.KindBug, num)
-	slug, _ := domain.Slugify(title)
-	now := time.Now()
-	return domain.Feature{
-		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug, Stage: domain.StageImplement,
-		CreatedAt: now, UpdatedAt: now,
-	}
-}
-
 func waitFor(t *testing.T, e *Engine, kind EventKind) Event {
 	t.Helper()
 	deadline := time.After(testWaitTimeout)
@@ -102,46 +88,103 @@ func waitFor(t *testing.T, e *Engine, kind EventKind) Event {
 	}
 }
 
-// waitState polls a feature's session until it reaches want.
-func waitState(t *testing.T, e *Engine, id domain.FeatureID, want SessionState) {
+// waitIdle waits for a card's session to finish the turn it is on.
+func waitIdle(t *testing.T, e *Engine, id domain.FeatureID) {
 	t.Helper()
 	deadline := time.After(testWaitTimeout)
 	for {
-		if s := e.Get(id); s != nil && s.State() == want {
+		if s := liveSession(e, id); s != nil && !s.Busy() && len(s.Snapshot().Transcript) > 0 {
 			return
 		}
 		select {
 		case <-deadline:
-			cur := "<nil>"
-			if s := e.Get(id); s != nil {
-				cur = string(s.State())
-			}
-			t.Fatalf("%s did not reach %s (at %s)", id, want, cur)
+			t.Fatalf("%s never went idle", id)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
 }
 
-// waitActivity waits until the session's activity feed contains one of
-// the wanted substrings. Used to wait out the git epilogue: the state
-// flips Done before settle's checkpoint commit, so a test that tears
-// its repo down right at Done races the commit.
-func waitActivity(t *testing.T, e *Engine, id domain.FeatureID, wants ...string) {
+// waitTurn waits until every session the engine holds has finished the
+// turn it is on: what a stage's EventIdle used to announce, which a
+// session reports only as a not-busy session with something said.
+func waitTurn(t *testing.T, e *Engine) {
 	t.Helper()
 	deadline := time.After(testWaitTimeout)
 	for {
-		acts := strings.Join(e.Get(id).Snapshot().Activity, "\n")
-		for _, w := range wants {
-			if strings.Contains(acts, w) {
-				return
+		e.mu.Lock()
+		ffs := make([]*FreeformSession, 0, len(e.freeform))
+		for _, ff := range e.freeform {
+			ffs = append(ffs, ff)
+		}
+		e.mu.Unlock()
+		idle := len(ffs) > 0
+		for _, ff := range ffs {
+			s := ff.Session()
+			if s == nil || s.Busy() || len(s.Snapshot().Transcript) == 0 {
+				idle = false
 			}
+		}
+		if idle {
+			return
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("%s activity never showed %q:\n%s", id, wants, acts)
+			t.Fatal("timed out waiting for the turn to end")
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+}
+
+// waitErr waits until a card's session records an error.
+func waitErr(t *testing.T, e *Engine, id domain.FeatureID) {
+	t.Helper()
+	deadline := time.After(testWaitTimeout)
+	for {
+		if s := liveSession(e, id); s != nil && s.Snapshot().Err != nil {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%s never recorded an error", id)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// liveSession is the session a card's conversation runs on, nil before
+// its first turn starts one.
+func liveSession(e *Engine, id domain.FeatureID) *Session {
+	if ff := e.Freeform(id); ff != nil {
+		return ff.Session()
+	}
+	return nil
+}
+
+// attach mints f in the engine's store when it is not there yet, opens
+// its session and sends its opening turn, and returns the session that
+// turn runs on.
+func attach(t *testing.T, e *Engine, f domain.Feature) *Session {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := e.cfg.Store.GetFeature(ctx, f.ID); err != nil {
+		createFeature(t, e.cfg.Store, f)
+	}
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Kickoff(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(testWaitTimeout)
+	for ff.Session() == nil {
+		select {
+		case <-deadline:
+			t.Fatalf("%s never started its session", f.ID)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	return ff.Session()
 }
 
 // newEngine builds an engine over one fake agent. Tests that need more
@@ -162,250 +205,16 @@ func withWorktree(t *testing.T, wt *worktree.Manager, f domain.Feature) {
 	}
 }
 
-func TestRejectsNonAgentStages(t *testing.T) {
-	e := newEngine(t, agent.NewFake("hi"))
-	for _, st := range []domain.Stage{domain.StageTodo, domain.StageDone} {
-		if _, err := e.Attach(context.Background(), feature(1, "x", st)); err == nil {
-			t.Errorf("Attach: stage %s should have no agent action", st)
-		}
-		if err := e.Run(feature(1, "x", st)); err == nil {
-			t.Errorf("Run: stage %s should have no agent action", st)
-		}
-	}
-}
-
-func TestInteractiveRoundTrip(t *testing.T) {
-	e := newEngine(t, agent.NewFake("Here are two approaches."))
-	ctx := context.Background()
-
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.Role != agent.RoleArchitect || !s.Interactive || s.State() != StateInteractive {
-		t.Fatalf("brainstorm should be an interactive architect session: %+v", s.Snapshot())
-	}
-	waitFor(t, e, EventStarted)
-	waitFor(t, e, EventIdle) // the kickoff turn (agent speaks first) completes
-
-	if err := e.Send(ctx, "FD-001", "how should dark mode persist?"); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
-
-	// kickoff (system) + its reply, then the user turn + its reply
-	snap := s.Snapshot()
-	if len(snap.Transcript) != 4 || snap.Transcript[0].Author != AuthorSystem ||
-		snap.Transcript[3].Content != "Here are two approaches." {
-		t.Fatalf("transcript = %+v", snap.Transcript)
-	}
-	if snap.Busy || snap.Spend.Credits != 2 {
-		t.Errorf("post-turn state wrong: busy=%v spend=%+v", snap.Busy, snap.Spend)
-	}
-	// interactive sessions do not consume a slot
-	if s := e.Get("FD-001"); s.State() != StateInteractive {
-		t.Errorf("interactive session changed state to %s", s.State())
-	}
-}
-
-func TestAutonomousRunKicksOff(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		return []agent.Event{
-			{Kind: agent.EventToolCall, Tool: "edit", Detail: "theme.go"},
-			{Kind: agent.EventMessage, Text: "Implemented."},
-			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 2, OutputTokens: 40}},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "impl", domain.StageImplement)
-	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	// the engine kicks it off automatically and it finishes → done
-	waitState(t, e, "FD-001", StateDone)
-
-	snap := e.Get("FD-001").Snapshot()
-	// tool name and detail compose double-space separated (the UI's
-	// split point for styling the two parts)
-	if len(snap.Activity) != 1 || snap.Activity[0] != "edit  theme.go" {
-		t.Errorf("activity = %+v", snap.Activity)
-	}
-	if snap.Spend.Credits != 2 {
-		t.Errorf("spend = %+v", snap.Spend)
-	}
-	// the kickoff turn is gummi's own boilerplate, not the user's, so it
-	// is recorded as the first system message (matches the interactive
-	// kickoff's appendSystem)
-	if len(snap.Transcript) < 1 || snap.Transcript[0].Author != AuthorSystem {
-		t.Errorf("kickoff not recorded: %+v", snap.Transcript)
-	}
-}
-
-// TestErrorFreesSlotAndUnwedgesQueue covers the scheduler-wedge fix: an
-// autonomous run that ends in a terminal EventError (no trailing idle) must
-// free its attention slot and move to a re-runnable state, so a second
-// queued feature starts rather than starving behind it forever.
-func TestErrorFreesSlotAndUnwedgesQueue(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if strings.Contains(opts.WorkDir, "FD-001") {
-			return []agent.Event{{Kind: agent.EventError, Err: errorString("backend blew up")}}
-		}
-		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f1 := feature(1, "boom", domain.StageImplement)
-	f2 := feature(2, "fine", domain.StageImplement)
-	withWorktree(t, wt, f1)
-	withWorktree(t, wt, f2)
-
-	if err := e.Run(f1); err != nil {
-		t.Fatal(err)
-	}
-	// f1 fails: it must not stay Running holding the only slot.
-	waitState(t, e, "FD-001", StatePaused)
-	if s := e.Get("FD-001"); s.Snapshot().Err == nil {
-		t.Error("failed run recorded no error")
-	}
-
-	// with the slot freed, a newly queued feature runs to completion.
-	if err := e.Run(f2); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-002", StateDone)
-
-	// and the failed feature can be retried (Run no longer no-ops on it).
-	if err := e.Run(f1); err != nil {
-		t.Fatalf("re-running a failed feature should be allowed: %v", err)
-	}
-}
-
-type errorString string
-
-func (e errorString) Error() string { return string(e) }
-
-func TestRunWithAppendsCommentsToKickoff(t *testing.T) {
-	var mu sync.Mutex
-	var got string
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		mu.Lock()
-		got = msg
-		mu.Unlock()
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "planned", domain.StagePlan)
-	withWorktree(t, wt, f)
-	note := "Please address these review comments in the spec.\n\n- L12: split the migration"
-	if err := e.RunWith(f, note); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-
-	mu.Lock()
-	defer mu.Unlock()
-	if !strings.Contains(got, kickoff(f.Kind)) || !strings.Contains(got, "split the migration") {
-		t.Errorf("kickoff missing the review comments:\n%s", got)
-	}
-	// the combined kickoff is what the transcript records
-	snap := e.Get("FD-001").Snapshot()
-	if len(snap.Transcript) == 0 || snap.Transcript[0].Content != got {
-		t.Errorf("transcript kickoff differs from the sent one: %+v", snap.Transcript)
-	}
-}
-
-func TestPauseLeavesOtherRunsRunning(t *testing.T) {
-	release := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() {
-		close(release)
-		e.Close()
-	})
-
-	f1 := autopilotFeature(1, "one")
-	f2 := autopilotFeature(2, "two")
-	withWorktree(t, wt, f1)
-	withWorktree(t, wt, f2)
-	if err := e.Run(f1); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateRunning)
-	if err := e.Run(f2); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-002", StateRunning)
-
-	// pause f1: it stops, and f2 keeps running beside nothing in its way
-	if err := e.Pause(context.Background(), "FD-001"); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StatePaused)
-	waitState(t, e, "FD-002", StateRunning)
-}
-
-func TestRunRequiresWorktree(t *testing.T) {
-	e := newEngine(t, agent.NewFake("ok"))
-	f := feature(1, "no wt", domain.StageImplement)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err) // Run enqueues fine
-	}
-	// the failure surfaces asynchronously as the scheduler tries to start
-	ev := waitFor(t, e, EventError)
-	if ev.Err == nil {
-		t.Error("missing worktree produced no error")
-	}
-	waitState(t, e, "FD-001", StatePaused)
-}
-
-func TestDropStopsSession(t *testing.T) {
-	e := newEngine(t, agent.NewFake("hi"))
-	if _, err := e.Attach(context.Background(), feature(1, "x", domain.StagePlan)); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventStarted)
-	e.Drop("FD-001")
-	if e.Get("FD-001") != nil {
-		t.Error("Drop did not remove the session")
-	}
-}
-
-func TestSendUnknownFeature(t *testing.T) {
-	e := newEngine(t, agent.NewFake("x"))
-	if err := e.Send(context.Background(), "FD-999", "hi"); err == nil {
-		t.Error("send to unknown feature should error")
-	}
-	if err := e.Interrupt(context.Background(), "FD-999"); err == nil {
-		t.Error("interrupt of unknown feature should error")
-	}
-}
-
 func TestWorktreeStageLocatesWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "impl me", domain.StageImplement)
+	f := freeformCard(1, "impl me")
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
 	wantDir := filepath.Join(wt.Root(), f.WorktreePath())
 	if rec.opts().WorkDir != wantDir {
@@ -413,73 +222,6 @@ func TestWorktreeStageLocatesWorktree(t *testing.T) {
 	}
 	if rec.opts().Role != agent.RoleImplementer {
 		t.Errorf("role = %s, want implementer", rec.opts().Role)
-	}
-}
-
-func TestArtifactPathOnStageSession(t *testing.T) {
-	for _, f := range []domain.Feature{
-		feature(1, "impl me", domain.StageImplement),
-		bugFeature("flaky test"),
-	} {
-		t.Run(string(f.ID), func(t *testing.T) {
-			ws, store, wt := newRepo(t)
-			rec := recordingAgent()
-			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-			t.Cleanup(func() { e.Close() })
-
-			withWorktree(t, wt, f)
-			if err := e.Run(f); err != nil {
-				t.Fatal(err)
-			}
-			waitState(t, e, f.ID, StateDone)
-
-			want := filepath.Join(wt.Root(), f.ArtifactPath())
-			if rec.opts().ArtifactPath != want {
-				t.Errorf("ArtifactPath = %s, want promoted artifact %s", rec.opts().ArtifactPath, want)
-			}
-			if rec.opts().WorkDir == rec.opts().ArtifactPath {
-				t.Errorf("ArtifactPath %s must not be the worktree workdir", rec.opts().ArtifactPath)
-			}
-		})
-	}
-}
-
-func TestAttachMaterializesDraftAndKicksOff(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "Dark mode", domain.StagePlan)
-	if _, err := e.Attach(context.Background(), f); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
-
-	// the artifact exists before the agent's first turn. It is at its
-	// workspace home rather than in the drafts directory: promotion moved
-	// to the card's first stage run when the card stopped needing two
-	// trees and therefore two artifact locations.
-	raw, err := os.ReadFile(specDraftPath(e, f))
-	if err != nil {
-		t.Fatalf("artifact not materialized: %v", err)
-	}
-	if !strings.Contains(string(raw), "## Problem") {
-		t.Errorf("draft is not the template: %q", raw)
-	}
-
-	// the hints carry the compiled-in contract, pointing at the artifact
-	hints := strings.Join(rec.opts().SystemHints, "\n")
-	for _, want := range []string{specDraftPath(e, f), "single source of truth", "nearest preceding non-marker line"} {
-		if !strings.Contains(hints, want) {
-			t.Errorf("contract hint missing %q", want)
-		}
-	}
-
-	// the agent led: gummi's kickoff is the first transcript turn
-	snap := e.Get("FD-001").Snapshot()
-	if len(snap.Transcript) == 0 || snap.Transcript[0].Author != AuthorSystem {
-		t.Errorf("kickoff not recorded as a system turn: %+v", snap.Transcript)
 	}
 }
 
@@ -531,11 +273,11 @@ func (r *recorder) count() int {
 	return r.sessions
 }
 
-// Every stage session must bind an inbound MCP endpoint and carry the
-// feature id on SessionOpts, for both a ClientTools backend and an
-// MCPTools (opencode-style) backend. The MCPTools backend must also still
-// receive the stage's client tools and toolHint, since it consumes the
-// tools over MCP rather than through opts.Tools.
+// Every session must bind an inbound MCP endpoint and carry the feature
+// id on SessionOpts, for both a ClientTools backend and an MCPTools
+// (opencode-style) backend. The MCPTools backend must also still receive
+// the session's client tools and tool hint, since it consumes the tools
+// over MCP rather than through opts.Tools.
 func TestNewAgentSessionAlwaysBindsMCPAndFeatureID(t *testing.T) {
 	for name, caps := range map[string]agent.Capabilities{
 		"clientTools": {ClientTools: true},
@@ -554,11 +296,9 @@ func TestNewAgentSessionAlwaysBindsMCPAndFeatureID(t *testing.T) {
 			e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 			t.Cleanup(func() { e.Close() })
 
-			f := feature(1, "x", domain.StagePlan)
-			if _, err := e.Attach(context.Background(), f); err != nil {
-				t.Fatal(err)
-			}
-			waitFor(t, e, EventIdle)
+			f := freeformCard(1, "x")
+			attach(t, e, f)
+			waitTurn(t, e)
 			mu.Lock()
 			defer mu.Unlock()
 			if got.MCPSockPath == "" {
@@ -570,8 +310,8 @@ func TestNewAgentSessionAlwaysBindsMCPAndFeatureID(t *testing.T) {
 			if len(got.Tools) == 0 {
 				t.Errorf("%s: Tools empty", name)
 			}
-			if h := toolHint(f.Stage, flavorStage); h != "" && !strings.Contains(strings.Join(got.SystemHints, "\n"), h) {
-				t.Errorf("%s: SystemHints missing stage toolHint", name)
+			if !strings.Contains(strings.Join(got.SystemHints, "\n"), freeformToolHint) {
+				t.Errorf("%s: SystemHints missing the session's tool hint", name)
 			}
 		})
 	}
@@ -665,7 +405,7 @@ func TestConsultAndFreeformSessionsCarryTheCardScratchDir(t *testing.T) {
 
 	r := recordingAgent()
 	e := newEngine(t, r)
-	f := feature(3, "scratch anchor", domain.StageImplement)
+	f := freeformCard(3, "scratch anchor")
 	createFeature(t, e.cfg.Store, f)
 	if _, err := e.OpenConsult(ctx, f); err != nil {
 		t.Fatal(err)

@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/morphis/gummi/internal/driver"
 )
 
 // captureStdout runs fn with the process-wide stdout redirected to a pipe and
@@ -125,19 +123,6 @@ func TestCobraHelp(t *testing.T) {
 	}
 }
 
-// bugs help lists its ingest/new subcommands.
-func TestCobraBugsHelp(t *testing.T) {
-	out := captureStdout(t, func() {
-		rootCmd.SetArgs([]string{"bugs", "--help"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("Execute(bugs --help): %v", err)
-		}
-	})
-	if !strings.Contains(out, "ingest") || !strings.Contains(out, "new") {
-		t.Fatalf("bugs help missing subcommands:\n%s", out)
-	}
-}
-
 // An unknown command errors (cobra's unknown-command path).
 func TestCobraUnknownCommand(t *testing.T) {
 	rootCmd.SetArgs([]string{"frobnicate"})
@@ -146,17 +131,17 @@ func TestCobraUnknownCommand(t *testing.T) {
 	}
 }
 
-// BG-003: `resume --gate-approval attended` re-affirms the run's default
-// gate mode explicitly, overriding a mode persisted on the card.
+// BG-003: a flag passed with its default value is still a flag passed —
+// `resume --answer ""` is an (empty) answer, which the driver refuses,
+// not a bare resume that silently carries on.
 //
 // This used to be a hazard worth a dedicated workaround. Cobra parsed the
 // flag, a helper re-serialized the parsed flags into a []string for a
 // second, stdlib parser, and that serializer dropped any flag whose value
 // equalled its default — because a []string cannot carry "the user typed
-// this". The override silently never took effect, and one command grew a
-// bespoke patch to re-add exactly this flag. There is one parser now, and
-// pflag's Changed carries the fact directly.
-func TestResumeKeepsExplicitDefaultGateApproval(t *testing.T) {
+// this". There is one parser now, and pflag's Changed carries the fact
+// directly.
+func TestResumeKeepsAnExplicitDefaultFlag(t *testing.T) {
 	resetFlags(rootCmd)
 	t.Cleanup(func() { resetFlags(rootCmd) })
 
@@ -164,14 +149,15 @@ func TestResumeKeepsExplicitDefaultGateApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finding resume: %v", err)
 	}
-	if err := cmd.Flags().Set("gate-approval", driver.GateAttended); err != nil {
-		t.Fatalf("Set(gate-approval, %q): %v", driver.GateAttended, err)
+	if err := cmd.Flags().Set("answer", ""); err != nil {
+		t.Fatalf("Set(answer, \"\"): %v", err)
 	}
-	if !cmdFlags(cmd).Changed("gate-approval") {
-		t.Fatal("Changed(gate-approval) = false after an explicit --gate-approval attended")
+	if !cmdFlags(cmd).Changed("answer") {
+		t.Fatal("Changed(answer) = false after an explicit --answer \"\"")
 	}
-	if got := cmdFlags(cmd).String("gate-approval"); got != driver.GateAttended {
-		t.Fatalf("gate-approval = %q, want %q", got, driver.GateAttended)
+	in, err := resumeInput(cmdFlags(cmd), nil)
+	if err != nil || in.Answer == nil || *in.Answer != "" {
+		t.Fatalf("resumeInput = %+v, %v; want an empty answer", in, err)
 	}
 }
 
@@ -213,27 +199,6 @@ func TestNoCommandParsesItsOwnFlags(t *testing.T) {
 func TestSkillGrammarResolvesAgainstTheTree(t *testing.T) {
 	if got := commandGrammar(); got == "" {
 		t.Fatal("commandGrammar() is empty")
-	}
-	if got := goalGrammar(); got == "" {
-		t.Fatal("goalGrammar() is empty")
-	}
-}
-
-// A flag that only ever applies to a goal must stay out of SKILL.md's core
-// grammar: an agent shipping one card cannot use any of them, and they
-// were a fifth of `resume`'s listing.
-func TestCoreGrammarOmitsGoalOnlyFlags(t *testing.T) {
-	grammar := commandGrammar()
-	for _, name := range goalResumeFlagNames {
-		if strings.Contains(grammar, "--"+name+" ") || strings.Contains(grammar, "--"+name+"\n") {
-			t.Errorf("core grammar mentions the goal-only flag --%s; it belongs in references/goals.md", name)
-		}
-	}
-	goals := goalGrammar()
-	for _, name := range goalResumeFlagNames {
-		if !strings.Contains(goals, "--"+name) {
-			t.Errorf("the goals reference is missing --%s", name)
-		}
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 )
 
 // hasAttach reports whether any of the offered actions is the raw-attach
@@ -35,11 +34,11 @@ func TestBG089AttachIsNotRecommendedWithoutAWorktree(t *testing.T) {
 		name string
 		in   nextInput
 	}{
-		{"paused", nextInput{sess: engine.StatePaused}},
+		{"idle", nextInput{}},
 		{"failed", nextInput{attn: attnFailure}},
 	}
-	for _, k := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch} {
-		for _, st := range domain.Stages {
+	for _, k := range []domain.Kind{domain.KindFreeform, domain.KindFeature, domain.KindBug, domain.KindResearch} {
+		for _, st := range append([]domain.Stage{domain.StageOpen}, domain.Stages...) {
 			for _, tc := range states {
 				in := tc.in
 				in.kind, in.stage = k, st
@@ -77,8 +76,8 @@ func TestBG089AttachSurvivesWhereItWorks(t *testing.T) {
 		row featureRow
 	}{
 		{
-			nextInput{sess: engine.StatePaused, kind: domain.KindFeature, stage: domain.StageImplement, hasWorktree: true},
-			featureRow{F: domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StageImplement}, HasWorktree: true},
+			nextInput{kind: domain.KindFreeform, stage: domain.StageOpen, hasWorktree: true},
+			featureRow{F: domain.Feature{ID: "FF-001", Kind: domain.KindFreeform, Stage: domain.StageOpen}, HasWorktree: true},
 		},
 		{
 			nextInput{attn: attnFailure, kind: domain.KindBug, stage: domain.StageImplement, hasWorktree: true},

@@ -24,7 +24,7 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	}
 	doc := bundle.String()
 
-	for _, path := range []string{"run", "research", "diagnose", "goal", "resume", "merge", "squash", "commit", "log", "rewrite", "status", "watch", "doctor"} {
+	for _, path := range []string{"run", "resume", "merge", "squash", "commit", "log", "rewrite", "status", "watch", "doctor"} {
 		cmd, _, err := rootCmd.Find(strings.Fields(path))
 		if err != nil {
 			t.Fatalf("finding %q: %v", path, err)
@@ -40,17 +40,14 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	}
 
 	for _, cmd := range []string{
-		"gummi run", "gummi research", "gummi diagnose", "gummi resume", "gummi verify",
+		"gummi run", "gummi resume",
 		"gummi merge", "gummi squash", "gummi commit", "gummi log", "gummi rewrite", "gummi clean", "gummi handoff",
 		"gummi status", "gummi watch", "gummi spec", "gummi diff", "gummi doctor",
-		"gummi deps add", "gummi skill",
+		"gummi skill",
 	} {
 		if !strings.Contains(skillBody(), cmd) {
 			t.Errorf("SKILL.md does not mention command %q", cmd)
 		}
-	}
-	if !strings.Contains(doc, "gummi goal") {
-		t.Error("the skill bundle does not mention `gummi goal`")
 	}
 }
 
@@ -98,8 +95,8 @@ var foreignSkillFlags = map[string]string{}
 func TestSkillDocumentsExitCodes(t *testing.T) {
 	doc := skillBody()
 	for _, want := range []string{
-		"| 0 | `verified` |", "| 2 | `question` |", "| 3 | `blocked` |",
-		"| 4 | `escalation` |", "| 5 | `exhausted` |", "| 6 | `timeout` |",
+		"| 0 | `done` |", "| 1 | `error` |", "| 2 | `needs_you` |",
+		"| 5 | `exhausted` |", "| 6 | `timeout` |",
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("SKILL.md exit table missing row %q", want)

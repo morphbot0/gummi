@@ -1,7 +1,7 @@
 // Package pr wires gummi's outbound-PR verbs (link/unlink/status) to the gh
-// CLI. It runs gh deterministically off a working directory (mirroring
-// internal/engine/bugsource.go's execGH: gh auto-detects owner/repo from a
-// directory's git remote when --repo is omitted) and never guesses when gh
+// CLI. It runs gh deterministically off a working directory (gh
+// auto-detects owner/repo from a directory's git remote when --repo is
+// omitted) and never guesses when gh
 // itself is missing — Available fails loudly, naming exactly what is
 // absent. Authentication is left entirely to gh.
 package pr

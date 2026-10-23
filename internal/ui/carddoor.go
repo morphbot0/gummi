@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -17,11 +16,10 @@ import (
 // happens once a card exists.
 
 // openCardForm builds the door for a card type with everything the board knows:
-// profiles, repositories, the repo chosen last time, the cards the after
-// row may name, and the seams for GitHub. It does not push it — presets
-// decide whether the form opens or goes straight to browse.
-func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
-	d := newCardForm(ct, m.profileNames, m.repoNames, m.repoHasDefault(), m.lastRepo, m.afterCands(), m.envelopePrefill(), m.createCard)
+// profiles, repositories, the repo chosen last time, and the seams for
+// GitHub. It does not push it.
+func (m *Shell) openCardForm() *cardForm {
+	d := newCardForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.lastRepo, m.envelopePrefill(), m.createCard)
 	// Offer the branches the chosen repo actually has, with the one it
 	// currently has out marked as the default.
 	d.setRepoData(m.baseBranches, m.repoBranches)
@@ -30,19 +28,15 @@ func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
 	}
 	d.setStackCands(m.stackCands())
 	d.onImport = func(ref domain.IssueRef, repo string) tea.Cmd { return m.fetchIssue(d, ref, repo) }
-	d.onBrowse = func(repo string) tea.Cmd { return m.browseIssues(d, repo) }
 	return d
 }
 
 // stackCands is every card the stack row may fork from; setStackCands
 // puts them in the order the row offers them.
 //
-// It is built apart from afterCands, and deliberately: the two rows
-// answer different questions (DESIGN §18.1 — topology, not scheduling),
-// and what is legal to wait on is not what is legal to fork from. The
-// refusals here are openStackForm's, as rows that never enter the cycle
-// rather than notices after the fact: a research card has no branch, and
-// a goal's cards share the goal's branch instead of stacking.
+// The refusals here are openStackForm's, as rows that never enter the
+// cycle rather than notices after the fact: a legacy research card has
+// no branch, and a legacy goal's cards share the goal's branch.
 //
 // A done card stays on offer. Done means the card reached a verified
 // branch, not that the branch landed (§7), so stacking the next slice on
@@ -52,7 +46,7 @@ func (m *Shell) stackCands() []stackCand {
 	var out []stackCand
 	for _, r := range m.rows {
 		f := r.F
-		if f.Kind == domain.KindResearch || f.Kind == domain.KindGoal || f.GoalID != "" {
+		if f.Kind == domain.KindResearch || f.Kind == domain.KindGoal {
 			continue
 		}
 		if f.Kind == domain.KindFreeform && (f.MainCheckout || f.Stage == domain.StageDone) {
@@ -70,19 +64,6 @@ func (m *Shell) stackCands() []stackCand {
 		}
 		out = append(out, stackCand{ID: f.ID, Title: f.Title, Repo: f.Repo, Touched: f.UpdatedAt})
 	}
-	return out
-}
-
-// afterCands is every card not yet done, as the after row offers them.
-func (m *Shell) afterCands() []afterCand {
-	var out []afterCand
-	for _, r := range m.rows {
-		if r.F.Stage == domain.StageDone {
-			continue
-		}
-		out = append(out, afterCand{ID: r.F.ID, Title: r.F.Title, Repo: r.F.Repo, Stage: r.F.Stage})
-	}
-	sortAfterCands(out)
 	return out
 }
 
@@ -138,36 +119,6 @@ func (m *Shell) fetchIssue(d *cardForm, ref domain.IssueRef, repo string) tea.Cm
 	}
 }
 
-// browseIssues opens the issue picker for repo. The form is popped by
-// its own HandleKey (done=true) and parked here until the picker fills
-// it or is left.
-func (m *Shell) browseIssues(d *cardForm, repo string) tea.Cmd {
-	m.pendingCard = d
-	o := repoOrigin{}
-	if m.wt != nil {
-		o = m.repoOriginFor(repo)
-	}
-	params := bugIngestParams{repo: repo, ownerRepo: o.ownerRepo, label: "bug", state: "open"}
-	if !o.github() {
-		// no origin to list from: ask for one, then browse
-		m.Overlay.Push(newTextPrompt("browse issues of", "", "owner/repo", nil, func(s string) tea.Cmd {
-			params.ownerRepo = strings.TrimSpace(s)
-			return m.startBugIngest(params)
-		}))
-		return nil
-	}
-	return m.startBugIngest(params)
-}
-
-// restorePendingCard pushes a form parked for browsing back onto the
-// stack, if there is one.
-func (m *Shell) restorePendingCard() {
-	if d := m.pendingCard; d != nil {
-		m.pendingCard = nil
-		m.Overlay.Push(d)
-	}
-}
-
 // cardCreated is what the shell does once a card exists.
 func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 	// an agent names no repository: it is not the one the next card wants
@@ -179,9 +130,6 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 		text += " — dependency not recorded: " + msg.warn
 	}
 	m.notice = noticeMsg{text: text, isErr: msg.warn != ""}
-	if msg.fromPicker && m.bugIngest != nil {
-		m.bugIngest.markOnBoard(msg.f.ExternalRef, msg.f.ID)
-	}
 	if msg.open {
 		m.openOnLoad = msg.f.ID
 	}
@@ -194,12 +142,6 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 	if msg.f.IsFreeform() {
 		m.openOnLoad = msg.f.ID
 		return tea.Batch(append(cmds, m.startFreeform(msg.f, msg.opening))...)
-	}
-	if msg.run {
-		cmds = append(cmds, m.runStage(msg.f))
-	}
-	if msg.start {
-		cmds = append(cmds, m.openAutopilot(msg.f))
 	}
 	return tea.Batch(cmds...)
 }

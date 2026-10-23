@@ -62,19 +62,6 @@ test('a freeform card shows its memory documents', async ({ pairedPage: page, se
   await expect(doc('dead-ends')).toHaveAttribute('open', /.*/);
 });
 
-// Nothing written yet reads as a placeholder, not as missing; and a
-// workflow card — whose document is its spec — shows no memory tab at
-// all, the mirror of a session's missing spec tab.
-test('a workflow card shows no memory tab', async ({ pairedPage: page, server, api }, info) => {
-  test.setTimeout(90_000);
-  const made = await api('POST', '/api/cards', { kind: 'feature', title: 'Row cache' });
-  const id = String(made.json?.id);
-  await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
-  await expect(page.getByTestId('tab-memory')).toHaveCount(0);
-  const mem = (await api('GET', `/api/cards/${id}/memory`)).json;
-  expect(mem.none).toBe(true);
-});
 // The Memory tab is a tab like the others: it survives moving to another
 // session (the next card's head still in flight says nothing about which
 // tabs it has), and a reload or a link naming it opens it.

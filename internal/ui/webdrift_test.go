@@ -13,26 +13,40 @@ import (
 	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/reentry"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
 // TestWebDecisionsMatchThePicker is the drift test DESIGN §20.1 asks for:
-// for a spread of stops — idle, a raised gate, an escalated one, a budget
-// stop, a failure, a finished verify, a closed card, a live question —
+// for a spread of stops — a session at rest, a budget stop, a failure,
+// retired workflow cards, a closed card, a live question —
 // the answers the web face serves are the answers the TUI's pinned picker
 // draws for the same card, in the same order, under the same question.
 // The golden is the served set, so a change to what a stop offers is
 // reviewed as the page will show it.
 func TestWebDecisionsMatchThePicker(t *testing.T) {
 	m := populatedShell(160, 50)
-	// the stops the inbox raises, on the populated board's cards
-	m.inbox.add("FD-047", attnGate, "plan is ready for your decision")
-	m.inbox.addEscalated("FD-049", attnGate, "the critique asked for changes the loop could not make")
-	m.inbox.add("FD-046", attnBudget, budgetAttentionText(domain.StageImplement, false))
-	m.inbox.addEscalated("FD-044", attnGate, "verification passed")
-	m.rows[4].Exited, m.rows[4].ExitVerdict = true, verdictPass
-	m.inbox.add("FD-042", attnFailure, "the implement session stopped: backend exited")
+	// sessions beside the populated board's retired cards, and the stops
+	// the inbox raises on them
+	m.rows = append(m.rows,
+		freeformRow(12, "drop the leaked pty fd", true),
+		freeformRow(13, "budgeted session", true),
+		freeformRow(14, "failing session", true),
+		freeformRow(15, "fresh session", false),
+	)
+	// and two sessions whose workflow runs ask: a proposal, and a loop at
+	// its max
+	proposal, loop := freeformRow(16, "run proposed", true), freeformRow(17, "loop at max", true)
+	proposal.DecidingRun = &domain.Run{Session: proposal.F.ID, N: 1, State: domain.RunProposed, Pending: &domain.RunDecision{
+		ID: "run:FF-016:1:0", Kind: domain.RunDecideProposal, Question: "Run the deliver workflow on spec S1?",
+		Options: []string{engine.WorkflowAllow, engine.WorkflowAlways, engine.WorkflowDeny},
+	}}
+	loop.DecidingRun = &domain.Run{Session: loop.F.ID, N: 2, State: domain.RunRunning, Pending: &domain.RunDecision{
+		ID: "run:FF-017:2:1", Kind: domain.RunDecideMax, Step: "build/3", Question: "Run 2: build reached its max of 3.",
+		Options: []string{engine.WorkflowOneMore, engine.WorkflowContinue, engine.WorkflowStopRun},
+	}}
+	m.rows = append(m.rows, proposal, loop)
+	m.inbox.add("FF-013", attnBudget, budgetAttentionText(domain.StageOpen, false))
+	m.inbox.add("FF-014", attnFailure, "the session stopped: backend exited")
 
 	type served struct {
 		Card     string          `json:"card"`
@@ -128,10 +142,7 @@ func wordRows(d webapi.Decision) int {
 }
 
 // The stops the first test does not reach, each against what the TUI does
-// at it: a clean verify pass, a multi-pick question, a handed-off card,
-// and the re-entry chip — the last one not as rows (the chip has none in
-// the terminal) but as the rule the rows stand for, that a go which
-// spends is never given on enter.
+// at it: a handed-off card and a multi-pick question.
 func TestWebEdgeDecisionsMatchTheTUI(t *testing.T) {
 	m := populatedShell(160, 50)
 	check := func(label string, i int) *webOpenDecision {
@@ -147,18 +158,6 @@ func TestWebEdgeDecisionsMatchTheTUI(t *testing.T) {
 		}
 		requirePickerRows(t, label, tui, od.api)
 		return od
-	}
-
-	// a clean verify pass heads as one, and its first answer is the landing.
-	// The verified stamp is deliberately NOT set: a board-driven pass
-	// raises its gate before the stamp lands, and a research card is never
-	// stamped — the head reads what the question does, the verdict
-	// (TestABoardDrivenVerifyPassReadsPassedWithoutARestart drives the
-	// real path)
-	m.rows[4].Exited, m.rows[4].ExitVerdict = true, verdictPass
-	m.inbox.add("FD-044", attnGate, "verification passed")
-	if od := check("verify passed", 4); od.api.Word != "verify passed" || od.api.Tone != "ok" {
-		t.Errorf("a passed verify heads as %q (%s), want \"verify passed\" (ok)", od.api.Word, od.api.Tone)
 	}
 
 	// a handed-off card: its closing answers, "land it after all" first
@@ -179,22 +178,5 @@ func TestWebEdgeDecisionsMatchTheTUI(t *testing.T) {
 	requirePickerRows(t, "multi-pick", picker, od.api)
 	if !od.api.Multi {
 		t.Error("a multi-pick question is served as single-pick")
-	}
-
-	// the chip: go is danger exactly when the terminal's enter will not
-	// give it (y is the key), and a spending go asks before it goes
-	for _, tc := range []struct {
-		name string
-		out  reentry.Outcome
-	}{
-		{"rewind", reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}}},
-		{"advance", reentry.Outcome{Action: reentry.Advance, Target: domain.StageImplement, Path: []domain.Stage{domain.StageImplement}}},
-	} {
-		p := &reentryReading{id: m.rows[3].F.ID, line: "go on", out: tc.out, goOnEnter: goOnEnter(tc.out)}
-		chip := m.webChipDecision(m.rows[3], p)
-		keys := ansi.Strip(chipKeys(m0Styles(), p.goOnEnter))
-		if got, yKey := chip.api.Options[0].Danger, strings.HasPrefix(keys, "y go"); got != yKey {
-			t.Errorf("%s: web go danger=%v but the terminal's keys read %q", tc.name, got, keys)
-		}
 	}
 }

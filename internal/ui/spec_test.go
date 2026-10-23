@@ -3,8 +3,6 @@ package ui
 import (
 	"context"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,11 +30,15 @@ func specWorkspace(t *testing.T) *Shell {
 	m, _ := newWorkspace(t)
 	m.now = func() time.Time { return fixedTime }
 	m.SetCopilotHint(false)
-	m = pump(t, m, m.Init())
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
-	m = typeString(t, m, "Dark mode")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	return m
+	// a retired workflow card, as an older board left it
+	f := &domain.Feature{
+		ID: "FD-001", Num: 1, Kind: domain.KindFeature, Title: "Dark mode", Slug: "dark-mode",
+		Stage: domain.StageTodo, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+	}
+	if err := m.store.CreateFeature(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	return pump(t, m, m.Init())
 }
 
 func TestSpecOpenCreatesDraftFromTemplate(t *testing.T) {
@@ -59,74 +61,6 @@ func TestSpecOpenCreatesDraftFromTemplate(t *testing.T) {
 	m = openSpecFor(t, m)
 	if m.spec.path == "" {
 		t.Fatal("reopen lost the spec path")
-	}
-}
-
-// depSpecShell builds a shell whose store has a feature at FD-001 with the
-// given dependencies, and returns a specView over that feature.
-func depSpecShell(t *testing.T, deps []domain.Feature) (*Shell, *specView) {
-	t.Helper()
-	m, _ := newWorkspace(t)
-	m.now = func() time.Time { return fixedTime }
-	ctx := context.Background()
-	f := &domain.Feature{
-		ID: "FD-001", Num: 1, Title: "dependent", Slug: "dependent",
-		Stage: domain.StagePlan, CreatedAt: fixedTime, UpdatedAt: fixedTime,
-	}
-	if err := m.store.CreateFeature(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	for _, d := range deps {
-		if err := m.store.CreateFeature(ctx, &d); err != nil {
-			t.Fatal(err)
-		}
-		if err := m.store.AddDependency(ctx, f.ID, d.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	content := "## Problem\nNeeds a dep.\n>\n> Depends on: static prose\n\n## Chosen approach\nBuild it.\n"
-	sv := &specView{f: *f, content: content, doc: spec.Parse(content), cursor: 1}
-	m.spec = sv
-	return m, sv
-}
-
-// TestSpecDependencyStatusGolden: each direct dependency renders with its
-// live status (ID, stage, done/pending), the static Depends-on prose is
-// gone from read mode, and an all-done line appears when all deps are done.
-func TestSpecDependencyStatusGolden(t *testing.T) {
-	pending := domain.Feature{
-		ID: "FD-002", Num: 2, Title: "pending", Slug: "pending",
-		Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime,
-	}
-	done := domain.Feature{
-		ID: "FD-003", Num: 3, Title: "done", Slug: "done",
-		Stage: domain.StageDone, CreatedAt: fixedTime, UpdatedAt: fixedTime,
-	}
-	m, sv := depSpecShell(t, []domain.Feature{pending, done})
-	out := stripANSI(sv.renderStatus(m, 90))
-	// the status header carries live per-dependency state; the doc's own
-	// static `> Depends on:` prose stays in the source body below it,
-	// where it is simply what the file says.
-	if strings.Contains(out, "static prose") {
-		t.Fatal("the header rendered the doc's static Depends-on prose:\n" + out)
-	}
-	if strings.Contains(out, "all dependencies done") {
-		t.Fatal("all-done line shown with a pending dep:\n" + out)
-	}
-	golden.RequireEqual(t, []byte(out))
-}
-
-// TestSpecDependencyStatusAllDone: every dependency done renders the
-// all-done line.
-func TestSpecDependencyStatusAllDone(t *testing.T) {
-	done := domain.Feature{
-		ID: "FD-002", Num: 2, Title: "done", Slug: "done",
-		Stage: domain.StageDone, CreatedAt: fixedTime, UpdatedAt: fixedTime,
-	}
-	m, sv := depSpecShell(t, []domain.Feature{done})
-	out := stripANSI(sv.renderStatus(m, 90))
-	if !strings.Contains(out, "all dependencies done") {
-		t.Fatalf("missing all-done line:\n%s", out)
 	}
 }
 
@@ -202,54 +136,6 @@ func TestSpecCommentFlow(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if strings.Contains(m.spec.content, "never saved") {
 		t.Fatal("cancelled comment was written")
-	}
-}
-
-func TestSpecPromotesToWorkspaceAtApproval(t *testing.T) {
-	m := specWorkspace(t)
-	// advance to the design stage, open the draft, annotate it
-	m = pressAdvance(t, m)
-	m = openSpecFor(t, m)
-	draftPath := m.spec.path
-	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
-	m = typeString(t, m, "keep me")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	// resolve it (an open user annotation blocks approval); the comment
-	// still travels with the migrated spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
-	m = typeString(t, m, "resolved — keeping it")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-
-	// cross the design gate → worktree + promoted spec
-	m = pressAdvance(t, m)
-	m = openSpecFor(t, m)
-	if m.spec.path == draftPath {
-		t.Fatalf("spec still reads the draft after approval: %s", m.spec.path)
-	}
-	if !strings.Contains(m.spec.path, filepath.Join(".gummi", "specs", "FD-001-dark-mode.md")) {
-		t.Fatalf("spec path not at its workspace home: %s", m.spec.path)
-	}
-	if strings.Contains(m.spec.path, filepath.Join(".gummi", "worktrees")) {
-		t.Fatalf("spec path leaked into the worktree: %s", m.spec.path)
-	}
-	// annotations travel with the promoted spec
-	if !strings.Contains(m.spec.content, "keep me") {
-		t.Fatal("draft annotations lost in promotion")
-	}
-	// the draft is retired
-	if _, err := os.Stat(draftPath); !os.IsNotExist(err) {
-		t.Fatal("draft still present after promotion")
-	}
-	// and nothing about the spec entered the feature branch: the worktree
-	// carries no .gummi content and no artifact commit
-	wtDir := filepath.Join(m.wt.Root(), ".gummi", "worktrees", "FD-001")
-	if _, err := os.Stat(filepath.Join(wtDir, ".gummi")); !os.IsNotExist(err) {
-		t.Fatalf(".gummi content present in the worktree: %v", err)
-	}
-	out, err := exec.CommandContext(context.Background(), "git", "-C", wtDir, "log", "--oneline").Output()
-	if err != nil || strings.Contains(string(out), "docs(spec)") {
-		t.Fatalf("artifact commit found on the branch: %v %q", err, out)
 	}
 }
 
@@ -582,46 +468,6 @@ func TestSpecResolveFirstOfTwoMarkers(t *testing.T) {
 	}
 }
 
-func TestSpecApproveFromSurface(t *testing.T) {
-	// A from the spec surface advances the gate exactly as board g does.
-	m := specWorkspace(t)
-	ctx := context.Background()
-	m = pressAdvance(t, m)
-	f, _ := m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StagePlan {
-		t.Fatalf("setup: feature at %s, want plan", f.Stage)
-	}
-	m = openSpecFor(t, m)
-	m = pressAdvance(t, m)
-	if m.spec != nil {
-		t.Fatal("g did not close the spec surface")
-	}
-	f, _ = m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StageImplement {
-		t.Errorf("A did not advance the gate: stage = %s, want implement", f.Stage)
-	}
-
-	// with an open @user marker the surface still closes but the gate
-	// stays shut and the blocking notice surfaces.
-	m2 := specWorkspace(t)
-	m2 = pressAdvance(t, m2)
-	m2 = openSpecFor(t, m2)
-	m2 = press(t, m2, tea.KeyPressMsg{Code: 'c', Text: "c"})
-	m2 = typeString(t, m2, "still open")
-	m2 = press(t, m2, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m2 = pressAdvance(t, m2)
-	if m2.spec != nil {
-		t.Fatal("A should close the surface even when blocked")
-	}
-	f2, _ := m2.store.GetFeature(ctx, "FD-001")
-	if f2.Stage != domain.StagePlan {
-		t.Errorf("open marker did not hold the gate: stage = %s, want plan", f2.Stage)
-	}
-	if !strings.Contains(m2.notice.text, "approval") || !strings.Contains(m2.notice.text, "x resolves one") {
-		t.Errorf("blocked notice = %q, want a blocking message naming x", m2.notice.text)
-	}
-}
-
 func TestSpecViewResolvedGolden(t *testing.T) {
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
@@ -649,7 +495,7 @@ func TestSpecBindingsAreOneTable(t *testing.T) {
 	}
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
-	for _, key := range []string{"c", "x", "n/p", "g", "R", "e"} {
+	for _, key := range []string{"c", "x", "n/p", "e"} {
 		if !has(m.spec.bindings(), key) {
 			t.Errorf("spec bindings missing %q: %+v", key, m.spec.bindings())
 		}
@@ -657,4 +503,11 @@ func TestSpecBindingsAreOneTable(t *testing.T) {
 	if has(m.spec.bindings(), "tab") {
 		t.Error("spec still binds tab — it cycles the tabs now")
 	}
+}
+
+// openSessionForm opens the new-session form, as n does.
+func openSessionForm(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	m.Overlay.Push(m.openCardForm())
+	return m
 }

@@ -26,12 +26,10 @@ func ParseLandMethod(s string) (LandMethod, error) {
 	return "", fmt.Errorf("unknown landing method %q (want %q or %q)", s, LandSquash, LandMerge)
 }
 
-// LandMethods lists the methods a local landing of f may use. A goal's
-// history is one commit per card under the goal's own merge commit, so a
-// card that belongs to a goal (or is one) lands as a squash only, and so
-// does a card a freeform session created, on the freeform branch.
+// LandMethods lists the methods a local landing of f may use. A card with a
+// parent session (a legacy delegated card) lands on the session's branch as a squash only.
 func (f *Feature) LandMethods() []LandMethod {
-	if f.IsGoal() || f.InGoal() || f.Delegated() {
+	if f.ParentID != "" {
 		return []LandMethod{LandSquash}
 	}
 	return []LandMethod{LandSquash, LandMerge}

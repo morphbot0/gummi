@@ -19,13 +19,21 @@ import (
 // turns — a hand-staged index under a running agent would fight its
 // commits — and every write runs under the card's lock.
 
-// treeBusy is why the tree may not be written now, "" when it may.
-func (d *WebDocs) treeBusy() string {
+// treeBusy is why the tree may not be written now, "" when it may: the
+// card's agent is mid-turn, another gummi drives it, or a workflow run's
+// step is working in a session's tree (Engine.WorkflowTreeBusy), which is
+// the session's own tree and so this card's.
+func (d *WebDocs) treeBusy(ctx context.Context) string {
 	switch {
 	case d.busy:
 		return "the agent is working in this tree — staging and committing wait until its turn ends"
 	case d.publish.watch:
 		return "another gummi is driving this card — work its tree from there"
+	}
+	if d.eng != nil && isRunSession(d.f) {
+		if why := d.eng.WorkflowTreeBusy(ctx, d.f.ID); why != "" {
+			return why + " — staging and committing wait until it ends, or stop the run"
+		}
 	}
 	return ""
 }
@@ -47,7 +55,7 @@ func (d *WebDocs) Tree(ctx context.Context) (webapi.Tree, error) {
 func (d *WebDocs) webTree(ctx context.Context, mgr *worktree.Manager, t worktree.Tree) webapi.Tree {
 	out := webapi.Tree{
 		Branch: t.Branch, Remote: t.Remote, Tracked: t.Tracked, Ahead: t.Ahead, Behind: t.Behind, Head: t.Head,
-		Why: d.treeBusy(), Signing: credentials.Current().Signing(), Remotes: []string{},
+		Why: d.treeBusy(ctx), Signing: credentials.Current().Signing(), Remotes: []string{},
 		Staged: webTreeFiles(t.Staged), Changes: webTreeFiles(t.Changes), Conflicts: webTreeFiles(t.Conflicts),
 		Stashes: make([]webapi.TreeStash, 0, len(t.Stashes)),
 	}
@@ -134,7 +142,7 @@ func hunkBodyLines(raw string, n int, idx []int) []int {
 // TreeWrite is POST /api/cards/{id}/tree: one write by person, under the
 // card's lock, answered with the tree as it now reads.
 func (d *WebDocs) TreeWrite(ctx context.Context, req webapi.TreeRequest, person string) (webapi.TreeResult, error) {
-	if why := d.treeBusy(); why != "" && req.Op != webapi.TreeFetch {
+	if why := d.treeBusy(ctx); why != "" && req.Op != webapi.TreeFetch {
 		return webapi.TreeResult{}, &conflictError{msg: why}
 	}
 	release, err := d.locks.Acquire(d.f.ID)

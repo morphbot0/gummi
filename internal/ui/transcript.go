@@ -10,7 +10,9 @@ package ui
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -32,9 +34,45 @@ import (
 // shows its output tail (the error is the point) and showOutput expands
 // every entry's full output.
 func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bool) []string {
+	return transcriptLinesWith(s, snap, w, showOutput, nil)
+}
+
+// timedBlock is a block of lines the transcript draws among its turns, at
+// the moment it belongs to: a workflow run's block, where it was proposed.
+type timedBlock struct {
+	at    time.Time
+	lines []string
+}
+
+// transcriptLinesWith is transcriptLines with blocks placed among the
+// turns where threadfold places a run (RunPlace, the one rule both faces
+// read): before the first turn written after it that is no part of an
+// activity row, at the top when it predates them all, after the last turn
+// when nothing came since. A run's own notes in the transcript are left
+// out: its block says all of them (threadfold.IsRunNote).
+func transcriptLinesWith(s *theme.Styles, snap engine.Snapshot, w int, showOutput bool, blocks []timedBlock) []string {
 	var lines []string
+	snap.Transcript = threadfold.WithoutRunNotes(snap.Transcript)
+	marks := threadfold.TranscriptMarks(snap.Transcript)
+	type placed struct {
+		at    int
+		lines []string
+	}
+	order := make([]placed, 0, len(blocks))
+	for _, b := range blocks {
+		order = append(order, placed{at: max(threadfold.RunPlace(marks, b.at), 0), lines: b.lines})
+	}
+	sort.SliceStable(order, func(i, j int) bool { return order[i].at < order[j].at })
+	k := 0
+	place := func(before int) {
+		for k < len(order) && order[k].at <= before {
+			lines = append(lines, order[k].lines...)
+			k++
+		}
+	}
 	for i := 0; i < len(snap.Transcript); i++ {
 		msg := snap.Transcript[i]
+		place(i)
 		// everything the agent did between two messages is one summary row
 		// until alt+o expands it; expanded, each entry renders as below.
 		if isActivityMsg(msg) && !showOutput {
@@ -80,9 +118,17 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		switch msg.Author {
 		case engine.AuthorUser:
 			label = s.KeyHint.Render("you")
-			if threadfold.TurnBy(msg.By) == "gummi" {
+			switch threadfold.TurnBy(msg.By) {
+			case "gummi":
 				// a turn gummi sent for the session's objective, never the person's
 				label = s.Faint.Render("gummi · objective")
+			case "workflow":
+				// a workflow run's turn — the report a session gets, a
+				// step's brief — never the person's
+				label = s.Faint.Render("workflow")
+			case "crew":
+				// an old crew reporting back, never the person's
+				label = s.Faint.Render("crew · report")
 			}
 			// EVERY answer to an ask carries its outcome, not just the
 			// happy one. The suffix used to appear only for a clean
@@ -133,6 +179,7 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		}
 		lines = append(lines, "")
 	}
+	place(len(snap.Transcript))
 	lines = append(lines, taskLines(s, snap.Tasks, w)...)
 	lines = append(lines, watchLines(s, snap.Watches, w)...)
 	lines = append(lines, objectiveLines(s, snap.Objective, w)...)

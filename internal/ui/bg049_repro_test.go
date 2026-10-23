@@ -31,7 +31,7 @@ func TestBG049ReproMastheadDropsBudgetBeforeTitle(t *testing.T) {
 // outright here, even though the badges alone fit the row's width with
 // room to spare.
 func TestBG049ReproMastheadHeightTrimDropsBudget(t *testing.T) {
-	m := reviewGateWorkspace(t)
+	m := askWorkspace(t)
 	m.rows[m.sel].F.Profile = "" // isolate the case from profile-tag shedding
 	out := ansi.Strip(m.threadView(61, 7))
 	if !strings.Contains(out, "$20.00") {

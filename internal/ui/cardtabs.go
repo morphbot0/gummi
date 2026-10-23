@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -90,11 +88,25 @@ func cardHasDiff(r featureRow) bool {
 	return r.F.Kind != domain.KindResearch && r.F.Stage != domain.StageTodo
 }
 
+// cardHasSessionSpec reports whether this card is a session with a spec
+// to open: a card hasSessionSpec may keep (websessionspec.go — freeform,
+// no session's hidden child, no home) whose spec file actually
+// exists on disk. The tab bar, alt+s (here and shell.go's board-level
+// key) and cardActionsFor's "open document" entry all call this one
+// predicate, so they cannot disagree about whether a session has a spec
+// to show. The file's existence is resolved once at load (loadRows, the
+// same point HasWorktree is), never stat'd again on the render path.
+func cardHasSessionSpec(r featureRow) bool {
+	return hasSessionSpec(r.F) && r.HasSessionSpec
+}
+
 // cardHasArtifact reports whether the card has a document for the
-// artifact tab to open. Every kind does but one: a freeform card's record
-// is its thread (DESIGN §19), so Kind.ArtifactNoun is empty for it and the
-// tab would render as a nameless label opening nothing.
-func cardHasArtifact(r featureRow) bool { return artifactNoun(r.F.Kind) != "" }
+// artifact tab to open. Every workflow kind but freeform does by
+// definition: Kind.ArtifactNoun is empty for freeform (DESIGN §19), so a
+// freeform card's own document is its session spec, when it has one.
+func cardHasArtifact(r featureRow) bool {
+	return artifactNoun(r.F.Kind) != "" || cardHasSessionSpec(r)
+}
 
 // cardTabBar renders the bar. The active tab is titled, the others are
 // muted and wear their chord, so the row teaches the keys instead of
@@ -129,7 +141,12 @@ func (m *Shell) cardTabBar(active cardTab, w int) string {
 			// the label is the interface, so it takes the card's own noun
 			// for its document — a bug card's page calling it a "spec"
 			// names the document by a word appearing nowhere else on it.
+			// A session has no noun of its own (Kind.ArtifactNoun is empty
+			// for freeform): its document is its spec.
 			name = artifactNoun(r.F.Kind)
+			if name == "" {
+				name = "spec"
+			}
 		}
 		if t == active {
 			out += s.PaneTitleActive.Render(name)
@@ -180,9 +197,9 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 	case cardTabArtifact:
 		if !cardHasArtifact(r) {
 			// the bar does not draw the tab for such a card, so the chord
-			// says why rather than mounting a view onto no document — the
-			// same contract the diff and stats chords keep below.
-			m.notice = noticeMsg{text: r.F.Name() + ": a freeform card has no document — its thread is the record"}
+			// says why rather than mounting a view onto nothing — the same
+			// contract the diff and stats chords keep below.
+			m.notice = noticeMsg{text: r.F.Name() + ": " + noArtifactReason(r)}
 			return nil, true
 		}
 		m.diff, m.stats, m.logv = nil, nil, nil
@@ -219,113 +236,16 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// cardCitationKey answers alt+1..alt+9 — the citation chords.
-//
-// It lives beside cardTabKey and is called from the same places for the
-// same reason: the chords must work from all three surfaces, or a
-// citation opened from the thread would be unopenable from the artifact
-// it just landed on. The digit is the number printed in the narration,
-// so a card with fewer citations than that simply does not answer —
-// silently, because an unmarked number is not a key the reader was
-// offered.
-func (m *Shell) cardCitationKey(key string) (tea.Cmd, bool) {
-	n, ok := citationChord(key)
-	if !ok {
-		return nil, false
+// noArtifactReason says why the artifact tab draws nothing for this
+// card: a session hasSessionSpec may keep, but has not started one
+// (most never need one; a workflow run does), reads differently from an agent —
+// a main-checkout card with no document at all, its record is its
+// thread and nothing else.
+func noArtifactReason(r featureRow) string {
+	if hasSessionSpec(r.F) {
+		return "it has no spec yet — most sessions never need one; a workflow run does"
 	}
-	r, ok := m.selected()
-	if !ok {
-		return nil, false
-	}
-	// Events is populated for the selected card only, lazily, and on a
-	// COPY of the row — threadView does it at thread.go's render and
-	// nothing writes it back to m.rows. So a row straight out of
-	// m.selected() carries an empty Events slice, and every event citation
-	// resolved against nothing: scrollThreadToEvent walked an empty list,
-	// found no stretch opening at the cited seq and answered "nothing on
-	// this page opens at that citation" — including when the status bar
-	// itself was advertising "alt+a open cited" (round 3 §2.2).
-	//
-	// The mark is generated from m.cardEvents (narration.go's
-	// unattendedClaim reads the cache directly), so resolving against the
-	// same cache is what makes the printed mark and the key agree —
-	// narration.go's invariant 3, which was true of the generator and
-	// false of the opener.
-	r.Events = m.cardEvents[r.F.ID]
-	cmd := m.openCitation(r, n)
-	// Answered either way: the chord belongs to this tier, and letting an
-	// unmatched one fall through would type an alt-digit into the
-	// composer instead of doing nothing.
-	return cmd, true
-}
-
-// reservedChords are the card page's alt letters that mean something
-// else: the three tabs, the card step, and the tool-output toggle. A
-// citation must not be able to name one of them.
-//
-// The tab tier is answered before the citation tier, so an overlap would
-// today be harmless — the tab would simply win. That is exactly why it
-// is excluded here instead: a collision saved only by the ORDER of two
-// handlers is a bug waiting for someone to reorder them, and it would
-// present as a mark the reader can see and cannot open.
-const reservedChords = "tsdjkorl"
-
-// citationLetters are the marks, in order: the first nine letters that
-// are not reserved.
-//
-// LETTERS, not digits, and not alt+digits either — the alt+digits are
-// the shell's own board/stats/inbox tabs, answered above this
-// tier, so a numbered chord would switch tab instead of opening a
-// citation. Footnote letters are the convention anyway, and this leaves
-// the whole digit row to the picker (F14).
-var citationLetters = firstFreeLetters(9)
-
-// firstFreeLetters takes n letters from the alphabet, skipping the
-// reserved chords.
-func firstFreeLetters(n int) string {
-	var out []byte
-	for c := byte('a'); c <= 'z' && len(out) < n; c++ {
-		if strings.IndexByte(reservedChords, c) < 0 {
-			out = append(out, c)
-		}
-	}
-	return string(out)
-}
-
-// citationMark is the mark printed beside claim n (1-based), including
-// the key that opens it.
-func citationMark(n int) string {
-	if n < 1 || n > len(citationLetters) {
-		return ""
-	}
-	return "alt+" + string(citationLetters[n-1])
-}
-
-// citationRange spells the chord range for n citations — "a" for one,
-// "a/b" for two, "a-d" beyond that — so the bar names keys that exist
-// rather than a range with dead letters in it.
-func citationRange(n int) string {
-	n = min(n, len(citationLetters))
-	switch {
-	case n <= 1:
-		return "a"
-	case n == 2:
-		return "a/b"
-	default:
-		return "a-" + string(citationLetters[n-1])
-	}
-}
-
-// citationChord reads alt+<letter> into the 1-based citation number.
-func citationChord(key string) (int, bool) {
-	rest, ok := strings.CutPrefix(key, "alt+")
-	if !ok || len(rest) != 1 {
-		return 0, false
-	}
-	if i := strings.IndexByte(citationLetters, rest[0]); i >= 0 {
-		return i + 1, true
-	}
-	return 0, false
+	return "a freeform card has no document — its thread is the record"
 }
 
 // cardTabFor resolves a chord to its tab.
@@ -365,31 +285,17 @@ func noDiffReason(r featureRow) string {
 func (m *Shell) cardTabBindings() []binding {
 	var bs []binding
 	r, haveCard := m.selected()
-	// The citation chords lead the tier, and the order is the point: the
-	// bar sheds hints from the second-to-last backwards, so whatever is
-	// earliest here outlives the rest of the tier. alt+t/s/d are already
-	// printed on screen by the tab bar itself, and this chord is printed
-	// nowhere but the marks it opens — so it is the one of the four
-	// worth keeping when the bar runs out of room.
-	//
-	// Listed only when the narration actually prints marks: a key table
-	// naming alt+1 above a paragraph with no [alt+1] in it is the same
-	// drift the diff row's own filter exists to prevent.
-	if haveCard {
-		if n := len(citedClaims(m.cardNarration(m.nextInputFor(r), r))); n > 0 {
-			bs = append(bs, binding{
-				key: "alt+" + citationRange(n), label: "open cited",
-				help: "open what a numbered claim above cites — the check, the hunk, the section, or the moment in the thread",
-				bar:  true,
-			})
-		}
-	}
 	bs = append(bs,
 		binding{key: "alt+t", label: "thread", help: "the card's conversation — where you answer the decision"},
-		binding{key: "alt+s", label: "artifact", help: "the document the stage wrote — comment, resolve and approve in place"},
+		binding{key: "alt+s", label: "artifact", help: "the document the stage wrote, or a session's own spec — comment, resolve and approve in place"},
 	)
-	if haveCard {
+	switch {
+	case haveCard && cardHasSessionSpec(r):
+		bs[len(bs)-1].help = "the session's spec — comment, resolve or edit it; each write is a revision"
+	case haveCard && artifactNoun(r.F.Kind) != "":
 		bs[len(bs)-1].help = "the " + artifactNoun(r.F.Kind) + " — comment, resolve and approve in place"
+	case haveCard && hasSessionSpec(r.F):
+		bs[len(bs)-1].help = "a session's own spec, once it has one — most never need one"
 	}
 	if !haveCard || cardHasDiff(r) {
 		bs = append(bs, binding{key: "alt+d", label: "diff", help: "the card's diff — comment, resolve and approve in place"})

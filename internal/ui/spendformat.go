@@ -94,12 +94,7 @@ func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 		return 0
 	}
 	live := 0.0
-	if s := m.engine.Get(id); s != nil {
-		live = s.CardSpent()
-	} else if ff := m.engine.Freeform(id); ff != nil {
-		// a freeform card's session is not a stage session: without this
-		// its row kept the spend of its last reload while its agent kept
-		// working
+	if ff := m.engine.Freeform(id); ff != nil {
 		live = ff.CardSpent()
 	}
 	if r, ok := m.rowByID(id); ok && r.F.Spend.CreditEquivalent() >= live {
@@ -108,18 +103,14 @@ func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 	return live
 }
 
-// liveCardContext returns the context-window occupancy of whichever
-// session is live on id — a stage session or, for a freeform card, its
-// one long-running session — or the zero value when none is live or the
+// liveCardContext returns the context-window occupancy of the session
+// live on id, or the zero value when none is live or the
 // backend never reported one. Unlike liveCardSpent there is no stored
 // fallback: context occupancy is never persisted to a board row, only
 // ever a fact of the session currently holding it.
 func (m *Shell) liveCardContext(id domain.FeatureID) agent.Context {
 	if m.engine == nil {
 		return agent.Context{}
-	}
-	if s := m.engine.Get(id); s != nil {
-		return s.Snapshot().Context
 	}
 	if ff := m.engine.Freeform(id); ff != nil {
 		return ff.Snapshot().Context

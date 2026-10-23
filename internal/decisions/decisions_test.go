@@ -109,16 +109,6 @@ func TestAnswerText(t *testing.T) {
 	}
 }
 
-func TestGateAnswerCrosses(t *testing.T) {
-	gate := &engine.Ask{Gate: true}
-	if !GateAnswerCrosses(gate, engine.GateAdvanceLabel) {
-		t.Error("the gate's advance option did not cross")
-	}
-	if GateAnswerCrosses(gate, "not yet") || GateAnswerCrosses(&engine.Ask{}, engine.GateAdvanceLabel) || GateAnswerCrosses(nil, engine.GateAdvanceLabel) {
-		t.Error("something other than a gate ask's advance option crossed")
-	}
-}
-
 // TestDecisionPermissionRanksWithAsk: a guarded tool call's decision rides
 // the ask lane — it ranks where an ask ranks, and its options are
 // gummi's own approve/deny wording, with the free-form row after them
@@ -155,10 +145,5 @@ func TestDecisionPermissionRanksWithAsk(t *testing.T) {
 	lane, escalated, ok := Attention(string(state.DecisionKindAsk))
 	if !ok || lane != LaneQuestion || escalated {
 		t.Errorf("Attention = (%v, %v, %v), want the question lane", lane, escalated, ok)
-	}
-	// a gate ask and a permission can be told apart: a permission is
-	// never a gate crossing
-	if GateAnswerCrosses(ask, engine.PermissionApproveLabel) {
-		t.Error("an approve ruling crossed a gate")
 	}
 }

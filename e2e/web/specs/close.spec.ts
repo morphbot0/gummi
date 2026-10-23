@@ -1,7 +1,7 @@
 import { expect, ref, test } from '../fixtures/test';
 
 let id = '';
-test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a parting helper'); } } });
+test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a parting helper'); } } });
 
 // /close is hand-off typed: the board asks its own yes/no first, and the
 // yes sends the same line again with the question's token.

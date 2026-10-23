@@ -9,7 +9,6 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/livelog"
 )
 
@@ -37,10 +36,6 @@ const (
 	// EventQuestion fires when the agent asks the user a question via the
 	// ask_user client tool (Snapshot.PendingAsk populated).
 	EventQuestion EventKind = "question"
-	// EventBriefReady fires when a freeform card's handoff brief turn has
-	// ended, answered or not: a dialog waiting on it reads the brief in, and
-	// a person who has walked away is told it is ready.
-	EventBriefReady EventKind = "brief_ready"
 	// EventAnnotations fires when the agent resolves a diff review comment
 	// via the resolve_annotation client tool — an open diff surface should
 	// re-read its annotations so the open-count burns down live.
@@ -54,14 +49,11 @@ const (
 	// the session machinery — a goal's lead — so no other Event would
 	// ever cover it. A UI surface should reload rows.
 	EventCardCreated EventKind = "card_created"
-	// EventDelegateCreated fires when a freeform session created a card
-	// under its delegation (Feature is the new card). The driving loop
-	// starts it on autopilot, the way a goal's start does for its cards.
-	EventDelegateCreated EventKind = "delegate_created"
-	// EventGoal asks the driving loop to tick a goal (Feature is the goal):
-	// it has work to conduct — it just entered implement, you added a note,
-	// it was sent back or stopped.
-	EventGoal EventKind = "goal"
+	// EventWorkflow fires when something a workflow run's conductor reads
+	// changed: a step's turn ended, a decision was answered, a run was
+	// proposed or allowed. The driving loop ticks the runs on it
+	// (Engine.WorkflowTick).
+	EventWorkflow EventKind = "workflow"
 )
 
 // Event is one item in the engine's UI-facing stream.
@@ -222,42 +214,13 @@ func (s *Session) generation() string {
 	return strconv.FormatInt(s.startedAt.UnixNano(), 10)
 }
 
-// The verdict floor's kinds: which deterministic floor holds a session's
-// one floor slot. Recorded beside the floor and its reason because the
-// reason string alone cannot say what re-derives the block — and one
-// kind can. The promise floor re-reads the artifact it cited, so a plan
-// corrected after the stamp clears the overrule at the next read
-// instead of holding the card for a full verify re-run; the others are
-// facts about a moment (a check that failed, a probe that probed,
-// a document as it stood) and keep their semantics.
-const (
-	// FloorOmission: a bug's verify passed without exercising any [env:]
-	// live check while a prerequisite probed present.
-	FloorOmission = "env-omission"
-	// FloorChecks: a live gummi-check failed during the verify run.
-	FloorChecks = "checks"
-	// FloorHygiene: the branch ships a build artifact (diff hygiene).
-	FloorHygiene = "hygiene"
-	// FloorPromise: a promise the plan made — an invariant verify never
-	// answered, or a golden pinned by nothing on the branch — is unmet.
-	FloorPromise = "promise"
-	// FloorDocument: the research document floor failed.
-	FloorDocument = "document"
-)
-
 // Snapshot is an immutable view of a session's state, safe to render.
 type Snapshot struct {
 	Feature     domain.Feature
 	Role        agent.Role
 	Interactive bool
-	Critique    bool // this is a plan-critique pass, not the plan writer
-	Rebase      bool // this is a rebase-resolve pass, not the stage's work
-	// ReplacedRunning: this rebase pass replaced a stage session that
-	// was still mid-turn — the hand-off interrupted it. False on every
-	// other session, including a rebase dispatched over a parked card.
-	ReplacedRunning bool
-	State           SessionState
-	AgentName       string // backend running this session ("copilot", "opencode", …)
+	State       SessionState
+	AgentName   string // backend running this session ("copilot", "opencode", …)
 	// AgentSessionID is the backend's own session id (agent.Identified),
 	// pointing at its on-disk log; empty for backends without one.
 	AgentSessionID string
@@ -271,30 +234,16 @@ type Snapshot struct {
 	Queued         []string      // a freeform card's lines waiting for the turn in flight
 	Watches        []string      // a freeform card's running gummi watches, "w1 · command"
 	Busy           bool          // agent is mid-turn
-	// Briefing is true while gummi's own handoff-brief turn is in flight
-	// on a freeform card (freeformhandoff.go): the busy word names what is
-	// happening rather than the bare "working".
-	Briefing bool
 	// Objective is a freeform card's objective (DESIGN §19.11), nil when
 	// it has none; Auditing is true while its audit runs between turns.
-	Objective          *domain.Objective
-	Auditing           bool
-	PendingAsk         *Ask   // the agent's open ask_user question, if any
-	Verdict            string // review verdict via submit_verdict, if submitted
-	VerdictFloor       string // deterministic ceiling applied before returning the stage verdict
-	VerdictFloorReason string // human-readable reason for the floor, if any
-	// VerdictFloorKind names which floor holds the slot (FloorPromise,
-	// FloorOmission, …). It is what lets a reader tell a floor it can
-	// re-derive from the one it read at the idle the stage ended: a
-	// promise floor re-runs against the artifact on read, so correcting
-	// the plan clears the overrule without a new verify session.
-	VerdictFloorKind string
+	Objective  *domain.Objective
+	Auditing   bool
+	PendingAsk *Ask // the agent's open ask_user question, if any
 	// Exhausted is true when this session stopped because the card's
 	// envelope ran out, not because it finished. Both states persist as
 	// StateDone, and only this tells them apart.
 	Exhausted bool
 	Err       error
-	EnvProbes []envprobe.Result
 	// StartedAt is the session's construction time, carried here as its
 	// identity. A stage hosts several sessions in turn — the writer, its
 	// critique, each replan round — and a reader that tracks a position
@@ -308,46 +257,7 @@ type Session struct {
 	Feature     domain.Feature
 	Role        agent.Role
 	Interactive bool
-	// Critique marks the plan-critique pass: a second, fresh-context
-	// session on the Plan stage that reviews the written plan (role:
-	// reviewer) instead of writing it. Set at construction, immutable.
-	Critique bool
-	// Rebase marks the rebase-resolve pass: an implementer session that
-	// rebases the branch onto main and resolves the conflicts, borrowing
-	// the current stage without doing its work. Set at construction,
-	// immutable.
-	Rebase bool
-	// ReplacedRunning marks a rebase pass that was dispatched over a
-	// stage session still mid-turn: the hand-off interrupted that run
-	// (Engine.run's replacement path) rather than waiting for it to
-	// drain. Set at construction, immutable. Settlement reads it to
-	// re-run the stage the interrupt stopped — a rebase dispatched on a
-	// parked card leaves nothing to re-run.
-	ReplacedRunning bool
-	// ReadOnly marks an autonomous research pass (investigate,
-	// review-of-research) that must never mutate the main checkout. Set at
-	// construction from researchReadOnly, immutable. The engine uses it to
-	// refuse mutating client tools (spec_replace_section, spec_annotate)
-	// even when a hand-crafted MCP call names them.
-	ReadOnly bool
 
-	// kickoffNote is extra content appended to an autonomous run's stage
-	// kickoff — the user's review comments delivered via RunWith. Set at
-	// construction, immutable after (like Feature/Role).
-	kickoffNote string
-	// answerForNextRun is an answer this stage's run could not take: the
-	// run stopped on its budget with its question up, and the person
-	// answered it there. Running the stage again is the top-up's call,
-	// not the answer's, so the exchange waits here and rides the kickoff
-	// of the next run of the same stage and pass (Engine.run). Written
-	// under s.mu.
-	answerForNextRun string
-	// specComments is the artifact's open user comments, compiled when a
-	// stage writer's run starts (Engine.openSpecComments) and appended to
-	// its kickoff. Kept apart from kickoffNote so a restart re-reads the
-	// artifact instead of replaying a stale list. Set before the kickoff
-	// is sent, never after.
-	specComments string
 	// startedAt is when this session generation began. It is the
 	// discriminator that keeps mirrored events unique per generation:
 	// a stage that re-runs (a review bounce, a resumed card) gets a
@@ -368,7 +278,7 @@ type Session struct {
 	agentName      string        // backend identity, for display
 	agentSessionID string        // backend session id (agent.Identified), "" if none
 	model          string        // model resolved at spawn
-	specPath       string        // resolved spec/draft path (for ask_user capture)
+	specPath       string        // a retired stage's spec path; a session's specs resolve per call (specTarget)
 	state          SessionState
 	transcript     []Message
 	// streamOpen and streamIdx name the transcript entry that is
@@ -405,9 +315,7 @@ type Session struct {
 	ctxPeak    agent.Context
 	busy       bool
 	pendingAsk *Ask
-	verdict    string // review verdict from submit_verdict ("pass"/"changes")
 	err        error
-	stopped    bool
 	finalized  bool // stopped; must not be persisted (may be dropped)
 
 	budget     float64 // stage credit budget (0 = none)
@@ -422,12 +330,9 @@ type Session struct {
 	// (a consult, which books its spend against the same feature) moves
 	// the row without moving this, so the figure can sit that much low
 	// until the next reload; it is never high.
-	cardSpent    float64
-	threshold    int    // highest budget threshold crossed (%)
-	pendingNudge string // budget nudge awaiting the next sent turn
-	exhausted    bool   // hit the credit cap
-	clientTools  bool   // resolved backend's ClientTools capability (spawn-time cache)
-	failing      toolFailStreak
+	cardSpent   float64
+	exhausted   bool // hit the credit cap
+	clientTools bool // resolved backend's ClientTools capability (spawn-time cache)
 
 	// cardUnlock retires this session's hold on the workspace's per-card
 	// lock (state.CardLocks), taken before the session was created so a
@@ -443,36 +348,6 @@ type Session struct {
 	// no call site branches on it. Emits are non-blocking channel sends,
 	// so holding s.mu across one costs nothing the UI can feel.
 	live *livelog.Writer
-
-	// envProbes holds the most recent env prerequisite probe results for
-	// this session, produced at Verify kickoff and surfaced on Snapshot.
-	envProbes []envprobe.Result
-
-	// verdictFloor is a deterministic ceiling applied to the raw agent
-	// verdict. Several floors share the one slot, last writer wins at the
-	// verify idle: a live check failure (FloorChecks), a shipped build
-	// artifact (FloorHygiene), a bug whose Verify finish omitted every
-	// [env:] live check while a prerequisite probed present
-	// (FloorOmission), an unmet plan promise (FloorPromise), and a
-	// research document failing its floor (FloorDocument). They only ever
-	// downgrade — Pass -> Blocked, or either -> Fail — and the downgrade
-	// itself happens in verdict.SessionVerdict from the stamped floor.
-	verdictFloor       string
-	verdictFloorKind   string
-	verdictFloorReason string
-	// The promise floor's re-check bookkeeping, cached at stamp time so
-	// the read path can re-run the check without re-entering locate or
-	// the worktree manager: where the branch and the artifact live, and
-	// the artifact's mtime+size signature as of the last check. An
-	// unchanged signature serves a read as-is with no grep; a changed one
-	// re-checks once and records the new signature. All three are cleared
-	// by any other stamper (the slot is one) and left empty for floors
-	// that never re-check. A session restored from persistence has the
-	// paths re-armed by Restore and no signature, so its first read
-	// re-checks once, then follows the guard.
-	verdictFloorWorkDir  string
-	verdictFloorSpecPath string
-	verdictFloorSig      string
 
 	// mcpTeardown releases the session's MCP inbound endpoint (closes the
 	// listener, joins its goroutines, removes the socket file) exactly
@@ -507,141 +382,38 @@ type Session struct {
 }
 
 // Snapshot returns a render-safe copy of the session's state.
-//
-// A promise-floor stamp is re-checked here, on the read path. The floor
-// stamps once, at the idle that ends the stage, and nothing else in a
-// live session ever revisits that verdict — so a plan corrected after
-// the stamp stayed blocked until a fresh verify session ran, even though
-// the condition is a pure read of the artifact and the branch. The check
-// runs only when the artifact's signature has moved since the last check
-// (a still-unmet card never greps per frame), runs outside s.mu — a git
-// grep has no business under the session lock — and takes a short write
-// afterwards that clears the stamp only if it still holds: a stamper
-// that fired meanwhile wins.
 func (s *Session) Snapshot() Snapshot {
 	s.mu.Lock()
-	re := s.promiseRecheckArmedLocked()
-	snap := s.snapshotLocked()
-	s.mu.Unlock()
-	if re != nil {
-		s.settlePromiseFloor(re, &snap)
-	}
-	return snap
+	defer s.mu.Unlock()
+	return s.snapshotLocked()
 }
 
 // snapshotLocked is the render-safe copy itself, taken with s.mu held.
 func (s *Session) snapshotLocked() Snapshot {
 	return Snapshot{
-		Feature:            s.Feature,
-		Role:               s.Role,
-		Interactive:        s.Interactive,
-		Critique:           s.Critique,
-		Rebase:             s.Rebase,
-		ReplacedRunning:    s.ReplacedRunning,
-		State:              s.state,
-		AgentName:          s.agentName,
-		AgentSessionID:     s.agentSessionID,
-		Model:              s.model,
-		Transcript:         append([]Message(nil), s.transcript...),
-		Activity:           append([]string(nil), s.activity...),
-		Spend:              s.spend,
-		SpentCredits:       s.spentForBudgetLocked(),
-		Context:            s.context,
-		Tasks:              s.tasksLocked(),
-		Busy:               s.busy,
-		PendingAsk:         s.pendingAsk,
-		Verdict:            s.verdict,
-		VerdictFloor:       s.verdictFloor,
-		VerdictFloorKind:   s.verdictFloorKind,
-		VerdictFloorReason: s.verdictFloorReason,
-		Exhausted:          s.exhausted,
-		Err:                s.err,
-		EnvProbes:          append([]envprobe.Result(nil), s.envProbes...),
-		StartedAt:          s.startedAt,
+		Feature:        s.Feature,
+		Role:           s.Role,
+		Interactive:    s.Interactive,
+		State:          s.state,
+		AgentName:      s.agentName,
+		AgentSessionID: s.agentSessionID,
+		Model:          s.model,
+		Transcript:     append([]Message(nil), s.transcript...),
+		Activity:       append([]string(nil), s.activity...),
+		Spend:          s.spend,
+		SpentCredits:   s.spentForBudgetLocked(),
+		Context:        s.context,
+		Tasks:          s.tasksLocked(),
+		Busy:           s.busy,
+		PendingAsk:     s.pendingAsk,
+		Exhausted:      s.exhausted,
+		Err:            s.err,
+		StartedAt:      s.startedAt,
 	}
-}
-
-// settlePromiseFloor applies one read-path re-check: it runs the bounded
-// promises check against the paths cached at stamp time, then takes a
-// short write that records the new signature and either lifts the stamp
-// (the promises now check out — and the env-omission floor is re-derived
-// before settling, so a clear does not erase a block that still holds)
-// or refreshes the reason to what the artifact now says. A read error is
-// no opinion and keeps the stamp. The copy is patched to the post-check
-// state, so the read that did the work reports it.
-func (s *Session) settlePromiseFloor(re *promiseRecheck, snap *Snapshot) {
-	rep, ok := runPromiseRecheck(re)
-	s.mu.Lock()
-	cleared := false
-	if s.verdictFloorKind == FloorPromise && s.verdictFloor == "blocked" &&
-		s.verdictFloorReason == re.reason {
-		// nobody re-stamped the slot while the check ran; a concurrent
-		// stamper's reason would differ from the one checked here
-		s.verdictFloorSig = artifactSignature(re.specPath)
-		if ok && !rep.blocks() {
-			s.verdictFloor, s.verdictFloorReason, s.verdictFloorKind = "", "", ""
-			s.verdictFloorWorkDir, s.verdictFloorSpecPath, s.verdictFloorSig = "", "", ""
-			cleared = true
-		} else if ok {
-			s.verdictFloorReason = rep.reason()
-		}
-	}
-	s.patchFloorFields(snap)
-	s.mu.Unlock()
-	if !cleared {
-		return
-	}
-	s.appendActivity(promiseFloorLiftedLine)
-	// Re-derive the omission floor before settling: the floor is one slot
-	// and the stampers are last-writer-wins at the same verify idle, so
-	// the promise stamp may have been sitting on top of an env-omission
-	// block that still holds. Re-derived from the session's env probes and
-	// one read of the artifact — no grep — and nothing lands unsafe either
-	// way: the omission gate re-reads at Advance.
-	reStampOmissionFloor(s, re.specPath)
-	s.mu.Lock()
-	s.patchFloorFields(snap)
-	s.mu.Unlock()
-}
-
-// patchFloorFields copies the session's current floor fields — and the
-// activity feed, which a lift appends to — onto a snapshot built before
-// the floor's state settled. Caller holds s.mu.
-func (s *Session) patchFloorFields(snap *Snapshot) {
-	snap.VerdictFloor = s.verdictFloor
-	snap.VerdictFloorKind = s.verdictFloorKind
-	snap.VerdictFloorReason = s.verdictFloorReason
-	snap.Activity = append([]string(nil), s.activity...)
-}
-
-// kickoffMessage returns the autonomous stage kickoff, with the user's
-// review comments appended when this run carries them (RunWith, or the
-// artifact's open comments on a stage writer's run). A
-// rebase session opens with its own go-ahead; its note carries the
-// rebase target and expected conflicts (RunRebase).
-func (s *Session) kickoffMessage() string {
-	base := kickoff(s.Feature.Kind)
-	if s.Rebase {
-		base = rebaseKickoff
-	}
-	for _, extra := range []string{s.kickoffNote, s.specComments} {
-		// RunWith from the spec view carries the same compiled list the
-		// artifact yields: say it once.
-		if extra != "" && !strings.Contains(base, extra) {
-			base += "\n\n" + extra
-		}
-	}
-	return base
 }
 
 // flavor recovers which autonomous pass this session runs (see runFlavor).
 func (s *Session) flavor() runFlavor {
-	switch {
-	case s.Critique:
-		return flavorCritique
-	case s.Rebase:
-		return flavorRebase
-	}
 	return flavorStage
 }
 
@@ -723,35 +495,18 @@ func (s *Session) attachAgent(a agent.Session) bool {
 
 // setAgentSessionID restores a persisted backend session id (Restore
 // has no live agent to ask).
-func (s *Session) setAgentSessionID(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.agentSessionID = id
-}
-
-// clearAgent nils the stale agent handle stop() leaves behind (Live's own
-// doc comment: "Pause leaves agentSess non-nil after closing the
-// backend"). Without this, Attach's reuse check (prior.agent() != nil)
-// mistakes a just-paused, already-closed session for one still worth
-// reusing, and hands the caller a session whose backend is gone.
+// clearAgent drops the session's backend handle: the shape a session has
+// once its backend is gone (a restore, an idle-out).
 func (s *Session) clearAgent() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agentSess = nil
 }
 
-// finishRunning atomically marks a running autonomous turn done, reporting
-// whether it did (false if the session was paused or stopped meanwhile).
-// Doing the check-and-set under one lock stops a racing Pause from being
-// silently overwritten by the completing turn.
-func (s *Session) finishRunning() bool {
+func (s *Session) setAgentSessionID(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.state != StateRunning {
-		return false
-	}
-	s.state = StateDone
-	return true
+	s.agentSessionID = id
 }
 
 func (s *Session) appendUser(text, by string) {
@@ -990,11 +745,10 @@ func (s *Session) openWatch(since time.Time) bool {
 // resolveToolResult attaches a backend-reported outcome to the pending
 // AuthorTool entry with the matching call id. Unknown ids are dropped
 // (a result for a call gummi never displayed, e.g. one from before a
-// restart). It returns the resolved call's tool and argument, both empty
-// when nothing matched.
-func (s *Session) resolveToolResult(callID string, ok bool, output string) (tool, detail string) {
+// restart).
+func (s *Session) resolveToolResult(callID string, ok bool, output string) {
 	if callID == "" {
-		return "", ""
+		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1010,9 +764,8 @@ func (s *Session) resolveToolResult(callID string, ok bool, output string) (tool
 		}
 		s.transcript[i].ToolOutput = output
 		s.live.Emit(livelog.Record{Kind: livelog.KindResult, Call: callID, OK: ok, Output: output})
-		return s.transcript[i].Tool, s.transcript[i].Detail
+		return
 	}
-	return "", ""
 }
 
 func (s *Session) addSpend(u agent.Usage) {
@@ -1048,37 +801,6 @@ func (s *Session) setContext(c agent.Context) {
 	}
 }
 
-// contextPeak reports the session's high-water context occupancy.
-func (s *Session) contextPeak() agent.Context {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ctxPeak
-}
-
-// crossedThreshold returns the highest new budget threshold this
-// session's spend has crossed since the last call (0 if none), and the
-// current spent credits. Advances the recorded threshold so each is
-// reported once.
-func (s *Session) crossedThreshold() (pct int, spent float64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	spent = s.spentForBudgetLocked()
-	if s.budget <= 0 {
-		return 0, spent
-	}
-	frac := spent / s.budget * 100
-	crossed := 0
-	for _, t := range budgetThresholds {
-		if int(frac) >= t && t > s.threshold {
-			crossed = t
-		}
-	}
-	if crossed > 0 {
-		s.threshold = crossed
-	}
-	return crossed, spent
-}
-
 // spentForBudgetLocked returns the session's spend as a credit-equivalent
 // (credits for a metered backend, token-derived for a token-only one at
 // the adapter's rate). Caller holds s.mu.
@@ -1111,12 +833,6 @@ func (s *Session) creditEquivalent(u agent.Usage) float64 {
 	s.mu.Unlock()
 	return domain.Spend{Credits: u.Credits, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}.
 		CreditEquivalentAt(rate)
-}
-
-func (s *Session) setSpecPath(p string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.specPath = p
 }
 
 // SpecPath returns the session's resolved spec/draft path.
@@ -1157,62 +873,6 @@ func (s *Session) trySetPendingAsk(a *Ask) bool {
 	s.pendingAsk = a
 	s.emitAskLocked(a)
 	return true
-}
-
-func (s *Session) setVerdict(v string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.verdict = v
-}
-
-// setVerdictFloor stamps the verdict floor: kind names which floor holds
-// the slot, v the ceiling it applies ("blocked"/"fail"), reason the
-// sentence a reader acts on. It replaces any stamp in the slot, floor
-// kind and re-check bookkeeping included — the slot is one and the
-// stampers are last-writer-wins.
-func (s *Session) setVerdictFloor(kind, v, reason string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.setVerdictFloorLocked(kind, v, reason)
-}
-
-// setVerdictFloorLocked is setVerdictFloor for a caller already holding
-// s.mu.
-func (s *Session) setVerdictFloorLocked(kind, v, reason string) {
-	s.verdictFloor = v
-	s.verdictFloorKind = kind
-	s.verdictFloorReason = reason
-	s.verdictFloorWorkDir = ""
-	s.verdictFloorSpecPath = ""
-	s.verdictFloorSig = ""
-}
-
-// setPromiseVerdictFloor stamps the promises floor and caches what its
-// read-path re-check needs: the branch and artifact paths the check ran
-// against, and the artifact's signature as of this check, so a later
-// read re-runs it only when the artifact has moved.
-func (s *Session) setPromiseVerdictFloor(v, reason, workDir, specPath string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.setVerdictFloorLocked(FloorPromise, v, reason)
-	s.verdictFloorWorkDir = workDir
-	s.verdictFloorSpecPath = specPath
-	s.verdictFloorSig = artifactSignature(specPath)
-}
-
-// cachePromiseFloorPaths arms a restored promise floor's re-check with
-// where its branch and artifact live. No signature is recorded — the
-// first read re-checks once, then follows the guard. A no-op for any
-// other floor in the slot, and for a session whose floor has already
-// been replaced.
-func (s *Session) cachePromiseFloorPaths(workDir, specPath string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.verdictFloorKind != FloorPromise {
-		return
-	}
-	s.verdictFloorWorkDir = workDir
-	s.verdictFloorSpecPath = specPath
 }
 
 // outlivePendingAsk cuts the open ask loose from the tool call that
@@ -1259,23 +919,6 @@ func (s *Session) callLive(callID string) bool {
 	}
 	_, native := a.(agent.ToolResolver)
 	return native && s.takesTurns()
-}
-
-// holdAnswerForNextRun parks an answer's re-entry turn for the stage's
-// next run (see answerForNextRun).
-func (s *Session) holdAnswerForNextRun(turn string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.answerForNextRun = turn
-}
-
-// takeAnswerForNextRun hands over a parked answer, once.
-func (s *Session) takeAnswerForNextRun() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	turn := s.answerForNextRun
-	s.answerForNextRun = ""
-	return turn
 }
 
 // takePendingAsk clears and returns the open ask (nil if none), so the
@@ -1362,13 +1005,9 @@ func (s *Session) clearResolverWaiting(callID string) {
 	delete(s.resolverWait, callID)
 }
 
-// clearResolversWaiting marks every registered MCP call-waiter as no
-// longer receiving, used when the backend process dies mid-flight (pump's
-// closed-event-stream path) so Answer treats any in-flight bridge call as
-// gone even though the session was never explicitly stopped. It leaves the
-// resolvers registered; takeResolver still finds them, and the cleared
-// flags are what tell Answer not to drop the answer into a buffer nobody
-// will read.
+// clearResolversWaiting marks every registered waiter as no longer
+// receiving: the backend behind them is gone, so an answer must not be
+// handed to a bridge call nobody is listening on (see AnswerAs).
 func (s *Session) clearResolversWaiting() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1507,47 +1146,6 @@ func (s *Session) addCardSpent(credits float64) {
 	s.cardSpent += credits
 }
 
-// queueNudge stores a budget nudge to be prepended to the next turn the
-// engine sends the agent (DESIGN §5.1 layer 2). It is appended to any
-// already-pending nudge so multiple threshold crossings in one turn are
-// all delivered in order.
-func (s *Session) queueNudge(text string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.pendingNudge != "" {
-		s.pendingNudge += "\n"
-	}
-	s.pendingNudge += text
-}
-
-// takePendingNudge returns and clears the queued budget nudge text ("" if
-// none). Called at the top of a turn-send path so the model sees the
-// remaining-budget warning before the orchestrator's own message.
-func (s *Session) takePendingNudge() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	text := s.pendingNudge
-	s.pendingNudge = ""
-	return text
-}
-
-// requeueNudge puts a nudge back at the FRONT of the pending text after
-// a turn that consumed it was refused. Front, not back: the nudges are
-// delivered in crossing order, and one taken for a turn that never
-// happened is older than anything queued since.
-func (s *Session) requeueNudge(text string) {
-	if text == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.pendingNudge == "" {
-		s.pendingNudge = text
-		return
-	}
-	s.pendingNudge = text + "\n" + s.pendingNudge
-}
-
 // dropUnsentUser removes the user message the caller appended for a turn
 // the backend then refused (agent.ErrBusy). An echo of a line the agent
 // never received is worse than no echo at all: the reader sees their own
@@ -1598,18 +1196,6 @@ func (s *Session) setError(err error) {
 	s.busy = false
 }
 
-// markStopped records the session as stopped, returning true the first
-// time so the engine emits exactly one stopped event.
-func (s *Session) markStopped() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopped {
-		return false
-	}
-	s.stopped = true
-	return true
-}
-
 // stop ends the session: it marks it finalized (so no late persist can
 // resurrect it), signals the pump, and closes the agent session (if one
 // was created). Idempotent.
@@ -1643,33 +1229,6 @@ func (s *Session) stop() {
 		// across a replace and unlocks only when the last holder leaves.
 		s.releaseCard()
 	})
-}
-
-// bindLive attaches the session's live-file writer and replays whatever
-// transcript it already carries, so a follower that joins mid-session — a
-// restart-reattach carries the prior conversation over — sees the whole
-// thing rather than only what arrives next. Called once, before the
-// session's pump starts.
-func (s *Session) bindLive(w *livelog.Writer) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.live = w
-	for _, m := range s.transcript {
-		switch m.Author {
-		case AuthorUser:
-			w.Emit(livelog.Record{Kind: livelog.KindUser, Text: m.Content})
-		case AuthorSystem:
-			w.Emit(livelog.Record{Kind: livelog.KindSystem, Text: m.Content})
-		case AuthorAssistant:
-			w.Emit(livelog.Record{Kind: livelog.KindMessage, Text: m.Content})
-		case AuthorTool:
-			w.Emit(livelog.Record{
-				Kind: livelog.KindTool, Text: m.Content,
-				OK: m.ToolStatus == ToolOK, Output: m.ToolOutput,
-			})
-		}
-	}
-	w.Emit(livelog.Record{Kind: livelog.KindState, State: string(s.state)})
 }
 
 // releaseCard retires this session's hold on the card lock. Safe to call

@@ -57,7 +57,7 @@ import (
 //   - a research card carries no branch to land;
 //   - a card linked to a PR refuses a local squash merge outright, so a
 //     landing message for it would never be read;
-//   - a handed-off or goal-dropped card has already ended, without a
+//   - a handed-off card has already ended, without a
 //     landing.
 //
 // It is exported because a caller that NARRATES the pass has to know
@@ -68,11 +68,9 @@ func PredraftEligible(f domain.Feature) bool {
 	switch {
 	case f.Kind == domain.KindGoal, f.Kind == domain.KindResearch:
 		return false
-	case f.GoalID != "":
-		return false
 	case !f.PullRequest.Empty():
 		return false
-	case f.HandedOff(), f.GoalDropped():
+	case f.HandedOff():
 		return false
 	}
 	return true

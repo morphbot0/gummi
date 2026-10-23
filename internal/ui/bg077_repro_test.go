@@ -93,13 +93,4 @@ func TestBG077GateCrossingRefreshesOpenThreadHistory(t *testing.T) {
 			t.Errorf("the crossing left no receipt in the open thread:\n%s", got)
 		}
 	})
-
-	t.Run("crossing into a worktree", func(t *testing.T) {
-		m, f, body := open(t)
-		model, cmd := m.Update(worktreeEnteredMsg{id: f.ID, note: string(f.ID) + " → implement"})
-		pump(t, model.(*Shell), cmd)
-		if got := body(); !strings.Contains(got, "plan → implement") {
-			t.Errorf("the approval that entered a worktree left no receipt in the open thread:\n%s", got)
-		}
-	})
 }

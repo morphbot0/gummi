@@ -23,7 +23,7 @@ func TestComposerPlaceholderNamesARunnableVerb(t *testing.T) {
 		t.Errorf("a research card's composer offers /diff as an example, which it cannot run: %q", research)
 	}
 	// it still teaches the sigil, and names verbs that work here
-	for _, want := range []string{"/verify", "↑ for actions"} {
+	for _, want := range []string{"/ask", "↑ for actions"} {
 		if !strings.Contains(research, want) {
 			t.Errorf("a research card's composer placeholder lost %q: %q", want, research)
 		}

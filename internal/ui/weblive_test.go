@@ -1,17 +1,9 @@
 package ui
 
 import (
-	"context"
 	"strconv"
-	"strings"
-	"sync"
 	"testing"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
-
-	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -112,108 +104,5 @@ func TestWebTranscriptACutOffMessageIsNotStreaming(t *testing.T) {
 	}
 	if _, _, streaming, _ = webTranscript(engine.Snapshot{Transcript: tr, Busy: true}); streaming != "Converged on the" {
 		t.Fatalf("a busy session's tail is what it is writing, got %q", streaming)
-	}
-}
-
-// A card whose busy word moves — a check that finished, a scribe pass
-// that settled — tells the open pages, whatever message moved it: the
-// page kept "implementer is checking" with a spinner for a card that had
-// long gone idle, because the pass's end was on no list of changes.
-func TestABusyWordThatEndsIsPushed(t *testing.T) {
-	b, log, _, f, _ := headlessBoard(t, agent.NewFake("ok"))
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	ctx := context.Background()
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { m.baselining[f.ID] = true; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Rows[0].Status == webapi.StatusRunning })
-	log.mu.Lock()
-	mark := len(log.all)
-	log.mu.Unlock()
-	// the check ends on a message the change hook has no arm for, and the
-	// row it reloads is the row it was
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		return func() tea.Msg { return baselineDoneMsg{id: f.ID} }
-	}); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		log.mu.Lock()
-		var live, card bool
-		for _, c := range log.all[mark:] {
-			live = live || (c.Kind == webapi.ChangeLive && c.ID == "FD-001")
-			card = card || (c.Kind == webapi.ChangeCard && c.ID == "FD-001")
-		}
-		log.mu.Unlock()
-		if live && card {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the check ended and no page was told: its spinner stays up")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// TestTheWebConversationNamesTheDraftingBrief: while gummi's handoff-brief
-// turn runs on a freeform card, the web conversation's busy verb names the
-// drafting — the same in-flight flag the TUI thread's busy line reads —
-// and goes back to the ordinary working word once it has ended.
-func TestTheWebConversationNamesTheDraftingBrief(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	once := &sync.Once{}
-	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
-		if strings.Contains(msg, "handoff brief") {
-			once.Do(func() { close(started) })
-			<-release
-			return []agent.Event{{Kind: agent.EventMessage, Text: "the brief"}, {Kind: agent.EventIdle}}
-		}
-		return []agent.Event{{Kind: agent.EventMessage, Text: "on it"}, {Kind: agent.EventIdle}}
-	}}
-	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
-	m, eng, _ := freeformAgentWorkspace(t, ag)
-	ctx := context.Background()
-
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
-	m = typeString(t, m, "Drop the leaked pty fd")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	fs, err := m.store.ListFeatures(ctx)
-	if err != nil || len(fs) != 1 {
-		t.Fatalf("features = %v, err = %v", fs, err)
-	}
-	f := fs[0]
-	ff, err := eng.OpenFreeform(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ff.Send(ctx, "drop the leaked pty fd"); err != nil {
-		t.Fatal(err)
-	}
-	waitFreeformIdle(t, eng, f.ID)
-	m = pump(t, m, m.loadRows)
-
-	if err := eng.StartHandoffBrief(ctx, f.ID); err != nil {
-		t.Fatalf("StartHandoffBrief: %v", err)
-	}
-	<-started
-	r, ok := m.rowByID(f.ID)
-	if !ok {
-		t.Fatal("the board lost the card")
-	}
-	conv := m.webFreeform(r)
-	if conv == nil || conv.Verb != engine.BriefDrafting {
-		t.Fatalf("the conversation's busy verb = %+v, want %q", conv, engine.BriefDrafting)
-	}
-	close(release)
-	for deadline := time.Now().Add(testWaitTimeout); eng.Freeform(f.ID).Briefing(); {
-		if time.Now().After(deadline) {
-			t.Fatal("the brief turn never ended")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if conv := m.webFreeform(r); conv == nil || conv.Busy || conv.Verb != "" {
-		t.Fatalf("after the brief turn the conversation still reads busy: %+v", conv)
 	}
 }

@@ -1,6 +1,6 @@
 // actions.js — a card's menu (Card.actions): the things the TUI offers on a
 // card besides answering its decision. An action that needs input (a
-// message, a number, a profile, a repository, a mode, cards, or a yes)
+// message, a number, a profile, a repository, or a yes)
 // collects it in a dialog first, prefilled with the action's default (the
 // drafted landing message, the current budget, the dependencies already
 // set); then POST /api/cards/{id}/actions/{action} runs it on the server,
@@ -16,20 +16,20 @@
 // which answers that question and nothing else. A refusal stays in the
 // dialog, in the board's own words.
 
-import { h, clear, isMobile, dollarsInput, parseDollars, ref, cardName } from './dom.js?v=__ASSET_V__'
+import { h, clear, isMobile, dollarsInput, parseDollars, cardName } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { openModal, openView } from './views.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
-import { state, set, rows } from './store.js?v=__ASSET_V__'
-import { openModelPicker, openWriteSpec } from './session.js?v=__ASSET_V__'
+import { state, set } from './store.js?v=__ASSET_V__'
+import { openModelPicker } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
 import { pushAfterControl, openBasePush } from './pushbase.js?v=__ASSET_V__'
 
-const NOUN = { message: 'Message', number: 'Dollars', profile: 'Profile', repo: 'Repository', mode: 'Mode', cards: 'Waits for', text: 'Value' }
+const NOUN = { message: 'Message', number: 'Dollars', profile: 'Profile', repo: 'Repository', text: 'Value' }
 
 // GO is the confirm button of an entry whose label is a noun (the menu
 // row names what it sets): the button says what pressing it does.
-const GO = { envelope: 'Set budget', profile: 'Switch profile', repo: 'Set repository', deps: 'Save dependencies' }
+const GO = { envelope: 'Set budget', profile: 'Switch profile', repo: 'Set repository' }
 
 function cap (s) { s = String(s || ''); return s ? s[0].toUpperCase() + s.slice(1) : s }
 
@@ -48,7 +48,6 @@ export async function runAction (card, a) {
   // the generic one-field dialog cannot carry an agent and a model, or a
   // profile and a budget
   if (a.needs === 'model') { openModelPicker(); return }
-  if (a.needs === 'spec') { openWriteSpec(card, a); return }
   // a heartbeat is a schedule: the Schedules view's form, aimed at this card
   if (a.needs === 'schedule') { openView('schedules', { heartbeat: card.id }); return }
   // publishing confirms resolved facts, not a yes: its own dialog (publish.js)
@@ -285,16 +284,14 @@ function fieldFor (card, a, need) {
       focus: () => inp.focus()
     }
   }
-  if (need === 'profile' || need === 'repo' || need === 'mode') {
-    let choices = a.choices || []
-    if (need === 'mode' && !choices.length) choices = [{ value: 'autopilot', label: 'autopilot', detail: 'gates cross unattended' }, { value: 'attended', label: 'attended', detail: 'a person crosses every gate' }]
+  if (need === 'profile' || need === 'repo') {
+    const choices = a.choices || []
     const cur = def || (need === 'profile' ? card.profile : need === 'repo' ? card.repo : '')
     const sel = h('select', { id: 'action-input', testid: 'action-input' },
       choices.map(c => h('option', { value: c.value, selected: c.value === cur }, c.detail ? `${c.label} — ${c.detail}` : c.label)))
     const key = need
     return { el: h('label', { class: 'field' }, label, sel), value: () => ({ [key]: sel.value }), focus: () => sel.focus() }
   }
-  if (need === 'cards') return cardsField(card, a, label, def)
   if (a.id === 'prlink') clear(label).append('Pull request')
   const inp = h('input', {
     id: 'action-input', testid: 'action-input', value: def, autocomplete: 'off', spellcheck: 'false',
@@ -346,28 +343,6 @@ export function draftAffordance (ta, hint) {
       }
     },
     drafted: (text) => { before = null; clear(hint).append(text) }
-  }
-}
-
-// cardsField is a multi-select of the board's other cards, the ones set
-// already ticked. Clearing every tick clears the dependencies.
-function cardsField (card, a, label, def) {
-  const set0 = new Set(String(def).split(',').map(s => s.trim()).filter(Boolean))
-  const cands = rows().filter(r => r.id !== card.id && (r.status !== 'done' || set0.has(r.id)))
-  const filter = h('input', { class: 'cfilter', testid: 'action-cards-filter', placeholder: 'Filter cards', 'aria-label': 'Filter cards', autocomplete: 'off' })
-  const boxes = cands.map(r => {
-    const cb = h('input', { type: 'checkbox', value: r.id, checked: set0.has(r.id), testid: `action-card-${r.id}` })
-    return { r, cb, el: h('label', { class: 'cpick' }, cb, h('span', { class: 'id' }, ref(r.id)), h('span', { class: 't' }, r.title), h('span', { class: 's' }, r.stage)) }
-  })
-  const list = h('div', { class: 'cpicks', id: 'action-input', testid: 'action-input', role: 'group', 'aria-label': 'Cards' }, boxes.map(b => b.el))
-  filter.addEventListener('input', () => {
-    const q = filter.value.toLowerCase().trim()
-    for (const b of boxes) b.el.hidden = !!q && !`${b.r.id} ${ref(b.r.id)} ${b.r.title}`.toLowerCase().includes(q)
-  })
-  return {
-    el: h('div', { class: 'field' }, label, boxes.length > 6 ? filter : null, boxes.length ? list : h('span', { class: 'fh' }, 'No other card to wait for.')),
-    value: () => ({ cards: boxes.filter(b => b.cb.checked).map(b => b.r.id) }),
-    focus: () => boxes[0]?.cb.focus()
   }
 }
 

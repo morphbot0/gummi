@@ -1,7 +1,8 @@
 import { expect, test } from '../fixtures/test';
 
 let id = '';
-test.use({ seed: { run: async (ws) => { id = await ws.seedDesignGate('Add a wave helper'); } } });
+let asking = '';
+test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a wave helper'); asking = (await ws.seedAsk('Pick where the wave goes')).id; } } });
 
 // A slash line in the composer is a command, not prose: the card's own
 // vocabulary completes while the word is typed, and enter runs it — the
@@ -23,9 +24,9 @@ test('a slash command completes and runs', async ({ pairedPage: page, server, ap
   await expect(offer.getByRole('option').first()).toContainText('/');
   await input.fill('/env');
   await expect(offer.getByRole('option')).toHaveText([/\/envelope\s*set the card's budget/]);
-  // a slash draft never reads as the pinned decision's answer — not while
-  // the server is still classifying it, and not after
-  await expect(page.getByTestId('composer-says')).not.toContainText('start the architect');
+  // a slash draft never reads as a turn for the session — not while the
+  // server is still classifying it, and not after
+  await expect(page.getByTestId('composer-says')).not.toContainText('turn');
   await expect(page.getByTestId('composer-send')).toHaveText('Send');
   // tab takes it, ready for arguments, and the says line tells what enter
   // will do with it
@@ -50,14 +51,14 @@ test('a slash command completes and runs', async ({ pairedPage: page, server, ap
   await page.getByTestId('action-cancel').click();
   await expect(page.getByTestId('action-dialog')).toBeHidden();
 
-  // a verb the card answers runs from the composer alone: approving the
-  // design gate crosses into implement
+  // a verb the card answers runs from the composer alone: /close hands
+  // the session off, after the board's own yes
   await input.click();
-  await input.fill('/approve');
-  await expect(page.getByTestId('composer-says')).toContainText('approve');
+  await input.fill('/close');
   await page.keyboard.press('Enter');
-  await expect(input).toHaveValue('');
-  await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step', { timeout: 30_000 });
+  await expect(page.getByTestId('decision-confirm')).toBeVisible();
+  await page.getByTestId('decision-confirm-yes').click();
+  await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage, { timeout: 30_000 }).toBe('done');
 });
 
 // A word naming nothing still opens the menu — and never strands the line
@@ -86,14 +87,14 @@ test('typing a slash command under a pinned decision raises no error', async ({ 
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) });
-  await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
+  await page.goto(`${server.url}/#${asking}`);
+  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', asking);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('decision')).toBeVisible();
   const input = page.getByTestId('composer-input');
   await input.click();
   await input.pressSequentially('/reb', { delay: 20 });
   await expect(page.getByTestId('composer-send')).toHaveText('Send');
-  await expect(page.getByTestId('composer-says')).not.toHaveText('approve');
+  await expect(page.getByTestId('composer-says')).not.toContainText('answers the question');
   expect(errors).toEqual([]);
 });

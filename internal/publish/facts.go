@@ -131,10 +131,9 @@ type Input struct {
 	// BaseRepo is the repository the person chose for the PR to open in,
 	// "" for the one recorded for this repository (Facts.BaseRepo).
 	BaseRepo string
-	// OpenComments counts unresolved review comments on its diff, and
-	// OpenSpec the open threads on its spec that hold its gate: the two
-	// counts a landing refuses on.
-	OpenComments, OpenSpec int
+	// OpenComments counts unresolved review comments on its diff, which a
+	// landing refuses on.
+	OpenComments int
 }
 
 // Detect is the cheap check a face makes before it draws the acts: gh is
@@ -244,7 +243,7 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 	if r := resolvePR(ctx, env, &fx, f); r != nil {
 		return Facts{}, r
 	}
-	if fl := Floor(f, fx.Tip, in.OpenComments+in.OpenSpec); fl != nil {
+	if fl := Floor(f, in.OpenComments); fl != nil {
 		fx.ReadyWhy, fx.ReadyFix = fl.Text, fl.Fix
 	}
 	return fx, nil

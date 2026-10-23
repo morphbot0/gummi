@@ -176,7 +176,7 @@ func (m *Shell) emitRowChanges(msg rowsMsg) {
 
 // liveKey is what a card's page shows that its row does not hold, reduced
 // to a comparable string: whether it is busy and at what, its session's
-// state, a pause asked for, a chip waiting on the reader. Cheap — no
+// state, a pause asked for. Cheap — no
 // transcript copy — because it is taken for every card after every
 // message a page could care about.
 func (m *Shell) liveKey(r featureRow) string {
@@ -189,12 +189,7 @@ func (m *Shell) liveKey(r featureRow) string {
 			b = append(b, '0')
 		}
 	}
-	flag(m.baselining[id])
-	flag(m.reentryRead != nil && m.reentryRead.id == id)
-	b = strconv.AppendInt(b, int64(m.scribing[id]), 10)
 	flag(m.consultSending[id] != "")
-	flag(m.pausing[id])
-	flag(m.chips[id] != nil)
 	if m.engine != nil {
 		if ff := m.engine.Freeform(id); ff != nil {
 			b = append(b, 'f')
@@ -208,13 +203,6 @@ func (m *Shell) liveKey(r featureRow) string {
 		b = append(b, 'c')
 		flag(snap.Busy)
 		b = strconv.AppendInt(b, int64(len(snap.Transcript)), 10)
-	}
-	if s := m.sessionFor(id); s != nil {
-		b = append(b, '|')
-		b = append(b, s.State()...)
-		flag(s.Busy())
-		flag(s.Critique)
-		b = strconv.AppendUint(b, uint64(reflect.ValueOf(s).Pointer()), 36)
 	}
 	if r.DrivenAbroad {
 		b = append(b, 'x')
@@ -264,7 +252,7 @@ func (m *Shell) syncWebLive() {
 // same way (emitChanges), whoever ran it.
 func (m *Shell) toastDetached(inner tea.Msg, before noticeMsg) {
 	switch inner.(type) {
-	case noticeMsg, verifyResultMsg:
+	case noticeMsg:
 		return
 	}
 	if m.notice == before || m.notice.text == "" {
@@ -359,14 +347,8 @@ func (m *Shell) applyWatchedRevs(revs map[domain.FeatureID]watchRev) bool {
 		was, ok := fs.revs[id]
 		fs.revs[id] = rev
 		if !ok {
-			// first sighting: nothing it moved from — unless the row read
-			// a branch tip at load (a verified card's, featureRow.Head) that
-			// is no longer the tip. A commit made before any page watched
-			// the card would otherwise leave the verify stop reading
-			// "verification passed" over a branch it no longer describes.
-			if r, found := m.rowByID(id); !found || r.Head == "" || rev.head == "" || r.Head == rev.head {
-				continue
-			}
+			// first sighting: nothing it moved from
+			continue
 		} else if was == rev {
 			continue
 		}

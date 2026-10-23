@@ -236,25 +236,19 @@ func TestPredraftSkipsCardsNobodyWillLand(t *testing.T) {
 	goal.Kind = domain.KindGoal
 	research := feature(2, "a study", domain.StageVerify)
 	research.Kind = domain.KindResearch
-	goalCard := feature(3, "a goal's card", domain.StageVerify)
-	goalCard.GoalID = domain.FeatureID("GL-001")
 	linked := feature(4, "a linked card", domain.StageVerify)
 	linked.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 7, URL: "https://x/7"}
 	handedOff := feature(5, "a handed-off card", domain.StageVerify)
 	handedOff.HandedOffAt = time.Now().UTC()
-	dropped := feature(6, "a dropped card", domain.StageVerify)
-	dropped.GoalDroppedAt = time.Now().UTC()
 
 	for _, tc := range []struct {
 		name string
 		f    domain.Feature
 	}{
-		{"goal lands as a merge commit gummi writes", goal},
+		{"a legacy goal is never landed", goal},
 		{"research carries no branch", research},
-		{"a goal's card is landed by its goal, at once", goalCard},
 		{"a linked card refuses a local landing", linked},
 		{"a handed-off card already ended", handedOff},
-		{"a dropped card already ended", dropped},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if PredraftEligible(tc.f) {

@@ -9,9 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -42,7 +40,6 @@ func populatedShell(w, h int) *Shell {
 		row(39, "onboarding", domain.StageDone, "premium", false),
 		row(46, "billing sync", domain.StageImplement, "thrifty", false),
 	}
-	m.rows[6].AutopilotDriving = true
 	m.rows[1].History = []state.TransitionRecord{
 		{FeatureID: "FD-042", From: domain.StageTodo, To: domain.StagePlan, Actor: "user", At: fixedTime},
 		{FeatureID: "FD-042", From: domain.StagePlan, To: domain.StagePlan, Actor: "user", At: fixedTime},
@@ -65,7 +62,7 @@ func TestBoardView120(t *testing.T) {
 
 func TestBoardGroupsAndOrder(t *testing.T) {
 	m := populatedShell(120, 34)
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	// grouped: todo(51), in-progress(42,47,49,46), review(44), done(39)
 	want := []int{0, 1, 2, 3, 6, 4, 5}
 	if len(order) != len(want) {
@@ -84,7 +81,7 @@ func TestBoardGroupsAndOrder(t *testing.T) {
 
 func TestBoardNavigation(t *testing.T) {
 	m := populatedShell(120, 34)
-	m.sel = m.displayOrder(m.sortMode)[0]
+	m.sel = m.displayOrder()[0]
 	m.moveSel(1)
 	if m.rows[m.sel].F.ID != "FD-042" {
 		t.Errorf("j from first should reach FD-042, got %s", m.rows[m.sel].F.ID)
@@ -218,31 +215,6 @@ func TestCardLineLandedSurvivesCleanup(t *testing.T) {
 	}
 }
 
-// TestCardLineGateMarker: the ⚡ badge marks only an explicit "auto"
-// gate-approval mode. Empty reads as auto everywhere else in the code
-// (domain.ValidGateApproval). Attended is the default and what empty
-// reads as, so it badges nothing — a marker on every card is not a
-// marker. Autopilot is the opted-in state, and the only one where the
-// board moves without you.
-func TestCardLineGateMarker(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	autopilot := row(1, "autopilot card", domain.StageTodo, "", false)
-	autopilot.F.GateApproval = domain.GateAutopilot
-	empty := row(2, "empty card", domain.StageTodo, "", false)
-	attended := row(3, "attended card", domain.StageTodo, "", false)
-	attended.F.GateApproval = domain.GateAttended
-
-	if !strings.Contains(m.cardLine(autopilot, 1, false, true, 80), "⚡") {
-		t.Error("an autopilot card should show the ⚡ marker")
-	}
-	if strings.Contains(m.cardLine(empty, 2, false, true, 80), "⚡") {
-		t.Error("empty gate mode reads as attended and must not show the marker")
-	}
-	if strings.Contains(m.cardLine(attended, 3, false, true, 80), "⚡") {
-		t.Error("attended is the default — it must not show the marker")
-	}
-}
-
 // TestNeedsAttention: the board's lookup agrees with attnIcon's own
 // per-kind glyph for every attention kind, and reports ok=false for a
 // feature with no pending item.
@@ -272,99 +244,28 @@ func TestNeedsAttention(t *testing.T) {
 }
 
 // TestCardLineAttentionOutranksBusy is the precedence rule's own repro: a
-// card whose gate is raised while its baseline check is still going must
-// show the needs-you icon, not the busy spinner/word — the user can act
-// on the gate, not on a check run.
+// card with a question waiting while another process still drives it
+// mid-turn must show the needs-you icon, not the busy spinner/word — the
+// user can act on the question, not on the turn.
 func TestCardLineAttentionOutranksBusy(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	r := row(1, "gated card", domain.StageImplement, "", false)
-	m.inbox.add(r.F.ID, attnGate, "implement finished — review & advance")
-	m.baselining[r.F.ID] = true
+	r := freeformRow(1, "asking card", true)
+	r.DrivenAbroad, r.Foreign = true, state.ForeignDrive{Busy: true}
+	m.inbox.add(r.F.ID, attnQuestion, "the agent asked a question")
 	if !m.cardBusy(r) {
-		t.Fatal("setup: want cardBusy true (baseline running)")
+		t.Fatal("setup: want cardBusy true (driven mid-turn)")
 	}
 
 	line := m.cardLine(r, 1, false, true, 100)
-	want := attnIcon(m.styles, attnGate)
+	want := attnIcon(m.styles, attnQuestion)
 	if !strings.Contains(line, want) {
 		t.Errorf("card line = %q, want it to contain the attention icon %q", line, want)
 	}
-	if strings.Contains(line, "checking") {
+	if strings.Contains(line, "running") {
 		t.Errorf("card line = %q, want no busy word once attention wins the loop slot", line)
 	}
 	if strings.Contains(line, m.spinner()) {
 		t.Errorf("card line = %q, want no spinner frame once attention wins the loop slot", line)
-	}
-}
-
-// TestCardLinePausedMarker: a card whose live session the user explicitly
-// paused (StatePaused) carries the ⏸ mark; a same-stage card that was
-// simply never started (no session at all) renders none — the concrete
-// "paused reads distinct from parked" symptom this card fixes.
-func TestCardLinePausedMarker(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleScribe {
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
-			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
-		}
-	}}
-	m, eng := agentWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageImplement)
-	m = openAndAttach(t, m)
-	waitForActivity(t, eng)
-
-	pausedRow := m.rows[0]
-	if pausedRow.F.ID != "FD-001" || pausedRow.F.Stage != domain.StageImplement {
-		t.Fatalf("setup: rows[0] = %+v, want FD-001 at implement", pausedRow.F)
-	}
-	m = pump(t, m, m.fireVerb("park", ""))
-	if got := eng.Get("FD-001"); got == nil || got.State() != engine.StatePaused {
-		t.Fatalf("setup: want FD-001 paused, got %+v", got)
-	}
-
-	line := m.cardLine(pausedRow, 1, false, true, 100)
-	if !strings.Contains(line, "⏸") {
-		t.Errorf("paused card line = %q, want the ⏸ mark", line)
-	}
-	if !strings.Contains(line, stageGlyph(pausedRow.F.Stage)) {
-		t.Errorf("paused card line dropped the stage glyph: %q", line)
-	}
-
-	parked := row(2, "parked card", domain.StageImplement, "", false)
-	parkedLine := m.cardLine(parked, 2, false, true, 100)
-	if strings.Contains(parkedLine, "⏸") {
-		t.Errorf("parked (no-session) card line = %q, must not show the paused mark", parkedLine)
-	}
-}
-
-// TestCardLineBaselineBusyWithNoSession is FD-029's other core repro: a
-// card running its gummi-checks baseline has no engine session at all —
-// m.baselining is the only signal — but the board row must still spin
-// with a "checking" word, and the stage glyph must survive rather than
-// being overwritten by the spinner.
-func TestCardLineBaselineBusyWithNoSession(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	idle := row(1, "idle card", domain.StagePlan, "", false)
-	baselining := row(2, "checking card", domain.StagePlan, "", false)
-	m.baselining[baselining.F.ID] = true
-
-	idleLine := m.cardLine(idle, 1, false, true, 80)
-	if strings.Contains(idleLine, "checking") {
-		t.Errorf("idle card line should not show a busy word: %q", idleLine)
-	}
-
-	line := m.cardLine(baselining, 2, false, true, 80)
-	if !strings.Contains(line, stageGlyph(baselining.F.Stage)) {
-		t.Errorf("baselining card line dropped the stage glyph: %q", line)
-	}
-	if strings.Contains(line, "◔") {
-		t.Errorf("baselining card must not show the queued marker: %q", line)
-	}
-	if !strings.Contains(line, "checking") {
-		t.Errorf("baselining card line missing the checking word: %q", line)
 	}
 }
 
@@ -413,36 +314,6 @@ func TestCardLineForeignRows(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.cardLine(busy, 1, false, true, 80)+"\n"+m.cardLine(idle, 2, false, true, 80)))
 }
 
-// TestCardLineAutopilotBadge: a card with AutopilotDriving true wears the
-// "◐ autopilot" badge, a card with it false does not, and on a card that
-// is both foreign-driven and autopilot-driving the elsewhere badge comes
-// first — the two read closest in meaning and sit next to each other by
-// construction, not by accident of append order.
-func TestCardLineAutopilotBadge(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	driving := row(1, "driven card", domain.StageImplement, "", false)
-	driving.AutopilotDriving = true
-	idle := row(2, "idle card", domain.StageImplement, "", false)
-	idle.AutopilotDriving = false
-
-	if !strings.Contains(m.cardLine(driving, 1, false, true, 80), "◐ autopilot") {
-		t.Error("AutopilotDriving=true should show the ◐ autopilot badge")
-	}
-	if strings.Contains(m.cardLine(idle, 2, false, true, 80), "◐ autopilot") {
-		t.Error("AutopilotDriving=false must not show the ◐ autopilot badge")
-	}
-
-	both := row(3, "both card", domain.StageImplement, "", false)
-	both.DrivenAbroad = true
-	both.AutopilotDriving = true
-	line := m.cardLine(both, 3, false, true, 100)
-	elsewhereAt := strings.Index(line, "◉ elsewhere")
-	autopilotAt := strings.Index(line, "◐ autopilot")
-	if elsewhereAt < 0 || autopilotAt < 0 || elsewhereAt > autopilotAt {
-		t.Errorf("card line = %q, want elsewhere badge before autopilot badge", line)
-	}
-}
-
 // TestCardLineNarrowWidthGolden locks in BG-037's shed order: as the row
 // runs out of room, cost goes first, then the profile tag, then the
 // worktree mark, then the PR badge — landed survives longest because it
@@ -464,7 +335,7 @@ func TestCardLineNarrowWidthGolden(t *testing.T) {
 
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
-	form := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, nil, false, "", nil, 2400, func(formResult) tea.Cmd { return nil })
+	form := newCardForm(nil, nil, false, "", 2400, func(formResult) tea.Cmd { return nil })
 	form.SetText("dark mode toggle")
 	form.text.Blur()
 	m.Overlay.Push(form)
@@ -541,35 +412,6 @@ func bugRow(num int, title string, sev domain.Severity) featureRow {
 	return r
 }
 
-// withCreated returns a copy of the row with a specific creation time
-// (used to exercise the severity sort's creation-time tiebreaker).
-func (r featureRow) withCreated(t time.Time) featureRow {
-	r.F.CreatedAt = t
-	return r
-}
-
-// TestBoardBlockedBadgeGolden: a card at its coding gate with an unmet
-// dependency renders the blocked badge; the same card with all deps done,
-// and a brainstorm card whose next step isn't the coding stage, render none.
-func TestBoardBlockedBadgeGolden(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	blocked := row(1, "blocked card", domain.StagePlan, "", true)
-	blocked.DepBlocked = true
-	met := row(2, "deps met", domain.StagePlan, "", true)
-	met.DepBlocked = false
-	design := row(3, "design card", domain.StagePlan, "", false)
-	design.DepBlocked = false
-	m.rows = []featureRow{blocked, met, design}
-	var b strings.Builder
-	b.WriteString("blocked@plan\n")
-	b.WriteString(m.cardLine(blocked, 1, false, true, 80) + "\n\n")
-	b.WriteString("met@plan\n")
-	b.WriteString(m.cardLine(met, 2, false, true, 80) + "\n\n")
-	b.WriteString("design@brainstorm\n")
-	b.WriteString(m.cardLine(design, 3, false, true, 80) + "\n")
-	golden.RequireEqual(t, []byte(b.String()))
-}
-
 // TestBoardCardLineSeverity golden-captures the severity badge rendering
 // for each canonical level plus the unclassified (empty) case.
 func TestBoardCardLineSeverity(t *testing.T) {
@@ -596,127 +438,20 @@ func TestBoardCardLineSeverity(t *testing.T) {
 // TestBoardBusyMarkersGolden golden-captures cardLine's busy rendering:
 // the stage glyph is kept (never swapped for the spinner) and the busy
 // word trails it in the loop slot. A live engine session is exercised as
-// a plain assertion test (run_test.go's TestCardBusyStateRunning /
-// TestCardBusyStateInteractive) rather than here — an in-flight fake
+// a plain assertion test (run_test.go's TestCardBusyStateSession) rather than here — an in-flight fake
 // agent turn is inherently async and would make a byte-diffed golden
-// flaky. This golden instead pins the deterministic busy source
-// (m.baselining) and the two non-busy cases (idle, queued) side by side.
+// flaky. This golden instead pins a deterministic busy source (a card
+// another process drives mid-turn) beside an idle card.
 func TestBoardBusyMarkersGolden(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	idle := row(1, "idle card", domain.StagePlan, "", false)
-	checking := row(2, "checking card", domain.StagePlan, "", false)
-	m.baselining[checking.F.ID] = true
+	idle := freeformRow(1, "idle card", true)
+	driven := freeformRow(2, "driven card", true)
+	driven.DrivenAbroad, driven.Foreign = true, state.ForeignDrive{Busy: true}
 
 	var b strings.Builder
 	b.WriteString("idle\n" + m.cardLine(idle, 1, false, true, 80) + "\n\n")
-	b.WriteString("checking (baseline, no session)\n" + m.cardLine(checking, 2, false, true, 80) + "\n\n")
+	b.WriteString("driven elsewhere, mid-turn\n" + m.cardLine(driven, 2, false, true, 80) + "\n\n")
 	golden.RequireEqual(t, []byte(b.String()))
-}
-
-// TestBoardAttentionAndPausedGolden golden-captures the three scenarios
-// this card adds to the card line: a pending attention item winning the
-// loop slot over a busy baseline, an explicitly paused session's own
-// trailing mark, and a card with neither signal.
-func TestBoardAttentionAndPausedGolden(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleScribe {
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
-			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
-		}
-	}}
-	m, eng := agentWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageImplement)
-	m = openAndAttach(t, m)
-	waitForActivity(t, eng)
-	pausedRow := m.rows[0]
-	m = pump(t, m, m.fireVerb("park", ""))
-	if got := eng.Get("FD-001"); got == nil || got.State() != engine.StatePaused {
-		t.Fatalf("setup: want FD-001 paused, got %+v", got)
-	}
-
-	attnBusy := row(2, "gated and busy", domain.StageImplement, "", false)
-	m.inbox.add(attnBusy.F.ID, attnGate, "implement finished — review & advance")
-	m.baselining[attnBusy.F.ID] = true
-
-	neither := row(3, "quiet card", domain.StageImplement, "", false)
-
-	var b strings.Builder
-	b.WriteString("attention-plus-busy\n")
-	b.WriteString(m.cardLine(attnBusy, 1, false, true, 80) + "\n\n")
-	b.WriteString("paused\n")
-	b.WriteString(m.cardLine(pausedRow, 2, false, true, 80) + "\n\n")
-	b.WriteString("neither\n")
-	b.WriteString(m.cardLine(neither, 3, false, true, 80) + "\n")
-	golden.RequireEqual(t, []byte(b.String()))
-}
-
-// TestDisplayOrderSortsTodoBySeverity: with SortSeverity active the todo
-// column ranks bugs critical→high→medium→low→empty while other columns
-// (in-progress, done) keep creation order.
-func TestDisplayOrderSortsTodoBySeverity(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	m.rows = []featureRow{
-		bugRow(1, "low bug", domain.SeverityLow),
-		bugRow(2, "critical bug", domain.SeverityCritical),
-		bugRow(3, "unclassified", ""),
-		bugRow(4, "high bug", domain.SeverityHigh),
-		bugRow(5, "medium bug", domain.SeverityMedium),
-	}
-	order := m.displayOrder(SortSeverity)
-	var got []domain.Severity
-	for _, i := range order {
-		got = append(got, m.rows[i].F.Severity)
-	}
-	want := []domain.Severity{
-		domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium,
-		domain.SeverityLow, "",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("order len = %d, want %d", len(got), len(want))
-	}
-	for i, sev := range want {
-		if got[i] != sev {
-			t.Errorf("position %d: severity %q, want %q", i, got[i], sev)
-		}
-	}
-	// creation order is restored with SortCreation, preserving the
-	// original row order within the todo column.
-	creation := m.displayOrder(SortCreation)
-	for i, wantNum := range []int{1, 2, 3, 4, 5} {
-		if got := m.rows[creation[i]].F.Num; got != wantNum {
-			t.Errorf("creation position %d: num %d, want %d", i, got, wantNum)
-		}
-	}
-}
-
-// TestDisplayOrderStable: rows sharing a severity keep creation time as a
-// stable tiebreaker across repeated sorts.
-func TestDisplayOrderStable(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	early := fixedTime
-	late := fixedTime.Add(2 * time.Hour)
-	mid := fixedTime.Add(time.Hour)
-	m.rows = []featureRow{
-		bugRow(3, "newest high", domain.SeverityHigh).withCreated(late),
-		bugRow(1, "oldest high", domain.SeverityHigh).withCreated(early),
-		bugRow(2, "middle high", domain.SeverityHigh).withCreated(mid),
-	}
-	first := m.displayOrder(SortSeverity)
-	second := m.displayOrder(SortSeverity)
-	for i := range first {
-		if first[i] != second[i] {
-			t.Fatalf("sort not stable across calls: %v vs %v", first, second)
-		}
-	}
-	want := []int{1, 2, 3} // creation time ascending: oldest, middle, newest
-	for i, idx := range first {
-		if want[i] != m.rows[idx].F.Num {
-			t.Errorf("position %d: num %d, want %d", i, m.rows[idx].F.Num, want[i])
-		}
-	}
 }
 
 // TestLongErrorNoticeUsesBand: a long error/remedy renders wrapped in the
@@ -771,43 +506,6 @@ func TestBG038ClearTransientNoticeScopesErrorToFeature(t *testing.T) {
 	m.clearTransientNotice()
 	if m.notice.text != "" {
 		t.Errorf("error notice about %s must not survive moving selection to %s, got %q", selected, m.rows[0].F.ID, m.notice.text)
-	}
-}
-
-// TestBG038QueuedNoticeNotLeftBehind: dispatching a run must not leave a
-// free-text "queued" notice on the status bar — the ◔ queued / ⬤ running
-// pills already say it live from engine state, so a stale copy of the same
-// fact can't survive the run leaving the queue the way the free text did.
-// The fake agent settles instantly, so by the time the engine's events are
-// drained the session has reached done, not merely running — the notice
-// must already be clear well before that.
-func TestBG038QueuedNoticeNotLeftBehind(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleScribe {
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	m, eng := agentWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageImplement)
-	if m.rows[0].F.Stage != domain.StageImplement {
-		t.Fatalf("setup: want FD-001 at implement, got %s", m.rows[0].F.Stage)
-	}
-
-	m = openAndAttach(t, m) // opens the card, then answers its pinned decision: start the run
-	if strings.Contains(m.notice.text, "queued") {
-		t.Errorf("BUG BG-038(2): notice %q still names the queue right after dispatch", m.notice.text)
-	}
-
-	m = drainEngineLoop(t, m)
-	if s := eng.Get("FD-001"); s == nil || s.State() != engine.StateDone {
-		t.Fatalf("setup: want FD-001 done, got %+v", s)
-	}
-	if strings.Contains(m.notice.text, "queued") {
-		t.Errorf("BUG BG-038(2): notice still says %q while the session state is done (left Queued)", m.notice.text)
 	}
 }
 

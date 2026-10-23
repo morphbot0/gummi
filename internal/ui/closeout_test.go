@@ -12,13 +12,10 @@ import (
 // The pass is a VIEW over the verified set, not a queue it owns — which
 // is what keeps it from going stale against the board.
 
-func verifiedRow(id domain.FeatureID, inGoal bool) featureRow {
+func verifiedRow(id domain.FeatureID) featureRow {
 	f := domain.Feature{
 		ID: id, Stage: domain.StageVerify, Title: "a card",
 		VerifiedAt: time.Now().Add(-time.Hour),
-	}
-	if inGoal {
-		f.GoalID = "GL-001"
 	}
 	return featureRow{F: f, HasWorktree: true}
 }
@@ -27,10 +24,8 @@ func TestCloseOutWalksTheVerifiedSet(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.rows = []featureRow{
 		{F: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}},
-		verifiedRow("FD-002", false),
-		verifiedRow("FD-003", false),
-		// a goal's card is its goal's to land, never a person's
-		verifiedRow("FD-004", true),
+		verifiedRow("FD-002"),
+		verifiedRow("FD-003"),
 		// verify without the stamp is not "ready": it has not reached the
 		// landing gate
 		{F: domain.Feature{ID: "FD-005", Stage: domain.StageVerify}},
@@ -53,7 +48,7 @@ func TestCloseOutWalksTheVerifiedSet(t *testing.T) {
 // the list: nothing here can disagree with the board.
 func TestCloseOutFollowsTheBoard(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
-	m.rows = []featureRow{verifiedRow("FD-002", false)}
+	m.rows = []featureRow{verifiedRow("FD-002")}
 	d := &closeOutDialog{m: m, skipped: map[domain.FeatureID]bool{}}
 	if _, ok := d.current(); !ok {
 		t.Fatal("a verified card is ready to land")
@@ -91,7 +86,7 @@ func TestSweepNamesWhatItHoldsBack(t *testing.T) {
 func TestMastheadNamesWhatCloseOutWouldFind(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.rows = []featureRow{
-		verifiedRow("FD-002", false),
+		verifiedRow("FD-002"),
 		{F: domain.Feature{ID: "FD-003", Stage: domain.StageDone}, Landed: true, HasWorktree: true},
 	}
 	m.worktreeSizeText = "1 GB"

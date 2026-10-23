@@ -23,7 +23,6 @@ package publish
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -47,7 +46,6 @@ const (
 	CodeAgentSession     Code = "agent-session"
 	CodeNoBranch         Code = "no-branch"
 	CodeStacked          Code = "stacked"
-	CodeGoalMember       Code = "goal-member"
 	CodeLanded           Code = "landed"
 	CodeContinued        Code = "continued"
 	CodeBusy             Code = "agent-busy"
@@ -159,18 +157,12 @@ func Refusal(c Card) *Error {
 	switch {
 	case f == nil:
 		return fail(CodeNoBranch, "no card", "")
-	case f.Kind == domain.KindResearch:
-		return fail(CodeNoBranch, "a research card works in a scratch tree and has no branch to publish", "")
-	case f.IsGoal():
-		return fail(CodeNoBranch, "a goal lands its own branch through `gummi goal`; publishing a goal branch is not supported yet", "")
+	case !f.IsFreeform():
+		return fail(CodeNoBranch, "a retired workflow card is read-only; gummi no longer publishes its branch", "push it yourself")
 	case f.MainCheckout:
 		return fail(CodeNoBranch, "this card works in "+f.CheckoutName()+" and has no branch of its own", "")
-	case f.Stage == domain.StageTodo:
-		return fail(CodeNoBranch, "this card has not started, so its branch is not cut yet", "")
 	case f.StackID != "":
 		return fail(CodeStacked, "a stacked card's PR needs the stack's order and a retarget on every replay, which gummi does not do yet (DESIGN §18.5)", "push the stack yourself with the printed --force-with-lease lines")
-	case f.InGoal() && !f.GoalDropped():
-		return fail(CodeGoalMember, "this card lands on its goal's branch; publishing it would go around the goal", "")
 	case c.Landed:
 		return fail(CodeLanded, "this card has landed: its commits are already on its base", "")
 	case f.ContinuedAs != "":
@@ -186,33 +178,13 @@ func Refusal(c Card) *Error {
 }
 
 // Floor is the quality floor publishing protects (decision 25): whether the
-// branch at tip may be offered as ready for review, which is whether it
-// could land here. A workflow card needs its verify to have run on tip; a
-// handed-off card meets MayLandAfterAll as well; a freeform card needs no
-// unresolved review comments (openComments), its floor being the person's
-// read of the diff (§19.1). nil means ready is allowed.
-func Floor(f *domain.Feature, tip string, openComments int) *Error {
-	if f.HandedOff() {
-		// handed off at a verified branch: MayLand's stage test no longer
-		// applies (the card is done), the revision it verified still does
-		if err := f.MayLandAfterAll(); err != nil {
-			return fail(CodeNotVerified, err.Error(), "")
-		}
-		if !f.IsFreeform() && (f.VerifiedRev == "" || f.VerifiedRev != tip) {
-			return fail(CodeNotVerified, "the tip "+domain.ShortRev(tip)+" is not the revision this card was verified at", "")
-		}
-	} else if err := f.MayLandAt(tip); err != nil {
-		// MayLandAt's errors all open with ErrNotVerified's words, which
-		// this sentence has already said
-		why := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(err.Error(), domain.ErrNotVerified.Error()), ":"))
-		text := "the tip " + domain.ShortRev(tip) + " is not verified"
-		switch {
-		case strings.HasPrefix(why, "("):
-			text += " " + why
-		case why != "":
-			text += ": " + why
-		}
-		return fail(CodeNotVerified, text, "verify the card again")
+// branch may be offered as ready for review, which is whether it could
+// land here. Its floor is the person's read of the diff (§19.1): no
+// unresolved review comments (openComments), and a card with a landing of
+// its own (domain.Feature.MayLand). nil means ready is allowed.
+func Floor(f *domain.Feature, openComments int) *Error {
+	if err := f.MayLand(); err != nil {
+		return fail(CodeNotVerified, err.Error(), "")
 	}
 	if openComments > 0 {
 		return fail(CodeUnresolved, fmt.Sprintf("%d review comment(s) on the diff are unresolved", openComments), "resolve them first")

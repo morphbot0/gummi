@@ -1,0 +1,993 @@
+package threadfold
+
+// A session's workflow runs in its thread (DESIGN §25.9). Each run is one
+// item, keyed run:<n>, folded from the run and its steps as the store
+// keeps them (Options.Runs) — never from an event per step action — and
+// updated in place: its Rev moves whenever anything the block draws does,
+// so a face redraws the block only then. Both faces draw the block from
+// this fold, and every word in it is said here.
+
+import (
+	"encoding/json"
+	"fmt"
+	"hash/fnv"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/workflowrecipe"
+)
+
+// ItemRun is a workflow run's block.
+const ItemRun ItemType = "run"
+
+// RunInput is one of the session's runs as the fold reads it: the run and
+// its step instances from the store, with what the store does not hold —
+// the spec's title, the files the run has changed, and each live step's
+// session — read by the caller.
+type RunInput struct {
+	Run   domain.Run
+	Steps []domain.RunStep
+	// SpecTitle is the run's spec's title.
+	SpecTitle string
+	// Files are the paths that differ between the run's starting tree and
+	// its newest snapshot: what it has changed so far, or what it left.
+	Files []string
+	// Live is each live step's session, by its path, and the session of
+	// an ended step that is working again (a person's follow-up).
+	Live map[string]StepLive
+	// Envelope is the session's envelope, in credits (0 uncapped): what a
+	// strip paused on a spent pool says is spent.
+	Envelope float64
+}
+
+// StepLive is what a step's own session says while it works.
+type StepLive struct {
+	// Busy says a turn is in flight on the step's card.
+	Busy bool
+	// Spent is the step card's spend so far, in credits.
+	Spent float64
+	// Action is the call the step's agent has in flight, or its last one,
+	// as its tool row labels it ("Edit  internal/x.go").
+	Action string
+	// Ask is the step's open ask_user question, nil when none.
+	Ask *engine.Ask
+}
+
+// Run is a run's block.
+type Run struct {
+	N int `json:"n"`
+	// Rev changes whenever anything else in the block does: a face that
+	// holds a block at the same Rev has nothing to redraw.
+	Rev    string `json:"rev"`
+	Recipe string `json:"recipe"`
+	// Spec is the spec's number on the session, SpecTitle its title, and
+	// SpecRev the revision the run froze (0 until it starts).
+	Spec      int    `json:"spec"`
+	SpecTitle string `json:"specTitle,omitempty"`
+	SpecRev   int    `json:"specRev,omitempty"`
+	// State is the run's (domain.RunState); Reason why it ended partial
+	// or stopped, or why it paused. Stopping marks a stop not yet wound
+	// down.
+	State    string `json:"state"`
+	Reason   string `json:"reason,omitempty"`
+	Stopping bool   `json:"stopping,omitempty"`
+	// Spent is what its steps have spent, live ones included, in credits:
+	// a run estimates nothing, and spends from the session's budget.
+	Spent float64 `json:"spent"`
+	// Started and Ended bound its elapsed time; a face counts an open
+	// run's to now.
+	Started time.Time `json:"started,omitzero"`
+	Ended   time.Time `json:"ended,omitzero"`
+	// Strip is the recipe's top-level entries, each in its state.
+	Strip []StripEntry `json:"strip"`
+	// Rows is a row per step that has run or is running, in the order they
+	// started, a finished repeat iteration folded to one.
+	Rows []StepRow `json:"rows"`
+	// Pending is the run's open decision (the proposal, a revised plan, a
+	// loop at its max, the budget). The decision itself is the
+	// session's pinned decision; the block only says one is pending.
+	Pending *RunPending `json:"pending,omitempty"`
+	// Baseline is the done-when checks run before the run's first step
+	// (§25.5), drawn while the run is proposed or queued, or open with no
+	// step yet; nil otherwise, and for a spec with no checks.
+	Baseline *RunBaseline `json:"baseline,omitempty"`
+	// Files are the paths the run has changed so far, uncommitted, or
+	// those an ended run left changed.
+	Files []string `json:"files,omitempty"`
+	// Results, Commits and Report close an ended run: its result per
+	// done-when item, the commits made while it ran, and whether its
+	// report was written into its spec.
+	Results []RunResult `json:"results,omitempty"`
+	Commits []string    `json:"commits,omitempty"`
+	Report  bool        `json:"report,omitempty"`
+	// What a person may do to the run now: Pause, Resume and Stop it, and
+	// Revert it (a run that started, with no step running).
+	CanPause  bool `json:"canPause,omitempty"`
+	CanResume bool `json:"canResume,omitempty"`
+	CanStop   bool `json:"canStop,omitempty"`
+	CanRevert bool `json:"canRevert,omitempty"`
+	// CanSave offers to save the run's inline recipe as a workspace recipe
+	// (a person's act), SaveName the name it suggests; SavedAs is the name
+	// it was saved as, after which it is not offered again.
+	CanSave  bool   `json:"canSave,omitempty"`
+	SaveName string `json:"saveName,omitempty"`
+	SavedAs  string `json:"savedAs,omitempty"`
+	// Live is the open run's live strip, drawn above the composer; nil
+	// for a run that is not running or paused.
+	Live *RunStrip `json:"live,omitempty"`
+	// Mark and Line are an ended run in one line, the way it folds in the
+	// thread (§25.9): its state's glyph, and "deliver · run 2 · spec 2
+	// “Close the TUI's gaps” · met 5/5 · $2.92 · 14 files". Empty on a run
+	// that has not ended.
+	Mark string `json:"mark,omitempty"`
+	Line string `json:"line,omitempty"`
+	// Folded says an ended run is folded to its Line by rule: it is no
+	// longer the latest news (FoldRuns). A face draws it as the one line
+	// until a person unfolds it; a person's unfolding is the face's own.
+	Folded bool `json:"folded,omitempty"`
+}
+
+// StripEntry is one top-level entry of the recipe.
+type StripEntry struct {
+	ID string `json:"id"`
+	// Kind is "step", "parallel" or "repeat".
+	Kind string `json:"kind"`
+	// State is waiting, running, asking, done or failed.
+	State string `json:"state"`
+	// A repeat's iteration under way (or last run) of its Max.
+	Iter int `json:"iter,omitempty"`
+	Max  int `json:"max,omitempty"`
+	// A parallel's branches, joined by ∥ where it is drawn.
+	Branches []StripEntry `json:"branches,omitempty"`
+}
+
+// StepRow is one row of the block: a step, or a finished iteration of a
+// repeat folded to one.
+type StepRow struct {
+	// Key is the row's identity: the step's path, or the iteration's.
+	Key  string `json:"key"`
+	Path string `json:"path"`
+	// Repeat and Iter place a row inside a repeat's iteration ("↺ 2").
+	Repeat string `json:"repeat,omitempty"`
+	Iter   int    `json:"iter,omitempty"`
+	// ID is the step's id (the repeat's, on a folded iteration); Role its
+	// role, empty on a folded iteration.
+	ID   string `json:"id"`
+	Role string `json:"role,omitempty"`
+	// State is the step's (domain.StepState) as its own session has it
+	// now: a live step asking while its question is open and running
+	// otherwise, and an ended step running while a person's follow-up is
+	// in flight. A folded iteration's is done, or failed when one of its
+	// steps failed.
+	State string  `json:"state"`
+	Spent float64 `json:"spent"`
+	// Line is the step's last action while it works, "asks you" while it
+	// waits on the person, and its end summary once it has ended.
+	Line string `json:"line,omitempty"`
+	// Flag is what the row warns of, beside its line: a reading step that
+	// changed files ("changed 2 files although it only reads"). Evidence
+	// for the person, never a gate.
+	Flag string `json:"flag,omitempty"`
+	// Card is the step's card, the one Open shows and a message goes to.
+	Card string `json:"card,omitempty"`
+	// Folded marks a finished iteration: Steps names what ran in it
+	// ("implement · review-a ∥ review-b · verdict") and Verdict how its
+	// stop condition was judged.
+	Folded  bool   `json:"folded,omitempty"`
+	Steps   string `json:"steps,omitempty"`
+	Verdict string `json:"verdict,omitempty"`
+	// Waiting marks the row the run's open decision is about.
+	Waiting bool `json:"waiting,omitempty"`
+	// Question is the step's own open question, drawn under its row.
+	Question *StepQuestion `json:"question,omitempty"`
+}
+
+// StepQuestion is a step's ask_user question, its recommended answer
+// first.
+type StepQuestion struct {
+	Question string           `json:"question"`
+	Options  []QuestionOption `json:"options,omitempty"`
+	Multi    bool             `json:"multi,omitempty"`
+}
+
+// QuestionOption is one answer a step's question offers.
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Detail      string `json:"detail,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
+}
+
+// RunPending is the run's open decision, as the block mentions it.
+type RunPending struct {
+	Kind     string   `json:"kind"`
+	Question string   `json:"question"`
+	Options  []string `json:"options,omitempty"`
+	Step     string   `json:"step,omitempty"`
+}
+
+// RunResult is one done-when item at the run's end.
+type RunResult struct {
+	Item string `json:"item"`
+	// Verdict is met, unmet or unjudged; Checked marks one its check
+	// command decided.
+	Verdict string `json:"verdict"`
+	Checked bool   `json:"checked,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	// Before is a checked item's verdict in the run's baseline, and Change
+	// its result before and after in words ("failed → passed").
+	Before string `json:"before,omitempty"`
+	Change string `json:"change,omitempty"`
+}
+
+// RunBaseline is the run's baseline as its block draws it: still running,
+// or each checked item before the run, those that prove nothing marked.
+type RunBaseline struct {
+	Running bool           `json:"running,omitempty"`
+	Err     string         `json:"err,omitempty"`
+	Items   []BaselineItem `json:"items,omitempty"`
+}
+
+// BaselineItem is one checked item's baseline: "DW-2 already passes
+// before the run" (a Problem), "DW-1 fails before the run".
+type BaselineItem struct {
+	Item    string `json:"item"`
+	Verdict string `json:"verdict"`
+	Line    string `json:"line"`
+	Problem bool   `json:"problem,omitempty"`
+}
+
+// BaselineWords is what a baseline still running says.
+const BaselineWords = "running the done-when checks before the run…"
+
+// foldBaseline is the run's baseline as its block draws it.
+func foldBaseline(b *domain.RunBaseline) *RunBaseline {
+	p := engine.ProposalBaselineOf(b)
+	if p == nil {
+		return nil
+	}
+	out := &RunBaseline{Running: p.Running, Err: Sanitize(firstLineOf(p.Err))}
+	for _, it := range p.Items {
+		out.Items = append(out.Items, BaselineItem{Item: it.Item, Verdict: string(it.Verdict), Line: it.Line, Problem: it.Problem})
+	}
+	return out
+}
+
+// runItems folds the session's runs into their items, the newest last.
+// said is when a person last said something to the session (PersonSaid).
+func runItems(runs []RunInput, said time.Time) []Item {
+	out := make([]Item, 0, len(runs))
+	for i, r := range FoldRuns(runs, said) {
+		out = append(out, Item{Key: "run:" + strconv.Itoa(r.N), T: ItemRun, At: runs[i].Run.CreatedAt, Stage: domain.StageOpen, Run: &r})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Run.N < out[j].Run.N })
+	return out
+}
+
+// FoldRuns folds each of a session's runs (FoldRun), in the order given,
+// and folds an ended one to its line once it is no longer the latest
+// news (§25.9). The run that ended most recently stays whole until a
+// person says something to the session after it ended (said, PersonSaid)
+// or another run is proposed after it ended; every other ended run is
+// folded. An open run is never folded, nor one that never ran.
+func FoldRuns(ins []RunInput, said time.Time) []Run {
+	out := make([]Run, len(ins))
+	latest := -1
+	var latestAt time.Time
+	latestN := 0
+	for i, in := range ins {
+		out[i] = FoldRun(in)
+		if !in.Run.State.Ended() {
+			continue
+		}
+		at := in.Run.EndedAt
+		if latest < 0 || at.After(latestAt) || (at.Equal(latestAt) && in.Run.N > latestN) {
+			latest, latestAt, latestN = i, at, in.Run.N
+		}
+	}
+	for i, in := range ins {
+		if !in.Run.State.Ended() {
+			continue
+		}
+		fold := i != latest || said.After(in.Run.EndedAt)
+		for _, o := range ins {
+			if o.Run.N != in.Run.N && o.Run.CreatedAt.After(in.Run.EndedAt) {
+				fold = true
+			}
+		}
+		if fold {
+			out[i].Folded = true
+			out[i].Rev = runRev(out[i])
+		}
+	}
+	return out
+}
+
+// PersonSaid is when a person last said something in a session's
+// transcript: a line of theirs, never one gummi sent on its own (an
+// objective's turn, a run's report or an old crew's), zero when none.
+func PersonSaid(tr []engine.Message) time.Time {
+	for i := len(tr) - 1; i >= 0; i-- {
+		msg := tr[i]
+		if msg.Author != engine.AuthorUser || msg.At.IsZero() {
+			continue
+		}
+		switch TurnBy(msg.By) {
+		case "gummi", "workflow", "crew":
+			continue
+		}
+		return msg.At
+	}
+	return time.Time{}
+}
+
+// TurnMark is one turn of a conversation as a run's place among the turns
+// reads it: when it was written, and whether it sits inside an activity
+// row (a tool call, a thought, the agent's task list), which a run's
+// block never splits.
+type TurnMark struct {
+	At       time.Time
+	Activity bool
+}
+
+// TranscriptMarks are a transcript's turns as RunPlace reads them.
+func TranscriptMarks(tr []engine.Message) []TurnMark {
+	out := make([]TurnMark, len(tr))
+	for i, msg := range tr {
+		out[i] = TurnMark{At: msg.At, Activity: msg.Author == engine.AuthorTool || msg.Author == engine.AuthorThinking || msg.Author == engine.AuthorTasks}
+	}
+	return out
+}
+
+// RunPlace is where a run proposed at at stands among a conversation's
+// turns, the one rule both faces place a run's block by (§25.9): before
+// turn i, the first turn written after it that is no part of an activity
+// row; len(turns) after every turn. It is -1 when the run predates every
+// turn given: it stands among the thread's settled items, where Items
+// places it, above the conversation.
+func RunPlace(turns []TurnMark, at time.Time) int {
+	seen := false
+	for i, t := range turns {
+		if t.At.IsZero() {
+			continue
+		}
+		if !seen {
+			seen = true
+			if t.At.After(at) {
+				return -1
+			}
+		}
+		if !t.Activity && t.At.After(at) {
+			return i
+		}
+	}
+	return len(turns)
+}
+
+// endedLine is an ended run in one line: its glyph, and its recipe and
+// number, its state's word when it did not end done, its spec, its checked
+// items met, its spend and the files it left changed.
+func endedLine(r Run) (string, string) {
+	mark, word := "✓", ""
+	switch domain.RunState(r.State) {
+	case domain.RunPartial:
+		mark, word = "◐", "partial"
+	case domain.RunStopped:
+		mark, word = "■", "stopped"
+	}
+	parts := []string{RunLine(r)}
+	if word != "" {
+		parts = append(parts, word)
+	}
+	spec := fmt.Sprintf("spec %d", r.Spec)
+	if r.SpecTitle != "" {
+		spec += " “" + cut(r.SpecTitle, 48) + "”"
+	}
+	parts = append(parts, spec)
+	if met, of := RunMet(r); of > 0 {
+		parts = append(parts, fmt.Sprintf("met %d/%d", met, of))
+	}
+	parts = append(parts, domain.FormatDollars(r.Spent))
+	switch n := len(r.Files); n {
+	case 0:
+	case 1:
+		parts = append(parts, "1 file")
+	default:
+		parts = append(parts, fmt.Sprintf("%d files", n))
+	}
+	return mark, strings.Join(parts, " · ")
+}
+
+// RunMet is how many of an ended run's checked done-when items it met, of
+// how many were checked.
+func RunMet(r Run) (met, of int) {
+	for _, x := range r.Results {
+		if !x.Checked {
+			continue
+		}
+		of++
+		if x.Verdict == string(domain.ItemMet) {
+			met++
+		}
+	}
+	return met, of
+}
+
+// placeRuns puts each run item into the thread where its run was
+// proposed: before the first item from after that moment. A run item
+// carries the Seq of the item before it, so paging never skips past an
+// event (Since delivers every run item on every page).
+func placeRuns(items, runs []Item) []Item {
+	if len(runs) == 0 {
+		return items
+	}
+	out := make([]Item, 0, len(items)+len(runs))
+	var seq int64
+	k := 0
+	for _, it := range items {
+		for k < len(runs) && runs[k].At.Before(it.At) {
+			runs[k].Seq = seq
+			out = append(out, runs[k])
+			k++
+		}
+		out = append(out, it)
+		seq = it.Seq
+	}
+	for ; k < len(runs); k++ {
+		runs[k].Seq = seq
+		out = append(out, runs[k])
+	}
+	return out
+}
+
+// FoldRun folds one run into its block.
+func FoldRun(in RunInput) Run {
+	run := in.Run
+	r := Run{
+		N: run.N, Recipe: runRecipe(run), Spec: run.Spec, SpecTitle: Sanitize(in.SpecTitle), SpecRev: run.SpecRev,
+		State: string(run.State), Reason: Sanitize(run.Reason), Stopping: run.Stopping,
+		Started: run.StartedAt, Ended: run.EndedAt,
+		Files: in.Files, Strip: []StripEntry{}, Rows: []StepRow{},
+	}
+	steps := append([]domain.RunStep(nil), in.Steps...)
+	sort.SliceStable(steps, func(i, j int) bool {
+		a, b := steps[i].StartedAt, steps[j].StartedAt
+		switch {
+		case a.IsZero() != b.IsZero():
+			return !a.IsZero()
+		case !a.Equal(b):
+			return a.Before(b)
+		}
+		return steps[i].Path < steps[j].Path
+	})
+	live := false
+	for _, s := range steps {
+		r.Spent += stepSpent(s, in.Live)
+		live = live || s.State.Live()
+	}
+	r.Spent = roundCredits(r.Spent)
+	// the strip reads a live step as its row does (liveState); an ended
+	// step's follow-up moves its row, not where the recipe stands
+	now := append([]domain.RunStep(nil), steps...)
+	for i, s := range now {
+		if l, seen := in.Live[s.Path]; seen && s.State.Live() {
+			now[i].State = liveState(s, l, seen)
+		}
+	}
+	for _, en := range run.Recipe.Steps {
+		r.Strip = append(r.Strip, stripEntry(en, "", now))
+	}
+	r.Rows = stepRows(run, steps, in.Live)
+	if d := run.Pending; d != nil {
+		r.Pending = &RunPending{Kind: string(d.Kind), Question: Sanitize(d.Question), Options: d.Options, Step: d.Step}
+		for i := range r.Rows {
+			if d.Step != "" && (r.Rows[i].Key == d.Step || r.Rows[i].Path == d.Step) {
+				r.Rows[i].Waiting = true
+			}
+		}
+	}
+	switch {
+	case run.State == domain.RunProposed, run.State == domain.RunQueued, run.State.Open() && len(r.Rows) == 0:
+		r.Baseline = foldBaseline(run.Baseline)
+	}
+	if run.State.Ended() {
+		for _, res := range run.Results {
+			r.Results = append(r.Results, RunResult{
+				Item: res.Item, Verdict: string(res.Verdict), Checked: res.Checked, Detail: Sanitize(firstLineOf(res.Detail)),
+				Before: string(res.Before), Change: engine.ResultChange(res),
+			})
+		}
+		for _, c := range run.Commits {
+			r.Commits = append(r.Commits, Sanitize(c))
+		}
+		r.Report = run.Report != ""
+	}
+	r.CanPause = run.State == domain.RunRunning && !run.Stopping
+	r.CanResume = run.State == domain.RunPaused && !run.Stopping
+	r.CanStop = run.State.Open() && !run.Stopping
+	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0
+	r.SavedAs = Sanitize(run.SavedAs)
+	if r.CanSave = engine.RunSaveRefusal(run) == ""; r.CanSave {
+		if workflowrecipe.CheckName(run.Recipe.Name) == nil {
+			r.SaveName = run.Recipe.Name
+		}
+	}
+	r.Live = liveStrip(in, r, now)
+	if run.State.Ended() {
+		r.Mark, r.Line = endedLine(r)
+	}
+	r.Rev = runRev(r)
+	return r
+}
+
+// runRecipe is how the block names a run's recipe.
+func runRecipe(run domain.Run) string {
+	switch {
+	case run.RecipeName != "":
+		return Sanitize(run.RecipeName)
+	case run.Recipe.Name != "":
+		return Sanitize(run.Recipe.Name)
+	}
+	return "inline recipe"
+}
+
+// runRev is the block's revision: a hash of everything else it carries.
+func runRev(r Run) string {
+	r.Rev = ""
+	b, _ := json.Marshal(r)
+	h := fnv.New64a()
+	_, _ = h.Write(b)
+	return strconv.FormatUint(h.Sum64(), 36)
+}
+
+// stepSpent is a step's spend: its card's, live, while it works.
+func stepSpent(s domain.RunStep, live map[string]StepLive) float64 {
+	if l, ok := live[s.Path]; ok && s.State.Live() && l.Spent > s.Spent {
+		return l.Spent
+	}
+	return s.Spent
+}
+
+// under reports whether path is prefix or sits beneath it.
+func under(path, prefix string) bool { return path == prefix || strings.HasPrefix(path, prefix+"/") }
+
+// stripEntry is one recipe entry at prefix, in the state its steps are in.
+func stripEntry(en domain.Entry, prefix string, steps []domain.RunStep) StripEntry {
+	id := en.ID()
+	path := id
+	if prefix != "" {
+		path = prefix + "/" + id
+	}
+	var mine []domain.RunStep
+	for _, s := range steps {
+		if under(s.Path, path) {
+			mine = append(mine, s)
+		}
+	}
+	e := StripEntry{ID: id, Kind: "step", State: entryState(mine)}
+	switch {
+	case en.Parallel != nil:
+		e.Kind = "parallel"
+		for _, s := range en.Parallel.Steps {
+			e.Branches = append(e.Branches, stripEntry(domain.Entry{Step: &domain.Step{ID: s.ID}}, path, steps))
+		}
+	case en.Repeat != nil:
+		e.Kind, e.Max = "repeat", en.Repeat.Max
+		for _, s := range mine {
+			if n, ok := iterationOf(s.Path, path); ok && n > e.Iter {
+				e.Iter = n
+			}
+		}
+	}
+	return e
+}
+
+// iterationOf is the iteration of the repeat at prefix that path sits in.
+func iterationOf(path, prefix string) (int, bool) {
+	rest, ok := strings.CutPrefix(path, prefix+"/")
+	if !ok {
+		return 0, false
+	}
+	head, _, _ := strings.Cut(rest, "/")
+	n, err := strconv.Atoi(head)
+	return n, err == nil
+}
+
+// entryState is the state of an entry from its steps' states: waiting
+// until one starts, asking or running while any is live, then failed when
+// none of them finished well, and done otherwise.
+func entryState(steps []domain.RunStep) string {
+	if len(steps) == 0 {
+		return "waiting"
+	}
+	running, asking, done, settled := false, false, false, true
+	for _, s := range steps {
+		switch s.State {
+		case domain.StepAsking:
+			asking = true
+		case domain.StepRunning:
+			running = true
+		case domain.StepDone:
+			done = true
+		}
+		if !s.State.Settled() {
+			settled = false
+		}
+	}
+	switch {
+	case asking:
+		return "asking"
+	case running:
+		return "running"
+	case !settled:
+		return "waiting"
+	case !done:
+		return "failed"
+	}
+	return "done"
+}
+
+// iteration is one repeat iteration's path and the repeat it belongs to.
+type iteration struct {
+	path   string
+	repeat domain.Repeat
+	n      int
+}
+
+// iterations lists every repeat iteration a step of the run sits in, the
+// innermost last.
+func iterations(es []domain.Entry, prefix string, steps []domain.RunStep) []iteration {
+	var out []iteration
+	for _, en := range es {
+		if en.Repeat == nil {
+			continue
+		}
+		base := en.Repeat.ID
+		if prefix != "" {
+			base = prefix + "/" + base
+		}
+		seen := map[int]bool{}
+		for _, s := range steps {
+			if n, ok := iterationOf(s.Path, base); ok && !seen[n] {
+				seen[n] = true
+				it := iteration{path: base + "/" + strconv.Itoa(n), repeat: *en.Repeat, n: n}
+				out = append(out, it)
+				out = append(out, iterations(en.Repeat.Steps, it.path, steps)...)
+			}
+		}
+	}
+	return out
+}
+
+// finished reports whether an iteration has ended: every step in it
+// settled, and its stop condition judged, a later iteration begun or the
+// run over.
+func finished(run domain.Run, it iteration, steps []domain.RunStep) bool {
+	var mine []domain.RunStep
+	later := false
+	for _, s := range steps {
+		if under(s.Path, it.path) {
+			mine = append(mine, s)
+		}
+		base := strings.TrimSuffix(it.path, "/"+strconv.Itoa(it.n))
+		if n, ok := iterationOf(s.Path, base); ok && n > it.n {
+			later = true
+		}
+	}
+	if len(mine) == 0 {
+		return false
+	}
+	for _, s := range mine {
+		if !s.State.Settled() {
+			return false
+		}
+	}
+	_, judged := run.Until[it.path]
+	return judged || later || run.State.Ended()
+}
+
+// stepRows draws the run's steps, oldest first, each finished outermost
+// iteration of a repeat folded to one row where its first step stood.
+func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) []StepRow {
+	fold := map[string]iteration{}
+	for _, it := range iterations(run.Recipe.Steps, "", steps) {
+		if !finished(run, it, steps) {
+			continue
+		}
+		outer := true
+		for p := range fold {
+			if under(it.path, p) {
+				outer = false
+			}
+		}
+		if outer {
+			fold[it.path] = it
+		}
+	}
+	rows := []StepRow{}
+	placed := map[string]int{}
+	changed := map[string]int{}
+	for _, s := range steps {
+		if s.State == domain.StepWaiting {
+			continue
+		}
+		var into *iteration
+		for p, it := range fold {
+			if under(s.Path, p) {
+				into = &it
+				break
+			}
+		}
+		if into == nil {
+			rows = append(rows, stepRow(s, live))
+			continue
+		}
+		i, ok := placed[into.path]
+		if !ok {
+			i = len(rows)
+			placed[into.path] = i
+			rows = append(rows, StepRow{
+				Key: into.path, Path: into.path, Repeat: into.repeat.ID, Iter: into.n, ID: into.repeat.ID,
+				State: string(domain.StepDone), Folded: true, Verdict: verdictWords(run, *into),
+			})
+		}
+		row := &rows[i]
+		row.Spent = roundCredits(row.Spent + s.Spent)
+		if s.State == domain.StepFailed {
+			row.State = string(domain.StepFailed)
+		}
+		changed[into.path] += len(s.Changed)
+	}
+	for p, i := range placed {
+		if n := changed[p]; n > 0 {
+			rows[i].Flag = "a reading step in it " + strings.TrimSuffix(ReaderFlag(n), " although it only reads")
+		}
+	}
+	for p, i := range placed {
+		rows[i].Steps = iterationSteps(fold[p], steps)
+		rows[i].Line = rows[i].Verdict
+	}
+	return rows
+}
+
+// stepRow is one step's row.
+func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
+	row := StepRow{
+		Key: s.Path, Path: s.Path, ID: s.StepID, Role: string(s.Role), State: string(s.State),
+		Spent: roundCredits(stepSpent(s, live)), Card: string(s.Card),
+	}
+	if row.ID == "" {
+		row.ID = s.Path[strings.LastIndex(s.Path, "/")+1:]
+	}
+	row.Repeat, row.Iter = innerIteration(s.Path)
+	l, seen := live[s.Path]
+	state := liveState(s, l, seen)
+	row.State = string(state)
+	switch {
+	case state == domain.StepAsking && s.EndTree != "":
+		row.Line = "its revised plan waits on you"
+	case state == domain.StepAsking:
+		row.Line = "asks you"
+	case state == domain.StepRunning && s.State.Settled():
+		row.Line = "a follow-up · " + actionWords(l.Action)
+	case state.Live():
+		row.Line = actionWords(l.Action)
+	case state == domain.StepDone:
+		row.Line = endSummary(s.Output)
+	default:
+		row.Line = Sanitize(firstLineOf(s.Reason))
+	}
+	if s.State.Live() && l.Ask != nil {
+		row.Question = AskQuestion(l.Ask)
+	}
+	row.Flag = ReaderFlag(len(s.Changed))
+	return row
+}
+
+// liveState is the state a step's row shows. The store's word on a live
+// step moves between running and asking only when the run is next ticked,
+// so a step that has just asked, or has just been answered, read as it was
+// until then; its own session (seen) is the authority while it has one. A
+// planner's revised plan waits on the person whatever its session says.
+// An ended step whose card is working again — a person's follow-up — is
+// running.
+func liveState(s domain.RunStep, l StepLive, seen bool) domain.StepState {
+	switch {
+	case !seen:
+		return s.State
+	case s.State.Live() && s.EndTree == "":
+		if l.Ask != nil {
+			return domain.StepAsking
+		}
+		return domain.StepRunning
+	case s.State.Settled() && l.Busy:
+		return domain.StepRunning
+	}
+	return s.State
+}
+
+// ReaderFlag is a reading step's row flag for the n files it changed, ""
+// when it changed none.
+func ReaderFlag(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "changed 1 file although it only reads"
+	}
+	return fmt.Sprintf("changed %d files although it only reads", n)
+}
+
+// innerIteration is the repeat and iteration a step's path sits in, the
+// innermost: build/2/implement → build, 2.
+func innerIteration(path string) (string, int) {
+	parts := strings.Split(path, "/")
+	for i := len(parts) - 2; i > 0; i-- {
+		if n, err := strconv.Atoi(parts[i]); err == nil {
+			return parts[i-1], n
+		}
+	}
+	return "", 0
+}
+
+// actionWords is a step's call in flight as its row says it.
+func actionWords(label string) string {
+	label = strings.Join(strings.Fields(Sanitize(label)), " ")
+	if label == "" {
+		return "working"
+	}
+	return cut(label, 110)
+}
+
+// endSummary is a step's output as its row ends on: its first line, past
+// any line that only records an item's judgement.
+func endSummary(out string) string {
+	for _, l := range strings.Split(Sanitize(out), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "MET:") || strings.HasPrefix(l, "UNMET:") || strings.HasPrefix(l, "```") {
+			continue
+		}
+		return cut(l, 110)
+	}
+	return "done"
+}
+
+// AskQuestion is a step's ask with its recommended answer first, as its
+// row and its opened step both draw it.
+func AskQuestion(a *engine.Ask) *StepQuestion {
+	q := &StepQuestion{Question: Sanitize(a.Question), Multi: a.MultiPick}
+	rec := engine.RecommendedOption(a)
+	first := 0
+	for i, o := range a.Options {
+		if o.Label == rec {
+			first = i
+			break
+		}
+	}
+	for i, o := range a.Options {
+		opt := QuestionOption{Label: Sanitize(o.Label), Detail: Sanitize(o.Detail)}
+		if i == first {
+			opt.Recommended = true
+			q.Options = append([]QuestionOption{opt}, q.Options...)
+			continue
+		}
+		q.Options = append(q.Options, opt)
+	}
+	return q
+}
+
+// verdictWords is how an iteration's stop condition was judged.
+func verdictWords(run domain.Run, it iteration) string {
+	j, ok := run.Until[it.path]
+	if !ok {
+		return ""
+	}
+	word := "not met"
+	switch {
+	case j.Met:
+		word = "met"
+	case j.Unjudged:
+		word = "can't judge"
+	}
+	if d := firstLineOf(j.Detail); d != "" {
+		return cut(Sanitize(word+" · "+d), 110)
+	}
+	return word
+}
+
+// iterationSteps names what ran in an iteration, in recipe order: steps
+// joined by " · ", a parallel's branches by " ∥ ".
+func iterationSteps(it iteration, steps []domain.RunStep) string {
+	ran := func(id string) bool {
+		for _, s := range steps {
+			if under(s.Path, it.path+"/"+id) {
+				return true
+			}
+		}
+		return false
+	}
+	var parts []string
+	for _, en := range it.repeat.Steps {
+		switch {
+		case en.Step != nil && ran(en.Step.ID):
+			parts = append(parts, en.Step.ID)
+		case en.Parallel != nil && ran(en.Parallel.ID):
+			var b []string
+			for _, s := range en.Parallel.Steps {
+				b = append(b, s.ID)
+			}
+			parts = append(parts, strings.Join(b, " ∥ "))
+		case en.Repeat != nil && ran(en.Repeat.ID):
+			parts = append(parts, en.Repeat.ID+" ↺")
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func firstLineOf(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+func cut(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
+
+// RunLine is a run in one line, the words a list of runs (a spec's, the
+// TUI's crumb) names it by: "deliver · run 2".
+func RunLine(r Run) string { return fmt.Sprintf("%s · run %d", r.Recipe, r.N) }
+
+// IsRunNote reports whether a transcript entry is one of the lines a run
+// puts into its session's transcript ("workflow: run 1 started"). The
+// run's block says all of it, in place, so neither face draws them: a
+// session's thread reads as its conversation with one block per run.
+func IsRunNote(msg engine.Message) bool {
+	return msg.Author == engine.AuthorTool && msg.Tool == "" && strings.HasPrefix(msg.Content, engine.RunNotePrefix)
+}
+
+// WithoutRunNotes is a transcript with its run notes left out (IsRunNote).
+// It returns tr itself when it holds none.
+func WithoutRunNotes(tr []engine.Message) []engine.Message {
+	k := -1
+	for i, msg := range tr {
+		if IsRunNote(msg) {
+			k = i
+			break
+		}
+	}
+	if k < 0 {
+		return tr
+	}
+	out := append([]engine.Message(nil), tr[:k]...)
+	for _, msg := range tr[k+1:] {
+		if !IsRunNote(msg) {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+// RunStateWord is a run's state as its block's head says it.
+func RunStateWord(r Run) string {
+	if r.Stopping {
+		return "stopping"
+	}
+	switch domain.RunState(r.State) {
+	case domain.RunProposed:
+		return "waits on your answer"
+	case domain.RunQueued:
+		return "queued behind the open run"
+	case domain.RunDenied:
+		return "not run"
+	}
+	return r.State
+}

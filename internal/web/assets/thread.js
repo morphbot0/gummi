@@ -20,6 +20,7 @@ import { draftHero } from './session.js?v=__ASSET_V__'
 import { attachmentURL, get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { restoreComposer } from './composer.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
+import { runBlock, runSig, markStep, setTranscriptDrawer } from './workflow.js?v=__ASSET_V__'
 
 const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
@@ -34,9 +35,22 @@ let shownFor = null
 let following = true
 
 export function initThread () {
-  on(['thread', 'sel', 'card', 'sessionDraft'], render)
-  on(['live'], () => { if (state.thread && !state.thread.items.length) render() })
-  on(['live', 'card', 'board'], renderLive)
+  on(['thread', 'sel', 'card', 'sessionDraft', 'runFold'], render)
+  // a run the live conversation places among its turns leaves the settled
+  // items, and one it no longer places comes back to them
+  let placed = ''
+  on(['live'], () => {
+    const now = liveRunKeys().join(',')
+    if (state.thread && (now !== placed || !threadItems(state.thread).length)) render()
+    placed = now
+  })
+  // a session's workflow runs are drawn among its turns (runsAt), so the
+  // live block is drawn again when the thread brings a run that moved
+  on(['live', 'card', 'board', 'thread', 'runFold'], renderLive)
+  on(['step'], () => markStep($('#thread')))
+  // a step opened beside the thread is drawn the way a session's
+  // conversation is (DESIGN §25.10)
+  setTranscriptDrawer(stepTranscript, reconcile)
   const sc = $('#thread')
   const follow = () => { following = atEnd(sc) }
   // a row the person opened or unclamped near the bottom grew under them:
@@ -118,13 +132,14 @@ function render () {
     setTimeout(() => { if (shownFor === filled && state.thread) box.setAttribute('aria-live', 'polite') }, 300)
   }
   const t = state.thread
+  const items = threadItems(t)
   if (!state.sel && state.sessionDraft) { placeholder(box, draftHero()); return }
   if (!state.sel) {
     placeholder(box, h('div', { class: 'empty', testid: 'thread-none' }, h('b', null, 'Nothing open'), 'Start a session, or pick a card from the list.'))
     return
   }
   if (!t) { placeholder(box, h('div', { class: 'empty', testid: 'thread-loading' }, h('span', { class: 'spinner' }))); return }
-  if (!t.items.length) {
+  if (!items.length) {
     if (t.gone) {
       placeholder(box, h('div', { class: 'empty', testid: 'thread-gone' }, h('b', null, `${ref(state.sel)} was deleted`),
         state.draft.trim() ? 'What you were writing is still in the composer. Pick another card from the list.' : 'Pick another card from the list.'))
@@ -132,7 +147,7 @@ function render () {
       placeholder(box, h('div', { class: 'empty', testid: 'thread-unavailable' }, h('b', null, 'The thread is not available yet'), 'This board’s server does not serve a card’s conversation yet. The head, the decision and the panel still work.'))
     } else if (t.err) {
       placeholder(box, h('div', { class: 'empty err', testid: 'thread-error' }, h('b', null, 'The thread did not load'), t.err.message))
-    } else if (talking(state.live)) {
+    } else if (talking(state.live) || items.length !== t.items.length) {
       // a conversation with no stage history (a freeform card, a consult)
       // is the live block's to draw; "nothing has happened" would be wrong
       placeholder(box, null)
@@ -148,7 +163,7 @@ function render () {
   // group items under the stage divider before them
   const gs = []
   let g = { key: '__pre', stage: null, items: [] }
-  for (const it of t.items) {
+  for (const it of items) {
     if (it.t === 'stage') {
       if (g.stage || g.items.length) gs.push(g)
       g = { key: it.key, stage: it, items: [] }
@@ -196,7 +211,40 @@ function render () {
   while (box.children.length > gs.length) box.lastChild.remove()
   for (const k of [...groups.keys()]) if (!keepGroups.has(k)) groups.delete(k)
   for (const k of [...nodes.keys()]) if (!keepItems.has(k)) nodes.delete(k)
+  markStep(box)
   stickToEnd(sc)
+}
+
+// threadItems is what the thread's own list draws: every item but a
+// workflow run's block the live conversation places among its turns
+// (renderLive). A run proposed before the turns it carries stands here,
+// where the server's fold put it among the settled items.
+function threadItems (t) {
+  const live = new Set(liveRunKeys())
+  return (t?.items || []).filter(it => it.t !== 'run' || !live.has(it.key))
+}
+
+// liveRunKeys are the runs the live conversation places among its turns,
+// by their items' keys.
+function liveRunKeys () {
+  return (state.live?.freeform?.runs || []).map(p => `run:${p.n}`)
+}
+
+// runsAt is where the server placed each of the session's runs among the
+// live conversation's turns (webapi.Conversation.Runs, threadfold's
+// RunPlace): a map of turn index to the blocks that go before it, the
+// ones after every turn under the last index. The page places nothing
+// itself.
+function runsAt (places) {
+  const items = new Map((state.thread?.items || []).filter(it => it.t === 'run').map(it => [it.run.n, it]))
+  const at = new Map()
+  for (const p of places || []) {
+    const it = items.get(p.n)
+    if (!it) continue
+    if (!at.has(p.before)) at.set(p.before, [])
+    at.get(p.before).push(cached(`run:${p.n}`, runSig(it), () => runBlock(it)))
+  }
+  return at
 }
 
 function talking (l) {
@@ -267,7 +315,8 @@ function groupNode (grp, last) {
 
 function itemNode (it, live = false) {
   live = live && it.t === 'activity'
-  const sig = `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}|${live}`
+  // a run's block moves without an event, and with the page's own fold of it
+  const sig = it.t === 'run' ? `run|${runSig(it)}` : `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}|${live}`
   const have = nodes.get(it.key)
   if (have && have.sig === sig) return have.el
   const el = itemEl(it, live)
@@ -289,8 +338,7 @@ export function itemEl (it, live = false) {
     case 'verify': return verify(it)
     case 'decision': return decision(it)
     case 'note': return h('div', { class: 'note-ev' }, h('span', null, it.text), h('span', { class: 'when' }, clock(it.time)))
-    case 'stretch': return h('div', { class: ['stretch', it.edge], testid: 'stretch', title: it.reason || null },
-      h('b', null, it.label || 'autopilot'), [it.tally, it.how].filter(Boolean).join(' · ') || null)
+    case 'run': return runBlock(it)
     default: return h('div', { class: 'note-ev' }, it.text || it.t)
   }
 }
@@ -358,8 +406,11 @@ function copyButton (text, title, testid) {
 // you is a line a person typed. It is headed with the name it was sent
 // with, and "you" when it came with none (the terminal's own lines) —
 // never with the viewer's own name, which would put one person's words
-// in another's mouth on a board several people share.
+// in another's mouth on a board several people share. A turn a workflow
+// run sent (its report, DESIGN §25.7) — or an old crew — is gummi's, never
+// the person's: it is drawn on the other side, headed as the workflow.
 function you (it) {
+  const run = it.by === 'workflow' || it.by === 'crew'
   const who = it.by || 'you'
   const text = String(it.text || '')
   // a long prompt is cut to a few lines, with a way to read it whole —
@@ -379,11 +430,11 @@ function you (it) {
         }
       }, whole ? 'show less' : 'show more')
     : null
-  return h('div', { class: 'msg mine', testid: it.via === 'consult' ? 'thread-consult' : 'bubble' },
+  return h('div', { class: ['msg', run ? 'runturn' : 'mine'], testid: run ? 'thread-workflow' : it.via === 'consult' ? 'thread-consult' : 'bubble' },
     h('div', { class: 'bubble' }, body, more, attachmentThumbs(it.attachments)),
     h('div', { class: 'who' },
       it.via ? h('span', { class: 'via' }, it.via) : null,
-      h('b', { title: 'who sent it' }, who),
+      h('b', { title: run ? `sent by the session’s ${it.by}` : 'who sent it' }, who),
       it.time ? h('span', { class: 'mono' }, clock(it.time)) : null,
       copyButton(text, 'Copy message', 'bubble-copy'),
       it.rewind ? h('button', { type: 'button', class: 'rewind', testid: 'turn-rewind', title: 'Take the conversation back to before this message and edit it. The branch keeps its commits.', onclick: it.rewind }, 'rewind') : null))
@@ -589,6 +640,9 @@ function renderLive () {
   const l = state.live
   if (turnsFor !== state.sel) { turnNodes.clear(); earlier.clear(); turnsFor = state.sel }
   const parts = []
+  // the session's runs the server placed among its turns; the rest stand
+  // among the settled items (threadItems)
+  let runs = null
   if (r) {
     const pausing = r.running?.pausing
     const role = l?.role || ROLE[l?.stage || r.stage] || 'agent'
@@ -621,20 +675,14 @@ function renderLive () {
         parts.push(cached(`${k}:head`, `${label}|${role}`, () => h('div', { class: ['ev-stage', k === 'freeform' ? 'st-open' : 'st-todo'], testid: `live-${k}-head` }, h('b', null, label),
           k === 'freeform' ? h('span', { class: 'sum' }, role) : null)))
         if (c.notice) parts.push(cached(`${k}:notice`, c.notice, () => h('div', { class: 'live warnc', testid: `live-${k}-notice` }, c.notice)))
-        parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null))
-        if (c.sending) parts.push(cached(`${k}:sending`, c.sending, () => you({ text: c.sending, via: 'sending' })))
-        if (c.tasks?.length) parts.push(cached(`${k}:tasks`, JSON.stringify(c.tasks), () => tasks(c.tasks, k)))
-        if (k === 'freeform' && c.watches?.length) parts.push(cached(`${k}:watches`, JSON.stringify(c.watches), () => watches(c.watches)))
-        if (k === 'freeform' && c.objective) parts.push(cached(`${k}:objective`, JSON.stringify(c.objective), () => objectiveStrip(state.sel, c.objective)))
-        if (k === 'freeform' && c.queued?.length) parts.push(cached(`${k}:queued`, JSON.stringify(c.queued), () => queued(state.sel, c.queued)))
-        if (c.busy) {
-          // the same line a stage run shows: what it is doing, the call in
-          // flight, and what the session has cost and how full it is
-          const words = [c.verb || 'thinking', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
-          const ctx = c.context?.limit ? `${Math.round(100 * c.context.tokens / c.context.limit)}% context` : null
-          parts.push(busyLine(`live-${k}`, `${k}:busy`, words, [c.spent ? cr(c.spent) : null, ctx].filter(Boolean).join(' · ') || null))
-        }
-        if (c.err) parts.push(cached(`${k}:err`, c.err, () => h('div', { class: 'live badc' }, c.err)))
+        if (k === 'freeform') runs = runsAt(c.runs)
+        parts.push(...talk(k, c, {
+          role: c.role || (k === 'freeform' ? 'implementer' : 'consult'),
+          stage: k === 'freeform' ? 'open' : null,
+          runs: k === 'freeform' ? runs : null,
+          busy: `live-${k}`,
+          own: k === 'freeform'
+        }))
       }
     } else if (r.status === 'running') {
       parts.push(busyLine('live', 'run', `${ROLE[r.stage] || 'agent'} is ${r.running?.verb || 'working'}${pausing ? ' · pauses after this turn' : ''}`, null))
@@ -642,7 +690,39 @@ function renderLive () {
   }
   const sc = $('#thread')
   reconcile(box, parts)
+  markStep(box)
   stickToEnd(sc)
+}
+
+// talk is a conversation as the thread draws it under its head: its
+// turns (runs placed among them), the line on its way to it, its tasks,
+// the working line while it works — what it is doing, the call in flight,
+// what it has cost and how full it is — and its error. own marks the
+// card's own session, whose watches, objective and queued lines are the
+// card's to act on.
+function talk (key, c, { role, stage, runs = null, busy, own = false }) {
+  const parts = conversation(key, c, role, stage, runs)
+  if (c.sending) parts.push(cached(`${key}:sending`, c.sending, () => you({ text: c.sending, via: 'sending' })))
+  if (c.tasks?.length) parts.push(cached(`${key}:tasks`, JSON.stringify(c.tasks), () => tasks(c.tasks, key)))
+  if (own && c.watches?.length) parts.push(cached(`${key}:watches`, JSON.stringify(c.watches), () => watches(c.watches)))
+  if (own && c.objective) parts.push(cached(`${key}:objective`, JSON.stringify(c.objective), () => objectiveStrip(state.sel, c.objective)))
+  if (own && c.queued?.length) parts.push(cached(`${key}:queued`, JSON.stringify(c.queued), () => queued(state.sel, c.queued)))
+  if (c.busy) {
+    const words = [c.verb || 'thinking', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
+    const ctx = c.context?.limit ? `${Math.round(100 * c.context.tokens / c.context.limit)}% context` : null
+    parts.push(busyLine(busy, `${key}:busy`, words, [c.spent ? cr(c.spent) : null, ctx].filter(Boolean).join(' · ') || null))
+  }
+  if (c.err) parts.push(cached(`${key}:err`, c.err, () => h('div', { class: 'live badc' }, c.err)))
+  return parts
+}
+
+// stepTranscript is a workflow step's own conversation as the step panel
+// draws it: the session's conversation drawn by the same hand (talk), so
+// the two read the same (DESIGN §25.10).
+function stepTranscript (card, l) {
+  const c = l?.freeform
+  if (!c) return []
+  return talk(`step:${card}`, c, { role: c.role || 'step', stage: 'open', busy: 'step-busy' })
 }
 
 // reconcile makes parent's children els, in order, moving or taking out
@@ -816,7 +896,7 @@ async function loadEarlier (kind, before, asked = false) {
   if (grew && !following) sc.scrollTop = sc.scrollHeight - below
 }
 
-function conversation (kind, c, role, stage) {
+function conversation (kind, c, role, stage, inserts = null) {
   const out = []
   const head = earlierFor(kind, c)
   const turns = head ? head.turns.concat(c.turns || []) : (c.turns || [])
@@ -824,6 +904,9 @@ function conversation (kind, c, role, stage) {
   // its nodes: a key that moved with the block's window redrew every turn
   // on every one it slid
   const first = head ? head.from : (c.omitted || 0)
+  // inserts are keyed by a turn's place in the live window (c.turns): the
+  // earlier turns a person loaded sit in front of it
+  const off = head ? head.turns.length : 0
   if (first > 0) {
     const busy = fetching.has(kind)
     out.push(cached(`${kind}:earlier`, `${first}|${busy}`, () => h('div', { class: 'earlier-turns' }, h('button', {
@@ -845,6 +928,7 @@ function conversation (kind, c, role, stage) {
     run = []
   }
   turns.forEach((t, i) => {
+    if (inserts?.has(i - off)) { flush(); out.push(...inserts.get(i - off)) }
     if (t.tool || t.author === 'thinking') {
       if (!run.length) start = i
       run.push(t)
@@ -874,6 +958,7 @@ function conversation (kind, c, role, stage) {
     out.push(el)
   })
   flush(!!c.busy && !c.streaming)
+  if (inserts?.has(turns.length - off)) out.push(...inserts.get(turns.length - off))
   if (c.streaming) {
     out.push(h('div', { class: ['msg reply live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
       // a message left half-written when its session stopped (paused,

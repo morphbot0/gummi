@@ -20,8 +20,9 @@ lint: vet
 # x/exp/golden define the -update flag.
 golden-update:
 	go test ./internal/domain/... -update
-	go test ./internal/spec/... -update
+	go test ./internal/threadfold/... -update
 	go test ./internal/ui/... -update
+	go test ./internal/webapi/... -update
 
 ci: build test lint
 

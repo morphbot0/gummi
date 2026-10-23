@@ -18,8 +18,7 @@ import (
 )
 
 // maxBody bounds a JSON request body. The largest thing the page sends as
-// JSON is a composer line or a spec note; a document goes to ingest as a
-// multipart upload with its own limit.
+// JSON is a composer line or a spec note.
 const maxBody = 1 << 20
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

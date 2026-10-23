@@ -13,16 +13,10 @@ import (
 	_ "modernc.org/sqlite" // pure-Go sqlite driver
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // ErrNotFound is returned when a feature ID has no row.
 var ErrNotFound = errors.New("feature not found")
-
-// ErrDependedOn is returned by DeleteFeature when the card still has
-// dependents. The store pre-checks before deleting so the raw SQLite FK
-// constraint error never surfaces and no edge is silently dropped.
-var ErrDependedOn = errors.New("feature has dependents")
 
 // ErrForkPointStamped is returned by SetForkPoint when the feature row
 // already records a fork-point SHA. It is the "stamped once" refusal that
@@ -103,9 +97,149 @@ CREATE TABLE IF NOT EXISTS features (
 	continued_as    TEXT NOT NULL DEFAULT '',
 	parent_id       TEXT NOT NULL DEFAULT '',
 	delegate_budget INTEGER NOT NULL DEFAULT 0,
-	delegate_all    INTEGER NOT NULL DEFAULT 0
+	delegate_all    INTEGER NOT NULL DEFAULT 0,
+	crew_of         TEXT NOT NULL DEFAULT '',
+	crew_seq        INTEGER NOT NULL DEFAULT 0,
+	crew_node       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
+-- A crew (DESIGN §24) and its nodes, retired by workflows (§25.2): kept so
+-- an old database opens, and read only by the upgrade that stops an open
+-- one. The crew's own card is a hidden
+-- freeform child of its session (features.crew_of); the plan, the
+-- approved plan and the open decision are JSON, read back whole.
+CREATE TABLE IF NOT EXISTS crews (
+	id             TEXT PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+	session_id     TEXT NOT NULL,
+	seq            INTEGER NOT NULL,
+	state          TEXT NOT NULL,
+	brief          TEXT NOT NULL DEFAULT '',
+	spec_rev       INTEGER NOT NULL DEFAULT 0,
+	budget         INTEGER NOT NULL DEFAULT 0,
+	approved       TEXT NOT NULL DEFAULT '{}',
+	approved_items TEXT NOT NULL DEFAULT '[]',
+	plan           TEXT NOT NULL DEFAULT '{}',
+	items          TEXT NOT NULL DEFAULT '[]',
+	pending        TEXT NOT NULL DEFAULT '',
+	wake           TEXT NOT NULL DEFAULT '[]',
+	own_spent      REAL NOT NULL DEFAULT 0,
+	stopping       INTEGER NOT NULL DEFAULT 0,
+	report         TEXT NOT NULL DEFAULT '',
+	verified_sha   TEXT NOT NULL DEFAULT '',
+	partial        INTEGER NOT NULL DEFAULT 0,
+	budget_warned  INTEGER NOT NULL DEFAULT 0,
+	out_of_budget  INTEGER NOT NULL DEFAULT 0,
+	created_at     TEXT NOT NULL,
+	updated_at     TEXT NOT NULL,
+	UNIQUE(session_id, seq)
+);
+CREATE TABLE IF NOT EXISTS crew_nodes (
+	crew_id       TEXT NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
+	node          TEXT NOT NULL,
+	card_id       TEXT NOT NULL DEFAULT '',
+	state         TEXT NOT NULL,
+	planner_tries INTEGER NOT NULL DEFAULT 0,
+	reason        TEXT NOT NULL DEFAULT '',
+	reworks       INTEGER NOT NULL DEFAULT 0,
+	envelope      INTEGER NOT NULL DEFAULT 0,
+	handoff       TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (crew_id, node)
+);
+CREATE TABLE IF NOT EXISTS crew_preauth (
+	feature_id TEXT PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+	credits    INTEGER NOT NULL DEFAULT 0
+);
+-- A session's specs (DESIGN §25.3), one per piece of work: n counts from
+-- 1 per session, and path is the spec's file relative to the workspace
+-- root. A session's spec from before is spec 1, at its old path.
+CREATE TABLE IF NOT EXISTS session_specs (
+	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	n          INTEGER NOT NULL,
+	title      TEXT NOT NULL DEFAULT '',
+	path       TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (feature_id, n)
+);
+-- Every saved state of a session's spec, numbered per spec (spec_n): a
+-- run freezes one, and the Specs tab lists them. A database from before
+-- many specs is rebuilt into this shape with every row on spec 1
+-- (rebuildSpecRevisions).
+CREATE TABLE IF NOT EXISTS spec_revisions (
+	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	spec_n     INTEGER NOT NULL DEFAULT 1,
+	rev        INTEGER NOT NULL,
+	content    TEXT NOT NULL,
+	by         TEXT NOT NULL DEFAULT '',
+	at         TEXT NOT NULL,
+	PRIMARY KEY (feature_id, spec_n, rev)
+);
+-- A session's workflow runs (DESIGN §25) and their step instances. The
+-- recipe is the copy the person allowed, kept both as its text and as the
+-- parsed recipe (JSON) a planner's revision splices into; the inputs,
+-- results, steers, the open decision, the judged untils, the onMax
+-- answers and the commits made while it ran are JSON, read back whole. A
+-- step's card is a hidden child of the session (features.crew_of, with
+-- crew_seq the run and crew_node the step's path).
+CREATE TABLE IF NOT EXISTS workflow_runs (
+	session_id     TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	n              INTEGER NOT NULL,
+	recipe_name    TEXT NOT NULL DEFAULT '',
+	recipe_yaml    TEXT NOT NULL DEFAULT '',
+	recipe         TEXT NOT NULL DEFAULT '{}',
+	inputs         TEXT NOT NULL DEFAULT '{}',
+	spec_n         INTEGER NOT NULL DEFAULT 0,
+	spec_rev       INTEGER NOT NULL DEFAULT 0,
+	state          TEXT NOT NULL,
+	estimate       INTEGER NOT NULL DEFAULT 0,
+	spent          REAL NOT NULL DEFAULT 0,
+	start_tree     TEXT NOT NULL DEFAULT '',
+	end_tree       TEXT NOT NULL DEFAULT '',
+	validated_tree TEXT NOT NULL DEFAULT '',
+	results        TEXT NOT NULL DEFAULT '[]',
+	report         TEXT NOT NULL DEFAULT '',
+	reason         TEXT NOT NULL DEFAULT '',
+	stopping       INTEGER NOT NULL DEFAULT 0,
+	warned         INTEGER NOT NULL DEFAULT 0,
+	out_of_budget  INTEGER NOT NULL DEFAULT 0,
+	steers         TEXT NOT NULL DEFAULT '[]',
+	pending        TEXT NOT NULL DEFAULT '',
+	feedback       TEXT NOT NULL DEFAULT '',
+	revision       INTEGER NOT NULL DEFAULT 0,
+	created_at     TEXT NOT NULL,
+	started_at     TEXT NOT NULL DEFAULT '',
+	ended_at       TEXT NOT NULL DEFAULT '',
+	updated_at     TEXT NOT NULL,
+	start_head     TEXT NOT NULL DEFAULT '',
+	until_results  TEXT NOT NULL DEFAULT '{}',
+	on_max         TEXT NOT NULL DEFAULT '{}',
+	commits        TEXT NOT NULL DEFAULT 'null',
+	baseline       TEXT NOT NULL DEFAULT '',
+	saved_as       TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, n)
+);
+CREATE TABLE IF NOT EXISTS workflow_steps (
+	session_id TEXT NOT NULL,
+	run_n      INTEGER NOT NULL,
+	path       TEXT NOT NULL,
+	step_id    TEXT NOT NULL DEFAULT '',
+	card_id    TEXT NOT NULL DEFAULT '',
+	role       TEXT NOT NULL DEFAULT '',
+	tier       TEXT NOT NULL DEFAULT '',
+	state      TEXT NOT NULL,
+	estimate   INTEGER NOT NULL DEFAULT 0,
+	allowance  INTEGER NOT NULL DEFAULT 0,
+	spent      REAL NOT NULL DEFAULT 0,
+	start_tree TEXT NOT NULL DEFAULT '',
+	end_tree   TEXT NOT NULL DEFAULT '',
+	prompt     TEXT NOT NULL DEFAULT '',
+	output     TEXT NOT NULL DEFAULT '',
+	reason     TEXT NOT NULL DEFAULT '',
+	started_at TEXT NOT NULL DEFAULT '',
+	ended_at   TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, run_n, path),
+	FOREIGN KEY (session_id, run_n) REFERENCES workflow_runs(session_id, n) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS workflow_steps_card ON workflow_steps(card_id);
 -- features_stack is created by the column migrations, not here: this
 -- block runs against pre-existing databases too, where stack_id does
 -- not exist until the ALTER TABLE below has run. features_goal is
@@ -276,11 +410,9 @@ CREATE TABLE IF NOT EXISTS check_baseline (
 	PRIMARY KEY (feature_id, name)
 );
 
--- One directed edge per dependency: feature_id depends on depends_on_id.
--- feature_id cascades on delete (a deleted card's outgoing edges go with
--- it); depends_on_id does not, so SQLite FK enforcement refuses deleting
--- a card others still depend on. The store pre-checks dependents before
--- delete (ErrDependedOn) so the raw constraint error never surfaces.
+-- One directed edge per dependency between two workflow cards, kept only
+-- so an old database opens: nothing writes an edge any more, and
+-- DeleteFeature drops a card's incoming edges before the card itself.
 CREATE TABLE IF NOT EXISTS feature_deps (
 	feature_id    TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
 	depends_on_id TEXT NOT NULL REFERENCES features(id),
@@ -403,6 +535,14 @@ func OpenStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}
 	if err := migrateMergedStages(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
+	if err := rebuildSpecRevisions(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
+	if err := migrateToWorkflows(db, workspaceRootOf(dbPath)); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}
@@ -846,13 +986,46 @@ var migrations = []string{
 	// written from it (domain.Feature.ContinuedAs). Empty is every other
 	// card, and every session closed before the column existed.
 	`ALTER TABLE features ADD COLUMN continued_as TEXT NOT NULL DEFAULT ''`,
-	// A freeform card's delegation (domain.Delegation) and the freeform
-	// card a delegated card belongs to (domain.Feature.ParentID). Every
-	// empty default reads as "no delegation", so no row needs a value.
+	// The session a child card belongs to (domain.Feature.ParentID), and
+	// the vestigial delegate_* columns of the retired delegation (no
+	// longer read or written). Every empty default reads as "no parent".
 	`ALTER TABLE features ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN delegate_budget INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN delegate_all INTEGER NOT NULL DEFAULT 0`,
 	`CREATE INDEX IF NOT EXISTS features_parent ON features(parent_id)`,
+	// A session's hidden child (domain.ChildLink): the session it belongs
+	// to, a number on it and a path — a workflow step's run and step path,
+	// or an old crew's number and node id. Empty on every card a person
+	// works.
+	`ALTER TABLE features ADD COLUMN crew_of TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN crew_seq INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN crew_node TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE crews ADD COLUMN partial INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE crews ADD COLUMN budget_warned INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE crews ADD COLUMN out_of_budget INTEGER NOT NULL DEFAULT 0`,
+	// A workflow run's start HEAD, its judged untils and the person's
+	// onMax answers (DESIGN §25.7), for a database whose workflow_runs
+	// predates them.
+	`ALTER TABLE workflow_runs ADD COLUMN start_head TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE workflow_runs ADD COLUMN until_results TEXT NOT NULL DEFAULT '{}'`,
+	`ALTER TABLE workflow_runs ADD COLUMN on_max TEXT NOT NULL DEFAULT '{}'`,
+	// The commits a workflow run's steps made, for its block in the thread
+	// (DESIGN §25.9).
+	`ALTER TABLE workflow_runs ADD COLUMN commits TEXT NOT NULL DEFAULT 'null'`,
+	// The paths a reading step changed, flagged in its row and the run's
+	// report (DESIGN §25.4).
+	`ALTER TABLE workflow_steps ADD COLUMN changed TEXT NOT NULL DEFAULT 'null'`,
+	// A workflow run's baseline: the done-when checks run before its first
+	// step (DESIGN §25.5). Empty is no baseline, as on every run from before.
+	`ALTER TABLE workflow_runs ADD COLUMN baseline TEXT NOT NULL DEFAULT ''`,
+	// The workspace recipe a person saved a run's inline recipe as (DESIGN
+	// §25.9). Empty is a run whose recipe nobody saved.
+	`ALTER TABLE workflow_runs ADD COLUMN saved_as TEXT NOT NULL DEFAULT ''`,
+	// When a session's turn was written, and who typed a user turn, so a
+	// restored thread still places and folds its runs (DESIGN §25.9).
+	// Empty on every row from before.
+	`ALTER TABLE session_messages ADD COLUMN at TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE session_messages ADD COLUMN by_actor TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -887,27 +1060,31 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			budget_envelope, created_at, updated_at,
 			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, commit_draft, commit_draft_sha, repo,
 			pr_repo, pr_number, pr_url, pr_head_sha,
-			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
+			found_by,
 			research_mode,
 			base, branch_scheme, branch, stack_id, stack_pos,
 			session_backend, session_model, main_checkout, home,
-			parent_id, delegate_budget, delegate_all)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			parent_id,
+			crew_of, crew_seq, crew_node)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
 		f.Budget.Envelope,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		// the three false values are skip_triage/skip_diagnose/quick: vestigial
-		string(kind), f.ExternalRef, false, false, false, f.GateApproval,
+		// the three false values are skip_triage/skip_diagnose/quick, and
+		// the empty gate_approval, are vestigial
+		string(kind), f.ExternalRef, false, false, false, "",
 		string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.CommitDraft, f.CommitDraftSHA, f.Repo,
 		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA,
-		string(f.GoalID), f.GoalAttached, formatOptTime(f.GoalDroppedAt), string(f.FoundBy),
-		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
+		// the goal_* columns are vestigial: goals are gone
+		string(f.FoundBy),
 		string(f.Mode),
 		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
 		f.SessionBackend, f.SessionModel, f.MainCheckout, f.Home,
-		string(f.ParentID), f.Delegate.Budget, f.Delegate.ConfirmAll)
+		// delegate_budget/delegate_all are vestigial: delegation is gone
+		string(f.ParentID),
+		string(f.Child.Of), f.Child.Seq, f.Child.Node)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -930,11 +1107,12 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	created_at, updated_at,
 	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, commit_draft, commit_draft_sha, repo,
 	pr_repo, pr_number, pr_url, pr_head_sha,
-	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
+	found_by,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
 	session_backend, session_model, main_checkout, home, verified_rev, continued_as,
-	parent_id, delegate_budget, delegate_all`
+	parent_id,
+	crew_of, crew_seq, crew_node`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -957,34 +1135,38 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
-	var goalID, goalDropped, foundBy, goalWrapUp, mode string
-	var stackID, continuedAs, parentID string
+	var foundBy, mode string
+	var stackID, continuedAs, parentID, crewOf string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
 	// so no rebuild is needed to drop them. Scanned into a bin.
 	var vestigialSkips [5]bool
+	// gate_approval is vestigial too: it was a workflow card's autopilot
+	// mode.
+	var vestigialGate string
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
 		&vestigialSkips[0], &vestigialSkips[1], &f.Profile,
 		&f.Budget.Envelope,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.CommitDraft, &f.CommitDraftSHA, &f.Repo,
+		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &vestigialGate, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.CommitDraft, &f.CommitDraftSHA, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
-		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
+		&foundBy,
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
 		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.Home, &f.VerifiedRev, &continuedAs,
-		&parentID, &f.Delegate.Budget, &f.Delegate.ConfirmAll)
+		&parentID,
+		&crewOf, &f.Child.Seq, &f.Child.Node)
 	if err != nil {
 		return f, err
 	}
 	f.StackID = domain.StackID(stackID)
 	f.ContinuedAs = domain.FeatureID(continuedAs)
 	f.ParentID = domain.FeatureID(parentID)
+	f.Child.Of = domain.FeatureID(crewOf)
 	f.Mode = domain.ResearchMode(mode)
-	f.GoalID = domain.FeatureID(goalID)
 	f.FoundBy = domain.FeatureID(foundBy)
 	f.Severity = domain.Severity(severity)
 	f.ID = domain.FeatureID(id)
@@ -1009,12 +1191,6 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		if f.HandedOffAt, err = time.Parse(timeFmt, handedOff); err != nil {
 			return f, fmt.Errorf("feature %s: corrupt handed_off_at %q: %w", id, handedOff, err)
 		}
-	}
-	if f.GoalDroppedAt, err = parseOptTime(goalDropped); err != nil {
-		return f, fmt.Errorf("feature %s: corrupt goal_dropped_at %q: %w", id, goalDropped, err)
-	}
-	if f.Goal.WrapUpAt, err = parseOptTime(goalWrapUp); err != nil {
-		return f, fmt.Errorf("feature %s: corrupt goal_wrapup_at %q: %w", id, goalWrapUp, err)
 	}
 	// A corrupt row (hand-edited DB, bad migration) must fail here, not
 	// flow onward: IDs and slugs feed branch names and worktree paths.
@@ -1044,62 +1220,6 @@ func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits, esti
 	return nil
 }
 
-// AddDecomposeSpend accumulates a decompose-pass usage sample (FD-081)
-// onto both a feature's overall running total and its decompose-only
-// bucket, in one UPDATE — so DecomposeCreditEquivalentAt(rate) can never
-// exceed CreditEquivalentAt(rate) at any rate, hosted or BYOK, and spend
-// reporting can distinguish what decomposition cost from the rest.
-func (s *Store) AddDecomposeSpend(ctx context.Context, id domain.FeatureID, credits float64, in, out int64) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE features SET
-			spend_credits = spend_credits + ?,
-			spend_in = spend_in + ?,
-			spend_out = spend_out + ?,
-			spend_decompose_credits = spend_decompose_credits + ?,
-			spend_decompose_in = spend_decompose_in + ?,
-			spend_decompose_out = spend_decompose_out + ?
-		WHERE id = ?`, credits, in, out, credits, in, out, string(id))
-	if err != nil {
-		return fmt.Errorf("metering decompose spend for %s: %w", id, err)
-	}
-	return nil
-}
-
-// SetVerifiedAt stamps when a feature's verify gate passed and its branch
-// became ready to land — the marker behind status's `verified` field and the
-// headless driver's stop-at-verified terminal state. Like AddSpend it is a
-// side-channel (it neither touches updated_at nor moves the stage, which
-// stays "verify" through and after the run), so the engine can record
-// "verified" the moment the gate is reached without a full-feature write.
-//
-// This is also where the verified landing is reported to the observer:
-// the stamp is the moment the branch became ready, and a card can sit
-// stamped at verify forever without anyone merging it. Only a card that
-// was not already stamped reports — a re-verify after the stamp was
-// cleared reports again, because the branch became ready again.
-//
-// rev is the branch tip the pass ran on (domain.Feature.VerifiedRev) —
-// the half of the stamp a landing checks — or "" where there is no single
-// branch to name (a goal).
-func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.Time, rev string) error {
-	var prev, stage string
-	// Read before the write so the report is "became verified", not "is
-	// verified". A missing row leaves both empty and the update below
-	// reports nothing of its own.
-	_ = s.db.QueryRowContext(ctx,
-		`SELECT verified_at, stage FROM features WHERE id = ?`, string(id)).Scan(&prev, &stage)
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE features SET verified_at = ?, verified_rev = ? WHERE id = ?`,
-		t.UTC().Format(timeFmt), rev, string(id))
-	if err != nil {
-		return fmt.Errorf("marking %s verified: %w", id, err)
-	}
-	if n, err := res.RowsAffected(); err == nil && n > 0 && prev == "" {
-		s.observe(CardEvent{Feature: id, Stage: domain.Stage(stage), Kind: EventVerified, At: t.UTC()})
-	}
-	return nil
-}
-
 // SetHandedOffAt stamps when a card was ended by hand-off: closed with its
 // branch deliberately left unlanded. Like SetVerifiedAt it is a side-channel
 // write and does not move the stage — the caller crosses the verify→done
@@ -1117,8 +1237,9 @@ func (s *Store) SetHandedOffAt(ctx context.Context, id domain.FeatureID, t time.
 }
 
 // SetContinuedAs records that freeform card id's work went on as the
-// feature spec (domain.Feature.ContinuedAs) — written by the hand-off that
-// continued it, once the spec exists. It refuses any card that is not a
+// feature spec (domain.Feature.ContinuedAs). Nothing writes it any more —
+// "write a spec" is retired — but legacy rows carry it, and the tests of
+// the landing refusal it still earns seed it here. It refuses any card that is not a
 // freeform one, the same refusal Validate makes of a row that carries it.
 func (s *Store) SetContinuedAs(ctx context.Context, id, spec domain.FeatureID) error {
 	res, err := s.db.ExecContext(ctx,
@@ -1142,25 +1263,6 @@ func (s *Store) ClearHandedOffAt(ctx context.Context, id domain.FeatureID) error
 	if err != nil {
 		return fmt.Errorf("clearing the hand-off stamp on %s: %w", id, err)
 	}
-	return nil
-}
-
-// SetGateApproval persists a feature's gate-approval mode (who crosses its
-// design gates on an unattended resume). Like SetVerifiedAt it is a
-// side-channel write — it neither touches updated_at nor moves the stage —
-// so `run` records the chosen mode at creation and a later `resume` that
-// re-passes --gate-approval can override it without a full-feature write.
-// An empty mode reads as domain.GateAttended.
-func (s *Store) SetGateApproval(ctx context.Context, id domain.FeatureID, mode string) error {
-	if !domain.ValidGateApproval(mode) {
-		return fmt.Errorf("setting gate-approval for %s: unknown mode %q", id, mode)
-	}
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE features SET gate_approval = ? WHERE id = ?`, mode, string(id))
-	if err != nil {
-		return fmt.Errorf("setting gate-approval for %s: %w", id, err)
-	}
-	s.appendAutopilotEvent(ctx, id, mode)
 	return nil
 }
 
@@ -1353,59 +1455,6 @@ func (s *Store) Rounds(ctx context.Context, id domain.FeatureID, kind domain.Rou
 		return 0, fmt.Errorf("reading %s-rounds for %s: %w", kind, id, err)
 	}
 	return count, nil
-}
-
-// IncrementRounds bumps a feature's round count for the given kind by one
-// in a single atomic upsert — never a read-modify-write — so concurrent
-// processes can't lose an increment across a resume. It is unbounded: no
-// cap lives here (see verdict.MaxRounds).
-func (s *Store) IncrementRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind) error {
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, 1)
-		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = count + 1`,
-		string(id), string(kind)); err != nil {
-		return fmt.Errorf("incrementing %s-rounds for %s: %w", kind, id, err)
-	}
-	return nil
-}
-
-// ClearRounds resets a feature's round count for the given kind to 0 —
-// the reset that happens when a cycle completes or escalates. A
-// live-cycle counter, so clearing a row that doesn't exist yet is
-// harmless.
-func (s *Store) ClearRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind) error {
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, 0)
-		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = 0`,
-		string(id), string(kind)); err != nil {
-		return fmt.Errorf("clearing %s-rounds for %s: %w", kind, id, err)
-	}
-	return nil
-}
-
-// SetPlanRounds sets a feature's plan-critique round count by value — a
-// test-only side-channel write routed to the keyed rounds storage. No cap
-// is enforced here; that stays verdict.MaxRounds.
-func (s *Store) SetPlanRounds(ctx context.Context, id domain.FeatureID, rounds int) error {
-	return s.setRounds(ctx, id, domain.RoundKindPlan, rounds)
-}
-
-// SetReviewRounds sets a feature's review→fix round count by value — a
-// test-only side-channel write routed to the keyed rounds storage,
-// matching SetPlanRounds. No cap is enforced here; that stays
-// verdict.MaxRounds.
-func (s *Store) SetReviewRounds(ctx context.Context, id domain.FeatureID, rounds int) error {
-	return s.setRounds(ctx, id, domain.RoundKindReview, rounds)
-}
-
-func (s *Store) setRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind, rounds int) error {
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, ?)
-		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = ?`,
-		string(id), string(kind), rounds, rounds); err != nil {
-		return fmt.Errorf("setting %s-rounds for %s: %w", kind, id, err)
-	}
-	return nil
 }
 
 // StageSpend is one rollup row from stage_spend: the realized cost a
@@ -1748,8 +1797,8 @@ func (s *Store) ListFeatures(ctx context.Context) ([]domain.Feature, error) {
 }
 
 // UpdateFeature rewrites a feature's mutable fields (everything except
-// ID/Num/CreatedAt). The workflow stage must be changed via Transition,
-// which records history; UpdateFeature refuses stage changes.
+// ID/Num/CreatedAt). A card's stage changes only through CloseCard, which
+// records history; UpdateFeature refuses stage changes.
 func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	if err := f.Validate(); err != nil {
 		return err
@@ -1775,16 +1824,11 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	return nil
 }
 
-// DeleteFeature removes a feature and (via cascade) its history. A card
-// that others still depend on is refused: dependents are checked first so
-// the raw SQLite FK constraint never surfaces and no edge is dropped.
+// DeleteFeature removes a feature and (via cascade) its history. A legacy
+// dependency edge onto it, which no cascade covers, goes first.
 func (s *Store) DeleteFeature(ctx context.Context, id domain.FeatureID) error {
-	deps, err := s.ListDependents(ctx, id)
-	if err != nil {
-		return err
-	}
-	if len(deps) > 0 {
-		return fmt.Errorf("deleting %s: %w", id, ErrDependedOn)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM feature_deps WHERE depends_on_id=?`, string(id)); err != nil {
+		return fmt.Errorf("deleting %s: %w", id, err)
 	}
 	// A card leaves its stack the way `stack rm` takes it out — the gap
 	// closed, the cards above moved down — or the stack is left with a hole
@@ -1845,9 +1889,15 @@ func (s *Store) BranchTaken(ctx context.Context, repo, branch string, excluding 
 	return "", false, rows.Err()
 }
 
-// Transition moves a feature to a new stage, enforcing the workflow's
-// legal-transition table and appending to the audit trail, atomically.
-func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.Stage, actor string) (domain.Feature, error) {
+// CloseCard closes a card: it writes domain.StageDone and records the
+// crossing in the card's history, in the same transaction as the stage
+// write, so a card's ending is as auditable as any other change. It
+// closes a session (a freeform card) and a legacy workflow card alike —
+// the latter is never run again, and closing it is how a person puts it
+// away. What it deliberately does NOT do is append a gate event: nothing
+// gated this, and recording one would claim a checkpoint was answered
+// that never existed.
+func (s *Store) CloseCard(ctx context.Context, id domain.FeatureID, actor string) (domain.Feature, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Feature{}, err
@@ -1862,104 +1912,6 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	}
 	if err != nil {
 		return f, err
-	}
-	if err := workflow.CanTransition(f.Stage, to); err != nil {
-		return f, fmt.Errorf("%s: %w", id, err)
-	}
-	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE features SET stage=?, updated_at=? WHERE id=?`,
-		string(to), now.Format(timeFmt), string(id)); err != nil {
-		return f, fmt.Errorf("transitioning %s: %w", id, err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO transitions (feature_id, from_stage, to_stage, actor, at) VALUES (?,?,?,?,?)`,
-		string(id), string(f.Stage), string(to), actor, now.Format(timeFmt)); err != nil {
-		return f, fmt.Errorf("recording transition for %s: %w", id, err)
-	}
-	// The gate event goes in the same transaction as the transition it
-	// describes, so a card's history cannot record a crossing the features
-	// table never made, or miss one it did. Every caller reaches a
-	// crossing through here — the engine's own Advance, the review loop's
-	// automatic steps, the headless driver — so this is the one place that
-	// sees all of them. The crossing answers the newest still-open gate
-	// decision, looked up in this same transaction so the crossing and its
-	// answer commit together.
-	answerID := s.newestOpenGateDecisionTx(ctx, tx, id)
-	gateInserted, err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now, answerID)
-	if err != nil {
-		return f, err
-	}
-	// A goal arriving at implement is being put back to work, so it is no
-	// longer finishing now and no longer partial. Engine.SendBackGoal
-	// said this itself, which covered its own verb and nothing else: the
-	// composer's rewind walks the same edge with a plain transition, and
-	// left a goal that had wrapped up with its wrap-up stamp and its
-	// "partial: the lead kept failing" standing. The conductor read those
-	// on its first tick, finished the goal again, and handed back the
-	// identical partial result — twice on the measured drive, at a full
-	// critique and verify round each time. Every caller reaches a
-	// crossing through here, which is what makes this the place to say it
-	// once.
-	if f.Kind == domain.KindGoal && to == domain.StageImplement {
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE features SET goal_wrapup_at='', goal_partial='', verified_at='', verified_rev='' WHERE id=?`, string(id)); err != nil {
-			return f, fmt.Errorf("lifting %s's wrap-up: %w", id, err)
-		}
-		f.Goal.WrapUpAt, f.Goal.Partial, f.VerifiedAt = time.Time{}, "", time.Time{}
-	}
-	if err := tx.Commit(); err != nil {
-		return f, err
-	}
-	// Post-commit reporting to hooks: the crossing, when its log row was
-	// actually inserted. The verified landing is not reported here —
-	// SetVerifiedAt reported it at the gate, where the branch became
-	// ready to land, rather than at a merge that may never happen.
-	if gateInserted {
-		s.observeTransition(id, f.Stage, to, actor, now, answerID)
-	}
-	f.Stage = to
-	f.UpdatedAt = now
-	return f, nil
-}
-
-// CloseFreeform closes a freeform card: it writes domain.StageDone and
-// records the transition, without asking internal/workflow whether the
-// move is legal — because for this one card it is not a move through the
-// graph at all. A freeform card holds domain.StageOpen, which has no
-// outgoing edge on purpose (DESIGN §19), so every ordinary crossing of
-// its ending would be refused by CanTransition.
-//
-// The safety of bypassing that check is this method's refusal: it closes a
-// KindFreeform card and nothing else. A store method that could write
-// "done" onto any card would be a way to land a feature without verifying
-// it — the exact hole the quality floor exists to prevent — so the check
-// that makes it safe lives here, beside the bypass, rather than in each
-// caller.
-//
-// The card's own history still records the crossing, in the same
-// transaction as the stage write, so a freeform card's ending is as
-// auditable as any other's. What it deliberately does NOT do is append a
-// gate event: nothing gated this, and recording one would claim a
-// checkpoint was answered that never existed.
-func (s *Store) CloseFreeform(ctx context.Context, id domain.FeatureID, actor string) (domain.Feature, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.Feature{}, err
-	}
-	defer tx.Rollback() //nolint:errcheck // no-op after commit
-
-	row := tx.QueryRowContext(ctx,
-		`SELECT `+featureCols+` FROM features WHERE id = ?`, string(id))
-	f, err := scanFeature(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return f, fmt.Errorf("%s: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return f, err
-	}
-	if !f.IsFreeform() {
-		return f, fmt.Errorf("%s is a %s card: close it through its workflow, not as a freeform card", id, f.Kind)
 	}
 	if f.Stage == domain.StageDone {
 		return f, nil

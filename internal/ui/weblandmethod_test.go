@@ -79,16 +79,13 @@ func TestWebLandingKeepsTheBranchWhenAsked(t *testing.T) {
 	}
 }
 
-// TestWebAnswerAdvanceWithMergeMethod: the verify decision's advance option
+// TestWebLandingAnswerWithMergeMethod: the decision's landing option
 // offers the choice, and an answer that picks merge with the message the
 // person read lands the branch as a merge commit on the base.
-func TestWebAnswerAdvanceWithMergeMethod(t *testing.T) {
+func TestWebLandingAnswerWithMergeMethod(t *testing.T) {
 	m, root, _ := mergeFixture(t)
 	b := bridgeOver(t, m)
 	ctx := context.Background()
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { m.raiseAttention("FD-001", attnGate, "verify passed"); return nil }); err != nil {
-		t.Fatal(err)
-	}
 	c, err := b.Card(ctx, "FD-001")
 	if err != nil {
 		t.Fatal(err)
@@ -98,17 +95,17 @@ func TestWebAnswerAdvanceWithMergeMethod(t *testing.T) {
 	}
 	var offered bool
 	for _, o := range c.Decision.Options {
-		if o.ID == "advance" {
+		if o.ID == "merge" {
 			offered = strings.Join(o.Methods, ",") == "squash,merge"
 		}
 	}
 	if !offered {
-		t.Fatalf("advance option does not offer the method choice: %+v", c.Decision.Options)
+		t.Fatalf("the landing option does not offer the method choice: %+v", c.Decision.Options)
 	}
 	before := gitOut(t, root, "rev-parse", "HEAD")
 	message := "FD-001: rebase me\n\nKeeps the feature commit on main."
 
-	card, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "advance", Words: message, Method: "merge", Against: c.Decision.Against.Token}, "Simon")
+	card, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "merge", Words: message, Method: "merge", Against: c.Decision.Against.Token}, "Simon")
 	if err != nil {
 		t.Fatalf("advance answer with merge: %v", err)
 	}
@@ -168,17 +165,17 @@ func TestWebAnswerRejectsUnknownMethod(t *testing.T) {
 	}
 }
 
-// TestWebLandingRefusesMergeForGoalCard: a dialog that offers only squash
-// refuses a merge-commit request before any git mutation.
-func TestWebLandingRefusesMergeForGoalCard(t *testing.T) {
+// TestWebLandingRefusesMergeForAParentedCard: a dialog that offers only
+// squash refuses a merge-commit request before any git mutation.
+func TestWebLandingRefusesMergeForAParentedCard(t *testing.T) {
 	var landed bool
-	d := newCommitMsgDialog(domain.Feature{ID: "FD-002", Slug: "x", GoalID: "GL-001"}, func(_ string, _ domain.LandMethod) tea.Cmd {
+	d := newCommitMsgDialog(domain.Feature{ID: "FF-002", Slug: "x", ParentID: "FF-001", Child: domain.ChildLink{Of: "FF-001", Seq: 1}}, func(_ string, _ domain.LandMethod) tea.Cmd {
 		landed = true
 		return nil
 	}, nil)
-	res := d.webAnswer(nil, &webInput{land: true, message: "FD-002: land it", method: domain.LandMerge})
+	res := d.webAnswer(nil, &webInput{land: true, message: "FF-002: land it", method: domain.LandMerge})
 	if res.refused == "" {
-		t.Fatal("a card in a goal accepted a merge-commit landing")
+		t.Fatal("a parented card accepted a merge-commit landing")
 	}
 	if landed {
 		t.Fatal("the refused landing still submitted")
@@ -213,11 +210,8 @@ func TestWebLandMethodsOfferedOnlyWhereChosen(t *testing.T) {
 	if got := webLandMethods(domain.Feature{ID: "FD-001"}); strings.Join(got, ",") != "squash,merge" {
 		t.Errorf("plain card methods = %v, want squash,merge", got)
 	}
-	if got := webLandMethods(domain.Feature{ID: "FD-002", GoalID: "GL-001"}); got != nil {
-		t.Errorf("card in a goal methods = %v, want none", got)
-	}
-	if got := webLandMethods(domain.Feature{ID: "GL-001", Kind: domain.KindGoal}); got != nil {
-		t.Errorf("goal methods = %v, want none", got)
+	if got := webLandMethods(domain.Feature{ID: "FF-002", ParentID: "FF-001", Child: domain.ChildLink{Of: "FF-001", Seq: 1}}); got != nil {
+		t.Errorf("parented card methods = %v, want none", got)
 	}
 }
 

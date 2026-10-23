@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
@@ -74,8 +73,8 @@ type statusView struct {
 	// Distinct from an ending: a CI caller polls `verified` to know a run
 	// reached its verified branch, since the headless driver never merges.
 	Verified bool `json:"verified"`
-	// Ending is how the card left gummi: "landed", "handed_off",
-	// "dropped", or empty while it is still open. One field, because the
+	// Ending is how the card left gummi: "landed" or "handed_off",
+	// or empty while it is still open. One field, because the
 	// question it answers is one question.
 	//
 	// It replaces `done` and `handed_off`. Those were two booleans naming
@@ -155,10 +154,8 @@ type statusView struct {
 	// passes as one figure. Rounds above says how many passes that is, and
 	// `stats` (under --stats) says what each of them cost.
 	StageSpend []statusStageSpend `json:"stage_spend,omitempty"`
-	// GoalID is the goal this card belongs to; FoundBy the card this one
-	// was filed from — a goal that found it along the way, or the finished
-	// card this is a follow-up to. Both absent on an ordinary card.
-	GoalID  string `json:"goal_id,omitempty"`
+	// FoundBy is the card this one was filed from — the finished card
+	// this is a follow-up to. Absent on an ordinary card.
 	FoundBy string `json:"found_by,omitempty"`
 	// Stats is where this card's credits and hours went — its passes, what
 	// each cost, how much of the total was work done a second time, and
@@ -166,12 +163,6 @@ type statusView struct {
 	// under --stats, since deriving it reads the card's whole event log and
 	// the rest of this view is cheap enough to poll.
 	Stats *statusStats `json:"stats,omitempty"`
-	// Goal is a goal's hand-over, as it stands now: its budget tree, its
-	// done-when items and their status, its cards, the decisions for
-	// review, declined findings and what it found along the way. `ready`
-	// inside it is true when the goal is waiting for you. Absent for every
-	// other kind.
-	Goal *engine.GoalReport `json:"goal,omitempty"`
 }
 
 // statusEscalation is the open decision that parked the card, in the
@@ -269,26 +260,8 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		ExcusedOn:       excusedOn(ctx, store, f),
 		UnprovenFiles:   unprovenFiles(f),
 		StageSpend:      stageSpendRows(ctx, store, f),
-		GoalID:          string(f.GoalID),
 		FoundBy:         string(f.FoundBy),
-		Goal:            goalReport(ctx, store, wt, ws, f),
 	}
-}
-
-// goalReport reads a goal's hand-over through an agent-less engine — the
-// goal view is the engine's, and status runs none of its sessions. Nil for
-// any other kind, or when the report cannot be read.
-func goalReport(ctx context.Context, store *state.Store, wt *worktree.Pool, ws state.Workspace, f *domain.Feature) *engine.GoalReport {
-	if !f.IsGoal() {
-		return nil
-	}
-	eng := engine.New(engine.Config{Store: store, Pool: wt, Workspace: ws})
-	defer func() { _ = eng.Close() }()
-	r, err := eng.GoalReport(ctx, f.ID)
-	if err != nil {
-		return nil
-	}
-	return &r
 }
 
 // openEscalation reads the newest still-open decision on the card — the
@@ -501,15 +474,6 @@ func renderStatus(w io.Writer, v statusView) {
 	// Under Verified for the same reason Excused is: it qualifies what
 	// happened after the pass.
 	switch v.Ending {
-	case domain.EndingDropped:
-		// A dropped card may never have had a branch at all, and saying
-		// "<branch> kept" two lines under a Branch line reading "(none)"
-		// describes a branch that was never created as kept.
-		if v.BranchState == "none" || v.Branch == "" {
-			fmt.Fprintf(w, "  Ending:   dropped by %s — it never started, nothing was kept\n", goalOrItsGoal(v))
-		} else {
-			fmt.Fprintf(w, "  Ending:   dropped by %s — %s kept, nothing landed\n", goalOrItsGoal(v), v.Branch)
-		}
 	case domain.EndingHandedOff:
 		fmt.Fprintf(w, "  Ending:   handed off — %s kept, nothing landed\n", v.Branch)
 	case domain.EndingLanded:
@@ -562,42 +526,8 @@ func renderStatus(w io.Writer, v statusView) {
 	if v.PullRequestLine != "" {
 		fmt.Fprintf(w, "  pr: %s\n", v.PullRequestLine)
 	}
-	if v.GoalID != "" {
-		fmt.Fprintf(w, "  Goal:     %s\n", v.GoalID)
-	}
 	if v.FoundBy != "" {
 		fmt.Fprintf(w, "  Found by: %s\n", v.FoundBy)
-	}
-	if g := v.Goal; g != nil {
-		met, total := g.Met()
-		state := "running"
-		switch {
-		case g.Ready:
-			state = "ready for you"
-		case g.WrappingUp:
-			state = "wrapping up"
-		}
-		if g.Partial != "" {
-			state += " — partial: " + g.Partial
-		}
-		fmt.Fprintf(w, "  Goal:     %s · %d of %d done-when met · %d lanes\n", state, met, total, g.Lanes)
-		// The cards' figure is what they HOLD — a live card holds its
-		// envelope, an ended one what it spent — because that is the term
-		// "left to give" is computed from. Printing their spend here beside
-		// it made four numbers that look like a decomposition of the
-		// envelope and do not add up to it.
-		fmt.Fprintf(w, "  Budget:   %s · goal %s · cards %s held (%s spent) · reserve %s · left to give %s\n",
-			domain.FormatDollars(float64(g.Budget.Envelope)), domain.FormatDollars(g.Budget.Own), domain.FormatDollars(g.Budget.Given),
-			domain.FormatDollars(g.Budget.CardSpent), domain.FormatDollars(float64(g.Budget.Reserve)), domain.FormatDollars(g.Budget.Available))
-		for _, d := range g.DoneWhen {
-			fmt.Fprintf(w, "            %s %s — %s\n", d.ID, d.Status, d.Says)
-		}
-		for _, c := range g.Cards {
-			fmt.Fprintf(w, "            %s %-9s %s\n", c.ID, c.State, c.Title)
-		}
-		if n := len(g.Decisions); n > 0 {
-			fmt.Fprintf(w, "  Decisions for review: %d\n", n)
-		}
 	}
 }
 
@@ -608,13 +538,4 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
-}
-
-// goalOrItsGoal names the goal that dropped a card, falling back to the
-// generic when the row no longer carries the id.
-func goalOrItsGoal(v statusView) string {
-	if v.GoalID != "" {
-		return v.GoalID
-	}
-	return "its goal"
 }

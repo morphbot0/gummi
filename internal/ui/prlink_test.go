@@ -299,3 +299,9 @@ func TestPRLinkSaysItIsWaitingOnGitHub(t *testing.T) {
 		t.Fatalf("after the link: work %v, notice %q", m.ghWork, m.notice.text)
 	}
 }
+
+// update feeds msg to the shell and returns it.
+func update(m *Shell, msg tea.Msg) *Shell {
+	model, _ := m.Update(msg)
+	return model.(*Shell)
+}

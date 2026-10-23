@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -723,13 +725,40 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 		args = append(args, "--force")
 	}
 	args = append(args, "--", p)
-	if _, err := runGit(ctx, m.repo, args...); err != nil {
+	if _, err := runGit(ctx, m.repo, args...); err != nil && !m.removedButAdmin(ctx, p) {
 		return err
 	}
 	// The worktree is gone, so its recorded fork is meaningless. Clear it so
 	// a recreate re-anchors to main's then-current head instead of keeping a
 	// stale SHA that would trip the drift guard forever.
 	return m.forkStore.ClearForkPoint(ctx, f.ID)
+}
+
+// removedButAdmin finishes a removal git got halfway through: the
+// checkout at p is gone but its admin directory under .git/worktrees is
+// not, because a git command reading the tree at that moment (the board
+// refreshing what a card shows) still had a file in it. Once that reader
+// is done, prune takes the directory. It reports whether git no longer
+// knows a worktree at p; a checkout still on disk is a real failure, and
+// is left to the caller's error.
+func (m *Manager) removedButAdmin(ctx context.Context, p string) bool {
+	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	for range 10 {
+		if _, err := runGit(ctx, m.repo, "worktree", "prune"); err == nil {
+			out, err := runGit(ctx, m.repo, "worktree", "list", "--porcelain")
+			if err == nil && !slices.Contains(strings.Split(out, "\n"), "worktree "+p) {
+				return true
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return false
 }
 
 // DiskSize is how many bytes the feature's worktree occupies, walking
@@ -1725,7 +1754,7 @@ func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, m
 	if n, err := runGit(ctx, m.repo, "rev-list", "--count", forkBase+".."+branch); err != nil {
 		return "", err
 	} else if n == "0" {
-		return "", fmt.Errorf("branch %s has no commits to merge", branch)
+		return "", nothingToLand(fmt.Sprintf("branch %s has no commits to merge", branch))
 	}
 	// A merge landing writes MERGE_HEAD, so it is undone with merge --abort;
 	// a squash writes none and only reset --merge can undo it.
@@ -1754,7 +1783,7 @@ func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, m
 				return "", fmt.Errorf("%s found nothing to commit AND reset failed, main checkout needs manual attention: %w", verb, resetErr)
 			}
 		}
-		return "", fmt.Errorf("nothing to merge — %s already landed on main", branch)
+		return "", nothingToLand(fmt.Sprintf("nothing to merge — %s already landed on main", branch))
 	}
 	commitArgs := []string{"commit", "-m", WithCoAuthors(message)}
 	if strings.TrimSpace(message) == "" {
@@ -2162,14 +2191,12 @@ func (m *Manager) Diff(ctx context.Context, f *domain.Feature) (string, error) {
 // the copy; with nothing untracked the environment is empty and the diff
 // runs exactly as before.
 //
-// Two trees are the exception. What a goal's own sessions leave in its
-// tree is scratch by design (a binary built to run a check), never part
-// of the branch. And a main-checkout card works in the person's own
-// checkout, where an untracked file is theirs rather than the card's.
-// Both diffs stay the committed and tracked work alone.
+// A main-checkout card is the exception: it works in the person's own
+// checkout, where an untracked file is theirs rather than the card's. Its
+// diff stays the committed and tracked work alone.
 func (m *Manager) withUntracked(ctx context.Context, f *domain.Feature, p string) (env []string, done func(), err error) {
 	done = func() {}
-	if f.IsGoal() || f.MainCheckout {
+	if f.MainCheckout {
 		return nil, done, nil
 	}
 	list, err := runGitRaw(ctx, p, "ls-files", "--others", "--exclude-standard", "-z")
@@ -2486,3 +2513,37 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 	}
 	return paths, nil
 }
+
+// trackedChanges names the tracked files a checkout has modified, staged
+// or not, ignoring .gummi for the same reason MainTrackedDirty does. It
+// reads the diff against HEAD rather than porcelain status because that
+// gives bare paths: status prefixes each line with its two-letter code,
+// and the leading space of an unstaged change does not survive the
+// trimming every command in this package does.
+func trackedChanges(ctx context.Context, dir string) ([]string, error) {
+	out, err := runGit(ctx, dir, "diff", "--name-only", "HEAD", "--", ":(exclude).gummi")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return paths, nil
+}
+
+// ErrNothingToLand is what a landing returns, through errors.Is, when the
+// branch brings nothing: no commits of its own, or content already on the
+// base. A caller for whom that is no failure — a branch whose work was
+// already there — tests for it instead of reading the sentence.
+var ErrNothingToLand = errors.New("nothing to land")
+
+type nothingToLandError string
+
+func nothingToLand(msg string) error { return nothingToLandError(msg) }
+
+func (e nothingToLandError) Error() string { return string(e) }
+
+func (e nothingToLandError) Is(target error) bool { return target == ErrNothingToLand }

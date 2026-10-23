@@ -30,7 +30,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/driver"
 )
 
 // cliFlags is a command body's view of the flags cobra has already parsed.
@@ -114,10 +113,8 @@ func (f cliFlags) Duration(name string) time.Duration {
 }
 
 // opt reads a string flag the command may or may not declare, reporting ""
-// when it does not. The shared driving options are assembled once
-// (driverOptions), but not every verb offers every one of them: a goal is
-// not in a repository so takes no --repo, and a resumed card can change
-// neither its repository nor its base branch.
+// when it does not: a resumed session can change neither its repository
+// nor its base branch, so resume declares neither.
 func (f cliFlags) opt(name string) string {
 	if f.fs.Lookup(name) == nil {
 		return ""
@@ -128,8 +125,7 @@ func (f cliFlags) opt(name string) string {
 // Changed reports whether the flag was present on the command line, so an
 // explicitly empty value (`--answer ""`) is distinguishable from an unset
 // one. This is what the old stdlib round trip could not carry: a []string
-// rebuilt from parsed values cannot say "the user typed this", which is
-// why `resume --gate-approval attended` used to be dropped on the floor.
+// rebuilt from parsed values cannot say "the user typed this".
 func (f cliFlags) Changed(name string) bool {
 	g := f.fs.Lookup(name)
 	if g == nil {
@@ -140,43 +136,35 @@ func (f cliFlags) Changed(name string) bool {
 
 // --- the shared driving surface ---------------------------------------
 
-// driveFlags is the flag surface the card-driving verbs share — run,
-// research, diagnose, goal and resume. Each field is that flag's help
-// text; an empty field omits the flag from the verb entirely.
+// driveFlags is the flag surface the session-driving verbs share — run
+// and resume. Each field is that flag's help text; an empty field omits
+// the flag from the verb entirely.
 //
 // Name, type and default live here once, so those cannot drift between
-// verbs. Help text is per-verb on purpose: a goal's --envelope really does
-// mean something different from a card's, and stating the difference at
-// the call site makes a deliberate divergence visible and an accidental
-// one impossible.
+// verbs. Help text is per-verb on purpose: resume's --envelope raises a
+// budget where run's sets one, and stating the difference at the call
+// site makes it visible.
 type driveFlags struct {
-	envelope   string
-	profile    string
-	gate       string
-	timeout    string
-	autonomous string
-	verbose    string
-	ref        string
-	repo       string
-	base       string
-	until      string
+	envelope string
+	profile  string
+	timeout  string
+	verbose  string
+	ref      string
+	repo     string
+	base     string
 }
 
-// stdDriveFlags is the wording the plain card verbs (run, research,
-// diagnose) all use. goal and resume start from it and override the
-// entries whose meaning genuinely differs for them.
+// stdDriveFlags is `gummi run`'s wording; resume starts from it and
+// overrides the entries whose meaning differs for it.
 func stdDriveFlags() driveFlags {
 	return driveFlags{
-		envelope:   "spend budget for the card, in dollars (required; falls back to GUMMI_ENVELOPE)",
-		profile:    "profile mapping roles to models (default: first configured)",
-		gate:       "who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)",
-		timeout:    "per-stage inactivity timeout (0 disables)",
-		autonomous: "auto-take the recommended answer instead of checkpointing questions",
-		verbose:    "add per-tool-call activity lines to the stream",
-		ref:        "external correlation id, echoed in the stream and persisted for status/resume lookup",
-		repo:       "managed repository to create the card in (a configured repos: name; required when repos: is configured)",
-		base:       "branch the card's work forks from and lands on (default: whatever the repository has checked out)",
-		until:      "stop cleanly before crossing the gate that leaves the design stage (default: run to a verified branch)",
+		envelope: "spend budget for the session, in dollars (required; falls back to GUMMI_ENVELOPE); its workflow runs are always allowed, and spend from it",
+		profile:  "profile mapping roles to models (default: first configured)",
+		timeout:  "stop as a timeout after this long with nothing happening on the session or its workflow run (0 disables)",
+		verbose:  "add the session's per-tool-call activity lines to the stream",
+		ref:      "external correlation id, echoed in the stream and persisted for status/resume lookup",
+		repo:     "managed repository to start the session in (a configured repos: name; required when repos: is configured)",
+		base:     "branch the session's work forks from and lands on (default: whatever the repository has checked out)",
 	}
 }
 
@@ -191,14 +179,8 @@ func (d driveFlags) bind(fs *pflag.FlagSet) {
 		envelopeFlag(fs, d.envelope)
 	}
 	str("profile", d.profile)
-	if d.gate != "" {
-		fs.String("gate-approval", driver.GateAttended, d.gate)
-	}
 	if d.timeout != "" {
-		fs.Duration("stage-timeout", defaultStageTimeout, d.timeout)
-	}
-	if d.autonomous != "" {
-		fs.Bool("autonomous", false, d.autonomous)
+		fs.Duration("timeout", defaultTimeout, d.timeout)
 	}
 	if d.verbose != "" {
 		fs.Bool("verbose", false, d.verbose)
@@ -206,24 +188,13 @@ func (d driveFlags) bind(fs *pflag.FlagSet) {
 	str("ref", d.ref)
 	str("repo", d.repo)
 	str("base", d.base)
-	str("until", d.until)
 }
 
 // sharedDriveFlagNames are the flags driveFlags owns, in the order bind
 // declares them. The skill's grammar generator factors exactly these out
-// of the per-verb listings into one shared block instead of reprinting
-// them under all five verbs.
+// of the per-verb listings into one shared block.
 var sharedDriveFlagNames = []string{
-	"envelope", "profile", "gate-approval", "stage-timeout",
-	"autonomous", "verbose", "ref", "repo", "base", "until",
-}
-
-// adoptionFlags declares the two ways to mint a card onto a branch gummi
-// did not cut (DESIGN §10 D22). Shared by `run` and `bugs new`, which
-// offer the identical choice.
-func adoptionFlags(fs *pflag.FlagSet) {
-	fs.String("adopt", "", "mint the card onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it")
-	fs.String("pr", "", "mint the card onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations")
+	"envelope", "profile", "timeout", "verbose", "ref", "repo", "base",
 }
 
 // messageFlag declares the -m/--message pair the three committing verbs

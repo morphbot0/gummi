@@ -99,103 +99,13 @@ func TestQuitWithoutLiveSessionQuits(t *testing.T) {
 	}
 }
 
-func TestQuitWithLiveSessionPushesDialog(t *testing.T) {
-	// hold a session in StateRunning (the plan writer) so the board has
-	// live autonomous work; q must then offer a confirm dialog instead of
-	// quitting.
-	release := make(chan struct{})
-	defer close(release)
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		// block only the plan writer (implementer) turn so its session
-		// stays live in StateRunning; the auto-discovery scribe pass and
-		// any other session must complete for the setup to finish.
-		if opts.Role == agent.RoleImplementer {
-			<-release
-		}
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	m, eng := chatWorkspace(t, ag)
-	m = pressAdvance(t, m)  // brainstorm → spec
-	m = pressAdvance(t, m)  // spec → plan
-	m = openAndAttach(t, m) // run plan (autonomous)
-	waitLive(t, eng, "FD-001")
-
-	m = toKeys(t, m)
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	if cmd != nil {
-		t.Fatalf("q with a live session returned a command, want the dialog")
-	}
-	d, ok := m.Overlay.Top().(*confirmDialog)
-	if !ok || d.id != "confirm-quit" {
-		t.Fatalf("top overlay = %v, want the confirm-quit dialog", m.Overlay.Top())
-	}
-}
-
-func TestQuitConfirmYesQuits(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleImplementer {
-			<-release
-		}
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	m, eng := chatWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = openAndAttach(t, m)
-	waitLive(t, eng, "FD-001")
-
-	// q pushes the dialog; confirming with y returns the quit command.
-	m = toKeys(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: 'q', Text: "q"})
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if cmd == nil {
-		t.Fatal("confirming the quit dialog returned no command")
-	}
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Fatalf("confirmed quit returned %T, want QuitMsg", cmd())
-	}
-}
-
-func TestQuitLiveDialogCancelStays(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if opts.Role == agent.RoleImplementer {
-			<-release
-		}
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	m, eng := chatWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = openAndAttach(t, m)
-	waitLive(t, eng, "FD-001")
-
-	m = toKeys(t, m)
-
-	m = press(t, m, tea.KeyPressMsg{Code: 'q', Text: "q"})
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	if cmd != nil {
-		t.Fatalf("declining the quit dialog returned a command")
-	}
-	if m.Overlay.Top() != nil {
-		t.Fatal("declining the dialog did not close it")
-	}
-}
-
-// waitLive waits until the feature's engine session is running or queued
-// (holding or waiting for a slot) — i.e. live autonomous work.
+// waitLive waits until the card's session is mid-turn.
 func waitLive(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
 	t.Helper()
 	deadline := time.After(testWaitTimeout)
 	for {
-		if s := eng.Get(id); s != nil {
-			switch s.State() {
-			case engine.StateRunning:
-				return
-			}
+		if s := eng.Freeform(id); s != nil && s.Busy() {
+			return
 		}
 		select {
 		case <-deadline:
@@ -226,7 +136,7 @@ func waitForTurn(t *testing.T, eng *engine.Engine, id domain.FeatureID, text str
 	t.Helper()
 	deadline := time.After(testWaitTimeout)
 	for {
-		if s := eng.Get(id); s != nil {
+		if s := eng.Freeform(id); s != nil {
 			for _, msg := range s.Snapshot().Transcript {
 				if strings.Contains(msg.Content, text) {
 					return
@@ -249,16 +159,16 @@ func waitForTurns(t *testing.T, eng *engine.Engine, n int) {
 	t.Helper()
 	deadline := time.After(testWaitTimeout)
 	for {
-		if s := eng.Get("FD-001"); s != nil && len(s.Snapshot().Transcript) >= n {
+		if s := eng.Freeform(sessionID); s != nil && len(s.Snapshot().Transcript) >= n {
 			return
 		}
 		select {
 		case <-deadline:
 			got := 0
-			if s := eng.Get("FD-001"); s != nil {
+			if s := eng.Freeform(sessionID); s != nil {
 				got = len(s.Snapshot().Transcript)
 			}
-			t.Fatalf("FD-001's transcript stopped at %d entries, want %d", got, n)
+			t.Fatalf("the session's transcript stopped at %d entries, want %d", got, n)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

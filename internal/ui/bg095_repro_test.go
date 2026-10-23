@@ -38,10 +38,17 @@ func TestBG095DesignPhaseCardIsNotCalledResearch(t *testing.T) {
 				if strings.Contains(n.text, "research") {
 					t.Errorf("%s at %s: %s refused with %q — that is a research card's reason", k, st, verb, n.text)
 				}
-				if !strings.Contains(n.text, "no worktree yet") {
-					t.Errorf("%s at %s: %s refused with %q, want the not-yet refusal", k, st, verb, n.text)
+				if !strings.Contains(n.text, "no worktree") {
+					t.Errorf("%s at %s: %s refused with %q, want the no-worktree refusal", k, st, verb, n.text)
 				}
 			}
+		}
+	}
+	// a session that has not run its first turn is told its worktree comes
+	r := freeformRow(1, "fresh", false)
+	for _, verb := range branchVerbs {
+		if n := branchVerbRefusal(r, verb); n == nil || !strings.Contains(n.text, "no worktree yet") {
+			t.Errorf("a fresh session: %s refused with %+v, want the not-yet refusal", verb, n)
 		}
 	}
 }

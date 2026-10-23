@@ -57,14 +57,7 @@ request once).
 | `rail-filtered` | compact rail only: a filter still applies; opens the full rail |
 | `rail-foot`, `rail-new-session`, `rail-new-agent`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new-agent`, behind the button's arrow, the same draft as an agent's, `rail-new` the new-card form) |
 | `rail-group-agents` | the agents' own group, above the status groups |
-| `rail-more-menu`, `menu-goals`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
-
-## Resume offer
-
-`resume-slot` (always present), `resume-banner` (the quit-resume question),
-`resume-text`, `resume-ago` (how long ago the quit was, kept current),
-`resume-all`, `resume-choose`, `resume-card-<ID>` (a checkbox once
-choosing), `resume-picked`, `resume-none` ("Not now").
+| `rail-more-menu`, `menu-stacks`, `menu-schedules`, `menu-skills`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
 ## Notifications
 
@@ -86,8 +79,7 @@ yes is sent bare first and never pre-confirmed, and its yes is the token the
 question came with), `action-input` (the field its `needs` asks for,
 prefilled with its default), `action-hint` (under a landing's or a squash's
 message: where it came from and what it becomes, or — with a spinner, the box read-only and
-`action-confirm` saying "Drafting…" — that gummi is drafting it), `action-card-<ID>` (a card in the dependency
-picker), `action-cards-filter`, `action-error` (the board's refusal, in the
+`action-confirm` saying "Drafting…" — that gummi is drafting it), `action-error` (the board's refusal, in the
 dialog), `action-confirm`, `action-cancel`, `land-method` (the landing method select
 above a landing's message, in the menu's dialog and in the verify answer's
 landing dialog, where a card may keep its commits; its options are `squash`
@@ -106,7 +98,7 @@ branch would be removed).
 | `thread-items` | the polite live region holding items |
 | `stage-group-<stage>` | a stage segment (`<details>`; `open` when unfolded; the current one has class `cur`) |
 | `thread-item` | an item without a more specific id; `data-key`, `data-type` on every item |
-| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `activity` (a run of tool calls, open while it is being added to and folded after; `activity-last` the step its folded line ends on), `stretch`, `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
+| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `activity` (a run of tool calls, open while it is being added to and folded after; `activity-last` the step its folded line ends on), `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
 | `verify-no-checks` | a verify item's head when gummi had no gummi-checks to run (never "all passed") |
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
@@ -126,7 +118,7 @@ branch would be removed).
 | `decision-carry` | "+ N diff comments" on an answer that takes them |
 | `nextup-slot`, `nextup` | "X also needs you" chip after an answer (on a phone's document tab, in the docked bar) |
 | `dock`, `composer`, `composer-input`, `composer-says`, `composer-send` | composer; `composer-says` is the enter line (the server's reading of the line, or the decision's answer) |
-| `composer-model`, `model-picker-btn` | a session's model beside Send (a draft's, or an open session's); absent on a card in the workflow |
+| `composer-model`, `model-picker-btn` | a session's model beside Send (a draft's, or an open session's); absent on a card of the retired kinds |
 | `model-picker`, `model-search`, `model-<agent>-<model>`, `model-typed-<agent>`, `model-recent-<agent>-<model>` | the picker: search or type an id; a suggested model (`default` for the agent's own), a typed id, a recent pair |
 | `composer-draft`, `draft-where` (an agent's draft: where it will run), `draft-repo`, `draft-base`, `draft-budget`, `draft-budget-pop`, `draft-budget-<n>`, `draft-budget-input`, `draft-budget-set`, `draft-budget-error` | a session draft's row above the line: repository, base, budget (`0` is uncapped) |
 | `draft-hero`, `draft-starter`, `draft-cancel` | a session draft's empty conversation, its starter lines, and leaving the draft |
@@ -137,7 +129,7 @@ branch would be removed).
 | id | what |
 |---|---|
 | `panel` | the right landmark |
-| `panel-tabs`, `tab-memory`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats` | tabs (`aria-selected`) |
+| `panel-tabs`, `tab-memory`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats`, `tab-step` | tabs (`aria-selected`; `tab-step` only while a workflow step is open) |
 | `tab-terminal` | the Terminal tab (a board served with `--terminal`, a card with a worktree); a phone reaches it from the card's menu, `action-terminal`, and shows the tab only while it is open |
 | `terminal`, `terminal-screen`, `terminal-note`, `terminal-again`, `terminal-off` | the shell (`data-state` = `open` \| `closed`), xterm's screen, the note over it (opening, reconnecting, exited), its retry / new-shell button, and the pane on a card with no worktree |
 | `terminal-end` | end the shell (a second press confirms) |
@@ -159,10 +151,83 @@ the note above it: "resolved by" when it closes it, "answered by" when an
 agent answered a person's note that only a person can close), `spec-checks`, `spec-check-<name>`, `spec-pending` (how many notes hold the
 gate), `spec-request-changes` (sends them to the stage that owns them: the TUI's R), `spec-none`.
 
+A session's specs (DESIGN §25.3): the tab (`tab-spec`) is Specs. With a spec
+or more, `specs` holds `specs-list` — one `specs-item-<n>` per spec
+(`aria-current` on the one shown) with its state `specs-state-<n>` (draft,
+running, met, partial) — then `specs-new` (+ New spec), which opens
+`specs-new-form`, `specs-new-title`, `specs-new-start`; the spec shown is
+drawn beneath with the ids below. `spec-start-session` (start the first one
+from the template, on `spec-none`), `spec-session` (its bar), `spec-rev`,
+`spec-ready` (its done-when items), `spec-edit`, `spec-editor`, `spec-save`,
+`spec-cancel`, `spec-stale` (the spec changed while it was being edited),
+`spec-revisions`, `spec-revision-<n>`; `spec-runs`, the spec's workflow runs
+newest first, one `spec-run-<n>` each (its glyph, recipe, state,
+`spec-run-met`, spend and when it ended), which jumps to the run's block in
+the thread, unfolded whole.
+
+A session's workflow runs (DESIGN §25): in the thread, a turn a run sent (its
+report): `thread-workflow`.
+
+A run's block, where its run was proposed — among the session's turns or the
+thread's settled items (§25.9, `workflow.js`): `run-<n>`
+(`data-state`, `data-rev`; `data-folded="yes"` while an ended run is folded
+to one line: `run-line`, which unfolds it, with `run-line-text`), its
+`run-head` with `run-title`, `run-state`,
+`run-spent`, `run-elapsed`, `run-reason` and the acts
+`run-pause`, `run-resume`, `run-stop`, and on an ended run `run-fold` (▾,
+folds it to its line); `run-strip` with one `run-strip-<id>`
+per top-level entry of the recipe; `run-pending` (the run waits on the pinned
+decision); `run-baseline` (while it is proposed or queued, or open before its
+first step: the done-when checks run before the run — `baseline-running`
+while they run, else one `baseline-<DW-n>` per checked item, `data-verdict`,
+amber when it proves nothing); `run-rows` with one `run-row-<key>` per step or folded iteration
+(`data-card`, `data-state`; `sel` when open beside the thread), its
+`run-row-line`, `run-row-flag` (a reading step that changed files) and
+`run-open`; a step's question `run-question` under its row,
+with `run-question-option-<i>` (the recommended first), `run-question-reply`
+and `run-question-send`; an ended run's `run-results` (`run-result-<DW-n>`, with
+`run-result-change` saying it before and after: `failed → passed`),
+`run-steps` (its rows, folded), `run-commits`, `run-report`; and `run-files`
+with `run-revert`, which opens `revert-dialog` (`revert-paths`, `revert-note`,
+`revert-cancel`, `revert-confirm`), and, on a run whose recipe the session
+wrote inline, `run-save` (Save as recipe…, from the proposal on), which opens
+`save-dialog` (`save-name`, `save-error`, `save-cancel`, `save-confirm`), or
+`run-saved` once it is saved.
+
+An open run's live strip above the composer (§25.9, `workflow.js`), in
+`run-live-slot`: `run-live` (`data-run`, `data-mood`: running, asking,
+deciding, budget or paused) with `run-live-name`, `run-live-strip` (the
+recipe's entries; dropped first on a narrow page), `run-live-now` (the step
+at work and its action, a step's question, or what a paused strip says),
+`run-live-money`, and its acts `run-live-jump` (scrolls the thread to the
+block, which flashes), `run-live-open` (the step at work; with several,
+`Open… ▾` opens `run-live-pick` with one `run-live-pick-<id>` each),
+`run-live-answer` (opens the asking step on its question),
+`run-live-topup` and `run-live-resume`. At the top of the thread,
+`run-above` says the open run's block is scrolled out of view above, and
+jumps to it.
+
+A step opened beside the thread (§25.10): the `tab-step` surface holds
+`step-panel` with `step-head` (`step-crumb`, whose first entry `step-close`
+goes back to the session, `step-title`, `step-live` or `step-state`,
+`step-spent`), the tabs `step-tab-transcript`, `step-tab-diff`,
+`step-tab-brief` (a step has no terminal tab: its tree is the session's),
+their bodies `step-transcript` (`step-transcript-empty`), `step-diff`
+(`step-diff-file`, `step-diff-none`), `step-brief` (`step-artifacts`), and
+the composer `step-composer` (`step-input`, `step-send`). A step that asks
+carries its question in the panel as `run-question`, as under its row.
+
+A run's proposal on its pinned decision (§25.5): `run-proposal` with
+`proposal-tree` (the tree it runs in, and whether it holds uncommitted work),
+`proposal-spec`, `proposal-step-<id>`, `proposal-checks`, `proposal-warnings`,
+`proposal-money`, `proposal-baseline` (the checks run in the tree before the
+run, as `run-baseline` has them); under its answers, `decision-feedback` and
+`decision-feedback-send`.
+
 Memory: `memory`, `memory-src` (where the files live), `memory-global`,
 `memory-plan`, `memory-dead-ends` (a document's title and its rendered
 markdown; nothing written yet reads as a placeholder), `memory-none`
-(why a card has none — the workflow-card answer).
+(why a card has none — the answer for a card of the retired kinds).
 
 Request changes that sends a card back to an earlier stage asks first:
 `changes-confirm` (the dialog), `changes-question`, `changes-go`,
@@ -237,39 +302,9 @@ first answer as one button, while the bar is folded),
 | `keys-help` | the `?` sheet |
 | `menu` | a popup menu opened with `openMenu` (its `testid` option overrides `menu`, e.g. `rail-more-menu`, `card-actions-menu`) |
 | `modal`, `modal-close` | a dialog opened with `openModal` (its `testid` option overrides `modal`) |
-| `view-<name>`, `view-<name>-body` | a registered view (`newcard`, `fleet`, `goals`, `goal`, `stacks`, `ingest`, `bugs`, `doctor`) |
+| `view-<name>`, `view-<name>-body` | a registered view (`newcard`, `fleet`, `stacks`, `doctor`) |
 | `not-available` | body of a view nobody registered yet |
 | `unpair-dialog`, `unpair-confirm` | unpairing |
-
-## Goals (`views/goals.js`)
-List: `goals-list`, `goals-count`, `goals-new` (toggles the form), `goals-empty`,
-`goals-error`, `goal-row-<ID>` (`data-state` = the goal's one word: `todo`,
-`agreeing the plan`, `running`, `wrapping up`, `ready for you`, `done`),
-`goal-row-met`, `goal-row-landed`, `goal-row-spent`.
-Form: `goal-form-slot`, `goal-form`, `goal-form-desc`, `goal-form-budget`,
-`goal-form-profile`, `goal-form-after` (continues another goal),
-`goal-form-refs` (one path per line), `goal-form-autopilot`,
-`goal-form-error`, `goal-form-cancel`, `goal-form-submit`.
-Page: `goal-head`, `goal-back`, `goal-id`, `goal-title`, `goal-state`,
-`goal-met`, `goal-after`, `goal-open-card`, `goal-partial`; callouts
-`goal-plan`, `goal-plan-open`, `goal-needs-budget`, `goal-needs-substrate`,
-`goal-needs-owner`, `goal-waiting-on`, `goal-unread`; `goal-gone` (the goal was deleted while its page was open), `goal-error` (the goal
-page did not load, with why).
-Verbs: `goal-actions`, `goal-action-<id>` (`note`, `budget`, `substrate`,
-`topup`, `stop`, `sendback`, `reverse`, `land`, `abandon`), `goal-action-slot`,
-`goal-panel-<id>` (the inline confirmation), `goal-action-input`,
-`goal-action-runs`, `goal-action-minutes`, `goal-action-ref`,
-`goal-action-why`, `goal-action-error`, `goal-action-cancel`,
-`goal-action-confirm`.
-Ledger: `goal-ledger`, `ledger-envelope`, `ledger-total`,
-`ledger-seg-<own|held|reserve|left>`, `ledger-goal-spend`, `ledger-held`,
-`ledger-card-spend`, `ledger-reserve`, `ledger-left`, `ledger-substrate`.
-Sections: `goal-done-when`, `done-when-<DW-N>` (`data-status`), `goal-cards`,
-`goal-card-<ID>` (`data-state`; click selects the card and closes the view),
-`goal-decisions`, `goal-decision-<D-N>`, `goal-reverse-<D-N>`,
-`goal-declined`, `goal-found`, `goal-notebook`, `goal-reference`,
-`goal-finding-<ref>`, `goal-try-it`, `goal-log`, `goal-log-entry`
-(`data-action`), `goal-log-more`.
 
 ## Stacks (`views/stacks.js`)
 `stacks-list`, `stacks-count`, `stacks-new`, `stacks-empty`, `stacks-error`;
@@ -289,8 +324,7 @@ Chain: `stack-chain`, `stack-base`, `stack-member-<ID>` (`data-pos`, and
 Restack answer: `stack-result`, `stack-result-close`, `stack-replayed`,
 `stack-conflict`, `stack-waiting`, `stack-push`, `stack-push-line`,
 `stack-push-copy`, `stack-push-copy-all`.
-Card head: `card-goal` (opens the goal page — the card's goal, or on a goal's
-own card its page), `card-stack` (opens the stacks view on the card's stack).
+Card head: `card-stack` (opens the stacks view on the card's stack).
 
 ## Schedules (`views/schedules.js`)
 `schedules-list`, `schedules-count`, `schedules-new`, `schedules-empty`,
@@ -331,30 +365,7 @@ pack), `curator-run-<id>-confirm`.
 ## Tool views
 Shared by the views below: `view-error` (a refusal, as the server said it),
 `<prefix>-confirm`, `<prefix>-confirm-yes`, `<prefix>-confirm-no` (an inline
-confirm strip), `<prefix>-<ID>` on each card link a write made — the list itself
-is `<prefix>` (`ingest-created`, `bugs-created`), `created` / `created-<ID>` when
-a view names no prefix.
-Import spec (`ingest`): `ingest-form`, `ingest-source` (the paste/path
-switch), `ingest-source-paste`,
-`ingest-source-path`, `ingest-name`, `ingest-markdown`, `ingest-path`,
-`ingest-profile`, `ingest-repo` (only with more than one repository),
-`ingest-envelope`, `ingest-start`; running: `ingest-running`, `ingest-steps`,
-`ingest-step`, `ingest-busy`; review: `ingest-review`, `ingest-kept` ("N
-kept"), `ingest-coverage`, `ingest-unmapped-count`, `ingest-unmapped`,
-`ingest-proposals`, `ingest-proposal-<i>` (`data-dropped`), `ingest-title`,
-`ingest-rename-<i>`, `ingest-oneliner-<i>`, `ingest-merge-<i>` (not on the
-first), `ingest-drop-<i>`, `ingest-undrop-<i>`, `ingest-edit-rename`,
-`ingest-edit-oneLiner`, `ingest-edit-save`, `ingest-approve`,
-`ingest-confirm` (+ `-yes`/`-no`), `ingest-confirm-unmapped`,
-`ingest-discard`, `ingest-discard-confirm`; after: `ingest-done`
-(`data-state`), `ingest-failed`, `ingest-created`, `ingest-created-<ID>`,
-`ingest-again`.
-Import bugs (`bugs`): `bugs-filters`, `bugs-repo`, `bugs-label`,
-`bugs-state`, `bugs-limit`, `bugs-fetch`, `bugs-loading`, `bugs-gh-error`
-(gh's own failure), `bugs-empty`, `bugs-all`, `bugs-list`,
-`bugs-issue-<number>`, `bugs-pick-<number>`, `bug-author` (who opened it),
-`bugs-onboard-<number>` (already on the board), `bugs-import`, `bugs-result`, `bugs-created`,
-`bugs-created-<ID>`, `bugs-missing`.
+confirm strip).
 Doctor (`doctor`): `doctor-ready` (`data-ready`), `doctor-rerun`,
 `doctor-deep`, `doctor-deep-confirm` (+ `-yes`/`-no`), `doctor-checks`,
 `doctor-check-<name>` (`data-status` = `ok` | `warn` | `fail` | `unknown`),
@@ -370,14 +381,10 @@ Fleet stats (`fleet`): `fleet`, `fleet-window` (the window switch),
 on you; `.gate`; `.land`), `fleet-lane-curator` (the skill curator's
 lane, above the cards'; `.blk.cur` a run), `fleet-curator-spent`,
 `fleet-tip`, `fleet-empty`, `fleet-error`.
-New card (`view-newcard`): `newcard-loading`, `newcard-form`, `newcard-kinds`,
-`newcard-kind-<value>` (`feature`, `bug`, `research`, `research-diagnosis`,
-`goal`, `freeform`), `newcard-about`, `newcard-title`, `newcard-desc`,
-`newcard-severity`, `newcard-repro`, `newcard-expected`, `newcard-actual`,
+New card (`view-newcard`): `newcard-loading`, `newcard-form`,
+`newcard-about`, `newcard-title`, `newcard-desc`,
 `newcard-profile`, `newcard-envelope`, `newcard-repo`, `newcard-base`
-(`newcard-base-hint` under it),
-`newcard-adopt`, `newcard-stack`, `newcard-after`, `newcard-after-<ID>`,
+(`newcard-base-hint` under it), `newcard-stack`,
 `newcard-error` (a refusal no field owns), `newcard-error-<field>` (beside
-its field: `title`, `desc`, `envelope`, `profile`, `severity`, `repo`,
-`base`, `adopt`, `stack`, `after`), `newcard-create`, `newcard-autopilot`,
-`newcard-cancel`.
+its field: `title`, `desc`, `envelope`, `profile`, `repo`,
+`base`, `stack`), `newcard-create`, `newcard-cancel`.

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -21,7 +20,6 @@ import (
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/webapi"
-	"github.com/morphis/gummi/internal/worktree"
 )
 
 // freeformRow builds a freeform card's row, at the one stage such a card
@@ -121,39 +119,11 @@ func TestAFreeformCardOffersNoWorkflowActions(t *testing.T) {
 			t.Errorf("a freeform card does not offer %q", want)
 		}
 	}
-	// write a spec needs an engine to run the handoff brief's turn: a
-	// detached board offers no row that only refuses
-	if ids["writespec"] {
-		t.Error("a detached board offers write a spec")
-	}
-	in.agentWired = true
-	ids = map[string]bool{}
-	for _, a := range cardActionsFor(in, r) {
-		ids[a.id] = true
-	}
-	if !ids["writespec"] {
-		t.Error("a wired board does not offer write a spec on an open session")
-	}
-	if a := writespecRowOf(cardActionsFor(in, r)); a == nil {
-		t.Error("the writespec row vanished from the wired list")
-	} else if a.key != "w" {
-		t.Errorf("write a spec wears key %q, want w", a.key)
-	}
-}
-
-// writespecRowOf finds the write-a-spec row in an action list.
-func writespecRowOf(acts []cardAction) *cardAction {
-	for i := range acts {
-		if acts[i].id == "writespec" {
-			return &acts[i]
-		}
-	}
-	return nil
 }
 
 // TestAFreeformCardsNextStepsAreItsReviewLoop: it has no gate to teach a
 // reader what comes next, so the answer set has to say it — read the
-// diff, land it, keep the branch and close, or continue it as a spec.
+// diff, land it, or keep the branch and close.
 func TestAFreeformCardsNextStepsAreItsReviewLoop(t *testing.T) {
 	in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true}
 	var ids []string
@@ -165,14 +135,12 @@ func TestAFreeformCardsNextStepsAreItsReviewLoop(t *testing.T) {
 		t.Errorf("next steps = %v, want %v", ids, want)
 	}
 
-	// With an engine to run the handoff brief's turn, the answer set gains
-	// the third ending — after the two the branch already has.
+	// a board with an engine offers the same two endings
 	in.agentWired = true
 	ids = nil
 	for _, a := range nextActions(in) {
 		ids = append(ids, a.id)
 	}
-	want = []string{"diff", "merge", "handoff", "writespec"}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Errorf("next steps with an engine = %v, want %v", ids, want)
 	}
@@ -228,7 +196,7 @@ func TestCreatingAFreeformCardMintsItOutsideTheGraph(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -263,7 +231,7 @@ func TestLandingAFreeformCardFromTheBoard(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -320,22 +288,22 @@ func headSHA(t *testing.T, root string) string {
 }
 
 // TestTheArtifactChordAnswersOnAFreeformCard: the tab bar does not draw an
-// artifact tab for a card with no document, so the chord that names it owes
-// an answer rather than mounting a view onto nothing.
+// artifact tab for a session with no spec yet, so the chord that names it
+// owes an answer rather than mounting a view onto nothing.
 func TestTheArtifactChordAnswersOnAFreeformCard(t *testing.T) {
 	m := freeformShell(t, 120, 34, true)
 	m.cardOpen = true
 	if bar := ansi.Strip(m.cardTabBar(cardTabThread, 120)); strings.Contains(bar, "spec") {
-		t.Errorf("the tab bar offers a document on a freeform card: %q", bar)
+		t.Errorf("the tab bar offers a document on a session with no spec: %q", bar)
 	}
 	cmd, handled := m.cardTabKey("alt+s")
 	if !handled {
 		t.Fatal("alt+s was not answered on a freeform card")
 	}
 	if cmd != nil {
-		t.Error("alt+s mounted something on a card with no document")
+		t.Error("alt+s mounted something on a session with no spec")
 	}
-	if !strings.Contains(m.notice.text, "no document") {
+	if !strings.Contains(m.notice.text, "no spec yet") {
 		t.Errorf("notice = %q, want it to say why", m.notice.text)
 	}
 }
@@ -374,12 +342,8 @@ func TestTheFreeformCommandIsInTheVocabulary(t *testing.T) {
 	if cmd := m.runCommand(found.id); cmd != nil {
 		t.Error("opening the creation dialog should need no command")
 	}
-	d, ok := m.Overlay.Top().(*cardForm)
-	if !ok {
+	if _, ok := m.Overlay.Top().(*cardForm); !ok {
 		t.Fatalf("the freeform command did not open the creation dialog")
-	}
-	if d.Kind() != domain.KindFreeform {
-		t.Errorf("the dialog opened preset to %q, want freeform", d.Kind())
 	}
 }
 
@@ -436,13 +400,8 @@ func TestWhileAFreeformTurnRunsTheAnswerIsToStopIt(t *testing.T) {
 	if !offered["pause"] {
 		t.Error("the inventory offers no way to stop a turn in flight")
 	}
-	if offered["deps"] {
-		t.Error("the dependency picker is what p would open mid-turn")
-	}
 
-	// Between turns it is the review loop again: nothing to stop, and no
-	// dependency picker either — a session has no stages for a
-	// dependency to hold back.
+	// Between turns it is the review loop again: nothing to stop.
 	idle := busy
 	idle.freeformBusy = false
 	offered = map[string]bool{}
@@ -451,9 +410,6 @@ func TestWhileAFreeformTurnRunsTheAnswerIsToStopIt(t *testing.T) {
 	}
 	if offered["pause"] {
 		t.Error("between turns there is no turn to stop")
-	}
-	if offered["deps"] {
-		t.Error("a session offers a dependency picker, but nothing holds a session back")
 	}
 }
 
@@ -467,7 +423,7 @@ func TestDeletingAFreeformCardLeavesTheWorkspaceStanding(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m.Overlay.Push(m.openCardForm())
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -495,253 +451,6 @@ func TestDeletingAFreeformCardLeavesTheWorkspaceStanding(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".gummi", "worktrees", string(f.ID))); !os.IsNotExist(err) {
 		t.Errorf("the card's own worktree survived the delete (stat err = %v)", err)
 	}
-}
-
-// freeformAgentWorkspace is newWorkspace with a fake-backed engine
-// attached, for the surfaces a freeform card's own session drives.
-func freeformAgentWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine, string) {
-	t.Helper()
-	root := t.TempDir()
-	root, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	git := func(args ...string) {
-		t.Helper()
-		if out, err := exec.CommandContext(context.Background(), "git",
-			append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	git("init", "-q", "-b", "main")
-	git("config", "user.name", "t")
-	git("config", "user.email", "t@e.invalid")
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("x\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git("add", ".")
-	git("commit", "-q", "-m", "init")
-
-	ws, err := state.Init(root, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := state.OpenStore(ws.DBFile())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root, root, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	eng := engine.New(engine.Config{
-		Agents: singleAgent(ag), Store: store, Pool: worktree.WrapSingle(wt),
-		Workspace: ws, Model: "fake-model",
-	})
-	t.Cleanup(func() { eng.Close() })
-
-	m := NewShell(theme.GummiDark(), "v0-test")
-	m.now = func() time.Time { return fixedTime }
-	m.Attach(store, worktree.WrapSingle(wt), ws)
-	m.AttachEngine(eng)
-	m.SetCopilotHint(false)
-	m = pump(t, m, m.Init())
-	return m, eng, root
-}
-
-// TestFreeformWritespec drives the third ending end to end: the dialog
-// opens on its drafting state while the fetch — the brief turn — runs, the
-// thread says gummi is drafting rather than working, the brief arrives as
-// an editable field, and confirming mints the spec with the edited text
-// and advances it into plan.
-func TestFreeformWritespec(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	once := &sync.Once{}
-	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
-		if strings.Contains(msg, "handoff brief") {
-			once.Do(func() { close(started) })
-			<-release
-			return []agent.Event{
-				{Kind: agent.EventMessage, Text: "asked\n- drop the leaked pty fd\n\ndecided\n- keep the fix in the adapter\n\ndone\n- sketched the fix on the branch\n\nremaining\n- write the test"},
-				{Kind: agent.EventIdle},
-			}
-		}
-		return []agent.Event{{Kind: agent.EventMessage, Text: "on it"}, {Kind: agent.EventIdle}}
-	}}
-	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
-	m, eng, root := freeformAgentWorkspace(t, ag)
-	ctx := context.Background()
-
-	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
-	m = typeString(t, m, "Drop the leaked pty fd")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	fs, err := m.store.ListFeatures(ctx)
-	if err != nil || len(fs) != 1 {
-		t.Fatalf("features = %v, err = %v", fs, err)
-	}
-	f := fs[0]
-	ff, err := eng.OpenFreeform(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ff.Send(ctx, "drop the leaked pty fd"); err != nil {
-		t.Fatal(err)
-	}
-	waitFreeformIdle(t, eng, f.ID)
-
-	// back to the board, where the card's keys are its own
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	m.sel = 0
-
-	// w opens the dialog on its drafting state and starts the fetch; the
-	// fetch is driven by hand so the in-flight moment can be looked at
-	model, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
-	m = model.(*Shell)
-	d, ok := m.Overlay.Top().(*freeformSpecDialog)
-	if !ok || !d.drafting {
-		t.Fatalf("w did not open the writespec dialog on its drafting state (top %T)", m.Overlay.Top())
-	}
-	fetchDone := make(chan tea.Msg, 1)
-	go func() { fetchDone <- cmd() }()
-	<-started
-
-	// while the turn runs, the thread names the drafting, not "working"
-	m.cardOpen = true
-	out := ansi.Strip(m.threadView(120, 34))
-	if !strings.Contains(out, "drafting the handoff brief") {
-		t.Errorf("the thread does not name the drafting while the brief turn runs:\n%s", lastLines(out, 6))
-	}
-	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "working…") {
-			t.Errorf("the brief turn still reads as the bare working word: %q", l)
-		}
-	}
-	// the tab cycle skips the brief field while it is not rendered: tab
-	// from the title lands on the profile, and typing into the dialog
-	// cannot reach a textarea that is not on it yet
-	model, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	m = model.(*Shell)
-	if d, ok := m.Overlay.Top().(*freeformSpecDialog); !ok || d.focus != specFieldProfile {
-		t.Fatalf("tab while drafting landed on field %d, want the profile (the brief is not rendered yet)", d.focus)
-	}
-	close(release)
-	// the start answered at once, and the read that followed says the brief
-	// is still drafting: the dialog keeps drafting rather than filling from
-	// nothing or dropping out of its state
-	msg := <-fetchDone
-	model, cmd = m.Update(msg)
-	m = model.(*Shell)
-	m = pump(t, m, cmd)
-	if d, ok = m.Overlay.Top().(*freeformSpecDialog); !ok || !d.drafting {
-		t.Fatalf("a brief still drafting filled the dialog or dropped it (top %T)", m.Overlay.Top())
-	}
-	// the turn lands, and the card's ready event refills the open dialog
-	deadline := time.Now().Add(testWaitTimeout)
-	for ff.Briefing() {
-		if time.Now().After(deadline) {
-			t.Fatal("the brief turn never ended")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	model, cmd = m.Update(engineEventMsg{ev: engine.Event{Kind: engine.EventBriefReady, Feature: f.ID, Stage: domain.StageOpen}})
-	m = model.(*Shell)
-	m = pump(t, m, cmd)
-
-	d, ok = m.Overlay.Top().(*freeformSpecDialog)
-	if !ok || d.drafting {
-		t.Fatalf("the ready brief never filled the open dialog (top %T)", m.Overlay.Top())
-	}
-	if !strings.Contains(d.brief.Value(), "write the test") {
-		t.Errorf("the dialog does not hold the session's brief:\n%s", d.brief.Value())
-	}
-
-	// with the draft landed, the brief field is back in the cycle: tab
-	// back from the profile reaches it
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	d, ok = m.Overlay.Top().(*freeformSpecDialog)
-	if !ok || d.focus != specFieldBrief {
-		t.Fatalf("shift+tab after the draft landed went to field %d, want the brief", d.focus)
-	}
-
-	// the person edits the brief before anything mints
-	d.brief.SetValue(strings.Replace(d.brief.Value(), "write the test", "write the test, edited by hand", 1))
-
-	// confirm: ctrl+s from any field starts the spec
-	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-
-	// the spec exists, at plan, on a branch of its own cut from the
-	// session's tip; the session is closed and keeps its branch
-	deadline = time.Now().Add(testWaitTimeout)
-	var spec domain.Feature
-	for {
-		rows, err := m.store.ListFeatures(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, r := range rows {
-			if r.ID != f.ID && r.Kind == domain.KindFeature {
-				spec = r
-			}
-		}
-		if spec.ID != "" && spec.Stage == domain.StagePlan {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the spec never reached plan: %+v (rows %v)", spec, rows)
-		}
-		time.Sleep(20 * time.Millisecond)
-		m = pump(t, m, m.loadRows)
-	}
-	if got := spec.BranchName(); got == f.BranchName() {
-		t.Errorf("the spec shares the session's branch %q", got)
-	}
-	if _, err := exec.CommandContext(context.Background(), "git", "-C", root,
-		"rev-parse", "--verify", f.BranchName()).CombinedOutput(); err != nil {
-		t.Errorf("the session's branch did not survive the handoff: %v", err)
-	}
-	closed, err := m.store.GetFeature(ctx, f.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if closed.Stage != domain.StageDone {
-		t.Errorf("the session is at %s, want done", closed.Stage)
-	}
-	doc, err := os.ReadFile(filepath.Join(root, spec.ArtifactPath()))
-	if err != nil {
-		doc, err = os.ReadFile(filepath.Join(root, ".gummi", "state", "drafts", filepath.Base(spec.ArtifactPath())))
-	}
-	if err != nil || !strings.Contains(string(doc), "Continued from the session "+string(f.ID)) ||
-		!strings.Contains(string(doc), "edited by hand") {
-		t.Errorf("the spec does not carry the edited brief (%v):\n%s", err, doc)
-	}
-}
-
-// waitFreeformIdle is the engine package's poll, for the ui tests that
-// drive a freeform card's own session.
-func waitFreeformIdle(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
-	t.Helper()
-	deadline := time.After(testWaitTimeout)
-	for {
-		if ff := eng.Freeform(id); ff != nil && !ff.Busy() && !ff.Briefing() {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatal("the freeform session never went idle")
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-}
-
-// lastLines is the last n lines of a block of text, for error output.
-func lastLines(s string, n int) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
 }
 
 // The stack row (and the web's stackable list, which is the same list)
@@ -868,117 +577,5 @@ func TestAQuestionOnAFreeformCardTakesTheLine(t *testing.T) {
 	c := m.classifyThreadLine(r, "Go up the middle", asking)
 	if got, says := m.webLineRoute(r, "Go up the middle", c); got != webapi.RouteAnswer || says != "answers the question above, in your words" {
 		t.Errorf("the web composer says %v %q, want an answer in the person's words", got, says)
-	}
-}
-
-// briefAlerts records the needs-you alerts a shell raises, so a test can
-// see the one a closed dialog's brief leaves behind.
-type briefAlerts struct {
-	mu   sync.Mutex
-	text []string
-}
-
-func (a *briefAlerts) NeedsYou(id domain.FeatureID, text string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.text = append(a.text, string(id)+": "+text)
-}
-
-// TestWritespecReadyAlertsWhenTheDialogIsClosed: a brief that lands with no
-// writespec dialog open tells the person it is ready to review, through the
-// same needs-you path every other attention event takes.
-func TestWritespecReadyAlertsWhenTheDialogIsClosed(t *testing.T) {
-	ag := agent.NewFake("on it")
-	m, _, _ := freeformAgentWorkspace(t, ag)
-	alerts := &briefAlerts{}
-	m.AddAttentionNotifier(alerts)
-	id := domain.FeatureID("FF-042")
-
-	model, cmd := m.Update(engineEventMsg{ev: engine.Event{Kind: engine.EventBriefReady, Feature: id, Stage: domain.StageOpen}})
-	m = model.(*Shell)
-	pump(t, m, cmd)
-	alerts.mu.Lock()
-	defer alerts.mu.Unlock()
-	if len(alerts.text) != 1 || !strings.Contains(alerts.text[0], "handoff brief finished") {
-		t.Fatalf("the ready brief raised %q, want one handoff-brief alert", alerts.text)
-	}
-}
-
-// stubOverlay is a dialog pushed over the writespec dialog, as help or a
-// confirm is.
-type stubOverlay struct{}
-
-func (stubOverlay) ID() string                                { return "stub" }
-func (stubOverlay) HandleKey(tea.KeyPressMsg) (bool, tea.Cmd) { return false, nil }
-func (stubOverlay) View(*theme.Styles, int, int) string       { return "" }
-
-// TestWritespecReadyFillsDialogUnderAnOverlay: a dialog with help pushed over
-// it still hears that its brief has landed. The ready event reads the brief
-// in and raises no alert, and the reply fills the dialog once help pops.
-func TestWritespecReadyFillsDialogUnderAnOverlay(t *testing.T) {
-	ag := agent.NewFake("on it")
-	m, _, _ := freeformAgentWorkspace(t, ag)
-	alerts := &briefAlerts{}
-	m.AddAttentionNotifier(alerts)
-	id := domain.FeatureID("FF-042")
-	d := newFreeformSpecDialog(domain.Feature{ID: id, Title: "a spec"}, nil, 0, nil)
-	m.Overlay.Push(d)
-	m.Overlay.Push(stubOverlay{})
-
-	model, cmd := m.Update(engineEventMsg{ev: engine.Event{Kind: engine.EventBriefReady, Feature: id, Stage: domain.StageOpen}})
-	m = model.(*Shell)
-	if cmd == nil {
-		t.Fatal("the ready event under an overlay did not read the brief in")
-	}
-	alerts.mu.Lock()
-	raised := len(alerts.text)
-	alerts.mu.Unlock()
-	if raised != 0 {
-		t.Fatalf("the ready event raised %d alert(s) while its dialog was open", raised)
-	}
-	m.handleWritespecDraftMsg(writespecDraftMsg{f: id, brief: "asked\n- the long brief", source: engine.BriefLive})
-	m.Overlay.Pop()
-	if top, ok := m.Overlay.Top().(*freeformSpecDialog); !ok || top.drafting || !strings.Contains(top.brief.Value(), "the long brief") {
-		t.Fatalf("the dialog under the overlay did not fill (top %T)", m.Overlay.Top())
-	}
-}
-
-// TestWritespecDialogKeepsALongBrief: the brief the session wrote reaches the
-// editable field whole, however long it is — the field has no character
-// limit to cut it at.
-func TestWritespecDialogKeepsALongBrief(t *testing.T) {
-	long := "asked\n- the retry flake\n\n" + strings.Repeat("decided\n- a long line the architect reads\n", 200) + "remaining\n- THE LAST LINE"
-	d := newFreeformSpecDialog(domain.Feature{ID: "FF-001", Title: "a spec"}, nil, 0, nil)
-	d.apply(writespecDraftMsg{f: "FF-001", brief: long, source: engine.BriefLive})
-	if got := d.brief.Value(); !strings.Contains(got, "THE LAST LINE") || len(got) < len(long) {
-		t.Fatalf("the field holds %d of the brief's %d characters", len(got), len(long))
-	}
-}
-
-// TestWritespecDialogRefusesToMintWhileDrafting: the confirm does not mint
-// while the brief is still drafting, whatever the field shows.
-func TestWritespecDialogRefusesToMintWhileDrafting(t *testing.T) {
-	minted := false
-	d := newFreeformSpecDialog(domain.Feature{ID: "FF-001", Title: "a spec"}, nil, 0, func(domain.Feature, string, string, string, int) tea.Cmd {
-		minted = true
-		return nil
-	})
-	if ok, _ := d.submit(); ok || minted {
-		t.Fatal("the dialog minted while the brief was still drafting")
-	}
-}
-
-// TestWritespecLatePendingReadKeepsTheBrief: a read issued before the brief
-// landed can answer pending after the ready event has filled the field. The
-// late answer must not put the dialog back into drafting.
-func TestWritespecLatePendingReadKeepsTheBrief(t *testing.T) {
-	d := newFreeformSpecDialog(domain.Feature{ID: "FF-001", Title: "a spec"}, nil, 0, nil)
-	d.apply(writespecDraftMsg{f: "FF-001", brief: "the whole brief", source: engine.BriefLive})
-	d.apply(writespecDraftMsg{f: "FF-001", source: engine.BriefPending})
-	if d.drafting {
-		t.Fatal("a pending read undid a brief already in the field")
-	}
-	if got := d.brief.Value(); got != "the whole brief" {
-		t.Fatalf("the field = %q, want the brief kept", got)
 	}
 }

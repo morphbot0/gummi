@@ -28,6 +28,7 @@ import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
 import { runAction, messageHint, draftAffordance, landMethodControl, landMessageBox, keepBranchControl } from './actions.js?v=__ASSET_V__'
 import { pushAfterControl, openBasePush } from './pushbase.js?v=__ASSET_V__'
+import { proposalEl } from './workflow.js?v=__ASSET_V__'
 
 let ctx = {}
 let answering = false
@@ -190,7 +191,6 @@ function optionButtons (d, compact) {
 const SURFACES = {
   spec: () => ctx.setTab('spec'),
   diff: () => ctx.setTab('diff'),
-  goalpage: () => openView('goal', { id: state.sel }),
   // the card's own menu entry, which asks for the profile the way the
   // menu does (a failed stage offers "change profile")
   profile: () => {
@@ -223,7 +223,7 @@ function onOption (i, compact) {
   const o = d.options[i]
   if (SURFACES[o.id]) {
     set({ hi: i })
-    if (isMobile() && o.id !== 'goalpage' && o.id !== 'profile') set({ view: 'panel' })
+    if (isMobile() && o.id !== 'profile') set({ view: 'panel' })
     SURFACES[o.id]()
     return
   }
@@ -341,7 +341,13 @@ function drawDecision (box) {
   clear(box)
   box.append(noteEl(false) || '')
   const d = openDecision()
-  if (!d) return
+  // a card that pins no decision (a session between turns) can still stop
+  // on the board's own question — a composer command's yes — and that
+  // question has to be drawn somewhere
+  if (!d) {
+    box.append(confirmEl(false) || '')
+    return
+  }
   const stage = state.card.stage
   const offline = state.conn !== 'live'
   const jump = jumpFor(d, state.card)
@@ -364,8 +370,9 @@ function drawDecision (box) {
             h('span', { class: 'mono', title: 'What you are answering against: the card as you read it. An answer to a card that has moved since is refused.' }, d.against?.label || d.against?.token || 'the card as shown'),
             d.multi ? h('span', null, isMobile() ? ' · pick any, then Answer' : ' · pick any, then enter') : '']),
       jump ? h('button', { class: 'link', type: 'button', testid: 'decision-jump', onclick: () => ctx.setTab(jump[0]) }, jump[1]) : null)),
-  h('div', { class: 'q', testid: 'decision-question' }, d.question),
+  h('div', { class: ['q', d.proposal && 'wfpq'], testid: 'decision-question' }, d.proposal ? proposalEl(d.proposal) : d.question),
   optionButtons(d, false),
+  d.proposal ? feedbackEl(d) : null,
   brief(d)
     ? h('button', { class: 'allopts', type: 'button', testid: 'decision-all', 'aria-expanded': 'false', onclick: () => set({ decAll: true }) }, `More answers (${d.options.length - 1})`)
     : null),
@@ -384,6 +391,38 @@ function drawDecision (box) {
     shownHi = state.hi
     opts?.querySelector('.opt.hi')?.scrollIntoView({ block: 'nearest' })
   }
+}
+
+// feedback is what a person is typing as feedback on a run's proposal,
+// by the decision's ref: the decision is drawn again on every change to
+// the card, and the words must come back from that.
+const feedback = new Map()
+
+// feedbackEl is a run proposal's feedback box (DESIGN §25.5): its words
+// are the answer, delivered to the session agent as a turn (to the
+// planner, on a revised plan), which may propose again.
+function feedbackEl (d) {
+  const chat = d.options.find(o => o.chat) || d.options.find(o => o.words)
+  if (!chat) return null
+  const ta = h('textarea', {
+    class: 'wfp-fb', rows: '1', testid: 'decision-feedback', 'aria-label': 'Feedback instead of an answer',
+    placeholder: d.proposal.kind === 'plan' ? 'Talk the plan over with its planner instead (Enter)' : 'Send feedback on this run instead (Enter)'
+  })
+  ta.value = feedback.get(d.ref) || ''
+  ta.addEventListener('input', () => feedback.set(d.ref, ta.value))
+  const go = () => {
+    const words = ta.value.trim()
+    if (!words) { ta.focus(); return }
+    if (answering || state.conn !== 'live') return
+    feedback.delete(d.ref)
+    send(state.sel, { ref: d.ref, option: chat.id, words, against: d.against?.token || '' }, 'feedback', false, false)
+  }
+  ta.addEventListener('keydown', (e) => {
+    e.stopPropagation()
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go() }
+  })
+  return h('div', { class: 'wfp-fbrow' }, ta,
+    h('button', { class: 'btn', type: 'button', testid: 'decision-feedback-send', disabled: answering || state.conn !== 'live', onclick: go }, 'Send feedback'))
 }
 
 // nextRow is the card the "also needs you" chip offers, while it still
@@ -433,14 +472,14 @@ function drawMdec (box) {
   // the dock sits with the composer, out of sight from a document tab —
   // and, with no decision left, what the answer left to say
   const nx = state.view !== 'panel' ? null : nextRow()
-  const show = isMobile() && (!!d || !!state.decNote || !!nx) && state.view === 'panel'
+  const show = isMobile() && (!!d || !!state.decNote || !!state.decConfirm || !!nx) && state.view === 'panel'
   box.hidden = !show
   clear(box)
   if (!show) return
   if (!d) {
     if (nx) box.style.setProperty('--dc', needsColor(nx.needs, nx.stage))
     box.classList.remove('open', 'lead')
-    box.append(noteEl(true) || '', nx ? h('div', { class: 'mnext' }, nextChip(nx)) : '')
+    box.append(noteEl(true) || '', confirmEl(true) || '', nx ? h('div', { class: 'mnext' }, nextChip(nx)) : '')
     return
   }
   box.style.setProperty('--dc', decisionColor(d, state.card.stage))
@@ -533,7 +572,7 @@ export async function answer ({ picked = false } = {}) {
     return
   }
   if (SURFACES[o.id] && !text) {
-    if (isMobile() && o.id !== 'goalpage' && o.id !== 'profile') set({ view: 'panel' })
+    if (isMobile() && o.id !== 'profile') set({ view: 'panel' })
     SURFACES[o.id]()
     return
   }
@@ -647,14 +686,6 @@ function refused (id, err, body, label, tookWords, danger) {
       reveal = true
       return
     case 'needs':
-      if (e.needs === 'decision') {
-        // which decision to reverse is picked on the goal's page, which
-        // lists them with the lead's reasons
-        landing?.close()
-        note(sentence(e.text) || 'Pick the decision on the goal’s page.', { testid: 'decision-needs' })
-        openView('goal', { id })
-        return
-      }
       if (e.needs === 'message' && e.draft !== undefined && e.draft !== null) {
         // a landing stopped to have its message read: into the dialog the
         // press opened when one is up (a second one on top of it would
@@ -758,8 +789,7 @@ function openLanding (id, d, o, draft, question = '') {
     })
     landMessageBox(control, input, hint)
   }
-  // a goal's landing sweeps its own cards and keeps its own rules
-  const keep = state.card?.kind === 'goal' ? null : keepBranchControl()
+  const keep = keepBranchControl()
   // where the repository closes cards by push, the base push follows the
   // landing (pushbase.js)
   const pushAfter = o.pushTo ? pushAfterControl(o.pushTo, state.card?.base) : null

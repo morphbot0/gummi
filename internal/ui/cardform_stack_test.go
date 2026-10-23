@@ -13,7 +13,7 @@ import (
 // stack row and repos to choose between, focused on that row.
 func stackDoor(t *testing.T, ct domain.CardType, cands []stackCand, repos []string) *cardForm {
 	t.Helper()
-	d := newCardForm(ct, []string{"thrifty"}, repos, false, "", nil, 2400, nil)
+	d := newCardForm([]string{"thrifty"}, repos, false, "", 2400, nil)
 	d.setStackCands(cands)
 	d.expanded = true
 	d.setFocus(cardStopStack)
@@ -118,7 +118,7 @@ func TestTheStackRowIsOneRepository(t *testing.T) {
 
 	d.repo.selectName("web")
 	d.text.SetValue("a card in the other repo")
-	if done, _ := d.submit(false); done {
+	if done, _ := d.submit(); done {
 		t.Fatal("submit should refuse a card stacked across repositories")
 	}
 	if !strings.Contains(d.errText, "one repository") {
@@ -131,24 +131,6 @@ func TestTheStackRowIsOneRepository(t *testing.T) {
 	// the reader can see and undo.
 	if d.stackIdx() == 0 {
 		t.Error("the refused card should still be the row's answer")
-	}
-}
-
-// TestTheStackRowSkipsKindsWithNoBranch: research cards and goals have
-// no branch of their own to fork, so they get no row at all rather than
-// one that can only say no.
-func TestTheStackRowSkipsKindsWithNoBranch(t *testing.T) {
-	for _, kind := range []domain.Kind{domain.KindResearch, domain.KindGoal} {
-		d := newCardForm(domain.CardType{Kind: kind}, []string{"thrifty"}, nil, false, "", nil, 2400, nil)
-		d.expanded = true
-		for _, stop := range d.stops() {
-			if stop == cardStopStack {
-				t.Errorf("%s offers a stack row", kind)
-			}
-		}
-		if strings.Contains(d.View(theme.New(theme.GummiDark()), 80, 40), "stack") {
-			t.Errorf("%s renders a stack row", kind)
-		}
 	}
 }
 
@@ -165,7 +147,6 @@ func TestStackCandsAreTheCardsWithABranch(t *testing.T) {
 		{F: domain.Feature{ID: "FD-003", Kind: domain.KindFeature, Stage: domain.StageDone}, Landed: true},
 		{F: domain.Feature{ID: "RS-001", Kind: domain.KindResearch}},
 		{F: domain.Feature{ID: "GL-001", Kind: domain.KindGoal}},
-		{F: domain.Feature{ID: "FD-002", Kind: domain.KindFeature, GoalID: "GL-001"}},
 		{F: domain.Feature{ID: "BG-001", Kind: domain.KindBug, UpdatedAt: time.Now()}},
 	}
 	cands := m.stackCands()

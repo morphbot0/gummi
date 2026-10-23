@@ -1,23 +1,16 @@
-// Package verify runs a feature's Verify-stage check commands in its
-// worktree and reports pass/fail with output. The commands come from
-// the artifact's gummi-checks block (internal/spec): auto-discovered at
-// approval, then ordinary spec content — human-gated by the approval
-// gates and versioned with the branch (DESIGN §4.4).
-//
-// Two callers, two safety stories: the manual verify dialog surfaces the
-// commands and runs on confirmation (a bare host may be watching); the
-// engine runs them autonomously at the Verify stage only in allow-all
-// mode, where the sandbox is the boundary and the stage's agent would
-// otherwise run the identical shell itself. In guarded mode the engine
-// does not auto-run them — the agent handles verification instead.
+// Package verify runs check commands in a worktree and reports pass/fail
+// with output. Its caller is a session's workflow run: the done-when
+// checks of the spec it froze, at the run's end and at a repeat's
+// `until: checks` (DESIGN §25.6). The commands
+// come from the spec, which the person allowed the run on.
 package verify
 
 import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,6 +42,10 @@ type Result struct {
 	ExitCode int
 	Output   string // combined stdout+stderr, truncated
 	Duration time.Duration
+	// RanNoTests marks a passing check that tested nothing: a `go test`
+	// with `-run` whose every package said "no tests to run". It passed,
+	// but proves nothing, and a caller must not read it as a pass.
+	RanNoTests bool
 }
 
 // CheckTimeout bounds a single check so one hung command can't consume the
@@ -59,10 +56,6 @@ const CheckTimeout = 2 * time.Minute
 // MaxCheckTimeout is the ceiling for any per-check Timeout configured in
 // the artifact. It is intentionally not configurable.
 const MaxCheckTimeout = 30 * time.Minute
-
-// budgetSlack pads the sum of per-check timeouts so a run's overall
-// deadline is not tight to the millisecond.
-const budgetSlack = 30 * time.Second
 
 // maxOutput bounds captured output so a chatty check can't blow up the
 // transcript/UI.
@@ -94,61 +87,6 @@ func RunBounded(ctx context.Context, workDir string, checks []domain.Check, perC
 		out = append(out, runOneWithBound(ctx, workDir, ch, perCheck))
 	}
 	return out
-}
-
-// RunWithBudget runs checks with an overall deadline derived from the
-// checks' own per-check timeouts. The deadline is max(floor, sum of each
-// check's effective timeout + budgetSlack). Checks without a configured
-// Timeout use the package default (CheckTimeout). The per-check bound is
-// applied individually so one slow check cannot exhaust the whole run.
-func RunWithBudget(ctx context.Context, workDir string, checks []domain.Check, floor time.Duration) ([]Result, error) {
-	type boundedCheck struct {
-		check domain.Check
-		bound time.Duration
-	}
-	bounded := make([]boundedCheck, len(checks))
-	var sum time.Duration
-	for i, ch := range checks {
-		d, err := effectiveTimeout(ch)
-		if err != nil {
-			return nil, err
-		}
-		bounded[i] = boundedCheck{check: ch, bound: d}
-		sum += d
-	}
-	deadline := floor
-	if sum+budgetSlack > deadline {
-		deadline = sum + budgetSlack
-	}
-	runCtx, cancel := context.WithTimeout(ctx, deadline)
-	defer cancel()
-
-	out := make([]Result, 0, len(checks))
-	for _, cb := range bounded {
-		if runCtx.Err() != nil {
-			out = append(out, Result{Name: cb.check.Name, Cmd: cb.check.Cmd, Status: StatusNotRun})
-			continue
-		}
-		out = append(out, runOneWithBound(runCtx, workDir, cb.check, cb.bound))
-	}
-	return out, nil
-}
-
-// effectiveTimeout resolves a check's configured Timeout, falling back to
-// the package default. An empty Timeout is not an error; a malformed value
-// or one above MaxCheckTimeout is.
-func effectiveTimeout(ch domain.Check) (time.Duration, error) {
-	if ch.Timeout == "" {
-		return CheckTimeout, nil
-	}
-	d, err := time.ParseDuration(ch.Timeout)
-	if err != nil {
-		return 0, fmt.Errorf("check %q: invalid timeout %q: %w", ch.Name, ch.Timeout, err)
-	}
-	if d > MaxCheckTimeout {
-		return 0, fmt.Errorf("check %q: timeout %s exceeds maximum %s", ch.Name, d, MaxCheckTimeout)
-	}
-	return d, nil
 }
 
 func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCheck time.Duration) Result {
@@ -188,12 +126,13 @@ func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCh
 		}
 	}
 	res := Result{
-		Name:     ch.Name,
-		Cmd:      ch.Cmd,
-		Status:   status,
-		OK:       status == StatusPass,
-		Output:   truncate(buf.String()),
-		Duration: time.Since(start),
+		Name:       ch.Name,
+		Cmd:        ch.Cmd,
+		Status:     status,
+		OK:         status == StatusPass,
+		Output:     truncate(buf.String()),
+		Duration:   time.Since(start),
+		RanNoTests: status == StatusPass && RanNoTests(ch.Cmd, buf.String()),
 	}
 	if err != nil {
 		var exit *exec.ExitError
@@ -204,6 +143,26 @@ func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCh
 		}
 	}
 	return res
+}
+
+// RanNoTests reports whether a check's output says it tested nothing. It
+// is deliberately narrow: only a `go test` naming `-run`, whose output
+// says "no tests to run" (as "testing: warning: no tests to run" or a
+// package's "[no tests to run]") and shows no package or test that did
+// run — a -run pattern that matched nothing anywhere.
+func RanNoTests(cmd, output string) bool {
+	if !strings.Contains(cmd, "go test") || !strings.Contains(cmd, "-run") || !strings.Contains(output, "no tests to run") {
+		return false
+	}
+	for _, l := range strings.Split(output, "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(l, "ok ") && !strings.Contains(l, "no tests to run"),
+			strings.HasPrefix(l, "=== RUN"), strings.HasPrefix(l, "--- PASS"):
+			return false
+		}
+	}
+	return true
 }
 
 func truncate(s string) string {

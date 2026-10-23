@@ -212,8 +212,8 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, lo
 
 // newEngineFromEnv constructs the orchestrator and its agents from the
 // environment, without restoring prior sessions. buildEngine wraps it for
-// the board (adding Restore + a combined cleanup); one-shot commands like
-// `gummi ingest` use it directly and own the agents' lifetimes. Returns
+// the board (adding Restore + a combined cleanup); one-shot commands use
+// it directly and own the agents' lifetimes. Returns
 // (nil, nil, nil) when no agent can be started.
 // The returned error is non-nil only when permissions: guarded is paired
 // with a backend that can't honor it (agent.GuardedSupport) — every other

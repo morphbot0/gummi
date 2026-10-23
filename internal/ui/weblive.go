@@ -18,7 +18,10 @@ import (
 func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 	r, ok := m.rowByID(domain.FeatureID(id))
 	if !ok {
-		return webapi.Live{}, false
+		// a workflow step's card: its conversation is its live block
+		if r, ok = m.childRow(domain.FeatureID(id)); !ok {
+			return webapi.Live{}, false
+		}
 	}
 	var live webapi.Live
 	f := r.F
@@ -30,22 +33,6 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 	case m.cardBusy(r) && !f.IsFreeform():
 		live.Busy = true
 		live.Verb = m.cardBusyWord(r)
-	}
-	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
-		snap := sess.Snapshot()
-		live.State = string(snap.State)
-		live.Spent = snap.SpentCredits
-		live.Stage, live.Role, live.Model = string(snap.Feature.Stage), string(snap.Role), runModel(snap)
-		live.Session = snap.StartedAt
-		if live.Busy {
-			live.Since = snap.StartedAt
-		}
-		if liveSessionActive(snap) {
-			live.Turns, live.Omitted, live.Streaming, live.Tool = webTranscript(snap)
-		}
-		if snap.Err != nil {
-			live.Err = threadfold.Sanitize(snap.Err.Error())
-		}
 	}
 	if r.DrivenAbroad {
 		fd := r.Foreign
@@ -78,8 +65,9 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 }
 
 // WebLiveEarlier is GET /api/cards/{id}/live/earlier: the turns before
-// turn before of one of the card's live conversations — conv "stage" (the
-// run its live block draws) or "freeform" — that the block left out. It
+// turn before of one of the card's live conversations — conv "stage" (a
+// session another gummi runs, which this board follows) or "freeform" —
+// that the block left out. It
 // reads the same snapshot WebLive does, so the numbers agree. ok is false
 // for a card the board does not have or a conversation it is not having.
 func (m *Shell) WebLiveEarlier(id, conv string, before int) (webapi.Earlier, bool) {
@@ -91,11 +79,6 @@ func (m *Shell) WebLiveEarlier(id, conv string, before int) (webapi.Earlier, boo
 	case "stage":
 		if m.follow != nil && m.follow.feature == r.F.ID {
 			return webEarlier(m.follow.Snapshot(), before), true
-		}
-		if sess := m.sessionFor(r.F.ID); sess != nil && !r.DrivenAbroad {
-			if snap := sess.Snapshot(); liveSessionActive(snap) {
-				return webEarlier(snap, before), true
-			}
 		}
 	case "freeform":
 		if !r.F.IsFreeform() || m.engine == nil {
@@ -109,19 +92,6 @@ func (m *Shell) WebLiveEarlier(id, conv string, before int) (webapi.Earlier, boo
 		}
 	}
 	return webapi.Earlier{}, false
-}
-
-// liveSessionActive reports whether a local session is still writing the
-// segment its card's log ends in: then the log does not hold its turns
-// yet, and the page draws them from the snapshot. A finished session
-// (the engine keeps it after its run) has handed everything to the log.
-//
-// A paused session has handed its turns over too: Pause saves it before
-// it stops, and nothing writes after. Holding its segment back would hide
-// what the log says since — the pause itself, the stop it parked at —
-// behind a transcript that has nothing more to add.
-func liveSessionActive(snap engine.Snapshot) bool {
-	return snap.State != engine.StateDone && snap.State != engine.StatePaused
 }
 
 // webConsult is the card's consult exchange, where the TUI thread draws
@@ -181,12 +151,10 @@ func (m *Shell) webFreeform(r featureRow) *webapi.Conversation {
 	if len(snap.Transcript) == 0 && sending == "" {
 		return nil
 	}
-	// the busy verb names what is running: gummi's own handoff-brief turn
-	// says so, not the bare "working"
+	// the busy verb names what is running: an objective's audit says so,
+	// not the bare "working"
 	verb := "working"
-	if snap.Briefing {
-		verb = engine.BriefDrafting
-	} else if snap.Auditing && !snap.Busy {
+	if snap.Auditing && !snap.Busy {
 		verb = engine.ObjectiveAuditing
 	}
 	c := webConversation(snap, sending, verb)
@@ -200,10 +168,10 @@ func (m *Shell) webFreeform(r featureRow) *webapi.Conversation {
 }
 
 func webConversation(snap engine.Snapshot, sending, verb string) *webapi.Conversation {
-	// a handoff brief in flight is activity the page should spin on, the
-	// same way it spins on a turn — the brief turn runs on a session of
-	// its own, so Busy alone would miss it
-	busy := snap.Busy || snap.Briefing || snap.Auditing
+	// an objective's audit is activity the page should spin on, the same
+	// way it spins on a turn — the audit runs on a session of its own, so
+	// Busy alone would miss it
+	busy := snap.Busy || snap.Auditing
 	c := &webapi.Conversation{Busy: busy, Role: string(snap.Role), Spent: snap.SpentCredits, Model: runModel(snap)}
 	c.Turns, c.Omitted, c.Streaming, c.Tool = webTranscript(snap)
 	if ctx := snap.Context; ctx.Tokens > 0 {
@@ -258,7 +226,8 @@ func webEarlier(snap engine.Snapshot, before int) webapi.Earlier {
 // arriving, which it returns apart, with the tool call in flight and that
 // call's place in the transcript (-1 when there is none).
 func settledTranscript(snap engine.Snapshot) (tr []engine.Message, streaming string, tool *webapi.ToolCall, inflight int) {
-	tr = snap.Transcript
+	// a run's notes are its block's to say (threadfold.IsRunNote)
+	tr = threadfold.WithoutRunNotes(snap.Transcript)
 	// A message is still arriving only while a turn is in flight. One a
 	// pause or a failure cut off is flagged streaming forever, and the
 	// page drew it under "writing" with a spinner for as long as the

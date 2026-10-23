@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -59,7 +58,7 @@ func TestBG104AttentionTextNamesNoBareKeys(t *testing.T) {
 	// offered here directly, so the sentence above may name the inbox
 	// without the card page having to send anyone there.
 	steps := nextActions(nextInput{
-		kind: domain.KindFeature, stage: domain.StageVerify, attn: attnBudget, sess: engine.StateDone,
+		kind: domain.KindFreeform, stage: domain.StageOpen, attn: attnBudget, hasWorktree: true,
 	})
 	var tops bool
 	for _, s := range steps {

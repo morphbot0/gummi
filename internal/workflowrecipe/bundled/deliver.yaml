@@ -1,0 +1,47 @@
+name: deliver
+description: Design, build and validate a spec's done-when items
+tier: standard            # default for every step
+inputs: {}                # name: hint, filled at workflow_run
+steps:
+  - id: design
+    role: contractor
+    prompt: |
+      Write the design for the spec below into {{artifacts.design}}.
+      Do not edit code.
+
+      {{spec}}
+    artifacts: { design: design.md }
+  - id: build
+    repeat:
+      max: 3
+      until: { verdict: APPROVED, in: review }
+      onMax: pause
+      steps:
+        - id: implement
+          role: implementer
+          prompt: |
+            Implement {{artifacts.design}} for the spec below. If
+            {{artifacts.review}} exists, address its findings first.
+
+            {{spec}}
+        - id: reviews
+          parallel:
+            join: allSettled
+            steps:
+              - { id: review-a, role: reviewer, tier: strong,   prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+              - { id: review-b, role: reviewer, tier: standard, prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+        - id: verdict
+          role: reviewer
+          prompt: |
+            Merge these reviews into {{artifacts.review}} as JSON:
+            {"verdict": "APPROVED" | "CHANGES", "findings": [...]}.
+            {{review-a.output}}
+            {{review-b.output}}
+          artifacts: { review: review.json }
+  - id: validate
+    role: reviewer
+    prompt: |
+      Read {{run.diff}} against the spec's done-when items. End with one
+      line per item: MET: DW-n or UNMET: DW-n <why>.
+
+      {{spec}}

@@ -234,10 +234,6 @@ func TestBacklogListMovesSelection(t *testing.T) {
 // so muscle memory survives whichever tab it's read from.
 func TestBacklogKeepsTheCardVerbs(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
-	m = press(t, m, key('S'))
-	if m.sortMode != SortSeverity {
-		t.Error("S should still toggle the sort from the backlog list")
-	}
 	m = press(t, m, key('n'))
 	if m.Overlay.Top() == nil {
 		t.Error("n should still raise the new-feature form from the backlog list")
@@ -288,9 +284,9 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	assertLabel(t, bs, "enter", "open card")
 
 	// a card opens with its composer holding the keyboard, so the bar
-	// teaches the line's keys first. FD-042 (implement, nothing running)
-	// has an open decision, so enter names the highlighted answer rather
-	// than plain send — the bar states what enter is about to do before
+	// teaches the line's keys first. FD-042 (a retired card with a
+	// worktree) has an open decision, so enter names the highlighted
+	// answer rather than plain send — the bar states what enter is about to do before
 	// it does it (DESIGN §6.3).
 	m.openCard()
 	name, bs = m.activeSurface()
@@ -299,7 +295,7 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	}
 	assertNoKey(t, bs, "→")
 	assertLabel(t, bs, "↑↓", "choose")
-	assertLabel(t, bs, "enter", "run implement")
+	assertLabel(t, bs, "enter", "read the diff")
 	// esc leaves the page from the line — there is no accelerator layer
 	// between the composer and the backlog any more
 	assertLabel(t, bs, "esc", "board")
@@ -324,7 +320,7 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	m.threadInput.Focus()
 	m.sel = 5 // FD-039, done
 	_, bs = m.activeSurface()
-	assertLabel(t, bs, "enter", "open a bug from this")
+	assertLabel(t, bs, "enter", "start a follow-up session")
 	assertLabel(t, bs, "↑↓", "choose")
 }
 

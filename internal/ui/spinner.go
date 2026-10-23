@@ -47,7 +47,7 @@ func (m *Shell) spinnerActive() bool {
 	if !m.motionEnabled {
 		return false
 	}
-	if m.ingestRun != nil || len(m.mergePrep) > 0 || m.squashPrep || len(m.baselining) > 0 || len(m.scribing) > 0 || len(m.ghWork) > 0 {
+	if len(m.mergePrep) > 0 || m.squashPrep || len(m.ghWork) > 0 {
 		return true
 	}
 	// a line on its way to a consult session that has not opened yet: no
@@ -56,20 +56,16 @@ func (m *Shell) spinnerActive() bool {
 	if len(m.consultSending) > 0 {
 		return true
 	}
+	// a workflow step at work in the open session's run block
+	if m.runsWorking() {
+		return true
+	}
 	// a foreign-driven card's busy state lives only in its row snapshot —
 	// unlike the local sources above, no live engine session covers
 	// another process's session, so this is the one place that state can
 	// be read from.
 	for _, r := range m.rows {
 		if r.DrivenAbroad && r.Foreign.Busy {
-			return true
-		}
-	}
-	if m.engine == nil {
-		return false
-	}
-	for _, s := range m.engine.Sessions() {
-		if s.Busy() {
 			return true
 		}
 	}

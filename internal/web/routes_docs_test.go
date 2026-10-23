@@ -81,6 +81,10 @@ func writeFile(t *testing.T, path, content string) {
 // before its loop starts.
 var docsShellSetup func(*ui.Shell)
 
+// docsSeedSession, when a test sets it, makes the docs board's card a
+// session (FF-001) rather than a retired workflow card (FD-001).
+var docsSeedSession bool
+
 func newDocsBoard(t *testing.T, ag agent.Agent, mutate ...func(*Options)) *docsBoard {
 	t.Helper()
 	ctx := context.Background()
@@ -119,6 +123,9 @@ func newDocsBoard(t *testing.T, ag agent.Agent, mutate ...func(*Options)) *docsB
 	t.Cleanup(func() { eng.Close() })
 
 	f := domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageImplement}
+	if docsSeedSession {
+		f = domain.Feature{ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageOpen}
+	}
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
@@ -141,8 +148,9 @@ func newDocsBoard(t *testing.T, ag agent.Agent, mutate ...func(*Options)) *docsB
 	gitIn(t, wt, "commit", "-q", "-m", "work")
 	rev1 := gitIn(t, wt, "rev-parse", "HEAD")
 
-	home, _ := f.ArtifactFile(root)
-	writeFile(t, home, docsSpec)
+	if home, ok := f.ArtifactFile(root); ok {
+		writeFile(t, home, docsSpec)
+	}
 
 	shell := ui.NewShell(theme.GummiDark(), "v0-test")
 	shell.SetCopilotHint(false)
@@ -176,12 +184,12 @@ func newDocsBoard(t *testing.T, ag agent.Agent, mutate ...func(*Options)) *docsB
 	// wait for the board's first row load
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		res, _ := h.do(b.c, http.MethodGet, "/api/cards/FD-001", "")
+		res, _ := h.do(b.c, http.MethodGet, "/api/cards/"+string(f.ID), "")
 		if res.StatusCode == http.StatusOK {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the board never loaded FD-001")
+			t.Fatalf("the board never loaded %s", f.ID)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -317,9 +325,8 @@ func TestDocsThreadPagesAndUpsertsByKey(t *testing.T) {
 	}
 }
 
-// A running session's turns are not in the log yet: the live block
-// carries them, the thread holds back the segment it is writing, and the
-// thread's lastSeq stops short of what it held back.
+// A running session's turn is the live conversation: what it streams, the
+// tool in flight and the turns so far, on the live block and the thread.
 func TestDocsLiveDuringARunningSession(t *testing.T) {
 	fake := agent.NewFake("")
 	fake.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
@@ -336,63 +343,53 @@ func TestDocsLiveDuringARunningSession(t *testing.T) {
 	b := newDocsBoard(t, fake)
 	ctx := context.Background()
 	stream := b.events(b.c, "")
-	if _, err := b.eng.Attach(ctx, b.f); err != nil {
+	id, _ := domain.NewID(domain.KindFreeform, 3)
+	now := time.Now()
+	f := domain.Feature{
+		ID: id, Num: 3, Kind: domain.KindFreeform, Title: "Tidy up", Slug: "tidy-up", Stage: domain.StageOpen,
+		BranchScheme: domain.BranchSchemeKind, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := b.store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the kickoff turn to reach the log", func() bool {
-		evs, _ := b.store.Events(ctx, b.f.ID)
-		for _, ev := range evs {
-			if ev.Kind == state.EventMessage && strings.Contains(ev.Payload, "hi there") {
-				return true
-			}
-		}
-		return false
-	})
-	if err := b.eng.Send(ctx, b.f.ID, "go on"); err != nil {
+	ff, err := b.eng.OpenFreeform(ctx, f)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := ff.Kickoff(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the kickoff turn to settle", func() bool { return !ff.Busy() })
+	if err := ff.Send(ctx, "go on"); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/cards/" + string(id)
 	var live webapi.Live
 	waitFor(t, "the live stream", func() bool {
 		live = webapi.Live{}
-		b.get("/api/cards/FD-001/live", &live)
-		return live.Streaming != ""
+		b.get(path+"/live", &live)
+		return live.Freeform != nil && live.Freeform.Streaming != ""
 	})
-	if !live.Busy || live.Verb != "running" || live.Streaming != "Running the te" {
-		t.Errorf("live = %+v, want busy running with the streaming text", live)
+	conv := live.Freeform
+	if !conv.Busy || conv.Streaming != "Running the te" {
+		t.Errorf("live conversation = %+v, want busy with the streaming text", conv)
 	}
-	if live.Tool == nil || live.Tool.Tool != "Bash" || live.Tool.Detail != "go test ./..." || live.Tool.Status != "running" {
-		t.Errorf("tool in flight = %+v", live.Tool)
+	if conv.Tool == nil || conv.Tool.Tool != "Bash" || conv.Tool.Detail != "go test ./..." || conv.Tool.Status != "running" {
+		t.Errorf("tool in flight = %+v", conv.Tool)
 	}
 	var said []string
-	for _, tn := range live.Turns {
+	for _, tn := range conv.Turns {
 		said = append(said, tn.Author+":"+tn.Text)
 	}
-	if got := strings.Join(said, "|"); !strings.HasPrefix(got, "gummi:") || !strings.Contains(got, "implementer:hi there|you:go on|tool:") {
+	if got := strings.Join(said, "|"); !strings.Contains(got, "implementer:hi there|you:go on") {
 		t.Errorf("turns = %q", got)
-	}
-	if live.Stage != "implement" || live.Session.IsZero() {
-		t.Errorf("live head = %q at %v", live.Stage, live.Session)
 	}
 	stream.until("live")
 
 	var th webapi.Thread
-	b.get("/api/cards/FD-001/thread", &th)
-	if n := len(th.Items); n == 0 || th.Items[n-1].T != webapi.ItemStage {
-		t.Fatalf("thread items = %+v, want to end at the live stage's divider", th.Items)
-	}
-	evs, _ := b.store.Events(ctx, b.f.ID)
-	var held int64
-	for _, ev := range evs {
-		if ev.Kind == state.EventMessage {
-			held = ev.Seq
-			break
-		}
-	}
-	if held == 0 || th.LastSeq >= held {
-		t.Errorf("lastSeq = %d, want short of the held-back turn at seq %d", th.LastSeq, held)
-	}
-	if th.Live == nil || th.Live.Streaming == "" {
-		t.Errorf("the thread does not carry the live block: %+v", th.Live)
+	b.get(path+"/thread", &th)
+	if th.Live == nil || th.Live.Freeform == nil || th.Live.Freeform.Streaming == "" {
+		t.Errorf("the thread does not carry the live conversation: %+v", th.Live)
 	}
 }
 
@@ -768,81 +765,26 @@ func TestDocsStatsAndFleet(t *testing.T) {
 	}
 }
 
-// "Request changes" is the terminal's R on the spec and diff surfaces:
-// with nothing open it refuses in the board's words, and with comments
-// open it sends them on and answers with what the board said.
+// "Request changes" is the terminal's R on the diff surface: with nothing
+// open it refuses in the board's words, and with comments open it sends
+// them on and answers with what the board said.
 func TestDocsRequestChanges(t *testing.T) {
 	t.Run("nothing open", func(t *testing.T) {
 		b := newDocsBoard(t, agent.NewFake("ok"))
-		for _, what := range []string{"spec", "diff"} {
-			if st := b.send(http.MethodPost, "/api/cards/FD-001/"+what+"/changes", "", nil); st != http.StatusConflict {
-				t.Errorf("%s changes with nothing open = %d, want 409", what, st)
-			}
-			if st := b.send(http.MethodPost, "/api/cards/FD-404/"+what+"/changes", "", nil); st != http.StatusNotFound {
-				t.Errorf("%s changes on no card = %d, want 404", what, st)
-			}
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/diff/changes", "", nil); st != http.StatusConflict {
+			t.Errorf("diff changes with nothing open = %d, want 409", st)
 		}
-		if st := b.send(http.MethodPost, "/api/cards/FD-002/spec/changes", "", nil); st != http.StatusConflict {
-			t.Errorf("spec changes on a card with no document = %d, want 409", st)
-		}
-	})
-
-	t.Run("spec", func(t *testing.T) {
-		b := newDocsBoard(t, agent.NewFake("ok"))
-		// a note on the Verification section is nobody's in particular,
-		// so the implement stage the card is in takes it
-		var sp webapi.Spec
-		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/notes", `{"line":7,"text":"check it at night too"}`, &sp); st != http.StatusOK {
-			t.Fatalf("add note = %d", st)
-		}
-		if sp.OpenComments != 1 {
-			t.Errorf("open comments = %d, want 1", sp.OpenComments)
-		}
-		var out webapi.Outcome
-		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/changes", "", &out); st != http.StatusOK {
-			t.Fatalf("spec changes = %d", st)
-		}
-		if !out.OK || !strings.Contains(out.Text, "1 review comment") {
-			t.Errorf("outcome = %+v", out)
-		}
-	})
-
-	// A note on the Problem is the design stage's to answer: the card goes
-	// back to plan for it, and only once the person has said yes to the
-	// question that says so.
-	t.Run("spec back to plan", func(t *testing.T) {
-		b := newDocsBoard(t, agent.NewFake("ok"))
-		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/notes", `{"line":5,"text":"only after dark?"}`, nil); st != http.StatusOK {
-			t.Fatalf("add note = %d", st)
-		}
-		var ask webapi.Error
-		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/changes", "", &ask); st != http.StatusAccepted {
-			t.Fatalf("spec changes = %d, want the 202 question", st)
-		}
-		if ask.Error != webapi.ConflictConfirm || ask.Confirm == "" ||
-			!strings.Contains(ask.Text, "back to plan") || !strings.Contains(ask.Text, "Problem") {
-			t.Fatalf("question = %+v", ask)
-		}
-		if f, _ := b.store.GetFeature(context.Background(), "FD-001"); f.Stage != domain.StageImplement {
-			t.Fatalf("asking moved the card to %s", f.Stage)
-		}
-		var out webapi.Outcome
-		body := fmt.Sprintf(`{"confirm":%q}`, ask.Confirm)
-		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/changes", body, &out); st != http.StatusOK {
-			t.Fatalf("confirmed spec changes = %d", st)
-		}
-		if !out.OK || !strings.Contains(out.Text, "sent back to plan") {
-			t.Errorf("outcome = %+v", out)
-		}
-		if f, _ := b.store.GetFeature(context.Background(), "FD-001"); f.Stage != domain.StagePlan {
-			t.Errorf("stage = %s, want plan", f.Stage)
+		if st := b.send(http.MethodPost, "/api/cards/FD-404/diff/changes", "", nil); st != http.StatusNotFound {
+			t.Errorf("diff changes on no card = %d, want 404", st)
 		}
 	})
 
 	t.Run("diff", func(t *testing.T) {
+		docsSeedSession = true
+		t.Cleanup(func() { docsSeedSession = false })
 		b := newDocsBoard(t, agent.NewFake("ok"))
 		var d webapi.Diff
-		b.get("/api/cards/FD-001/diff", &d)
+		b.get("/api/cards/FF-001/diff", &d)
 		var target webapi.DiffLine
 		for _, f := range d.Files {
 			for _, h := range f.Hunks {
@@ -854,11 +796,11 @@ func TestDocsRequestChanges(t *testing.T) {
 			}
 		}
 		body := fmt.Sprintf(`{"idx":%d,"comment":"why a second func?","text":"func b() {}"}`, target.Idx)
-		if st := b.send(http.MethodPost, "/api/cards/FD-001/diff/annotations", body, nil); st != http.StatusOK {
+		if st := b.send(http.MethodPost, "/api/cards/FF-001/diff/annotations", body, nil); st != http.StatusOK {
 			t.Fatalf("annotate = %d", st)
 		}
 		var out webapi.Outcome
-		if st := b.send(http.MethodPost, "/api/cards/FD-001/diff/changes", "", &out); st != http.StatusOK {
+		if st := b.send(http.MethodPost, "/api/cards/FF-001/diff/changes", "", &out); st != http.StatusOK {
 			t.Fatalf("diff changes = %d", st)
 		}
 		if !out.OK || !strings.Contains(out.Text, "1 diff comment") {

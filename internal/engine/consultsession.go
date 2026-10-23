@@ -117,23 +117,11 @@ func (e *Engine) OpenConsult(ctx context.Context, f domain.Feature) (*ConsultSes
 		e.mu.Unlock()
 		return prior, nil
 	}
-	priorStage := e.live[f.ID]
 	e.mu.Unlock()
 
 	rc, backend := e.resolveConsultRole(f.Profile)
 	c := &ConsultSession{engine: e, id: f.ID, stage: f.Stage, rc: rc, backend: backend}
-
-	// The one-directional seed: a card's stage session (of any state),
-	// carried over exactly once, on this card's first-ever OpenConsult.
-	// Every later respawn (ensureBackend, on idle-timeout) carries over
-	// this ConsultSession's OWN transcript instead — it never re-reads
-	// e.live, so the stage seed can never happen a second time.
-	var seed []Message
-	if priorStage != nil {
-		snap := priorStage.Snapshot()
-		seed = stampSeedRole(snap.Transcript, snap.Role)
-	}
-	if err := c.spawn(ctx, seed); err != nil {
+	if err := c.spawn(ctx, nil); err != nil {
 		return nil, err
 	}
 
@@ -147,42 +135,6 @@ func (e *Engine) OpenConsult(ctx context.Context, f domain.Feature) (*ConsultSes
 	e.mu.Unlock()
 	e.send(Event{Feature: f.ID, Kind: EventUpdated})
 	return c, nil
-}
-
-// stampSeedRole labels a transcript with the role that actually produced
-// it, so the consult session it seeds can render the borrowed turns as
-// what they were. Without it every seeded turn inherited the holding
-// session's role at render time and the stage's own work was re-attributed
-// to `consult`: the reviewer's "VERDICT: pass" reappeared further down the
-// same card page as something the consult agent had said, under the
-// consult model's name.
-//
-// Stamped uniformly rather than only on the assistant turns. Message.Role
-// answers "who produced this", which is true of a user turn and a tool
-// line as much as an assistant one; the renderer consults it only where it
-// labels an assistant-style line, so a stamp it does not read costs
-// nothing, while a rule about which authors get one is a second thing to
-// keep in sync with the renderer.
-//
-// A message that already carries a Role is left alone: it was produced by
-// some third session and seeded through here once already, and this
-// session's role is not a better answer than the one recorded.
-func stampSeedRole(transcript []Message, role agent.Role) []Message {
-	if role == "" || len(transcript) == 0 {
-		return transcript
-	}
-	// A new slice, never stamped in place: today's only caller hands this
-	// Snapshot's own private copy, but a helper whose safety rests on that
-	// is one refactor away from relabelling a live session's transcript
-	// under whatever role happened to be borrowing it.
-	out := make([]Message, len(transcript))
-	copy(out, transcript)
-	for i := range out {
-		if out[i].Role == "" {
-			out[i].Role = role
-		}
-	}
-	return out
 }
 
 // Consult looks up a card's consult session without ever spawning one —
@@ -295,7 +247,7 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 	c.mu.Unlock()
 
 	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.pumpConsult(c, sess) }()
+	go func() { defer e.wg.Done(); e.pumpConsult(c, sess, agentSess) }()
 	c.armIdleTimer()
 	return nil
 }
@@ -531,9 +483,11 @@ func (c *ConsultSession) onIdleTimeout() {
 // handleConsult and exits when that backend stops or its event channel
 // closes — pumpBoard's shape, parametrized by the specific *Session this
 // goroutine was started for, since c.sess can move on to a respawned one
-// while this pump is still draining the old backend's final events.
-func (e *Engine) pumpConsult(c *ConsultSession, sess *Session) {
-	events := sess.agent().Events()
+// while this pump is still draining the old backend's final events. Like
+// pumpFreeform it is handed the backend it relays, ag, which the session's
+// handle may no longer hold by the time this goroutine first runs.
+func (e *Engine) pumpConsult(c *ConsultSession, sess *Session, ag agent.Session) {
+	events := ag.Events()
 	for {
 		select {
 		case <-sess.done:

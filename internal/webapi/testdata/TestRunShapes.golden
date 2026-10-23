@@ -1,0 +1,419 @@
+{
+  "item": {
+    "key": "run:2",
+    "seq": 41,
+    "t": "run",
+    "time": "2026-09-27T09:12:00Z",
+    "stage": "open",
+    "run": {
+      "n": 2,
+      "rev": "34b6qlinkckg2",
+      "recipe": "deliver",
+      "spec": 2,
+      "specTitle": "Resume pre-migration sessions",
+      "specRev": 2,
+      "state": "running",
+      "spent": 310,
+      "started": "2026-09-27T09:12:00Z",
+      "strip": [
+        {
+          "id": "design",
+          "kind": "step",
+          "state": "done"
+        },
+        {
+          "id": "build",
+          "kind": "repeat",
+          "state": "asking",
+          "iter": 2,
+          "max": 3
+        },
+        {
+          "id": "checks",
+          "kind": "parallel",
+          "state": "waiting",
+          "branches": [
+            {
+              "id": "lint",
+              "kind": "step",
+              "state": "waiting"
+            }
+          ]
+        }
+      ],
+      "rows": [
+        {
+          "key": "design",
+          "path": "design",
+          "id": "design",
+          "role": "contractor",
+          "state": "done",
+          "spent": 40,
+          "line": "Design for the spec",
+          "card": "FF-12"
+        },
+        {
+          "key": "build/1",
+          "path": "build/1",
+          "repeat": "build",
+          "iter": 1,
+          "id": "build",
+          "state": "done",
+          "spent": 170,
+          "line": "not met · CHANGES",
+          "folded": true,
+          "steps": "implement · review-a ∥ review-b · verdict",
+          "verdict": "not met · CHANGES"
+        },
+        {
+          "key": "build/2/implement",
+          "path": "build/2/implement",
+          "repeat": "build",
+          "iter": 2,
+          "id": "implement",
+          "role": "implementer",
+          "state": "asking",
+          "spent": 100,
+          "line": "asks you",
+          "card": "FF-14",
+          "waiting": true,
+          "question": {
+            "question": "Resume a pruned session?",
+            "options": [
+              {
+                "label": "Resume (recommended)",
+                "recommended": true
+              },
+              {
+                "label": "Refuse",
+                "detail": "with a sentence"
+              }
+            ]
+          }
+        }
+      ],
+      "pending": {
+        "kind": "max",
+        "question": "Run one more iteration?",
+        "options": [
+          "Run one more iteration",
+          "Continue",
+          "Stop the run"
+        ],
+        "step": "build/2/implement"
+      },
+      "baseline": {
+        "items": [
+          {
+            "item": "DW-1",
+            "verdict": "unmet",
+            "line": "DW-1 fails before the run"
+          }
+        ]
+      },
+      "files": [
+        "internal/state/migrate_turns.go"
+      ],
+      "results": [
+        {
+          "item": "DW-1",
+          "verdict": "met",
+          "checked": true,
+          "before": "unmet",
+          "change": "failed → passed"
+        },
+        {
+          "item": "DW-2",
+          "verdict": "unmet",
+          "detail": "no v40 test"
+        }
+      ],
+      "commits": [
+        "9f8e7d6 feat(state): keep the turns"
+      ],
+      "report": true,
+      "canPause": true,
+      "canStop": true,
+      "canRevert": true,
+      "canSave": true,
+      "saveName": "deliver-lite",
+      "live": {
+        "name": "deliver · run 2",
+        "mood": "asking",
+        "steps": [
+          {
+            "id": "implement",
+            "path": "build/2/implement",
+            "card": "FF-14",
+            "state": "asking"
+          }
+        ],
+        "who": "implement",
+        "card": "FF-14",
+        "question": "Resume a pruned session?"
+      }
+    }
+  },
+  "ended": {
+    "key": "run:1",
+    "seq": 12,
+    "t": "run",
+    "time": "2026-09-27T09:12:00Z",
+    "stage": "open",
+    "run": {
+      "n": 1,
+      "rev": "1x9",
+      "recipe": "deliver",
+      "spec": 1,
+      "specTitle": "Persist turns",
+      "state": "done",
+      "spent": 810,
+      "started": "2026-09-27T09:12:00Z",
+      "ended": "2026-09-27T09:12:00Z",
+      "strip": [],
+      "rows": [],
+      "files": [
+        "a.go"
+      ],
+      "results": [
+        {
+          "item": "DW-1",
+          "verdict": "met",
+          "checked": true
+        }
+      ],
+      "mark": "✓",
+      "line": "deliver · run 1 · spec 1 “Persist turns” · met 1/1 · $8.10 · 1 file",
+      "folded": true
+    }
+  },
+  "step": {
+    "card": "FF-14",
+    "session": "FF-12",
+    "run": 2,
+    "recipe": "deliver",
+    "path": "build/2/implement",
+    "id": "implement",
+    "crumb": [
+      "Session",
+      "deliver run 2",
+      "build ↺ 2",
+      "implement"
+    ],
+    "role": "implementer",
+    "tier": "standard",
+    "model": "sonnet",
+    "state": "running",
+    "spent": 1,
+    "started": "2026-09-27T09:12:00Z",
+    "live": true,
+    "brief": "You are step build/2/implement of workflow run 2…",
+    "artifacts": [
+      {
+        "name": "design",
+        "path": ".gummi/runs/FF-12/2/design.md",
+        "exists": true
+      },
+      {
+        "name": "review",
+        "path": ".gummi/runs/FF-12/2/review.json",
+        "writes": true
+      }
+    ],
+    "says": "a turn to the step while it runs",
+    "question": {
+      "question": "Resume a pruned session?",
+      "options": [
+        {
+          "label": "Resume (recommended)",
+          "recommended": true
+        }
+      ]
+    }
+  },
+  "send": {
+    "text": "Keep the migration idempotent."
+  },
+  "answer": {
+    "answer": "Resume (recommended)"
+  },
+  "specs": {
+    "specs": [
+      {
+        "n": 1,
+        "title": "Persist turns",
+        "state": "met",
+        "rev": 4,
+        "doneWhen": 3,
+        "met": 3,
+        "runs": [
+          {
+            "n": 1,
+            "recipe": "deliver",
+            "state": "done",
+            "spent": 810,
+            "mark": "✓",
+            "met": 3,
+            "checked": 3,
+            "ended": "2026-09-27T09:12:00Z"
+          }
+        ]
+      },
+      {
+        "n": 2,
+        "title": "Resume pre-migration sessions",
+        "state": "running",
+        "rev": 2,
+        "frozen": 2,
+        "doneWhen": 1,
+        "runs": [
+          {
+            "n": 2,
+            "recipe": "deliver",
+            "state": "running",
+            "spent": 310
+          }
+        ]
+      },
+      {
+        "n": 3,
+        "title": "Trim replay",
+        "state": "draft",
+        "rev": 1,
+        "doneWhen": 0
+      }
+    ],
+    "canStart": true
+  },
+  "revert": {
+    "run": 2,
+    "paths": [
+      "a.go",
+      "b.go"
+    ],
+    "tree": "4b825dc",
+    "note": "This also undoes anything the session changed in these paths since then."
+  },
+  "confirm": {
+    "tree": "4b825dc"
+  },
+  "reverted": {
+    "run": 2,
+    "paths": [
+      "a.go",
+      "b.go"
+    ]
+  },
+  "save": {
+    "name": "deliver-lite"
+  },
+  "saved": {
+    "run": 2,
+    "name": "deliver-lite",
+    "path": ".gummi/workflows/deliver-lite.yaml"
+  },
+  "decision": {
+    "ref": "ask:run:FF-12:2:1",
+    "kind": "ask",
+    "question": "Run the deliver workflow on spec S2?",
+    "word": "allow run",
+    "tone": "info",
+    "anchor": "thread",
+    "against": {
+      "token": "ask:run:FF-12:2:1",
+      "label": "workflow run 2's allow run"
+    },
+    "options": [
+      {
+        "id": "0",
+        "label": "Allow",
+        "words": false
+      },
+      {
+        "id": "1",
+        "label": "Always allow",
+        "words": false
+      },
+      {
+        "id": "2",
+        "label": "Deny",
+        "words": false
+      },
+      {
+        "id": "chat",
+        "label": "Chat about this",
+        "words": true,
+        "chat": true
+      }
+    ],
+    "proposal": {
+      "run": 2,
+      "kind": "proposal",
+      "recipe": "deliver",
+      "description": "Design, build and validate",
+      "spec": 2,
+      "specTitle": "Resume pre-migration sessions",
+      "specRev": 2,
+      "steps": [
+        {
+          "id": "design",
+          "depth": 0,
+          "kind": "step",
+          "role": "contractor",
+          "tier": "standard",
+          "prompt": "Write the design"
+        },
+        {
+          "id": "build",
+          "depth": 0,
+          "kind": "repeat",
+          "max": 3,
+          "until": "verdict APPROVED in review",
+          "onMax": "pause"
+        },
+        {
+          "id": "reviews",
+          "depth": 1,
+          "kind": "parallel",
+          "join": "allSettled"
+        },
+        {
+          "id": "review-a",
+          "depth": 2,
+          "kind": "step",
+          "role": "reviewer",
+          "tier": "strong"
+        }
+      ],
+      "warnings": [
+        "parallel reviews holds more than one writing role"
+      ],
+      "checks": [
+        {
+          "item": "DW-1",
+          "says": "a v40 session resumes",
+          "cmd": "go test ./internal/engine -run TestMigrateV40"
+        }
+      ],
+      "baseline": {
+        "items": [
+          {
+            "item": "DW-1",
+            "verdict": "unmet",
+            "line": "DW-1 fails before the run"
+          },
+          {
+            "item": "DW-3",
+            "verdict": "unjudged",
+            "line": "DW-3 ran no tests",
+            "problem": true
+          }
+        ]
+      },
+      "poolLeft": 1620,
+      "bounded": true,
+      "dirty": true,
+      "branch": "ff/persist-turns"
+    }
+  }
+}

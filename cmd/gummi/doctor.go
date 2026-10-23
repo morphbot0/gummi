@@ -22,7 +22,6 @@ import (
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/substrate"
 	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -213,8 +212,6 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		sources = map[string]string{}
 	}
 	checks = append(checks, envChecks(wsCfg, defaultRoot)...)
-	checks = append(checks, substrateChecks(wsCfg, ws)...)
-	checks = append(checks, judgeChecks(wsCfg, ws)...)
 	checks = append(checks, configLayeringChecks(wsCfg, sources, userPath, ws.ConfigFile(), ws.Root)...)
 
 	// profiles are parsed once and shared by the backend check (they decide
@@ -446,11 +443,6 @@ func reachChecks(ws state.Workspace, profiles config.Profiles, opts doctorOpts, 
 	var checks []doctorCheck
 	for _, pname := range profiles.Names() {
 		roles := []agent.Role{agent.RoleArchitect, agent.RoleImplementer, agent.RoleReviewer, agent.RoleScribe}
-		// a goal's lead is probed only where a profile names one; an
-		// undeclared lead runs on the architect's model, already probed
-		if _, declared := profiles.Profiles[pname][string(agent.RoleLead)]; declared {
-			roles = append(roles, agent.RoleLead)
-		}
 		for _, role := range roles {
 			model, backend := resolveRoleModel(profiles, pname, role)
 			if backend == "" {
@@ -1034,168 +1026,6 @@ func envChecks(cfg config.Config, dir string) []doctorCheck {
 		checks = append(checks, doctorCheck{Name: "env:" + r.Name, Status: status, Detail: detail})
 	}
 	return checks
-}
-
-// substrateChecks emits one substrate:<name> check per configured
-// substrate: its state, who holds it, when it expires, and what gummi may
-// do about it. Advisory like an env check — a substrate that is down is a
-// thing to wait for, not a reason gummi cannot run.
-func substrateChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
-	if len(cfg.Substrates) == 0 {
-		return nil
-	}
-	m := substrate.New(ws.StateDir(), ws.Root, cfg.Substrates)
-	var checks []doctorCheck
-	for _, name := range m.Names() {
-		spec := cfg.Substrates[name]
-		st, err := m.Status(context.Background(), name)
-		status := statusWarn
-		if err == nil && (st.State == substrate.Ready || st.State == substrate.Held) {
-			status = statusOK
-		}
-		detail := fmt.Sprintf("%s — %s", spec.Describe, strings.ToUpper(st.State.String()))
-		if err != nil {
-			detail = fmt.Sprintf("%s — %v", spec.Describe, err)
-		}
-		if st.State == substrate.Held {
-			detail += " by " + st.Holder.String()
-		}
-		if !st.ExpiresAt.IsZero() {
-			detail += " — expires " + st.ExpiresAt.Local().Format("Jan 2 15:04")
-		}
-		var can []string
-		if spec.Reset != "" {
-			can = append(can, "reset")
-		}
-		if spec.Provision != "" {
-			can = append(can, "provision")
-		}
-		fix := ""
-		if status == statusWarn {
-			fix = "gummi can only wait for it: no provision or reset command is configured"
-			if len(can) > 0 {
-				fix = "a goal that needs it may " + strings.Join(can, " and ") + " it"
-			}
-		}
-		checks = append(checks, doctorCheck{Name: "substrate:" + name, Status: status, Detail: detail, Remediation: fix})
-	}
-	return checks
-}
-
-// judgeChecks asks whether the work can edit what judges it.
-//
-// §17.8 makes experiments and substrates operator configuration for one
-// reason: a goal may well change the harness it is tested on — that is
-// often part of the work — but it must not thereby change what counts as
-// passing. The config file is outside every worktree, which settles the
-// definitions. It does not settle the *scripts* they name: a command
-// that lives inside a managed repository is a judge a card can rewrite
-// on its own branch, and the run that then passes proves nothing.
-//
-// Reading is a separate matter and not checkable here. Nothing cages an
-// agent's shell (see the write-cage check), so the rig's own state is
-// readable by the work whatever this says. Operator config is protection
-// against the work *editing* the judge, never against it looking.
-func judgeChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
-	repos := map[string]string{}
-	for name, rel := range cfg.Repos {
-		repos[name] = filepath.Clean(filepath.Join(ws.Root, rel))
-	}
-	if cfg.Repo != "" {
-		repos[""] = filepath.Clean(filepath.Join(ws.Root, cfg.Repo))
-	}
-	// Whether an experiment proves the rig is not a question about
-	// repositories, so it is asked before the ones that are.
-	var checks []doctorCheck
-	var noControl []string
-	for name, x := range cfg.Experiments {
-		if strings.TrimSpace(x.Control) == "" {
-			noControl = append(noControl, name)
-		}
-	}
-	sort.Strings(noControl)
-	if len(noControl) > 0 {
-		// A rig that cannot prove itself judges everything anyway: a
-		// missing control is skipped silently and the run proceeds. Seven
-		// of eight harness defects in the trials made the rig look
-		// healthier than it was, and the control is the only mechanism
-		// that catches that.
-		checks = append(checks, doctorCheck{
-			Name: "control", Status: statusWarn,
-			Detail: "no positive control, so nothing ever asks whether the rig can turn an assertion green: " +
-				strings.Join(noControl, ", "),
-			Remediation: "give each a control: command that proves the rig against its own reference on a freshly reset substrate (DESIGN §17.8)",
-		})
-	} else if len(cfg.Experiments) > 0 {
-		checks = append(checks, doctorCheck{
-			Name: "control", Status: statusOK,
-			Detail: fmt.Sprintf("every experiment (%d) proves the rig against its own reference first", len(cfg.Experiments)),
-		})
-	}
-	if len(repos) == 0 {
-		return checks
-	}
-	inRepo := func(cmd string) string {
-		for _, field := range strings.Fields(cmd) {
-			p := strings.Trim(field, "\"'")
-			if p == "" || strings.HasPrefix(p, "-") {
-				continue
-			}
-			abs := p
-			if !filepath.IsAbs(abs) {
-				abs = filepath.Join(ws.Root, p)
-			}
-			abs = filepath.Clean(abs)
-			for name, root := range repos {
-				if abs == root || strings.HasPrefix(abs, root+string(filepath.Separator)) {
-					if name == "" {
-						name = "the default repository"
-					}
-					return p + " is in " + name
-				}
-			}
-		}
-		return ""
-	}
-
-	var bad []string
-	for name, x := range cfg.Experiments {
-		for phase, cmd := range map[string]string{
-			"control": x.Control, "deploy": x.Deploy, "settle": x.Settle,
-			"run": x.Run, "collect": x.Collect,
-		} {
-			if cmd == "" {
-				continue
-			}
-			if why := inRepo(cmd); why != "" {
-				bad = append(bad, fmt.Sprintf("experiment %s's %s: %s", name, phase, why))
-			}
-		}
-	}
-	for name, sub := range cfg.Substrates {
-		for phase, cmd := range map[string]string{
-			"probe": sub.Probe, "provision": sub.Provision, "reset": sub.Reset,
-		} {
-			if cmd == "" {
-				continue
-			}
-			if why := inRepo(cmd); why != "" {
-				bad = append(bad, fmt.Sprintf("substrate %s's %s: %s", name, phase, why))
-			}
-		}
-	}
-	if len(bad) == 0 {
-		return append(checks, doctorCheck{
-			Name: "judge", Status: statusOK,
-			Detail: "no experiment or substrate command lives in a managed repository",
-		})
-	}
-	sort.Strings(bad)
-	return append(checks, doctorCheck{
-		Name: "judge", Status: statusWarn,
-		Detail:      "a command that decides whether work passes is inside a repository the work can edit — " + strings.Join(bad, "; "),
-		Remediation: "move it outside every managed repository, or land its changes yourself before they judge anything (DESIGN §17.8, §17.11)",
-	})
 }
 
 // sandboxChecks emits one sandbox:<profile> check per defined profile. It

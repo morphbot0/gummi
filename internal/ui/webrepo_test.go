@@ -18,14 +18,14 @@ func TestWebRowCarriesItsRepo(t *testing.T) {
 	named.F.Repo = "lxd"
 	def := row(52, "plain feature", domain.StageTodo, "thrifty", false)
 
-	if got := m.webRow(named, nil).Repo; got != "lxd" {
+	if got := m.webRow(named).Repo; got != "lxd" {
 		t.Errorf("named-repo row Repo = %q, want lxd", got)
 	}
-	defRow := m.webRow(def, nil)
+	defRow := m.webRow(def)
 	if defRow.Repo != "" {
 		t.Errorf("default-repo row Repo = %q, want empty", defRow.Repo)
 	}
-	raw, err := json.Marshal(m.webRow(named, nil))
+	raw, err := json.Marshal(m.webRow(named))
 	if err != nil {
 		t.Fatal(err)
 	}

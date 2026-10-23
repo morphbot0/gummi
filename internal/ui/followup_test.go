@@ -8,17 +8,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// handedOffCard walks a card to done and stamps the hand-off on it — the
-// ending whose closing block offers "open a bug from this" beside "land
-// it after all". The classifier is wired anyway: the point of the tests
-// below is that the follow-up never reaches it.
+// handedOffCard is a retired card closed by a hand-off — the ending whose
+// closing block offers a follow-up beside "land it after all".
 func handedOffCard(t *testing.T) *Shell {
 	t.Helper()
-	m, _ := chatWorkspace(t, classifyingAgent("implementation_wrong"))
-	m = advanceTo(t, m, domain.StageDone)
+	m, _ := chatWorkspace(t, agent.NewFake("ok"))
+	m.rows[0].F.Stage = domain.StageDone
 	m.rows[0].F.HandedOffAt = time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
 	m.rows[0].Landed = false
 	// back to the board and into the card's own page, where the closing
@@ -45,7 +44,7 @@ func TestFollowUpTakesTheTypedLine(t *testing.T) {
 	}
 
 	m = typeString(t, m, "the export drops the last row")
-	if out := ansi.Strip(m.threadView(100, 30)); !strings.Contains(out, "open a bug from this with your words") {
+	if out := ansi.Strip(m.threadView(100, 30)); !strings.Contains(out, "start a follow-up session with your words") {
 		t.Fatalf("typing did not aim and relabel the follow-up:\n%s", out)
 	}
 
@@ -69,12 +68,12 @@ func TestFollowUpTakesTheTypedLine(t *testing.T) {
 
 	var bug *domain.Feature
 	for i := range m.rows {
-		if m.rows[i].F.Kind == domain.KindBug {
+		if m.rows[i].F.Kind == domain.KindFreeform {
 			bug = &m.rows[i].F
 		}
 	}
 	if bug == nil {
-		t.Fatalf("no bug card was minted (notice %q)", m.notice.text)
+		t.Fatalf("no follow-up session was minted (notice %q)", m.notice.text)
 	}
 	if !strings.Contains(bug.Title, "export") {
 		t.Errorf("bug title = %q, want the typed line", bug.Title)
@@ -111,18 +110,13 @@ func TestFollowUpJumpIsSpentOnce(t *testing.T) {
 	}
 }
 
-// The follow-up never spends a classification turn. There is no rerun
-// edge out of done, so every intent the reader could name routes nowhere
-// — the read would cost seconds and a scribe pass to arrive back at the
-// row the line was already aimed at.
+// A line typed at the closing block's follow-up raises the follow-up's
+// confirm.
 func TestFollowUpIsNotRead(t *testing.T) {
 	m := handedOffCard(t)
 	m = typeString(t, m, "the export drops the last row")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	if m.reentryRead != nil {
-		t.Errorf("the follow-up sent the line out to be read: %+v", m.reentryRead)
-	}
 	if _, ok := m.Overlay.Top().(*confirmDialog); !ok {
 		t.Fatalf("enter did not raise the follow-up confirm (notice %q)", m.notice.text)
 	}
@@ -135,10 +129,10 @@ func TestFollowUpRefusesACommandAndAsksForALine(t *testing.T) {
 	m := handedOffCard(t)
 	r := m.rows[m.sel]
 
-	if cmd := m.fixedSendBack(r, "newbug", ""); cmd != nil || !strings.Contains(m.notice.text, "type what is wrong") {
+	if cmd := m.bugFromLine(r, ""); cmd != nil || !strings.Contains(m.notice.text, "type what is wrong") {
 		t.Errorf("a bare follow-up = %q, want it to ask for a line", m.notice.text)
 	}
-	if cmd := m.fixedSendBack(r, "newbug", "/verify"); cmd != nil || !strings.Contains(m.notice.text, "that line is a command") {
+	if cmd := m.bugFromLine(r, "/verify"); cmd != nil || !strings.Contains(m.notice.text, "that line is a command") {
 		t.Errorf("a verb follow-up = %q, want it refused", m.notice.text)
 	}
 	if m.Overlay.Top() != nil {

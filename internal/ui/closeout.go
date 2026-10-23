@@ -90,10 +90,6 @@ func (d *closeOutDialog) readyCards() []featureRow {
 		if r.F.Stage != domain.StageVerify || r.F.VerifiedAt.IsZero() || d.skipped[r.F.ID] {
 			continue
 		}
-		if r.F.InGoal() {
-			// a goal card's branch is its goal's to land, never a person's
-			continue
-		}
 		out = append(out, r)
 	}
 	return out
@@ -125,7 +121,7 @@ func (d *closeOutDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		// the ordinary merge flow, message dialog and all. It opens ON TOP
 		// of this one; when it finishes, the card leaves readyCards and
 		// this pass shows the next.
-		return false, d.m.prepareMerge(r.F, true)
+		return false, d.m.prepareMerge(r.F)
 	case "h":
 		return false, d.m.prepareHandOff(r.F)
 	case "s":

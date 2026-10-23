@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/morphis/gummi/internal/cardops"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
@@ -26,26 +25,24 @@ func runMerge(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	// a goal lands as a merge commit gummi writes from the goal and its
-	// cards, so -m is optional for one. A merge commit of a card takes git's
-	// own message when -m is absent; only a squash needs one.
-	isGoal := strings.HasPrefix(strings.ToUpper(idArg), "GL-")
+	// A merge commit takes git's own message when -m is absent; only a
+	// squash needs one.
 	method := domain.LandSquash
 	if fl.Bool("no-squash") {
 		method = domain.LandMerge
 	}
-	message, err := commitMessage(fl, "merge", !isGoal && method == domain.LandSquash)
+	message, err := commitMessage(fl, "merge", method == domain.LandSquash)
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *cardops.Ops, store *state.Store, ws state.Workspace, pool *worktree.Pool) (cardops.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		defer release()
 		out, err := d.Merge(ctx, f.ID, message, method)
@@ -73,14 +70,14 @@ func runClean(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *cardops.Ops, store *state.Store, ws state.Workspace, _ *worktree.Pool) (cardops.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		defer release()
 		state.ReapOrphanAgent(ws, f.ID)
@@ -97,10 +94,10 @@ func runClean(fl cliFlags, args []string) error {
 // explain. A card that still fails (a race, a locked card someone else is
 // driving) is skipped and counted, and the run exits non-zero if any did.
 func runCleanAll() error {
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *cardops.Ops, store *state.Store, ws state.Workspace, pool *worktree.Pool) (cardops.Outcome, error) {
 		feats, err := store.ListFeatures(ctx)
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		var cleaned, failed int
 		for _, f := range feats {
@@ -115,16 +112,16 @@ func runCleanAll() error {
 			state.ReapOrphanAgent(ws, f.ID)
 			out, _ := d.Clean(ctx, f.ID)
 			release()
-			if out.Status == driver.StatusVerified {
+			if out.Status == cardops.StatusDone {
 				cleaned++
 			} else {
 				failed++
 			}
 		}
 		if failed > 0 {
-			return driver.Outcome{Status: driver.StatusError}, fmt.Errorf("clean --all: cleaned %d, failed %d", cleaned, failed)
+			return cardops.Outcome{Status: cardops.StatusError}, fmt.Errorf("clean --all: cleaned %d, failed %d", cleaned, failed)
 		}
-		return driver.Outcome{Status: driver.StatusVerified}, nil
+		return cardops.Outcome{Status: cardops.StatusDone}, nil
 	})
 }
 
@@ -139,14 +136,14 @@ func runHandOff(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *cardops.Ops, store *state.Store, ws state.Workspace, pool *worktree.Pool) (cardops.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		defer release()
 		out, err := d.HandOff(ctx, f.ID)
@@ -165,8 +162,8 @@ func runHandOff(fl cliFlags, args []string) error {
 // is returned: a card closeOut leaves standing (uncommitted work, a stack
 // other branches fork from, a goal's own sweep) is still closed, and
 // `gummi clean` is there for it afterwards.
-func closeOut(ctx context.Context, d *driver.Driver, store *state.Store, pool *worktree.Pool, id domain.FeatureID, keep bool, out driver.Outcome, err error) (driver.Outcome, error) {
-	if err != nil || out.Status != driver.StatusVerified || keep {
+func closeOut(ctx context.Context, d *cardops.Ops, store *state.Store, pool *worktree.Pool, id domain.FeatureID, keep bool, out cardops.Outcome, err error) (cardops.Outcome, error) {
+	if err != nil || out.Status != cardops.StatusDone || keep {
 		return out, err
 	}
 	f, ferr := store.GetFeature(ctx, id)
@@ -177,16 +174,16 @@ func closeOut(ctx context.Context, d *driver.Driver, store *state.Store, pool *w
 	return out, err
 }
 
-// withLandingWorkspace wires the workspace, store, worktree manager, and a
-// minimal driver for the headless landing verbs (merge, handoff, clean), then
+// withLandingWorkspace wires the workspace, store, worktree manager, and
+// the card operations (internal/cardops) for the headless landing verbs (merge, handoff, clean), then
 // hands it to fn and maps the Outcome to a process exit. It mirrors
 // withRunEngine but deliberately starts no agent: none of them run a
 // session — they only touch the workspace, store, and worktree manager.
 // Each fn resolves its card and holds that card's per-card lock, so landing
-// one card never races a drive or another landing of a different card. The driver still needs an engine object for its
-// gate-floor checks, so one is built with no agents — the engine is only
-// ever read from here, never run.
-func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store, state.Workspace, *worktree.Pool) (driver.Outcome, error)) error {
+// one card never races a drive or another landing of a different card. The operations still need an engine object for
+// their gate-floor checks, so one is built with no agents — the engine is
+// only ever read from here, never run.
+func withLandingWorkspace(fn func(context.Context, *cardops.Ops, *state.Store, state.Workspace, *worktree.Pool) (cardops.Outcome, error)) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -210,11 +207,11 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store,
 	}
 	hookd := wireHooks(store, pool, ws)
 	defer hookd.Close()
-	// no agents: the driver's Merge/HandOff/Clean never run a session.
+	// no agents: the card operations never run a session.
 	eng := engine.New(engine.Config{Store: store, Pool: pool, Workspace: ws})
 	defer func() { _ = eng.Close() }()
 
-	d := driver.New(eng, store, ws, os.Stdout, driver.Options{})
+	d := &cardops.Ops{Eng: eng, Store: store, WS: ws, Out: cardops.NewEmitter(os.Stdout, false), Actor: "caller"}
 	out, derr := fn(context.Background(), d, store, ws, pool)
 	if out.Status == "" && derr != nil {
 		// the closure failed before the driver produced an outcome (e.g. an

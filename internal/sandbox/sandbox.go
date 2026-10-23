@@ -23,7 +23,6 @@ package sandbox
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
@@ -116,22 +115,4 @@ func Resolve(workspaceMode, profileMode Mode, profile config.Profile, caps map[s
 	})
 
 	return Resolution{Mode: effective, Gaps: gaps}
-}
-
-// RefusalError is returned by the engine when a run whose profile resolves
-// to enforce would start despite incomplete tool coverage. Its message
-// names every offending (backend, role) pair so the operator knows which
-// profile to fix.
-type RefusalError struct {
-	Mode Mode
-	Gaps []Gap
-}
-
-func (e *RefusalError) Error() string {
-	pairs := make([]string, 0, len(e.Gaps))
-	for _, g := range e.Gaps {
-		pairs = append(pairs, g.Backend+"/"+g.Role)
-	}
-	return fmt.Sprintf("sandbox mode %q refuses to start: backends without tool coverage: %s",
-		e.Mode, strings.Join(pairs, ", "))
 }

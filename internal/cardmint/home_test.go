@@ -6,8 +6,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // TestMintAnAgent: the third "runs in" answer. The card comes out a
@@ -17,7 +15,6 @@ func TestMintAnAgent(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
 	f, err := Mint(ctx, store, ws, Input{
-		Kind:        domain.KindFreeform,
 		Description: "Watch the nightly CI",
 		Home:        true,
 		RequireRepo: func(string) error { return errors.New("no default repository") },
@@ -51,10 +48,8 @@ func TestAnAgentNamesNoRepositoryOrBranch(t *testing.T) {
 		in   Input
 		want string
 	}{
-		"kind":  {Input{Kind: domain.KindFeature, Description: "x", Home: true}, "is an agent's"},
-		"repo":  {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Repo: "api"}, "in no repository"},
-		"base":  {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Base: "release"}, "forks from no branch"},
-		"adopt": {Input{Kind: domain.KindFreeform, Description: "x", Home: true, Adopt: "topic"}, "adopt"},
+		"repo": {Input{Description: "x", Home: true, Repo: "api"}, "in no repository"},
+		"base": {Input{Description: "x", Home: true, Base: "release"}, "forks from no branch"},
 	} {
 		_, err := Mint(ctx, store, ws, c.in)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
@@ -76,7 +71,7 @@ func TestAnAgentDoesNotInheritAHome(t *testing.T) {
 	if err := os.MkdirAll(ws.HomeDir("FF-001"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	in := Input{Kind: domain.KindFreeform, Description: "x", Home: true}
+	in := Input{Description: "x", Home: true}
 	if _, err := Mint(ctx, store, ws, in); err == nil || !strings.Contains(err.Error(), "earlier agent's home") {
 		t.Fatalf("err = %v, want a refusal naming the home that stands there", err)
 	}

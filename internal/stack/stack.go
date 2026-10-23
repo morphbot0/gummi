@@ -8,9 +8,8 @@
 // The engine builds the snapshot and executes (Engine.StackTick); the
 // worktree manager asks BaseFor to resolve a card's base; the board
 // renders the same View. Keeping the rules here is what lets the TUI and
-// the headless driver conduct a stack identically, the way gatepolicy
-// lets both cross a gate identically and cardrun lets three surfaces
-// agree on what a card cost.
+// the headless driver conduct a stack identically, the way cardrun lets
+// three surfaces agree on what a card cost.
 //
 // The one rule worth stating twice, because getting it wrong defeats the
 // feature: a stack is TOPOLOGY, never scheduling. Nothing here reports a

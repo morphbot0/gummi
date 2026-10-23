@@ -160,6 +160,8 @@ func LintDraft(d Draft, existing map[string]Meta, repos []string) Lint {
 		refuse("name %q must be lowercase letters, digits and dashes, at most 58", d.Name)
 	case d.Name == archiveDir || d.Name == "gummi":
 		refuse("name %q is reserved", d.Name)
+	case IsBuiltin(d.Name):
+		refuse("name %q is one of gummi's own skills, which ship with gummi", d.Name)
 	}
 	if old, ok := existing[d.Name]; ok && !old.Curated() {
 		refuse("%q is a person's or pinned skill; the curator never changes one", d.Name)

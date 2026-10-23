@@ -963,3 +963,38 @@ func TestCreateRecoversFromStaleWorktreeRegistration(t *testing.T) {
 		t.Fatalf("worktree list after recovery: %v, %v", paths, err)
 	}
 }
+
+// A git command reading a card's tree while it is removed can hold a file
+// in the worktree's admin directory: git deletes the checkout, then fails
+// on the admin directory ("Directory not empty"). Remove finishes the job
+// once the reader is done, rather than leaving the card undeletable.
+func TestRemoveFinishesWhatAReaderHeldUp(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "Removed under a reader")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := mustGit(t, p, "rev-parse", "--absolute-git-dir")
+	// a directory git cannot empty stands for the reader's file
+	held := filepath.Join(admin, "held")
+	writeFile(t, admin, "held/index.lock", "")
+	if err := os.Chmod(held, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(held, 0o700) })
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = os.Chmod(held, 0o700)
+	}()
+	if err := m.Remove(ctx, f, true); err != nil {
+		t.Fatalf("Remove = %v, want it finished once the reader let go", err)
+	}
+	if _, err := os.Stat(admin); !os.IsNotExist(err) {
+		t.Fatalf("the admin directory is still there: %v", err)
+	}
+	if list := mustGit(t, root, "worktree", "list", "--porcelain"); strings.Contains(list, p) {
+		t.Fatalf("git still lists the worktree:\n%s", list)
+	}
+}

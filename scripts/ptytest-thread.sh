@@ -37,7 +37,6 @@ BIN="$SC/gummi"
 WS="$SC/ws"
 
 command -v tmux   >/dev/null || { echo "ptytest-thread: tmux is required";    exit 2; }
-command -v sqlite3 >/dev/null || { echo "ptytest-thread: sqlite3 is required"; exit 2; }
 
 echo "building gummi…"
 go build -C "$ROOT" -o "$BIN" ./cmd/gummi || exit 2
@@ -123,106 +122,68 @@ alive() {
 }
 
 # ------------------------------------------------------------- workspace
+# Every agent turn here is the scripted fake the web suite uses
+# (scripts/web-e2e-agent.py), never a real backend: the seed's `gummi run`
+# and the TUI below both see these two variables.
+export GUMMI_AGENT=headless
+export GUMMI_AGENT_CMD="$ROOT/scripts/web-e2e-agent.py"
+
 rm -rf "$WS"; mkdir -p "$WS"
 git -C "$WS" init -q -b main
 git -C "$WS" config user.name t; git -C "$WS" config user.email t@e.invalid
 printf '# demo\n' > "$WS/README.md"; printf 'package demo\n' > "$WS/demo.go"
 git -C "$WS" add .; git -C "$WS" commit -q -m init
 ( cd "$WS" && "$BIN" init >/dev/null 2>&1 )
-for i in 1 2 3; do
-  ( cd "$WS" && "$BIN" bugs new --title "Seeded bug $i for the thread drive" \
-      --desc "d$i" --repro "r$i" --expected "e$i" --actual "a$i" \
-      --severity medium --yes >/dev/null 2>&1 )
-done
 
-DB="$WS/.gummi/state/gummi.db"
-
-# BG-001 gets a deep history: nine finished stage sessions (four of them
-# the same `fix` stage, bounced back by review — the loop every real card
-# runs), then an open one. That is what makes the folded receipts, the
-# live-stage block and a body taller than any window all exist at once.
-n=0; AT=""
-tick() { local m=$((n*2)); AT=$(printf '2026-08-30T%02d:%02d:00Z' $((9+m/60)) $((m%60))); n=$((n+1)); }
-ins() { tick; sqlite3 "$DB" "INSERT INTO card_events (feature_id,stage,kind,status,at,payload,output,dedupe)
-        VALUES ('BG-001','$1','$2','$3','$AT',json('$4'),'$5','');"; }
-seg() {
-  local stage="$1" role="$2" verdict="$3" credits="$4" nev="$5" i
-  ins "$stage" stage_enter '' "{\"role\":\"$role\",\"model\":\"sonnet\",\"flavor\":\"sonnet\"}" ''
-  for i in $(seq 1 "$nev"); do
-    case $((i % 3)) in
-      0) ins "$stage" tool ok "{\"label\":\"Read internal/ui/thread.go:$i\"}" "captured output line for $stage $i" ;;
-      1) ins "$stage" message '' "{\"author\":\"$role\",\"content\":\"$stage turn $i — a long enough sentence to exercise wrapping and truncation at narrow widths.\"}" '' ;;
-      2) ins "$stage" message '' "{\"author\":\"user\",\"content\":\"$stage user turn $i\"}" '' ;;
-    esac
-  done
-  ins "$stage" stage_exit "$([ "$verdict" = fail ] && echo fail || echo ok)" "{\"verdict\":\"$verdict\",\"credits\":$credits}" ''
-  # stage_spend accumulates across generations of a stage, the way the
-  # meter really writes it (PK is feature+stage+model+role).
-  sqlite3 "$DB" "INSERT INTO stage_spend (feature_id,stage,model,role,credits,updated_at)
-    VALUES ('BG-001','$stage','sonnet','$role',$credits,'$AT')
-    ON CONFLICT(feature_id,stage,model,role) DO UPDATE SET credits = credits + $credits;"
-}
-# BG-003 carries a period it ran itself: handed over, one gate crossed
-# and one question answered without anyone watching, parked, and then a
-# turn typed by a person after it stopped. That last turn is the point —
-# the record of the period has to sit ABOVE it, because that is when it
-# happened. The block this replaced was appended after the live stage and
-# so was permanently below everything, including turns typed hours later.
-a=0
-atick() { local m=$((a*2)); AP=$(printf '2026-08-30T%02d:%02d:00Z' $((7+m/60)) $((m%60))); a=$((a+1)); }
-apins() { atick; sqlite3 "$DB" "INSERT INTO card_events (feature_id,stage,kind,status,at,payload,output,dedupe)
-          VALUES ('BG-003','$1','$2','','$AP',json('$3'),'','');"; }
-apins diagnose autopilot   '{"event":"took-over","mode":"full"}'
-apins diagnose stage_enter '{"role":"diagnoser","model":"sonnet","flavor":"sonnet"}'
-apins triage   gate        '{"from":"triage","to":"diagnose","actor":"autopilot"}'
-apins diagnose ask         '{"question":"buffer or stream?","answer":"stream rows","by":"autopilot"}'
-apins diagnose message     '{"author":"diagnoser","content":"root cause is the theme layer"}'
-apins diagnose park        '{"reason":"needs-you","detail":"diagnose finished, review it"}'
-apins diagnose message     '{"author":"user","content":"hold on, let me read that"}'
-
-sqlite3 "$DB" "UPDATE features SET stage='review', spend_credits=53.5 WHERE id='BG-001';
-               UPDATE features SET stage='done'   WHERE id='BG-002';
-               UPDATE features SET stage='diagnose' WHERE id='BG-003';"
-seg triage   triager     ok   3.25 5
-seg diagnose diagnoser   ok   7.5  7
-seg fix      implementer ok  12.0  9
-seg review   reviewer    fail 4.0  6
-seg fix      implementer ok   9.25 8
-seg review   reviewer    fail 3.5  5
-seg fix      implementer ok   6.0  7
-seg review   reviewer    fail 2.5  4
-seg fix      implementer ok   5.5  6
-ins review stage_enter '' '{"role":"reviewer","model":"sonnet","flavor":"sonnet"}' ''
-for i in 1 2 3 4 5 6 7 8; do
-  ins review message '' "{\"author\":\"reviewer\",\"content\":\"open review turn $i — the newest events sit at the bottom\"}" ''
-done
+# FF-001 gets a deep history — its opening turn and fourteen follow-ups,
+# each a real turn through the headless driver — so a body taller than any
+# window exists. FF-002 is one quiet turn.
+seed() { ( cd "$WS" && "$BIN" "$@" >/dev/null 2>&1 ) || { echo "seed failed: gummi $*"; exit 2; }; }
+seed run --envelope 5 "Seeded session 1 for the thread drive"
+for i in $(seq 1 14); do seed resume FF-001 "follow-up turn $i"; done
+seed run --envelope 5 "Seeded session 2 for the thread drive"
 
 tmux kill-session -t $S 2>/dev/null
-tmux new-session -d -s $S -x 120 -y 40 "cd '$WS' && '$BIN'"
+tmux new-session -d -s $S -x 120 -y 40 \
+  "cd '$WS' && GUMMI_AGENT=headless GUMMI_AGENT_CMD='$GUMMI_AGENT_CMD' '$BIN'"
 sleep 1.8
 # first start opens the agent-tab CLI picker over the board; dismiss it.
 send Escape
 
-# goto <id> — move the backlog cursor onto a card by id.
+# FF-003 asks a question with options. It is created here, through the
+# form, rather than seeded: an ask's options live in the process that
+# asked it, and one seeded by an earlier `gummi run` comes back as a bare
+# "answer in your own words".
+send n
+lit 'Live question for the thread drive [ask-where]'
+send Enter
+expect "the asking session was created"       'Where should FF-003.s helper live\?'
+send Escape
+
+# goto <title> — move the board cursor onto a card by its title.
 goto() {
   local want="$1" i
   for i in $(seq 1 8); do
-    pane | grep -qE -- "▸[0-9]+ .* $want " && return 0
+    pane | grep -qE -- "▸[0-9]+ .* $want" && return 0
+    send Up
+  done
+  for i in $(seq 1 8); do
+    pane | grep -qE -- "▸[0-9]+ .* $want" && return 0
     send Down
   done
   return 1
 }
 
-# reopen <id> — return to a known state from wherever the last section
-# left the UI: back out to the backlog list, land on the card, open its
-# page, and empty the composer. Sections are not allowed to inherit each
-# other's focus, draft, or overlay stack — one of the defects below is
-# precisely a flag that leaks between lines, and a suite that let state
-# leak between sections could not tell that apart from its own sloppiness.
+# reopen <title> — return to a known state from wherever the last section
+# left the UI: back out to the board, land on the card, open its page,
+# and empty the composer. Sections are not allowed to inherit each
+# other's focus, draft, or overlay stack — a suite that let state leak
+# between sections could not tell a leaking flag apart from its own
+# sloppiness.
 reopen() {
   local want="$1" i
   for i in 1 2 3 4; do
-    pane | grep -qE 'BACKLOG  3 cards' && break
+    pane | grep -qE 'BOARD  3 cards' && break
     send Escape
   done
   goto "$want" || { echo "reopen: could not reach $want"; exit 2; }
@@ -232,32 +193,28 @@ reopen() {
 
 # ============================================================ 1. opening
 section "1. opening a card lands on the composer, at the newest event"
-goto BG-001 || { echo "could not reach BG-001"; exit 2; }
-send Enter
-expect "the card page opened"                 'esc backlog'
+reopen 'Seeded session 1'
+expect "the card page opened"                 'esc board'
 expect "the crumb names the card's position"  '·  [0-9]+ of 3'
 expect "the crumb names the step key in force" 'alt\+j/k prev/next card'
-expect "the masthead names the card"          'BG-001 · Seeded bug 1'
-expect "the stage strip renders"              'todo ─ triage ─ diagnose ─ fix'
-expect "the pinned spec line renders"         '⌄ bug report · Review'
+expect "the masthead names the card"          'FF-001 · Seeded session 1'
+expect "the masthead names the branch"        'ff/seeded-session-1-for-the-thread-drive'
 expect "the composer is present and focused"  '┃ '
-expect "it opens anchored at the newest event" 'open review turn 8'
+expect "it opens anchored at the newest event" 'follow-up turn 14'
 alive  "still alive after opening a card"
 
 section "2. the composer holds the keyboard — typing is text, not accelerators"
 lit 't'
-expect "t types rather than toggling the transcript" '┃ t'
-expect "t types — the transcript mode is gone" '┃ t'
+expect "t types rather than toggling anything" '┃ t'
 clear_composer
-lit 'gsA'
-expect "the picker's own accelerators type too"     '┃ gsA'
-refute "picker options have no key column"     '▸ \d+\. .* [a-z]\s*$'
+lit 'dmh'
+expect "the board's own accelerators type too" '┃ dmh'
 clear_composer
 
 section "3. esc leaves in one press, and the draft is kept"
 lit 'a draft that must survive'
 send Escape
-expect "esc left the card page"                'BACKLOG  3 cards'
+expect "esc left the card page"                'BOARD  3 cards'
 send Enter
 expect "reopening finds the draft intact"      '┃ a draft that must survive'
 
@@ -266,166 +223,235 @@ clear_composer
 lit 'a draft for this card'
 expect "a draft types into the composer"       '┃ a draft for this card'
 tmux send-keys -t $S M-j; sleep 0.8
-expect "alt+j steps to the next card"          'BG-002 · Seeded bug 2'
+expect "alt+j steps to the next card"          'FF-002 · Seeded session 2'
 refute "a draft does not follow to the next card" '┃ a draft for this card'
 tmux send-keys -t $S M-k; sleep 0.8
-expect "alt+k steps back"                      'BG-001 · Seeded bug 1'
+expect "alt+k steps back"                      'FF-001 · Seeded session 1'
 clear_composer
 
 section "5. paging the conversation, mid-draft, and its clamps"
 size 80 24
 lit 'mid-draft text'
-expect "the window shows the newest events"    'open review turn 8'
-for _ in 1 2 3 4 5 6 7 8 9 10; do send PPage; done
-expect "pgup reaches the oldest receipt" 'diagnose · diagnoser'
-expect "pgup does not disturb the draft"        '┃ mid-draft text'
+expect "the window shows the newest events"    'follow-up turn 14'
+for _ in $(seq 1 20); do send PPage; done
+expect "pgup reaches the opening turn"         '^    Seeded session 1 for the thread drive'
+expect "pgup does not disturb the draft"       '┃ mid-draft text'
 send PPage
-expect "the up clamp holds"   'diagnose · diagnoser'
-for _ in 1 2 3 4 5 6 7 8 9 10; do send NPage; done
-expect "pgdn returns to the newest"             'open review turn 8'
+expect "the up clamp holds"                    '^    Seeded session 1 for the thread drive'
+expect "at the oldest end, scroll marker shows" '↓ .* more'
+for _ in $(seq 1 20); do send NPage; done
+expect "pgdn returns to the newest"            'follow-up turn 14'
 expect "at the newest end, scroll marker shows" '↑ .* more'
-send PPage
-expect "after pgup, scroll marker shows"        '↓ .* more'
-send NPage
-send NPage
 clear_composer
 size 120 40
 
 section "6. the decision picker: movement, numbering, and the aimed word"
-send Escape
-goto BG-003 || { echo "could not reach BG-003"; exit 2; }
-send Enter
-expect "a multi-option decision is pinned"     '▸ 1\. start the architect'
-expect "option 2 is the gate"                  '2\. approve'
-expect "option 4 is the autopilot hand-over"   '4\. let autopilot finish'
-send Down; send Down
-expect "↓ moves the highlight"                 '▸ 3\. read the bug report first'
+reopen 'Live question'
+expect "a multi-option decision is pinned"     '▸ 1\. A new file \(recommended\)'
+expect "option 2 is the other way"             '2\. Extend the existing file'
+expect "the last option is your own words"     '3\. Chat about this'
+send Down
+expect "↓ moves the highlight"                 '▸ 2\. Extend the existing file'
 send Up
-expect "↑ moves it back"                       '▸ 2\. approve'
+expect "↑ moves it back"                       '▸ 1\. A new file'
 lit '2'
-expect "digits select the option"              '▸ 2\. approve'
-expect "the user-chosen position survives"    '▸ 2\. approve'
+expect "digits select the option"              '▸ 2\. Extend the existing file'
 clear_composer
 lit 'the repro steps are too thin'
-expect "prose aims at the word-consuming option" '▸ 1\. start the architect with your words'
-expect "at 120 cols the bar hints what enter does" 'enter start the architect'
-size 140 40
-expect "…and it is there once the bar has room" 'enter start the architect'
-size 120 40
+expect "prose aims at the word-consuming option" '▸ 3\. Chat about this'
+expect "the decision says the line is the answer" 'your line is the answer'
+expect "the bar says what enter does"          'enter answer'
 clear_composer
 
-section "7. verbs, the confirm chip, and what the bar promises"
-reopen BG-003
-lit 'verify the CSV path is right'
-expect "the bar shows 'confirm' for a verb line" 'enter confirm'
-send Enter
-expect "enter raised the confirm chip"          'verify · run the checks\?'
-expect "the chip names both ways out"           'enter yes · esc no, send as a message'
-tmux send-keys -t $S M-o; sleep 0.7
-expect "alt+o leaves the chip standing"        'verify · run the checks\?'
-send PPage
-expect "pgup leaves the chip standing"         'verify · run the checks\?'
-send NPage
-send Escape
-expect "esc cancels the chip"                  '┃ verify the CSV path is right'
-
-section "8. after esc on a chip, the next verb parses"
-reopen BG-003
-lit 'verify test'
-send Enter
-expect "chip raised"                           'verify · run the checks\?'
-send Escape
-clear_composer
-lit 'verify another test'
-send Enter
-expect "verify verb parses and raises chip"  'verify · run the checks\?'
-
-section "9. the verb vocabulary's own wiring"
-reopen BG-001
-lit 'park'
-send Enter
-expect "park raises a confirm chip"            'park · '
-# one esc, not two: the first cancels the chip and hands the line back,
-# the second would leave the card page and type the next line into the
-# backlog.
-send Escape
+section "7. a bare word is prose; only /verb acts"
+reopen 'Seeded session 2'
+lit 'park the CSV path for now'
+expect "a line starting with a verb word sends" 'enter send'
+refute "…and raises no confirm"                'enter confirm'
 clear_composer
 lit '/park'
 send Enter
-# the two routes to an action used to run off different vocabularies:
-# a bare verb fired, while the same word behind a "/" filtered the
-# board-level command menu and dead-ended on "no commands match". They
-# share one route now, so "/park" has to reach the same chip bare "park"
-# reached three lines up.
-expect "/<verb> routes exactly as the bare verb does" 'park · '
-refute "…and never dead-ends in the menu"      'no commands match'
-send Escape
+expect "/park on an idle session says so"      'nothing running to park'
 clear_composer
-# a word the menu owns rather than the verb vocabulary — envelope lives
-# only in the card's action inventory — has to find the card's own entry
-# now that the menu carries it while a card page is open.
-lit '/envelope'
+lit '/close'
 send Enter
-expect "/<card action> finds the card's own entry" 'envelope +u'
+expect "/close opens the hand-off confirm"     'hand off “Seeded session 2'
+expect "…which says nothing lands"             'nothing lands'
+send Escape
+refute "esc cancels it"                        'hand off “Seeded session 2'
+alive  "still alive after the verbs"
+
+section "8. a word no verb covers routes through the command menu"
+reopen 'Seeded session 2'
+# a word the menu owns rather than the verb vocabulary — budget lives only
+# in the card's action inventory — has to find the card's own entry now
+# that the menu carries it while a card page is open.
+lit '/budget'
+send Enter
+expect "/<card action> finds the card's own entry" '▸ budget +u'
+send Escape
+clear_composer
+lit '/nosuchverb'
+send Enter
+expect "an unknown word dead-ends in the menu, said so" 'no commands match'
 send Escape
 clear_composer
 
-section "10. reaching the card's actions"
-reopen BG-002
-expect "a done card has no open decision"      'or ↑ for actions'
+section "9. reaching the card's actions"
+reopen 'Seeded session 2'
+expect "an idle session pins no decision"      '┃ say what to do next'
 send Up
-expect "↑ on a done card opens actions"        'actions · BG-002'
+expect "↑ on an empty composer opens actions"  'actions · FF-002'
 expect "it carries the keyless actions"        'duplicate'
-expect "…and the ones no verb covers"          'dependencies'
+expect "…and the keyed ones"                   'budget +u'
 send Escape
-reopen BG-003
-expect "a working card pins a decision instead" 'nothing is running|the agent is waiting'
+reopen 'Live question'
 send Up
-expect "↑ on first option opens actions"       'actions · BG-003'
-expect "actions are reachable from the card"   'dependencies'
+expect "↑ on the first option opens actions"   'actions · FF-003'
+send Escape
 
-section "11. folded receipts"
-reopen BG-001
-expect "a finished session folds to one line"  'triage · triager · 4 turns · 3\.3 credits'
-expect "a failed session is marked ✗"          'review · reviewer .* ✗'
-expect "four fix receipts show different spend" 'fix · implementer'
-refute "receipt chevrons do not render"        '⌄ triage · triager|⌄ diagnose|⌄ fix|⌄ review'
+section "10. the outputs toggle"
+reopen 'Seeded session 1'
+expect "outputs are folded by default"         'alt\+o outputs'
+refute "…so a tool's row is hidden"            '✓ edit  NOTES\.md'
+tmux send-keys -t $S M-o; sleep 0.7
+expect "alt+o unfolds the outputs"             '✓ edit  NOTES\.md'
+expect "…and the bar offers to fold them"      'alt\+o fold'
+tmux send-keys -t $S M-o; sleep 0.7
+refute "alt+o again folds them"                '✓ edit  NOTES\.md'
 
-section "12. a period the card ran itself"
-reopen BG-003
-expect "the period opens where it began"        '── autopilot took over'
-expect "its crossing keeps its position"        'autopilot crossed triage → diagnose'
-expect "its answer keeps its position"          'autopilot answered'
-expect "the period closes where it stopped"     '── autopilot parked it'
-expect "the close carries the park's own words" 'diagnose finished, review it'
-expect "the tally counts what it decided"       '1 gate · 1 answer'
-refute "no rollup pinned below the thread"      'while you were away'
-refute "no raw event kinds leak through"        '^ *(park|decision_open|autopilot)$'
-# the whole point: the record sits above the turn typed after it
-ap_close=$(pane | grep -n 'autopilot parked it' | head -1 | cut -d: -f1)
-ap_turn=$(pane  | grep -n 'hold on, let me read that' | head -1 | cut -d: -f1)
-if [ -n "$ap_close" ] && [ -n "$ap_turn" ] && [ "$ap_close" -lt "$ap_turn" ]; then
-  PASS=$((PASS+1)); printf '  ok    %s\n' "the period sits above the turn that followed it"
-else
-  FAIL=$((FAIL+1)); FAILED_NAMES+=("the period sits above the turn that followed it")
-  printf '  FAIL  %s   (close=%s turn=%s)\n' "the period sits above the turn that followed it" "$ap_close" "$ap_turn"; dump
-fi
-
-section "13. the layout under pressure"
+section "11. the layout under pressure"
 for dim in "120 40" "100 30" "80 24" "60 16" "36 9" "24 6" "20 5" "18 4" "120 3"; do
   set -- $dim
   size "$1" "$2"
   alive "survives ${1}x${2}"
 done
 size 36 9
-expect "36x9 keeps the card named"             'BG-001 · Seeded'
+expect "36x9 keeps the card named"             'FF-001 · Seede'
 expect "36x9 keeps the composer"               '┃ '
-expect "36x9 keeps the decision"               'nothing is running|run review'
-refute "36x9 spends nothing on the crumb"      'esc backlog  ·'
+refute "36x9 spends nothing on the crumb"      'esc board  ·'
 size 20 5
-expect "at h=5 the layout survives"  'BG-001'
+expect "at h=5 the layout survives"            'FF-001'
 size 120 40
 alive "still alive after the resize matrix"
+
+section "12. a workflow run in the thread"
+# expect_long <name> <regex> <seconds> — expect, for something that takes
+# a run's worth of turns.
+expect_long() {
+  local name="$1" re="$2" secs="$3" i
+  for i in $(seq 1 $((secs * 4))); do
+    pane | grep -qE -- "$re" && { PASS=$((PASS+1)); printf '  ok    %s\n' "$name"; return 0; }
+    sleep 0.25
+  done
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
+  printf '  FAIL  %s   (no match for: %s)\n' "$name" "$re"; dump; return 1
+}
+for i in 1 2 3 4; do
+  pane | grep -qE 'BOARD  [0-9]+ cards' && break
+  send Escape
+done
+# the scripted session writes a spec and proposes the bundled deliver on
+# it; its implementer asks its person before it writes
+send n
+lit 'Workflow drive [workflow] [step-asks]'
+send Enter
+expect_long "the proposal is the pinned decision"  'workflow run 1 · allow run' 20
+expect "it draws the recipe's step tree"       'build ↺ ≤3'
+expect "…the checks it will run"               'test -f made\.txt'
+expect "…and what the pool has left"           'left in the session; the run spends from it'
+expect "Allow is the first answer"             '▸ 1\. Allow'
+expect "Always allow"                          '2\. Always allow'
+refute "…with no amount"                       'Always allow up to'
+expect "Deny"                                  '3\. Deny'
+expect "Feedback takes the person's words"     '4\. Feedback'
+send Enter
+expect_long "the run is one block in the thread" '┌ workflow deliver · run 1' 20
+expect_long "the implementer's question is drawn under its step" 'implement asks: Keep made\.txt plain' 30
+expect "the step's row asks"                   '\? ↺ 1 +implement +implementer'
+expect "the live strip says the step asks"     '\? deliver · run 1 +implement asks: Keep made\.txt plain.*alt\+w jump'
+refute "the run's notes stay out of the transcript" 'workflow: run 1'
+tmux send-keys -t $S M-w; sleep 0.6
+expect "alt+w puts the cursor on the asking step" '▸ \? ↺ 1 +implement'
+expect "the bar names the run's keys"          'p pause/resume'
+send Enter
+expect "enter opens the step, with its crumb"  'Session › deliver run 1 › build ↺ 1 › implement'
+expect "the step's head names its role and state" 'implementer +implement +build/1/implement'
+expect "its question is answerable there"      '▸ 1\. Keep it plain \(recommended\)'
+send Enter
+expect "the answer reaches the step"           'answered implement: Keep it plain'
+send d
+expect_long "the step's own diff"              '\+made by step build/1/implement' 15
+send b
+expect "its brief is the prompt as filled in"  'prompt'
+send Escape
+expect_long "the run ends done"               'deliver · run 1 .*done · \$' 60
+expect "an ended run folds to its results"     '│ ✓ DW-1 failed → passed'
+expect "…and the files it left"                '1 file left changed in the tree: made\.txt'
+refute "the head carries no validated mark"    'validated at tree|re-check'
+send v
+expect "v asks before it reverts"              'Revert run 1\?'
+expect "…listing every path it puts back"      '^.*│ +made\.txt'
+send n
+refute "n leaves the tree alone"               'Revert run 1\?'
+send Escape
+tmux send-keys -t $S M-s; sleep 1
+expect "the spec view lists the session's specs" '▸ S1 Make the workflow file +met'
+expect "…and the spec's runs, newest first"     '1 ✓ deliver · run 1 · done · met'
+send Escape
+# the person speaks after the run ended: it is no longer the latest news,
+# and folds to one line where it stood (alt+w brings it into view)
+lit 'Thanks, that is all for now'
+send Enter
+expect_long "the person's line is answered"     'Done: noted it in NOTES\.md' 30
+tmux send-keys -t $S M-w; sleep 0.6
+expect "the ended run folds to one line"        '▸ ✓ deliver · run 1 · spec 1 .* ▸'
+send Escape
+# the spec's row jumps to it, unfolded whole
+tmux send-keys -t $S M-s; sleep 1
+send 1
+expect "a run's row jumps to its block, whole"  '▸ workflow deliver · run 1'
+send Escape
+alive "still alive after the run"
+
+section "13. steps at work side by side"
+for i in 1 2 3 4; do
+  pane | grep -qE 'BOARD  [0-9]+ cards' && break
+  send Escape
+done
+# every step of this run works a few seconds before it answers, so the two
+# reviews of deliver's parallel are seen at work together
+send n
+lit 'Side by side [workflow] [step-slow]'
+send Enter
+expect_long "its proposal is the pinned decision"  'workflow run 1 · allow run' 20
+send Enter
+expect_long "a step at work is lit and spins"      '┃ [^ ] +design +contractor' 30
+# the live strip stands on the composer while the run is open
+expect "the live strip names the run and its step" '[^ ] deliver · run 1 +design ✓? ?›.*· design .*alt\+w jump'
+tmux send-keys -t $S M-w; sleep 0.6
+expect "alt+w jumps to the block, the cursor on the step at work" '▸ [^ ] +design +contractor'
+send Escape
+# both reviews at once: two lit rows, one each
+both=0
+for i in $(seq 1 200); do
+  p=$(pane)
+  if echo "$p" | grep -qE '┃ [^ ] ↺ 1 +review-a +reviewer' && echo "$p" | grep -qE '┃ [^ ] ↺ 1 +review-b +reviewer'; then both=1; break; fi
+  sleep 0.25
+done
+if [ "$both" = 1 ]; then PASS=$((PASS+1)); printf '  ok    %s\n' "both reviews read as at work, side by side"
+else FAIL=$((FAIL+1)); FAILED_NAMES+=("both reviews at work"); printf '  FAIL  %s\n' "both reviews read as at work, side by side"; dump; fi
+expect "…while the step before them reads done"  '│ ✓ ↺ 1 +implement +implementer'
+expect_long "the run reports to the session"     'has reported' 90
+refute "the live strip goes with the run"       'alt\+w jump$|alt\+w jump '
+# its report has pushed the block up the thread: alt+w brings it back
+tmux send-keys -t $S M-w; sleep 0.6
+expect "the ended run's block"                   'deliver · run 1 .*done · \$'
+send Enter
+expect "its steps unfolded"                      '│ ✓ +validate +reviewer'
+refute "and nothing reads as at work after it"   '┃ [^ ] .*(reviewer|contractor|implementer)'
+send Escape
+alive "still alive after the side-by-side run"
 
 # ----------------------------------------------------------------- report
 printf '\n============ %d passed, %d failed, %d known defects ============\n' "$PASS" "$FAIL" "$KNOWN"

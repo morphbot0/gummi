@@ -51,9 +51,10 @@ test('a session starts from its first message, on the model picked beside Send',
   // a second draft shows nothing of the card it was opened from, before
   // its first message is sent
   if (phone) return;
-  // a session has no spec, so it has no Spec tab
+  // a session may keep a spec (DESIGN §24.2): its Spec tab is there, and
+  // offers to start one
   await expect(page.getByTestId('tab-diff')).toBeVisible();
-  await expect(page.getByTestId('tab-spec')).toHaveCount(0);
+  await expect(page.getByTestId('tab-spec')).toBeVisible();
   await showTab(page, 'stats');
   await expect(page.locator('#pane')).not.toBeEmpty();
   await page.getByTestId('rail-new-session').click();
@@ -108,62 +109,8 @@ test('a session switches its model mid-conversation, and a stage card has no pic
   await input.press('Enter');
   await expect(page.getByTestId('thread')).toContainText('Done: noted it in NOTES.md.', { timeout: 30_000 });
 
-  const feature = String((await api('POST', '/api/cards', { kind: 'feature', title: 'Configurable retries' })).json?.id);
-  await page.goto(`${server.url}/#${feature}`);
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', feature);
-  await expect(page.getByTestId('model-picker-btn')).toHaveCount(0);
-});
-
-// Writing a spec moves a session into the workflow from its own head: the
-// dialog asks for a title, a profile and a budget, the session closes with
-// its branch kept, and the page lands on the new feature in its plan stage.
-test('a session is continued as a spec from its head', async ({ pairedPage: page, server, api, workspace }, info) => {
-  test.setTimeout(120_000);
-  const made = await api('POST', '/api/cards', { kind: 'freeform', description: 'Poke at the rounding', backend: 'headless', model: 'e2e-implementer' });
-  const id = String(made.json?.id);
-  await page.goto(`${server.url}/#${id}`);
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
-  await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
-  // the opening turn leaves its NOTES.md edit uncommitted, and a spec is
-  // refused while the session has uncommitted work: commit it as the person
-  // would before writing the spec
-  await workspace.exec('sh', ['-c', 'git add -A && (git diff --cached --quiet || git commit -q -m "Note the rounding")'], { cwd: workspace.worktree(id) });
-
-  if (info.project.name === 'phone') {
-    // no room in a phone's head: the card's menu carries it
-    await page.getByTestId('card-actions').click();
-    await page.getByTestId('action-writespec').click();
-  } else {
-    // no surface is open beside the thread, so the head has room for it
-    await expect(page.getByTestId('write-spec')).toBeVisible();
-    await page.getByTestId('write-spec').click();
-  }
-  await expect(page.getByTestId('write-spec-dialog')).toBeVisible();
-  // the brief drafts in the background: the start stays off until it has
-  // landed in the field, and only then can the spec be minted
-  await expect(page.getByTestId('spec-start')).toBeEnabled({ timeout: 30_000 });
-  await page.getByTestId('spec-title').fill('Sum before rounding');
-  await page.getByTestId('spec-profile').selectOption('e2e-alt');
-  // a negative budget is refused in words, not started uncapped
-  await page.getByTestId('spec-budget').fill('-5');
-  await page.getByTestId('spec-start').click();
-  await expect(page.getByTestId('spec-error')).toContainText('negative');
-  await expect(page.getByTestId('write-spec-dialog')).toBeVisible();
-  await page.getByTestId('spec-budget').fill('6');
-  await shot(page, info, 'session-write-spec');
-  await page.getByTestId('spec-start').click();
-
-  await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', /^FD-/, { timeout: 30_000 });
-  await expect(page.getByTestId('card-title')).toHaveText('Sum before rounding');
-  await expect(page.getByTestId('stage-plan')).toHaveAttribute('aria-current', 'step', { timeout: 30_000 });
-  const spec = (await page.getByTestId('card-id').getAttribute('data-id'))!;
-  const card = (await api('GET', `/api/cards/${spec}`)).json;
-  expect(card.profile).toBe('e2e-alt');
-  expect(card.envelope).toBe(600);
-  expect(card.session).toBeUndefined();
-  const session = (await api('GET', `/api/cards/${id}`)).json;
-  expect(session.stage).toBe('done');
-  expect(session.branch).not.toBe(card.branch);
+  // the workflow kinds are retired: the API makes sessions only
+  expect((await api('POST', '/api/cards', { kind: 'feature', title: 'Configurable retries' })).status).toBe(400);
 });
 
 // The session's Stats tab answers what a session has: its spend against

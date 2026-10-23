@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { expect, showTab, test } from '../fixtures/test';
+import { expect, test } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import { pixelPNG } from '../fixtures/paths';
 import { shot } from '../fixtures/shots';
@@ -19,7 +19,7 @@ async function openForm(page: Page) {
 
 const phone = (info: { project: { name: string } }) => info.project.name === 'phone';
 
-test('a new card attaches an image and its spec shows it', async ({ pairedPage: page }, info) => {
+test('a new session attaches an image and its opening turn shows it', async ({ pairedPage: page }, info) => {
   await openForm(page);
   await page.getByTestId('newcard-title').fill('Fix the broken header layout');
   await page.getByTestId('newcard-desc').fill('See the attached screenshot.');
@@ -29,12 +29,12 @@ test('a new card attaches an image and its spec shows it', async ({ pairedPage: 
   await expect(page.getByTestId('view-newcard')).toHaveCount(0);
   await expect(page.getByTestId('card-title')).toHaveText('Fix the broken header layout');
 
-  await showTab(page, 'spec');
-  const img = page.getByTestId('spec-doc').locator('img');
+  if (phone(info)) await page.getByTestId('tab-thread').click();
+  const img = page.getByTestId('thread').locator('.thumb img').first();
   await expect(img).toHaveAttribute('alt', 'pixel.png');
   await expect(img).toHaveAttribute('src', /\/api\/attachments\/[0-9a-f]{64}$/);
   await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
-  await shot(page, info, 'attachments-spec');
+  await shot(page, info, 'attachments-opening');
 });
 
 test('a session draft hides its attach control on the headless backend', async ({ pairedPage: page }) => {

@@ -53,16 +53,6 @@ func TestMemoryDocumentsServeLikeTheSpec(t *testing.T) {
 	if m.Memory.Path != ".gummi/memory/"+c.ID+"/memory.md" {
 		t.Errorf("memory path = %q", m.Memory.Path)
 	}
-
-	// a workflow card's documents are its stages'
-	fc := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Row cache"})
-	var w webapi.Memory
-	if st := h.call(http.MethodGet, "/api/cards/"+fc.ID+"/memory", nil, &w); st != http.StatusOK {
-		t.Fatalf("GET memory on a workflow card: %d", st)
-	}
-	if !w.None || w.Why == "" {
-		t.Errorf("workflow card memory = %+v, want none with why", w)
-	}
 }
 
 // TestMemoryMigratesPlanOnGET: a card whose session memory still sits in

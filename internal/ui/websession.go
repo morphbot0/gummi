@@ -13,7 +13,6 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/agentcli"
-	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
@@ -231,130 +230,6 @@ func objectiveVerbDone(args string) string {
 type sessionSwitchedMsg struct {
 	id   domain.FeatureID
 	text string
-}
-
-// specFromSession ends a session and continues its work as a feature card
-// (DESIGN §19.8, "write a spec"). The session is handed off — its branch
-// kept, and refused while its worktree holds work nobody committed, since
-// nothing here commits it — and a feature is minted with the brief
-// the writespec dialog handed in: the person's edited text, fetched once
-// when the dialog opened (the session's own words, or the assembled draft
-// when no live session could answer), never re-derived here at mint. The
-// branch is cut from the session's tip, so the plan stage starts from the
-// work rather than from main, and its plan stage runs at once.
-//
-// The feature does not adopt the session's branch. That would make one
-// branch two cards', and deleting the closed session would take the
-// spec's work with it; a branch of its own is gummi's to rebase, land and
-// clean exactly like any feature's.
-func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, envelope int) tea.Cmd {
-	eng, pool, actor := m.engine, m.wt, m.humanActor()
-	if f.Home {
-		return func() tea.Msg {
-			return noticeMsg{text: f.Name() + " is an agent: its home is no repository a feature's branch could be cut in — start the feature as a card of its own", isErr: true, id: f.ID}
-		}
-	}
-	return func() tea.Msg {
-		ctx := context.Background()
-		if _, diffOpen, _, err := eng.GateBlockers(ctx, f.ID); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
-		} else if diffOpen > 0 {
-			them := "them"
-			if diffOpen == 1 {
-				them = "it"
-			}
-			return noticeMsg{text: f.Name() + " has " + itoa(diffOpen) + " open diff comment" + plural(diffOpen) + " — send or resolve " + them + " before writing a spec from it", isErr: true, id: f.ID}
-		}
-		// a turn in flight is still writing into the worktree the next
-		// check reads, and closing the session below would cut it off
-		if ff := eng.Freeform(f.ID); ff != nil && ff.Busy() {
-			return noticeMsg{text: f.Name() + " is mid-turn; write the spec once this turn ends", isErr: true, id: f.ID}
-		}
-		// the spec continues from the session's last commit, and nothing
-		// here commits for it: loose work would be left behind
-		if err := eng.WritespecRefusal(ctx, f.ID); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
-		}
-		// the session's backend and lock go first: the hand-off commits the
-		// worktree, and nothing may still be writing into it
-		if ff := eng.Freeform(f.ID); ff != nil {
-			_ = ff.Close()
-		}
-		release, err := m.locks.Acquire(f.ID)
-		if err != nil {
-			return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true, id: f.ID}
-		}
-		res, err := eng.HandOff(ctx, f.ID, actor)
-		release()
-		if err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
-		}
-		if res.Status != engine.StatusAdvanced {
-			return noticeMsg{text: f.Name() + " could not be handed off to a spec", isErr: true, id: f.ID}
-		}
-		head, err := pool.Head(ctx, &f)
-		if err != nil {
-			return noticeMsg{text: f.Name() + " was handed off, but its branch could not be read: " + sanitize(err.Error()), isErr: true, id: f.ID}
-		}
-		spec, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
-			Kind: domain.KindFeature, Description: specBrief(f, title, head, brief),
-			Profile: profile, Envelope: envelope, Repo: f.Repo, RequireRepo: m.requireRepo, Base: f.Base,
-			Source: "manual",
-		})
-		if err != nil {
-			return noticeMsg{text: f.Name() + " was handed off, but the spec was not created: " + sanitize(err.Error()), isErr: true, id: f.ID}
-		}
-		if _, err := pool.CreateFrom(ctx, &spec, head); err != nil {
-			// a spec card whose branch was not cut from the session would
-			// start its plan from the base, as if the work never happened
-			_ = m.store.DeleteFeature(ctx, spec.ID)
-			return noticeMsg{text: f.Name() + " was handed off, but the spec's branch could not be cut from " + f.BranchName() + ": " + sanitize(err.Error()), isErr: true, id: f.ID}
-		}
-		// the session's work now lands through the spec, so the session
-		// must not land it a second way (domain.Feature.MayLandAfterAll)
-		if err := m.store.SetContinuedAs(ctx, f.ID, spec.ID); err != nil {
-			return noticeMsg{text: spec.ID.Ref() + " was created, but " + f.Name() + " could not record it: " + sanitize(err.Error()), isErr: true, id: f.ID}
-		}
-		// into the plan stage, where the architect is what runs: todo runs
-		// no agent, and a spec written from a session has nothing to wait
-		// for in a backlog
-		adv, err := eng.Advance(ctx, spec.ID, actor)
-		if err != nil || adv.Status != engine.StatusAdvanced {
-			eng.NoteClosedFreeform(f.ID, "Continued as the spec "+spec.Name()+".")
-			return cardCreatedMsg{f: spec, open: true}
-		}
-		eng.NoteClosedFreeform(f.ID, "Continued as the spec "+adv.Feature.Name()+", on its own branch "+adv.Feature.BranchName()+" cut from this one.")
-		return cardCreatedMsg{f: adv.Feature, open: true, run: true}
-	}
-}
-
-// specBrief is the spec card's description: its title, where its work came
-// from, and the handoff brief the writespec dialog handed in — the brief
-// the session wrote, or the assembled draft, as the person edited it.
-func specBrief(f domain.Feature, title, head, brief string) string {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = f.Title
-	}
-	short := head
-	if len(short) > 7 {
-		short = short[:7]
-	}
-	var b strings.Builder
-	b.WriteString(title)
-	if f.MainCheckout {
-		// The session ran in the main checkout and left its work uncommitted
-		// there; the branch this spec walks starts from the checkout's HEAD
-		// and carries none of the loose work — the architect has to know
-		// which half of the checkout it is standing on.
-		b.WriteString("\n\nContinued from the session " + string(f.ID) + " (" + f.Title + "). That session ran in the main checkout and left its work uncommitted there; this card's branch is cut from the checkout's HEAD at " + short + " and carries none of the loose work: read the checkout before designing, and plan what remains rather than what is done.")
-	} else {
-		b.WriteString("\n\nContinued from the session " + string(f.ID) + " (" + f.Title + "). Its work so far is already on this card's branch, cut from " + f.BranchName() + " at " + short + ": read the diff before designing, and plan what remains rather than what is done.")
-	}
-	if strings.TrimSpace(brief) != "" {
-		b.WriteString("\n\n" + strings.TrimSpace(brief))
-	}
-	return b.String()
 }
 
 // WarmModelCatalogs starts asking every agent a session could run on here

@@ -223,36 +223,13 @@ func (b *Bridge) answeredOrMoved(ctx context.Context, id, ref, against string, c
 	return &WebError{Code: WebConflict, Reason: webapi.ConflictMoved, Text: "the card moved since you read it — now " + now}
 }
 
-// webAnswer runs one option of an open decision: the chip's go or keep,
-// an ask's option (or its chat row, with the words as the answer), or a
+// webAnswer runs one option of an open decision: an ask's option (or its
+// chat row, with the words as the answer), or a
 // stop's workflow answer — with words, the line the TUI's composer would
 // have carried to the word-eating option.
 func (m *Shell) webAnswer(r featureRow, od *webOpenDecision, req webapi.AnswerRequest) (tea.Cmd, error) {
 	words := strings.TrimSpace(req.Words)
 	switch od.api.Kind {
-	case webapi.DecisionConfirm:
-		switch req.Option {
-		case webOptionGo:
-			if !od.chip.goOnEnter {
-				// the TUI's enter says "that spends credits — press y";
-				// the page asks the same question, with what the go
-				// does, and sends back the token that answers it
-				q := r.F.Name() + ": that spends credits — go?"
-				if detail := strings.TrimSpace(od.api.Options[0].Detail); detail != "" {
-					q += "\n" + detail
-				}
-				if m.intent == nil || !m.intent.in.takeConfirm(webConfirmToken("chip-go", r.F.ID, q)) {
-					return nil, &WebError{
-						Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(webapi.ActionNeedsConfirm),
-						Text: q, Confirm: webConfirmToken("chip-go", r.F.ID, q),
-					}
-				}
-			}
-			return m.takeReading(r), nil
-		case webOptionKeep:
-			return m.declineReading(r), nil
-		}
-		return nil, refuse(WebBadRequest, "the chip answers go or keep, not "+strconv.Quote(req.Option))
 	case webapi.DecisionAsk:
 		if req.Option == webOptionChat {
 			if words == "" {
@@ -306,7 +283,6 @@ func (m *Shell) webAnswer(r featureRow, od *webOpenDecision, req webapi.AnswerRe
 		}
 	}
 	m.clearTransientNotice()
-	m.endChat(r.F.ID) // a row picked is the way out of a conversation
 	return m.answerDecisionAt(r, od.d, i, nil), nil
 }
 
@@ -423,28 +399,6 @@ func (b *Bridge) Rewind(ctx context.Context, id string, back int) (webapi.Rewoun
 	return webapi.Rewound{Text: text}, nil
 }
 
-// SetDelegation is POST /api/cards/{id}/delegation: the person opts a
-// freeform card's session in to creating cards (engine.SetDelegation), or
-// out again.
-func (b *Bridge) SetDelegation(ctx context.Context, id string, req webapi.DelegationRequest) error {
-	fid := webID(id)
-	var serr error
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		if m.engine == nil {
-			serr = fmt.Errorf("no engine is running")
-			return nil
-		}
-		serr = m.engine.SetDelegation(ctx, fid, domain.Delegation{Budget: req.Budget, ConfirmAll: req.ConfirmAll})
-		return m.loadRows
-	}); err != nil {
-		return err
-	}
-	if serr != nil {
-		return refuse(WebConflict, serr.Error())
-	}
-	return nil
-}
-
 // Unqueue is POST /api/cards/{id}/queue/{n}/take: a line said to a
 // freeform card mid-turn, taken back before the agent hears it
 // (engine.FreeformSession.Unqueue). One that has gone already is a 409,
@@ -481,14 +435,9 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	}
 	in := webInput{
 		actor: state.PersonActor(person), message: req.Message, number: req.Number,
-		profile: req.Profile, repo: req.Repo, mode: req.Mode, confirm: req.Confirm,
-		land: action == "merge" || action == "squash", autopilot: action == "gate" || action == "autopilot",
+		profile: req.Profile, repo: req.Repo, confirm: req.Confirm,
+		land:   action == "merge" || action == "squash",
 		method: method, keepBranch: req.KeepBranch,
-	}
-	switch req.Mode {
-	case "", domain.GateAutopilot, domain.GateAttended:
-	default:
-		return nil, refuse(WebBadRequest, "mode is autopilot or attended, not "+strconv.Quote(req.Mode))
 	}
 	if action == "repo" {
 		// the repository the action offers may be a clone made since launch
@@ -535,11 +484,6 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	}
 	if answered != "" {
 		b.noteAnswer(id, webAnswerRecord{ref: refOf(req.Against), against: req.Against, by: person, label: answered})
-	}
-	if action == "writespec" && out.created != "" {
-		// the spec is the card the page moves onto; the session it came
-		// from is closed
-		id = string(out.created)
 	}
 	card, werr := b.Card(ctx, id)
 	if werr != nil {
@@ -640,33 +584,6 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 	msg := strings.TrimSpace(req.Message)
 	m.clearTransientNotice()
 	switch id {
-	case "deps":
-		want := make([]domain.FeatureID, 0, len(req.Cards))
-		for _, c := range req.Cards {
-			want = append(want, domain.FeatureID(strings.TrimSpace(c)))
-		}
-		return m.setDependencies(r.F, want), nil
-	case "writespec":
-		profile := strings.TrimSpace(req.Profile)
-		if profile == "" && len(entry.Choices) > 0 {
-			profile = entry.Choices[0].Value
-		}
-		if profile != "" && !slices.ContainsFunc(entry.Choices, func(c webapi.Choice) bool { return c.Value == profile }) {
-			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(profile)+" is not one a spec can run under")
-		}
-		envelope := m.envelopePrefill()
-		if req.Number != nil {
-			if *req.Number < 0 {
-				return nil, refuse(WebBadRequest, "a budget cannot be negative")
-			}
-			envelope = *req.Number
-		}
-		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() {
-			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; write the spec once this turn ends"}
-		}
-		// the brief rides the request: the person's edited text, prefilled
-		// by the draft the dialog fetched when it opened
-		return m.specFromSession(r.F, msg, req.Brief, profile, envelope), nil
 	case "model":
 		if m.engine == nil {
 			return nil, webErr(WebUnavailable, "%s", m.noAgent(" (set a model/provider to enable agents)"))
@@ -697,127 +614,17 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; commit once this turn ends"}
 		}
 		return m.commitSession(r.F.ID, msg), nil
-	case "profile":
-		if !slices.ContainsFunc(entry.Choices, func(c webapi.Choice) bool { return c.Value == req.Profile }) {
-			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(req.Profile)+" is not one "+r.F.Name()+" can switch to")
-		}
-		return m.confirmCardProfileChange(r.F.ID, req.Profile), nil
-	case "gate":
-		if m.intent.in.mode == "" {
-			// the menu entry names the move from where the card is
-			m.intent.in.mode = entry.Default
-		}
-	case "run":
-		if msg != "" {
-			// a run with a note: the kickoff carries it, as the re-run
-			// "send it back" row's words do
-			return m.runStageWithNote(r.F, msg), nil
-		}
-	case "bounce":
-		if msg != "" {
-			return m.fixedSendBack(r, "bounce", msg), nil
-		}
-	case "changes", "newbug":
+	case "newbug":
 		if msg == "" {
 			return nil, &WebError{
 				Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
 				Text: "say what is wrong — your words go with it",
 			}
 		}
-		return m.fixedSendBack(r, id, msg), nil
+		return m.deliverWords(r, id, msg), nil
 	case "merge", "squash":
 		// the message answers the landing dialog; the menu's own route
 		// runs every pre-check the dialog's opening runs
 	}
 	return m.runCardAction(cardAction{id: entry.ID, key: entry.Key, label: entry.Label, why: entry.Detail, danger: entry.Danger}), nil
-}
-
-// setDependencies makes want the card's dependency set, edge by edge
-// through the dependency picker's own add and remove (deppicker.go), after
-// checking every edge the picker would refuse — a cycle, the card
-// itself, a card already coding — so nothing is half-applied.
-func (m *Shell) setDependencies(f domain.Feature, want []domain.FeatureID) tea.Cmd {
-	store := m.store
-	if store == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		ctx := context.Background()
-		dp := &depPicker{}
-		if err := dp.buildCands(ctx, store, f); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
-		}
-		wanted := map[domain.FeatureID]bool{}
-		for _, id := range want {
-			wanted[id] = true
-		}
-		// check first: every wanted card must be addable or attached
-		for id := range wanted {
-			i := slices.IndexFunc(dp.cands, func(c depCandidate) bool { return c.f.ID == id })
-			switch {
-			case i < 0 && dp.removeOnly:
-				return noticeMsg{text: f.Name() + ": " + depReasonLate, isErr: true, id: f.ID}
-			case i < 0:
-				return noticeMsg{text: f.Name() + ": no card " + id.Ref() + " to depend on", isErr: true, id: f.ID}
-			case dp.cands[i].state == candSelf || dp.cands[i].state == candCycle:
-				return noticeMsg{text: f.Name() + " → " + dp.cands[i].f.Name() + ": " + dp.cands[i].reason, isErr: true, id: f.ID}
-			}
-		}
-		changed := 0
-		for i, c := range dp.cands {
-			var cmd tea.Cmd
-			switch {
-			case wanted[c.f.ID] && c.state == candOK:
-				dp.cursor = i
-				cmd = dp.add(m)
-			case !wanted[c.f.ID] && (c.state == candAttached || c.state == candRemove):
-				dp.cursor = i
-				cmd = dp.remove(m)
-			}
-			if cmd == nil {
-				continue
-			}
-			changed++
-			if n, ok := cmd().(noticeMsg); ok && n.isErr {
-				return n
-			}
-		}
-		if changed == 0 {
-			return noticeMsg{text: f.Name() + ": dependencies unchanged"}
-		}
-		return noticeMsg{text: f.Name() + ": " + dependencyCount(len(wanted)), reload: true}
-	}
-}
-
-// Resume is POST /api/board/resume: the quit-resume question a headless
-// board holds (quitresume.go), answered. Cards picks those back up
-// through the dialog's own resume; None is "Not now", which leaves every
-// card parked where the quit stopped it. Either way the question is
-// settled — as the TUI's dialog is once answered.
-func (b *Bridge) Resume(ctx context.Context, req webapi.ResumeRequest, person string) error {
-	out, werr := b.intent(ctx, "", webInput{actor: state.PersonActor(person)}, webWait, func(m *Shell, _ featureRow) (tea.Cmd, error) {
-		m.settleQuitResume()
-		o := m.resumeOffer
-		if o == nil {
-			return nil, refuse(WebConflict, "there is nothing to pick back up")
-		}
-		if req.None || len(req.Cards) == 0 {
-			m.resumeOffer = nil
-			return nil, nil
-		}
-		picked := o.cards[:0:0]
-		for _, id := range req.Cards {
-			i := slices.IndexFunc(o.cards, func(c engine.QuitStoppedCard) bool { return string(c.Feature.ID) == id })
-			if i < 0 {
-				return nil, refuse(WebBadRequest, id+" is not one of the cards the quit stopped")
-			}
-			picked = append(picked, o.cards[i])
-		}
-		m.resumeOffer = nil
-		return m.resumeQuitStopped(picked), nil
-	})
-	if werr != nil {
-		return werr
-	}
-	return out.err()
 }

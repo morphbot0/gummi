@@ -30,7 +30,7 @@ func TestPublishRowsAreOfferedOnlyWhereACardCouldBePublished(t *testing.T) {
 	on := func(r featureRow) nextInput {
 		return nextInput{stage: r.F.Stage, kind: r.F.Kind, landed: r.Landed, publish: true}
 	}
-	plain := cardRow(domain.KindFeature, domain.StageImplement, false, true)
+	plain := freeformRow(208, "rate-limit pairing", true)
 
 	// a board that does not publish offers none of it
 	off := on(plain)
@@ -53,11 +53,12 @@ func TestPublishRowsAreOfferedOnlyWhereACardCouldBePublished(t *testing.T) {
 
 	stacked := plain
 	stacked.F.StackID = "ST-001"
+	retired := cardRow(domain.KindFeature, domain.StageVerify, false, true)
 	research := cardRow(domain.KindResearch, domain.StageImplement, false, true)
-	todo := cardRow(domain.KindFeature, domain.StageTodo, false, true)
-	landed := cardRow(domain.KindFeature, domain.StageVerify, true, true)
-	noTree := cardRow(domain.KindFeature, domain.StageImplement, false, false)
-	for name, r := range map[string]featureRow{"stacked": stacked, "research": research, "todo": todo, "landed": landed, "no worktree": noTree} {
+	landed := freeformRow(209, "landed", true)
+	landed.Landed = true
+	noTree := freeformRow(210, "no tree", false)
+	for name, r := range map[string]featureRow{"stacked": stacked, "retired": retired, "research": research, "landed": landed, "no worktree": noTree} {
 		if got := publishIDs(cardActionsFor(on(r), r)); len(got) != 0 {
 			t.Errorf("a %s card offers %v", name, got)
 		}
@@ -65,7 +66,7 @@ func TestPublishRowsAreOfferedOnlyWhereACardCouldBePublished(t *testing.T) {
 
 	// an agent holding the card holds publishing off too
 	busy := on(plain)
-	busy.busy = true
+	busy.freeformBusy = true
 	if got := publishIDs(cardActionsFor(busy, plain)); len(got) != 0 {
 		t.Errorf("a busy card offers %v", got)
 	}
@@ -94,7 +95,7 @@ func pressPublish(d *publishDialog, keys ...string) (closed bool) {
 func TestThePublishConfirmSendsWhatThePersonReadAndNothingUnacknowledged(t *testing.T) {
 	var sent []webapi.PublishRequest
 	submit := func(r webapi.PublishRequest) tea.Cmd { sent = append(sent, r); return nil }
-	f := domain.Feature{ID: "FD-001"}
+	f := domain.Feature{ID: "FF-001"}
 
 	facts := webapi.PublishFacts{Act: "create", Fingerprint: "abc", Summary: "Push x and open a PR.", Title: "feat: x", Body: "why", Hook: ".git/hooks/pre-push"}
 	d := newPublishDialog(f, facts, submit)
@@ -170,8 +171,8 @@ func publishWorkspace(t *testing.T) (m *Shell, fake, bare string) {
 	git(root, "remote", "add", "origin", "git@github.com:me/widget.git")
 	git(root, "config", "url."+bare+".insteadOf", "git@github.com:me/widget.git")
 	f := &domain.Feature{
-		ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode",
-		Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Dark mode", Slug: "dark-mode",
+		Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind, CreatedAt: fixedTime, UpdatedAt: fixedTime,
 	}
 	if err := m.store.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
@@ -182,6 +183,13 @@ func publishWorkspace(t *testing.T) (m *Shell, fake, bare string) {
 	tree := filepath.Join(root, f.WorktreePath())
 	git(tree, "commit", "-q", "--allow-empty", "-m", "feat: a dark palette")
 	git(tree, "commit", "-q", "--allow-empty", "-m", "feat: a toggle for it")
+	// an unresolved review comment holds the card below the floor, so a
+	// PR it opens is a draft
+	if _, err := m.store.AddDiffAnnotation(ctx, domain.DiffAnnotation{
+		Feature: f.ID, File: "README.md", Anchor: "x", Excerpt: "+x", Comment: "not yet",
+	}, fixedTime); err != nil {
+		t.Fatal(err)
+	}
 	gh := filepath.Join(fake, "gh")
 	if err := os.WriteFile(gh, []byte(publishFlowGH), 0o700); err != nil {
 		t.Fatal(err)
@@ -219,7 +227,7 @@ func publishDialogOn(t *testing.T, m *Shell) *publishDialog {
 func TestThePublishConfirmAsksWhereAForksPROpens(t *testing.T) {
 	var sent []webapi.PublishRequest
 	var asked []string
-	f := domain.Feature{ID: "FD-001"}
+	f := domain.Feature{ID: "FF-001"}
 	open := func(facts webapi.PublishFacts, chosen string) *publishDialog {
 		d := newPublishDialog(f, facts, func(r webapi.PublishRequest) tea.Cmd { sent = append(sent, r); return nil })
 		d.baseRepo = chosen
@@ -256,7 +264,7 @@ func TestThePublishConfirmAsksWhereAForksPROpens(t *testing.T) {
 func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	m, fake, bare := publishWorkspace(t)
 	ctx := context.Background()
-	r, ok := m.rowByID("FD-001")
+	r, ok := m.rowByID("FF-001")
 	if !ok {
 		t.Fatal("no row")
 	}
@@ -275,7 +283,7 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 		t.Fatalf("dialog id = %q", d.ID())
 	}
 	view := d.View(m0Styles(), 100, 40)
-	// the card is mid-implement: the draft is the floor's, not a choice
+	// a review comment is open: the draft is the floor's, not a choice
 	for _, want := range []string{"open pull request · “Dark mode”", "and open a draft", "- feat: a dark palette", "[x] open as draft", "Dark mode"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("the confirm does not show %q:\n%s", want, view)
@@ -285,7 +293,7 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 		t.Fatal("the details are shown before tab")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
-	if view = publishDialogOn(t, m).View(m0Styles(), 100, 40); !strings.Contains(view, "git push --porcelain origin") || !strings.Contains(view, "me:gummi/FD-001-dark-mode") {
+	if view = publishDialogOn(t, m).View(m0Styles(), 100, 40); !strings.Contains(view, "git push --porcelain origin") || !strings.Contains(view, "me:ff/dark-mode") {
 		t.Fatalf("tab does not unfold the details:\n%s", view)
 	}
 
@@ -316,14 +324,14 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	if !strings.Contains(string(log), "--title=feat: dark mode --body-file - --draft") {
 		t.Fatalf("gh was called as:\n%s", log)
 	}
-	if out, err := exec.Command("git", "--git-dir", bare, "rev-parse", "gummi/FD-001-dark-mode").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "--git-dir", bare, "rev-parse", "ff/dark-mode").CombinedOutput(); err != nil {
 		t.Fatalf("the branch was not pushed: %s", out)
 	}
-	f, err := m.store.GetFeature(ctx, "FD-001")
+	f, err := m.store.GetFeature(ctx, "FF-001")
 	if err != nil || f.PullRequest.Number != 512 {
 		t.Fatalf("the card links %+v (%v)", f.PullRequest, err)
 	}
-	evs, _ := m.store.Events(ctx, "FD-001")
+	evs, _ := m.store.Events(ctx, "FF-001")
 	recorded := false
 	for _, ev := range evs {
 		recorded = recorded || ev.Kind == state.EventPublish
@@ -334,18 +342,18 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 
 	// the reloaded row carries the link, so the menu now offers the PR's
 	// own acts; readying a draft the floor holds is refused in words
-	r, _ = m.rowByID("FD-001")
+	r, _ = m.rowByID("FF-001")
 	if r.F.PullRequest.Number != 512 {
 		t.Fatalf("the board's row was not reloaded: %+v", r.F.PullRequest)
 	}
-	tip, _ := exec.Command("git", "--git-dir", bare, "rev-parse", "gummi/FD-001-dark-mode").Output()
-	view512 := `{"number":512,"url":"https://github.com/me/widget/pull/512","state":"OPEN","isDraft":true,"headRefOid":"` + strings.TrimSpace(string(tip)) + `","headRefName":"gummi/FD-001-dark-mode","headRepositoryOwner":{"login":"me"}}`
+	tip, _ := exec.Command("git", "--git-dir", bare, "rev-parse", "ff/dark-mode").Output()
+	view512 := `{"number":512,"url":"https://github.com/me/widget/pull/512","state":"OPEN","isDraft":true,"headRefOid":"` + strings.TrimSpace(string(tip)) + `","headRefName":"ff/dark-mode","headRepositoryOwner":{"login":"me"}}`
 	if err := os.WriteFile(filepath.Join(fake, "view.json"), []byte(view512), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	m = update(m, m.openPublish(r, publish.ActReady, "")())
-	if m.Overlay.HasDialogs() || !m.notice.isErr || !strings.Contains(m.notice.text, "“Dark mode”: ") || !strings.Contains(m.notice.text, "verif") {
-		t.Fatalf("ready on an unverified card: dialogs %v, notice %+v", m.Overlay.HasDialogs(), m.notice)
+	if m.Overlay.HasDialogs() || !m.notice.isErr || !strings.Contains(m.notice.text, "“Dark mode”: ") || !strings.Contains(m.notice.text, "unresolved") {
+		t.Fatalf("ready on a card below the floor: dialogs %v, notice %+v", m.Overlay.HasDialogs(), m.notice)
 	}
 	// nothing new to push either
 	m = update(m, m.openPublish(r, publish.ActPush, "")())
@@ -358,7 +366,7 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 // already reached GitHub, and leaves the card unlinked.
 func TestTheBoardSaysWhatAFailedPublishAlreadyDid(t *testing.T) {
 	m, fake, bare := publishWorkspace(t)
-	r, _ := m.rowByID("FD-001")
+	r, _ := m.rowByID("FF-001")
 	if err := os.WriteFile(filepath.Join(fake, "fail-pr-create"), []byte("HTTP 502: Bad Gateway"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -368,10 +376,10 @@ func TestTheBoardSaysWhatAFailedPublishAlreadyDid(t *testing.T) {
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "HTTP 502") || !strings.Contains(m.notice.text, "was pushed to me/widget") {
 		t.Fatalf("notice = %+v", m.notice)
 	}
-	if out, err := exec.Command("git", "--git-dir", bare, "rev-parse", "gummi/FD-001-dark-mode").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "--git-dir", bare, "rev-parse", "ff/dark-mode").CombinedOutput(); err != nil {
 		t.Fatalf("the branch was not pushed: %s", out)
 	}
-	if f, _ := m.store.GetFeature(context.Background(), "FD-001"); !f.PullRequest.Empty() {
+	if f, _ := m.store.GetFeature(context.Background(), "FF-001"); !f.PullRequest.Empty() {
 		t.Fatalf("a PR that was not opened is linked: %+v", f.PullRequest)
 	}
 
@@ -379,10 +387,10 @@ func TestTheBoardSaysWhatAFailedPublishAlreadyDid(t *testing.T) {
 	if err := os.Remove(filepath.Join(fake, "fail-pr-create")); err != nil {
 		t.Fatal(err)
 	}
-	r, _ = m.rowByID("FD-001")
+	r, _ = m.rowByID("FF-001")
 	m = update(m, m.openPublish(r, publish.ActCreate, "")())
 	publishDialogOn(t, m)
-	release, err := state.AcquireLock(m.ws.CardLockFile("FD-001"))
+	release, err := state.AcquireLock(m.ws.CardLockFile("FF-001"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,9 +431,9 @@ func TestPublishNoticesReadTheSameForEveryAct(t *testing.T) {
 func TestTheBarNamesThePublishStepInFlight(t *testing.T) {
 	m, _, _ := publishWorkspace(t)
 	said := make(chan publishStepMsg, 1)
-	step := publishStepMsg{id: "FD-001", step: "push", text: "Push 0123abc to me/widget", n: 2, of: 3, next: said}
+	step := publishStepMsg{id: "FF-001", step: "push", text: "Push 0123abc to me/widget", n: 2, of: 3, next: said}
 
-	m.markGHWork("FD-001", "publishing", "")
+	m.markGHWork("FF-001", "publishing", "")
 	if cmd := m.handlePublishStep(step); cmd == nil {
 		t.Fatal("the next step is not waited for")
 	}
@@ -433,7 +441,7 @@ func TestTheBarNamesThePublishStepInFlight(t *testing.T) {
 		t.Fatalf("the bar says %q", pill)
 	}
 
-	model, _ := m.Update(ghDoneMsg{id: "FD-001", inner: noticeMsg{text: "FD-001: pushed 0123abc"}})
+	model, _ := m.Update(ghDoneMsg{id: "FF-001", inner: noticeMsg{text: "FD-001: pushed 0123abc"}})
 	m = model.(*Shell)
 	if len(m.ghWork) != 0 || m.notice.text != "FD-001: pushed 0123abc" {
 		t.Fatalf("after the act: work %v, notice %q", m.ghWork, m.notice.text)

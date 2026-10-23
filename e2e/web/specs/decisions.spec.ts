@@ -5,11 +5,9 @@ import path from 'node:path';
 import { shot } from '../fixtures/shots';
 
 // Answering a card's pinned decision against a real `gummi web` and the
-// scripted agent: the design gate, reworking a plan with a note, sending a
-// failed verify back with a diff comment, an agent's question (an option,
-// and "chat about this"), the composer's enter line, two people answering
-// at once, and an answer given against a card that has since moved. The
-// phone answers from the docked decision bar.
+// scripted agent: an agent's question (an option, and "chat about this"),
+// one that outlived its call or its backend, and the next card waiting.
+// The phone answers from the docked decision bar.
 
 const isPhone = (info: { project: { name: string } }) => info.project.name === 'phone';
 
@@ -35,356 +33,47 @@ async function answerOption(page: Page, phone: boolean, option: string) {
 
 async function thread(page: Page, phone: boolean) {
   if (phone) await page.getByTestId('tab-thread').click();
-  return page.getByTestId('thread-items');
+  // a session's turns are drawn in its live conversation, under the items
+  return page.getByTestId('thread');
 }
 
-test.describe('a design gate', () => {
-  let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedDesignGate('Add a wave helper'); } } });
-
-  test('approving it moves the card to implement and the thread names who', async ({ pairedPage: page, server }, info) => {
-    await open(page, server, id);
-    await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'gate');
-    await expect(page.getByTestId('decision-against')).toContainText('spec ');
-    await shot(page, info, 'gate-open');
-    if (isPhone(info)) {
-      await answerOption(page, true, 'advance');
-    } else {
-      // the keyboard: a digit picks, enter gives it
-      // keys go to the page, not to whatever control the pointer last
-      // touched: drop focus rather than click into the thread, whose
-      // middle may be a control (enter on one activates it, by design)
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-      await page.keyboard.press('3');
-      await expect(page.getByTestId('decision-option-pause')).toHaveAttribute('aria-pressed', 'true');
-      await page.keyboard.press('ArrowUp');
-      await page.keyboard.press('1');
-      await expect(page.getByTestId('composer-says')).toHaveText('approve');
-      await page.keyboard.press('Enter');
-    }
-    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
-    const items = await thread(page, isPhone(info));
-    await expect(items.getByTestId('receipt').last()).toContainText('Tester');
-    await shot(page, info, 'gate-approved');
-  });
-
-  // A phone's decision is its first answer as one button: in the thread
-  // with the others behind "More", and beside the question on the bar
-  // that follows the card into its documents.
-  test('a phone offers the first answer as one button', async ({ pairedPage: page, server }, info) => {
-    test.skip(!isPhone(info), 'the list of answers fits beside a thread');
-    await page.removeLocatorHandler(page.getByTestId('decision-all'));
-    await open(page, server, id);
-    const answers = page.getByTestId('decision').locator('.opt');
-    await expect(page.getByTestId('decision-option-advance')).toBeVisible();
-    await expect(answers.nth(1)).toBeHidden();
-    await shot(page, info, 'gate-brief');
-    await page.getByTestId('decision-all').click();
-    await expect(answers.nth(1)).toBeVisible();
-    await expect(page.getByTestId('decision-all')).toHaveCount(0);
-
-    await showTab(page, 'diff');
-    const go = page.getByTestId('mdec-go');
-    await expect(go).toHaveText('approve');
-    await shot(page, info, 'gate-bar');
-    // the rest of the answers open from the question, and the button
-    // makes way for them
-    await page.getByTestId('mdec-toggle').click();
-    await expect(page.getByTestId('mdec-option-pause')).toBeVisible();
-    await expect(go).toHaveCount(0);
-    await page.getByTestId('mdec-toggle').click();
-    await go.click();
-    await page.getByTestId('tab-thread').click();
-    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
-  });
-
-  // "stop here" leaves the card at its gate, and the thread says who
-  // stopped it; approving afterwards passes the headless run's stop, and
-  // the thread stops drawing it as the decision waiting
-  test('stop here is recorded, and the stop it parked at goes once approved', async ({ pairedPage: page, server }, info) => {
-    const phone = isPhone(info);
-    await open(page, server, id);
-    await answerOption(page, phone, 'pause');
-    const items = await thread(page, phone);
-    await expect(items.getByTestId('receipt').last()).toContainText('Tester parked it');
-    // past the moment a just-changed decision holds a press
-    await page.waitForTimeout(1000);
-    await answerOption(page, phone, 'advance');
-    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
-    await thread(page, phone);
-    await expect(items.getByTestId('receipt').last()).toContainText('Tester advanced plan → implement');
-    await expect(items.getByTestId('thread-decision')).toHaveCount(0);
-    await expect(items).toContainText('Tester parked it');
-  });
-
-  // One press answers. A second press a moment later, meant for the
-  // answer just given, meets the stop that answer led to: it is chosen,
-  // not answered unread.
-  test('one press approves, and a second press does not answer the next stop', async ({ pairedPage: page, server, api }, info) => {
-    test.skip(isPhone(info), 'the phone answers from the docked bar');
-    await open(page, server, id);
-    await page.getByTestId('decision-option-advance').click();
-    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
-    const next = (await api('GET', `/api/cards/${id}`)).json.decision;
-    await expect(page.getByTestId('decision')).toHaveAttribute('data-ref', next.ref);
-    await page.getByTestId('decision').locator('.opt').first().click();
-    await expect(page.getByTestId('decision-fresh')).toContainText('new decision');
-    await page.waitForTimeout(300);
-    expect((await api('GET', `/api/cards/${id}`)).json.decision?.ref).toBe(next.ref);
-  });
-
-  test('reworking the plan carries the note to the architect', async ({ pairedPage: page, server, workspace }, info) => {
-    await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('tab-thread').click();
-    await page.getByTestId('composer-input').fill('Cover an empty name too');
-    await expect(page.getByTestId('decision-option-run')).toHaveAttribute('aria-pressed', 'true');
-    // the words are read before they go: the enter line says so rather
-    // than promising the architect starts on them
-    await expect(page.getByTestId('composer-says')).toContainText('read first');
-    await page.getByTestId('composer-send').click();
-    await expect(page.getByTestId('composer-input')).toHaveValue('');
-    // a line at a gate is read first, and the reading is put to you
-    const chip = page.getByTestId('decision');
-    await expect(chip).toHaveAttribute('data-kind', 'confirm');
-    await expect(page.getByTestId('decision-option-keep')).toBeVisible();
-    await shot(page, info, 'gate-chip');
-    // going on runs the architect again, which spends: as the terminal's
-    // chip wants y rather than enter, the page asks before it goes
-    await expect(page.getByTestId('decision-option-go')).toHaveClass(/\bdanger\b/);
-    await answerOption(page, false, 'go');
-    await expect(page.getByTestId('decision-confirm')).toBeVisible();
-    // the question is the server's, and it says what the go does
-    await expect(page.getByTestId('decision-confirm-question')).toContainText('spends credits');
-    const yes = page.waitForRequest((r) => r.url().endsWith('/answer') && typeof r.postDataJSON()?.confirm === 'string');
-    await page.getByTestId('decision-confirm-yes').click();
-    expect((await yes).postDataJSON().confirm).toMatch(/^c[0-9a-f]+$/);
-    // the architect heard it, and the plan comes back to the gate
-    await expect.poll(() => workspace.agentLog().includes('Cover an empty name too')).toBe(true);
-    await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'gate', { timeout: 30_000 });
-    await shot(page, info, 'gate-rework');
-  });
-
-  test('a refused approval is said once, in the decision, and nothing covers the composer', async ({ pairedPage: page, server, workspace }, info) => {
-    // a plan whose Chosen approach was emptied keeps the gate shut
-    const dir = path.join(workspace.repo, '.gummi', 'specs');
-    const file = path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith(id))!);
-    const body = fs.readFileSync(file, 'utf8');
-    fs.writeFileSync(file, body.replace(/(## Chosen approach\n)[\s\S]*?(\n## )/, '$1$2'));
-    expect(fs.readFileSync(file, 'utf8')).not.toBe(body);
-    await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('tab-thread').click();
-    await answerOption(page, false, 'advance');
-    const note = page.getByTestId('decision-error');
-    await expect(note).toContainText('gate stays shut');
-    // the board says the same line to every viewer; this one has it in the
-    // note already, so no toast repeats it over the page
-    await page.waitForTimeout(1500);
-    // (counted now, not polled: a toast goes by itself after a few seconds)
-    expect(await page.getByTestId('toast').filter({ hasText: 'gate stays shut' }).count()).toBe(0);
-    // and a toast, when there is one, stands clear of the composer
-    await page.evaluate(async () => { (await import('/assets/toast.js')).toast('A notice\nof two lines', { ms: 8000 }); });
-    const t = await page.getByTestId('toast').last().boundingBox();
-    const c = await page.getByTestId('composer').boundingBox();
-    expect(t && c && (t.y + t.height <= c.y || t.y >= c.y + c.height), 'the toast does not overlap the composer').toBe(true);
-    await shot(page, info, 'gate-refused');
-  });
-
-  test('the enter line says what a line would do as it is typed', async ({ pairedPage: page, server }, info) => {
-    await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('tab-thread').click();
-    const says = page.getByTestId('composer-says');
-    await expect(says).toHaveText('approve');
-    await page.getByTestId('composer-input').fill('the plan misses the empty name');
-    await expect(says).toContainText('read first');
-    // a command that is in the card's menu, not one of the answers
-    await page.getByTestId('composer-input').fill('/rebase');
-    await expect(says).toContainText('menu');
-    await expect(page.getByTestId('composer-send')).toHaveText('Send');
-    await page.getByTestId('composer-send').click();
-    await expect(page.getByTestId('card-actions-menu')).toBeVisible();
-    await expect(page.getByTestId('card-actions-menu').locator('button').first()).toHaveAttribute('data-testid', 'action-rebase');
-    await shot(page, info, 'composer-menu');
-  });
-
-  test('two people answer at once: one wins, the other is told who', async ({ pairedPage: page, server, browser }, info) => {
-    const u = info.project.use as any;
-    const other = await browser.newContext({ viewport: u.viewport, isMobile: u.isMobile, hasTouch: u.hasTouch, deviceScaleFactor: u.deviceScaleFactor, userAgent: u.userAgent });
-    const page2 = await other.newPage();
-    try {
-      await pair(page2, server, 'Yuki');
-      await open(page, server, id);
-      await open(page2, server, id);
-      const phone = isPhone(info);
-      const go = async (p: Page) => {
-        if (phone) {
-          await showTab(p, 'diff');
-          await p.getByTestId('mdec-toggle').click();
-          return p.getByTestId('mdec-option-advance');
-        }
-        return p.getByTestId('decision-option-advance');
-      };
-      const [a, b] = [await go(page), await go(page2)];
-      // both give it at once, each to the decision it read: the buttons are
-      // taken before either press, since the winner's answer redraws the
-      // other page's decision and a press that waited for its button to
-      // settle would find a different answer set there, or none
-      const [ha, hb] = [await a.elementHandle(), await b.elementHandle()];
-      await Promise.all([ha!.evaluate((el: HTMLElement) => el.click()), hb!.evaluate((el: HTMLElement) => el.click())]);
-      // the loser is told who answered — and that note stays: the card
-      // moving under its press a moment later does not replace it with a
-      // vaguer "moved while you were choosing"
-      const told = (p: Page) => p.getByTestId(phone ? 'mdec-note' : 'decision-answered');
-      await expect.poll(async () => (await told(page).count()) + (await told(page2).count())).toBe(1);
-      const [loser, winner] = (await told(page).count()) ? [page, 'Yuki'] : [page2, 'Tester'];
-      await expect(told(loser)).toContainText(`Answered by ${winner}`);
-      await loser.waitForTimeout(1500);
-      await expect(told(loser)).toContainText(`Answered by ${winner}`);
-      if (!phone) await expect(loser.getByTestId('decision-moved')).toHaveCount(0);
-      await shot(loser, info, 'answered-first');
-    } finally {
-      await other.close();
-    }
-  });
-
-  // "stop here" at a gate parks the run and leaves the gate pinned: the
-  // same ref, a new answer set. A row chosen on another device before
-  // that is not carried onto whatever answer now sits in its place, and
-  // enter does not give the first answer in its stead.
-  test('another viewer’s answer does not move your choice onto a different answer', async ({ pairedPage: page, server, browser, api }, info) => {
-    test.skip(isPhone(info), 'the keyboard chooses from the pinned block');
-    const u = info.project.use as any;
-    const other = await browser.newContext({ viewport: u.viewport, userAgent: u.userAgent });
-    const page2 = await other.newPage();
-    try {
-      await pair(page2, server, 'Yuki');
-      await open(page, server, id);
-      await open(page2, server, id);
-      const before = (await api('GET', `/api/cards/${id}`)).json.decision;
-      // this page chooses "stop here" with the keyboard, and has not sent it
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-      await page.keyboard.press('3');
-      await expect(page.getByTestId('decision-option-pause')).toHaveAttribute('aria-pressed', 'true');
-      // the other device answers "stop here" first
-      await page2.getByTestId('decision-option-pause').click();
-      await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.against?.token).not.toBe(before.against.token);
-      // the page says so, and highlights nothing it was not told to
-      await expect(page.getByTestId('decision-moved')).toContainText('moved while you were choosing');
-      await expect(page.getByTestId('decision').locator('.opt.hi')).toHaveCount(0);
-      await expect(page.getByTestId('composer-says')).toHaveText('pick an answer first');
-      await shot(page, info, 'moved-while-choosing');
-      // enter gives nothing: it asks for an answer instead of approving
-      // (past the moment a just-changed decision holds a bare enter anyway)
-      await page.waitForTimeout(900);
-      await page.keyboard.press('Enter');
-      await expect(page.getByTestId('decision-pick')).toBeVisible();
-      await page.waitForTimeout(300);
-      await expect(page.getByTestId('stage-plan')).toHaveAttribute('aria-current', 'step');
-      expect((await api('GET', `/api/cards/${id}`)).json.stage).toBe('plan');
-    } finally {
-      await other.close();
-    }
-  });
-});
-
-test.describe('a failed verify', () => {
-  let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerifyFailed('Add a regressing helper'); } } });
-
-  test('a diff comment goes back with the failure', async ({ pairedPage: page, server, api }, info) => {
-    const phone = isPhone(info);
-    await open(page, server, id);
-    await showTab(page, 'diff');
-    await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
-    await page.locator('[data-testid^="diff-line-"]').nth(3).locator('.n').click();
-    await page.getByTestId('annotation-input').fill('Return early on an empty name');
-    await page.getByTestId('annotation-save').click();
-    await expect(page.getByTestId('diff-pending')).toContainText('1 comment');
-    if (phone) {
-      await page.getByTestId('mdec-toggle').click();
-      await expect(page.getByTestId('mdec-option-bounce')).toContainText('+ 1 diff comment');
-      await shot(page, info, 'verify-carry');
-      // the tap sends it back, and the comment goes with it
-      await page.getByTestId('mdec-option-bounce').click();
-    } else {
-      await expect(page.getByTestId('decision-option-bounce')).toContainText('+ 1 diff comment');
-      await shot(page, info, 'verify-carry');
-      await answerOption(page, false, 'bounce');
-    }
-    // the card is back in implement, crossed by the person who answered
-    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
-    await expect.poll(async () => (await api('GET', `/api/cards/${id}/thread`)).json.items
-      .some((it: any) => it.t === 'receipt' && /Tester/.test(`${it.receipt?.by} ${it.receipt?.text}`))).toBe(true);
-    await shot(page, info, 'verify-sent-back');
-    // and the comment goes to the implementer with its next run — which the
-    // card, on autopilot, starts itself once it is sent back
-    await expect.poll(() => server.ws.agentLog().includes('Return early on an empty name'), { timeout: 20_000 }).toBe(true);
-  });
-
-  test('an answer given against a card that moved is refused and re-read', async ({ pairedPage: page, server, workspace }, info) => {
-    await open(page, server, id);
-    const against = await page.getByTestId('decision-against').textContent();
-    // someone commits to the branch under the page
-    const wt = workspace.worktree(id);
-    await workspace.exec('sh', ['-c', 'echo "// late" >> README.md && git add README.md && git commit -qm late'], { cwd: wt });
-    await answerOption(page, isPhone(info), 'pause');
-    const note = page.getByTestId(isPhone(info) ? 'mdec-note' : 'decision-moved');
-    await expect(note).toContainText('moved since you read it');
-    await shot(page, info, 'moved');
-    if (!isPhone(info)) {
-      await expect(page.getByTestId('decision-against')).not.toHaveText(against || '');
-      // read again, the same answer goes through
-      await answerOption(page, false, 'pause');
-      await expect(page.getByTestId('rail-row-' + id)).toHaveAttribute('data-status', /paused|idle|needs/);
-      await expect(page.getByTestId('decision-moved')).toHaveCount(0);
-    }
-  });
-});
-
-test.describe('two cards at their design gates', () => {
+test.describe('two sessions waiting on their questions', () => {
   let ids: string[];
-  test.use({ seed: { run: async (ws) => { ids = [await ws.seedDesignGate('Add a wave helper'), await ws.seedDesignGate('Add a nod helper')]; } } });
+  test.use({ seed: { run: async (ws) => { ids = [(await ws.seedAsk('Add a wave helper')).id, (await ws.seedAsk('Add a nod helper')).id]; } } });
 
   // the chip names the next card's stop in the rail's words, never a
-  // run's CLI line, and a phone answering from a document tab sees it in
-  // the docked bar — the dock's own chip sits out of sight there
+  // run's CLI line
   test('the next card waiting is offered where the answer was given', async ({ pairedPage: page, server }, info) => {
     const [a, b] = ids;
     await open(page, server, a);
-    if (isPhone(info)) {
-      await showTab(page, 'spec');
-      await page.getByTestId('mdec-toggle').click();
-      await page.getByTestId('mdec-option-advance').click();
-    } else {
-      await page.getByTestId('decision-option-advance').click();
-    }
-    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
-    const chip = (isPhone(info) ? page.getByTestId('mobile-decision') : page.getByTestId('nextup-slot')).getByTestId('nextup');
-    await expect(chip).toBeVisible();
-    await expect(chip).toContainText('“Add a nod helper” also needs you · design gate');
-    await expect(chip).not.toContainText('--until');
+    // the question outlived the run that asked it: its words answer it
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
+    await page.getByTestId('decision-option-chat').click();
+    await page.getByTestId('composer-input').fill('Left, beside Greet');
+    await page.keyboard.press('Enter');
+    const chip = page.locator('[data-testid="nextup"]:visible').first();
+    await expect(chip).toBeVisible({ timeout: 30_000 });
+    await expect(chip).toContainText(/Add a nod helper” also needs you/);
+    await expect(chip).not.toContainText('gummi resume');
     await shot(page, info, 'nextup');
     await chip.click();
     await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', b);
   });
 });
 
-test.describe('a verified card linked to a pull request', () => {
+test.describe('a session linked to a pull request', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a farewell helper'); await ws.linkPR(id); } } });
+  test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a farewell helper'); await ws.linkPR(id); } } });
 
-  // its gate's advance is "merge the PR", which lands on GitHub: no local
-  // landing dialog opens for it, and the board's answer is said beside
-  // the decision
-  test('merge the PR opens no landing message', async ({ pairedPage: page, server }, info) => {
+  // it lands on GitHub: the menu offers no local landing for it, and the
+  // way to land it here anyway is the menu's own unlink
+  test('offers no local landing', async ({ pairedPage: page, server }, info) => {
     await open(page, server, id);
-    const phone = isPhone(info);
-    if (phone) await page.getByTestId('tab-thread').click();
-    await expect(page.getByTestId('decision-option-advance')).toContainText('merge the PR');
-    await page.getByTestId('decision-option-advance').click();
-    await expect(page.getByTestId('decision-error')).toContainText('linked to');
-    // the way to land it here anyway is the menu's, not a terminal command
-    await expect(page.getByTestId('decision-error')).toContainText('“unlink PR” in the card\'s menu');
-    await expect(page.getByTestId('decision-error')).not.toContainText('gummi pr unlink');
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
+    await page.getByTestId('card-actions').click();
+    await expect(page.getByTestId('card-actions-menu')).toBeVisible();
+    await expect(page.getByTestId('action-merge')).toHaveCount(0);
+    await expect(page.getByTestId('action-prunlink')).toBeVisible();
     await expect(page.getByTestId('landing-dialog')).toHaveCount(0);
     await shot(page, info, 'pr-merge-refused');
   });
@@ -393,10 +82,8 @@ test.describe('a verified card linked to a pull request', () => {
 test.describe('an agent’s question', () => {
   // A question's options live only in the process that asked it, so the
   // card is started from this board rather than seeded by `gummi run`.
-  async function ask(api: any, title = '[ask] Add a choosy helper'): Promise<string> {
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title })).json;
-    let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+  async function ask(api: any, title = '[ask-where] Add a choosy helper'): Promise<string> {
+    const c = (await api('POST', '/api/cards', { kind: 'freeform', title })).json;
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
     return c.id;
   }
@@ -493,14 +180,12 @@ test.describe('an agent’s question', () => {
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
     await expect(page.getByTestId('composer-says')).toHaveText('Chat about this');
     await page.keyboard.press('Enter');
-    await expect(page.getByTestId('thread-items')).toContainText('Put it beside Greet, in greet.go');
+    await expect(page.getByTestId('thread')).toContainText('Put it beside Greet, in greet.go');
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
   });
 
   // A reply being written to the question while another device answers
-  // it: the words stay, the page says the card moved, and the first enter
-  // does not send them on to whatever the next decision's words go to (a
-  // rework of the plan) without saying so.
+  // it: the words stay, and the page says the card moved.
   test('words typed for a question someone else answered are not re-aimed unannounced', async ({ pairedPage: page, server, api }, info) => {
     test.skip(isPhone(info), 'enter answers from the composer on a keyboard');
     const id = await ask(api);
@@ -511,39 +196,11 @@ test.describe('an agent’s question', () => {
     // the other device picks an option
     const d = (await api('GET', `/api/cards/${id}`)).json.decision;
     await api('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: '0', against: d.against.token });
-    await expect(page.getByTestId('decision')).not.toHaveAttribute('data-kind', 'ask', { timeout: 30_000 });
+    await expect(page.locator('[data-testid="decision"][data-kind="ask"]')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByTestId('decision-moved')).toContainText('while you were writing');
-    await expect(page.getByTestId('composer-input')).toHaveValue('Put it beside Greet, in greet.go');
-    const before = (await api('GET', `/api/cards/${id}`)).json.decision?.ref;
-    await page.getByTestId('composer-input').press('Enter');
-    await expect(page.getByTestId('decision-moved')).toContainText('enter again sends your words');
-    await page.waitForTimeout(300);
-    expect((await api('GET', `/api/cards/${id}`)).json.decision?.ref).toBe(before);
     await expect(page.getByTestId('composer-input')).toHaveValue('Put it beside Greet, in greet.go');
   });
 
-  // Enter pressed twice on "start the architect" meets the question the
-  // architect asks within a moment of the first: the second press must not
-  // give that question its first answer before anyone has read it.
-  test('a second enter does not answer a question that has just arrived', async ({ pairedPage: page, server, api }, info) => {
-    test.skip(isPhone(info), 'enter answers from the composer on a keyboard');
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask] Add a hasty helper' })).json;
-    const card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    await open(page, server, c.id);
-    await expect(page.getByTestId('decision')).toHaveAttribute('data-ref', card.decision.ref);
-    await page.getByTestId('composer-input').focus();
-    await page.keyboard.press('1');
-    await page.keyboard.press('Enter');
-    await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'ask');
-    await page.keyboard.press('Enter');
-    await expect(page.getByTestId('decision-fresh')).toContainText('new decision');
-    await page.waitForTimeout(300);
-    expect((await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
-    // read, it answers as ever
-    await page.waitForTimeout(800);
-    await page.keyboard.press('Enter');
-    await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).not.toBe('ask');
-  });
 });
 
 // A backend's own MCP client bounds a tool call (a minute, on several of
@@ -554,9 +211,7 @@ test.describe('an agent’s question', () => {
 // the answer reaches the architect as its next turn.
 test.describe('a question the agent stopped waiting on', () => {
   async function ask(api: any): Promise<string> {
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-gives-up] Add a patient helper' })).json;
-    let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+    const c = (await api('POST', '/api/cards', { kind: 'freeform', title: '[ask-gives-up] Add a patient helper' })).json;
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
     return c.id;
   }
@@ -587,11 +242,8 @@ test.describe('a question the agent stopped waiting on', () => {
 
     await answerOption(page, isPhone(info), '1');
     await expect(await thread(page, isPhone(info))).toContainText('Extend the existing file');
-    // the architect finishes the plan with the answer, and only then is
-    // the plan critiqued and its gate raised
-    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
-    const spec = (await api('GET', `/api/cards/${id}/spec`)).json;
-    expect(JSON.stringify(spec)).toContain('Decided with the user: Extend the existing file');
+    // the architect finishes the plan with the answer
+    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json), { timeout: 30_000 }).toContain('Decided with the user: Extend the existing file');
   });
 });
 
@@ -604,9 +256,7 @@ test.describe('a question the agent stopped waiting on', () => {
 // restart and the spec recorded choices nobody had delivered.
 test.describe('a question whose backend went away', () => {
   async function ask(api: any, title: string): Promise<string> {
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title })).json;
-    let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+    const c = (await api('POST', '/api/cards', { kind: 'freeform', title })).json;
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
     return c.id;
   }
@@ -616,7 +266,7 @@ test.describe('a question whose backend went away', () => {
     await open(page, server, id);
     await expect(page.getByTestId('decision-question')).toContainText('Where should');
     // the process dies while the reader is looking at the question
-    await expect(page.getByTestId('rail-row-' + id)).toContainText('failed', { timeout: 15_000 });
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}/live`)).json.freeform?.err ?? '', { timeout: 15_000 }).not.toBe('');
     expect((await api('GET', `/api/cards/${id}`)).json.decision?.kind).toBe('ask');
     await shot(page, info, 'ask-backend-died');
 
@@ -625,14 +275,12 @@ test.describe('a question whose backend went away', () => {
     // are drawn under the settled items, so this reads the whole thread
     if (isPhone(info)) await page.getByTestId('tab-thread').click();
     await expect(page.getByTestId('thread')).toContainText('Extend the existing file');
-    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
-    const spec = JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json);
-    expect(spec).toContain('Decided with the user: Extend the existing file');
-    expect(spec).not.toContain('A new file (recommended)');
+    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json), { timeout: 30_000 }).toContain('Decided with the user: Extend the existing file');
+    expect(JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json)).not.toContain('A new file (recommended)');
   });
 
   test('a restart keeps it, and its answer carries the card on', async ({ pairedPage: page, server, api }, info) => {
-    const id = await ask(api, '[ask] Add a durable helper');
+    const id = await ask(api, '[ask-where] Add a durable helper');
     await server.restart();
     await open(page, server, id);
     // the options died with the process that asked; the words are left
@@ -644,99 +292,7 @@ test.describe('a question whose backend went away', () => {
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('thread')).toContainText('Put it beside Greet, in greet.go');
-    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
-    const spec = JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json);
-    expect(spec).toContain('Decided with the user: Put it beside Greet, in greet.go');
-  });
-});
-
-// A model that polls or sleeps while it waits on its question goes on
-// spending, and the card can run out of budget behind the question. The
-// question comes first; answering it settles the question and leaves the
-// card on its budget stop, which the board used to forget until the next
-// restart (offering a plain run in its place). Topping up runs the stage
-// again, and that run opens with the answer.
-test('a question answered behind a budget stop reaches the run the top-up starts', async ({ pairedPage: page, server, api }, info) => {
-  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-spends] Add a thrifty helper' })).json;
-  let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-  card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
-  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.needs?.kind).toBe('budget');
-  await open(page, server, c.id);
-  await expect(page.getByTestId('decision-question')).toContainText('Where should');
-  await shot(page, info, 'ask-over-budget');
-
-  await answerOption(page, isPhone(info), '1');
-  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('budget');
-  expect((await api('GET', `/api/cards/${c.id}`)).json.status).not.toBe('running');
-  if (!isPhone(info)) await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'budget');
-  await shot(page, info, 'budget-after-answer');
-
-  const stop = (await api('GET', `/api/cards/${c.id}`)).json.decision;
-  let r = await api('POST', `/api/cards/${c.id}/answer`, { ref: stop.ref, option: 'topup', against: stop.against.token });
-  if (r.status === 409 && r.json.confirm) {
-    r = await api('POST', `/api/cards/${c.id}/answer`, { ref: stop.ref, option: 'topup', against: stop.against.token, confirm: r.json.confirm });
-  }
-  expect(r.status).toBe(200);
-  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
-  const spec = JSON.stringify((await api('GET', `/api/cards/${c.id}/spec`)).json);
-  expect(spec).toContain('Decided with the user: Extend the existing file');
-});
-
-
-test.describe('a verified card', () => {
-  let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a parting helper'); } } });
-
-  // A confirm-gated answer stops on the board's own question (the TUI's
-  // y/n). The question and its buttons are drawn beside the decision, not
-  // inside its capped box: inside it they were clipped under the composer
-  // on a phone, and nobody could hand a card off by touch.
-  test('handing it off asks first, and the question can be answered by touch', async ({ pairedPage: page, server, api }, info) => {
-    await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('tab-thread').click();
-    const opt = page.getByTestId('decision-option-handoff');
-    await expect(opt).toBeVisible();
-    await opt.click();
-    const confirm = page.getByTestId('decision-confirm');
-    await expect(confirm).toBeVisible();
-    // the board's question, with its lines kept as the board wrote them
-    await expect(page.getByTestId('decision-confirm-question')).toContainText(/Hand off “.+”/);
-    await expect(page.getByTestId('decision-confirm-question')).toHaveCSS('white-space', 'pre-line');
-    await expect(confirm).toBeFocused();
-    await shot(page, info, 'handoff-confirm');
-    // both buttons are on screen and nothing stands over them
-    for (const tid of ['decision-confirm-no', 'decision-confirm-yes']) {
-      const b = page.getByTestId(tid);
-      await expect(b).toBeInViewport({ ratio: 1 });
-      const hit = await b.evaluate((el) => {
-        const r = el.getBoundingClientRect();
-        const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        return !!at && (at === el || el.contains(at));
-      });
-      expect(hit, `${tid} is the element under its own centre`).toBe(true);
-    }
-    if (isPhone(info)) await page.getByTestId('decision-confirm-yes').tap();
-    else await page.getByTestId('decision-confirm-yes').click();
-    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage).toBe('done');
-    await expect(page.getByTestId('decision-confirm')).toHaveCount(0);
-  });
-
-  // A commit after verify passed is work no check has run on: the stop
-  // stops offering the landing and offers a re-verify, which runs the
-  // checks on the new tip and brings the landing back.
-  test('a commit after verify asks for a re-verify, not a landing', async ({ pairedPage: page, server, workspace }, info) => {
-    test.skip(isPhone(info), 'the decision is the same on every face');
-    const tree = workspace.worktree(id);
-    fs.writeFileSync(path.join(tree, 'unverified.txt'), 'added after verify\n');
-    await workspace.git('-C', tree, 'add', 'unverified.txt');
-    await workspace.git('-C', tree, 'commit', '-q', '-m', 'after verify');
-    await open(page, server, id);
-    await expect(page.getByTestId('decision-option-reverify')).toBeVisible();
-    await expect(page.getByTestId('decision-option-advance')).toHaveCount(0);
-    await shot(page, info, 'verify-branch-moved');
-    await page.getByTestId('decision-option-reverify').click();
-    await expect(page.getByTestId('decision-option-advance')).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId('decision-option-reverify')).toHaveCount(0);
+    await expect.poll(async () => JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json), { timeout: 30_000 }).toContain('Decided with the user: Put it beside Greet, in greet.go');
   });
 });
 
@@ -745,9 +301,7 @@ test.describe('a verified card', () => {
 // must carry its own way to send them.
 test('a phone sends a multi-pick answer from the docked bar', async ({ pairedPage: page, server, api }, info) => {
   test.skip(!isPhone(info), 'the docked bar is the phone’s');
-  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-multi] Add a plural helper' })).json;
-  let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-  card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+  const c = (await api('POST', '/api/cards', { kind: 'freeform', title: '[ask-multi] Add a plural helper' })).json;
   await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.multi).toBe(true);
   await open(page, server, c.id);
   await showTab(page, 'diff');

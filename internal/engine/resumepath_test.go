@@ -42,80 +42,6 @@ func TestResumeSessionPathKeysOnFeatureRoleFlavor(t *testing.T) {
 	}
 }
 
-// TestNewAgentSessionStampsResumePath proves every stage session's
-// SessionOpts carries ResumePath, derived the same way resumeSessionPath
-// does, and that a rebase pass on an implementer-owned stage gets a path
-// different from the stage's own — the flavor collision this feature
-// exists to avoid.
-func TestNewAgentSessionStampsResumePath(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "impl", domain.StageImplement)
-	createFeature(t, store, f)
-	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-
-	want := resumeSessionPath(ws, f.ID, agent.RoleImplementer, flavorStage)
-	if got := rec.opts().ResumePath; got != want {
-		t.Errorf("stage ResumePath = %q, want %q", got, want)
-	}
-
-	ctx := context.Background()
-	if err := e.RunRebase(ctx, f, []string{"main.go"}); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-
-	rebasePath := rec.opts().ResumePath
-	if rebasePath == "" {
-		t.Fatal("rebase ResumePath empty")
-	}
-	if rebasePath == want {
-		t.Fatalf("rebase ResumePath collided with the stage's own path: %q", rebasePath)
-	}
-	wantRebase := resumeSessionPath(ws, f.ID, agent.RoleImplementer, flavorRebase)
-	if rebasePath != wantRebase {
-		t.Errorf("rebase ResumePath = %q, want %q", rebasePath, wantRebase)
-	}
-}
-
-// TestFreshSpawnClearsExistingTranscript proves a stage's fresh spawn
-// unlinks any pre-existing transcript at its derived path before the
-// session starts — the fresh-context invariant a bounce or a stale
-// transcript from an unrelated attempt must not defeat.
-func TestFreshSpawnClearsExistingTranscript(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-
-	f := feature(1, "impl", domain.StageImplement)
-	withWorktree(t, wt, f)
-
-	path := resumeSessionPath(ws, f.ID, agent.RoleImplementer, flavorStage)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{"type":"session","id":"stale"}`+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
-
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("stale transcript at %s not removed before the fresh spawn: stat err = %v", path, err)
-	}
-}
-
 // TestRestoreDoesNotClearTranscript proves persist.Restore itself never
 // touches a durable transcript: it only rehydrates in-memory session
 // state from the store, so it must not call clearResumeTranscript.
@@ -125,12 +51,10 @@ func TestRestoreDoesNotClearTranscript(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
 	path := resumeSessionPath(ws, f.ID, agent.RoleImplementer, flavorStage)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -199,15 +123,13 @@ func TestInteractiveReattachAfterRestartContinuesTranscript(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	createFeature(t, store, f)
 
 	ag1 := &resumeStubAgent{Fake: agent.NewFake("Two approaches, per-device vs synced.")}
 	e1 := persistEngine(t, ag1, ws, store, wt)
-	if _, err := e1.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e1, EventIdle)
+	attach(t, e1, f)
+	waitTurn(t, e1)
 	e1.Close()
 
 	path := ag1.opts().ResumePath
@@ -224,9 +146,10 @@ func TestInteractiveReattachAfterRestartContinuesTranscript(t *testing.T) {
 	if err := e2.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e2.Attach(ctx, f); err != nil {
+	if err := e2.Freeform(f.ID).Send(ctx, "carry on"); err != nil {
 		t.Fatal(err)
 	}
+	waitTurn(t, e2)
 
 	if got := ag2.opts().ResumePath; got != path {
 		t.Fatalf("restart-reattach ResumePath = %q, want the same path %q", got, path)

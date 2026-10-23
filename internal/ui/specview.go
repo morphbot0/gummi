@@ -8,15 +8,19 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/webapi"
 )
 
 // specView is the spec surface state: one feature's design doc, shown as
@@ -36,6 +40,11 @@ type specView struct {
 	content string
 	doc     spec.Doc
 	cursor  int // 1-based source line
+	// n is which of a session's specs is open, and specs the list of them
+	// to switch between (DESIGN §25.3), each with its state, revision,
+	// runs and done-when count; both zero on any other card's document.
+	n     int
+	specs []webapi.SpecEntry
 }
 
 // specLoadedMsg delivers a (re)loaded spec document.
@@ -44,13 +53,21 @@ type specLoadedMsg struct {
 	path    string
 	content string
 	err     error
+	// n and specs are a session's: the spec loaded, and its list.
+	n     int
+	specs []webapi.SpecEntry
 }
 
-// openSpec resolves the feature's spec file — the workspace copy under
+// openSpec resolves the feature's spec file — a session's own spec file
+// directly (no draft, no migration: a session's spec is started whole, by
+// spec_start or + New spec), or for a retired workflow card, the workspace copy under
 // .gummi/specs|bugs once the feature has a worktree, the draft under
 // .gummi/state/drafts/ before then (created from the template on first
 // open).
 func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
+	if hasSessionSpec(f) {
+		return m.openSessionSpec(f)
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		// Once the worktree exists the artifact lives at its workspace
@@ -76,11 +93,121 @@ func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
 	}
 }
 
+// sessionSpecAt is which of f's specs lives at path, 1 when none is
+// found: the view is mounted on one spec's file.
+func (m *Shell) sessionSpecAt(f domain.Feature, path string) int {
+	specs, _ := m.store.SessionSpecs(context.Background(), f.ID)
+	for _, sp := range specs {
+		if filepath.Join(m.wt.Root(), filepath.FromSlash(sp.Path)) == path {
+			return sp.N
+		}
+	}
+	return 1
+}
+
+// openSessionSpec mounts a session's own spec directly — no draft, no
+// migrateDraft, no EnsureDraft: those exist to seed a retired workflow
+// card's artifact; a session's specs are started by spec_start, the web
+// page's + New spec, or + in this view (startNewSpec). It opens spec 1, or
+// the spec already open on f.
+func (m *Shell) openSessionSpec(f domain.Feature) tea.Cmd {
+	n := 1
+	if m.spec != nil && m.spec.f.ID == f.ID && m.spec.n > 0 {
+		n = m.spec.n
+	}
+	return m.loadSessionSpec(f, n)
+}
+
+// loadSessionSpec reads f's spec n and the list of f's specs.
+func (m *Shell) loadSessionSpec(f domain.Feature, n int) tea.Cmd {
+	path, _ := m.store.SessionSpecFile(context.Background(), m.wt.Root(), f.ID, n)
+	var docs *WebDocs
+	if r, ok := m.rowByID(f.ID); ok {
+		docs, _ = m.webDocsFor(r)
+	}
+	return func() tea.Msg {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return specLoadedMsg{err: err}
+		}
+		msg := specLoadedMsg{f: f, path: path, content: string(raw), n: n}
+		if docs != nil {
+			if list, err := docs.Specs(context.Background()); err == nil {
+				msg.specs = list.Specs
+			}
+		}
+		return msg
+	}
+}
+
+// startNewSpec starts a new spec on the session the spec view is open on,
+// titled from the + dialog. It is refused where the web page's + New spec
+// is (newSpecRefusal), and recorded as the person at this board, the same
+// actor the view's own edits are. The engine call runs off the update
+// loop; specStartedMsg brings the new spec's number back to it, where the
+// view is switched, since loading the view reads the board's rows.
+func (m *Shell) startNewSpec(title string) tea.Cmd {
+	sv := m.spec
+	if sv == nil {
+		return nil
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil
+	}
+	f := sv.f
+	if err := newSpecRefusal(f); err != nil {
+		return errNoticeCmd(err.Error())
+	}
+	person := m.humanActor()
+	return func() tea.Msg {
+		return m.withEngine(func(eng *engine.Engine) tea.Msg {
+			sp, _, err := eng.StartSessionSpec(context.Background(), f, title, person)
+			if err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+			return specStartedMsg{f: f, n: sp.N}
+		})
+	}
+}
+
+// specStartedMsg is a new spec started from the spec view: the view opens
+// it.
+type specStartedMsg struct {
+	f domain.Feature
+	n int
+}
+
+// switchSpec opens the session's spec delta places along its list.
+func (m *Shell) switchSpec(delta int) tea.Cmd {
+	sv := m.spec
+	if sv == nil || len(sv.specs) < 2 {
+		if sv != nil && sv.n > 0 {
+			m.notice = noticeMsg{text: sv.f.Name() + " keeps one spec"}
+		}
+		return nil
+	}
+	at := 0
+	for i, e := range sv.specs {
+		if e.N == sv.n {
+			at = i
+		}
+	}
+	next := sv.specs[clamp(at+delta, 0, len(sv.specs)-1)].N
+	if next == sv.n {
+		return nil
+	}
+	return m.loadSessionSpec(sv.f, next)
+}
+
 // reloadSpec re-reads the currently open spec from disk.
 func (m *Shell) reloadSpec() tea.Cmd {
 	sv := m.spec
 	if sv == nil {
 		return nil
+	}
+	if sv.n > 0 {
+		return m.loadSessionSpec(sv.f, sv.n)
 	}
 	return func() tea.Msg {
 		raw, err := os.ReadFile(sv.path)
@@ -98,13 +225,61 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 		return nil
 	}
 	reload := m.reloadSpec()
-	path := sv.path
+	f, path := sv.f, sv.path
 	return func() tea.Msg {
+		if err := m.sessionSpecClosed(f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
 		if err := writeSpecNote(path, line, m.now().Format("2006-01-02"), text); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := m.noteSessionSpecRevision(f, path); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return reload()
 	}
+}
+
+// noteSessionSpecRevision records a session's spec, just written to path
+// by the caller, as a new numbered revision through the engine — the
+// terminal's mirror of the web page's own writer (WebDocs.noteSessionRevision),
+// so a comment, a resolution or an $EDITOR save made here reaches a
+// open workflow run that froze it as a steer the same way a web edit does. A no-op for
+// every card that is not such a session; a static board records the
+// revision through withEngine's own short-lived engine.
+func (m *Shell) noteSessionSpecRevision(f domain.Feature, path string) error {
+	if !hasSessionSpec(f) {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	n := m.sessionSpecAt(f, path)
+	fresh := f
+	if got, ferr := m.store.GetFeature(ctx, f.ID); ferr == nil {
+		fresh = got
+	}
+	var writeErr error
+	m.withEngine(func(eng *engine.Engine) tea.Msg {
+		_, writeErr = eng.WriteSessionSpec(ctx, fresh, n, string(raw), m.humanActor())
+		return nil
+	})
+	return writeErr
+}
+
+// sessionSpecClosed refuses a write to a closed session's spec, read from
+// the store rather than the view's load-time copy — the same refusal the
+// web page's writers give (closedToReview).
+func (m *Shell) sessionSpecClosed(f domain.Feature) error {
+	if !hasSessionSpec(f) {
+		return nil
+	}
+	if got, err := m.store.GetFeature(context.Background(), f.ID); err == nil {
+		f = got
+	}
+	return closedToReview(f, "its spec takes no more edits")
 }
 
 // writeSpecNote writes one `@user` note under line of the document at
@@ -144,9 +319,15 @@ func (m *Shell) resolveSpecComment(line int, reason string) tea.Cmd {
 		return nil
 	}
 	reload := m.reloadSpec()
-	path := sv.path
+	f, path := sv.f, sv.path
 	return func() tea.Msg {
+		if err := m.sessionSpecClosed(f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
 		if err := writeSpecResolution(path, line, m.now().Format("2006-01-02"), reason, nil); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := m.noteSessionSpecRevision(f, path); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return reload()
@@ -327,14 +508,6 @@ func (d *resolveDialog) View(s *theme.Styles, w, h int) string {
 	return s.DialogFrame.Render(b.String())
 }
 
-// approveSurface leaves the active spec/diff surface and runs the same
-// gate the board's g does — advanceStage. Exactly one approve path, so
-// the two surfaces can't disagree about what "approved" means.
-func (m *Shell) approveSurface(f domain.Feature) tea.Cmd {
-	m.spec, m.diff = nil, nil
-	return m.advanceStage(f.ID)
-}
-
 // editSpec suspends the TUI and opens the doc in $EDITOR at the cursor
 // line (best effort — plain `$EDITOR file` when unknown).
 func (m *Shell) editSpec() tea.Cmd {
@@ -348,15 +521,34 @@ func (m *Shell) editSpec() tea.Cmd {
 			return noticeMsg{text: "$EDITOR is not set", isErr: true}
 		}
 	}
+	if hasSessionSpec(sv.f) {
+		if err := closedToReview(sv.f, "its spec takes no more edits"); err != nil {
+			return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
+		}
+	}
 	reload := m.reloadSpec()
-	path := sv.path
+	f, path, before := sv.f, sv.path, sv.content
 	cmd := exec.CommandContext(context.Background(), editor, path) //nolint:gosec // $EDITOR is the user's own trusted setting
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+	return tea.ExecProcess(cmd, m.specEdited(f, path, before, reload))
+}
+
+// specEdited is what follows the editor's exit: a session's spec saved
+// with a change becomes a revision, then the view reloads.
+func (m *Shell) specEdited(f domain.Feature, path, before string, reload tea.Cmd) func(error) tea.Msg {
+	return func(err error) tea.Msg {
 		if err != nil {
 			return noticeMsg{text: fmt.Sprintf("editor: %v", err), isErr: true}
 		}
+		// only a save that actually changed the file is worth a revision —
+		// an editor opened and closed untouched would otherwise spend a
+		// revision (and a run's steer) on nothing.
+		if raw, rerr := os.ReadFile(path); rerr == nil && string(raw) != before {
+			if err := m.noteSessionSpecRevision(f, path); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
+		}
 		return reload()
-	})
+	}
 }
 
 // threadAtCursor returns the thread whose markers include the cursor
@@ -373,32 +565,38 @@ func (sv *specView) threadAtCursor() *spec.Thread {
 	return nil
 }
 
-// bindings is the spec surface's key table (see keymap.go). Near enough to
-// one table: the surface has one mode, so every verb it lists is live
-// whenever the surface is — which is exactly why the one verb that can
-// stop being live, the gate crossing, is added by withGateKey rather
-// than sitting here.
+// bindings is the spec surface's key table (see keymap.go): the surface
+// has one mode, so every verb it lists is live whenever the surface is.
 func (sv *specView) bindings() []binding {
 	// Bar order is shedding order: the status bar drops hints from the
 	// second-to-last backwards and never the last, so the two rows that
 	// answer "what do I do about this document" lead, and the way out
 	// goes last where it outlives everything else (threadInputBindings
 	// keeps esc last for the same reason). Reading and annotating are
-	// what the surface is obviously for; approving it, sending it back
-	// and leaving are the rows a reader would otherwise have to go
-	// looking for.
+	// what the surface is obviously for; leaving is the row a reader
+	// would otherwise have to go looking for.
 	bs := []binding{
 		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
 		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
-		{key: "R", label: "request changes", help: "send the open comments to the architect", bar: true},
 		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 		{key: "x", label: "resolve", help: "resolve the comment thread at the cursor", bar: true},
 		{key: "n/p", label: "comments", help: "jump between comments", bar: true},
 		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
+	}
+	if len(sv.specs) > 1 {
+		bs = append(bs, binding{key: "[ ]", label: "specs", help: "the session's previous / next spec", bar: true})
+	}
+	if hasSessionSpec(sv.f) {
+		bs = append(bs, binding{key: "+", label: "new spec", help: "start a new spec on this session", bar: true})
+	}
+	if len(sv.specRuns()) > 0 {
+		bs = append(bs, binding{key: "1-9", label: "jump to run", help: "jump to the run the list's row names, in the thread, unfolded whole"})
+	}
+	bs = append(bs, []binding{
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
-	}
-	return withGateKey(sv.f, bs)
+	}...)
+	return bs
 }
 
 // handleSpecKey processes keys while the spec surface is open.
@@ -409,12 +607,24 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		m.spec = nil
 	case "e":
 		return m.editSpec()
-	case "R":
-		// request changes: send the open comments to the architect
-		return m.requestSpecChanges(sv)
-	case "g":
-		// cross the gate: leave the surface and run the board's g
-		return m.approveSurface(sv.f)
+	case "[":
+		return m.switchSpec(-1)
+	case "]":
+		return m.switchSpec(1)
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		runs := sv.specRuns()
+		i, _ := strconv.Atoi(key)
+		if i > len(runs) {
+			return nil
+		}
+		return m.jumpToRun(runs[i-1].N)
+	case "+":
+		if !hasSessionSpec(sv.f) {
+			return nil
+		}
+		m.Overlay.Push(newSpecTitleDialog(func(title string) tea.Cmd {
+			return m.startNewSpec(title)
+		}))
 	case "j", "down":
 		sv.setCursor(sv.cursor + 1)
 	case "k", "up":
@@ -513,7 +723,12 @@ func (m *Shell) specViewRender(w, h int) string {
 	// opens over a bug's report as often as over a feature's spec, and
 	// calling both "spec" renamed the document between the line that
 	// pointed at it and the header of the thing it opened.
-	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· "+artifactNoun(sv.f.Kind))
+	noun := artifactNoun(sv.f.Kind)
+	if sv.n > 0 {
+		// a session's spec, one of its list
+		noun = fmt.Sprintf("spec S%d", sv.n)
+	}
+	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· "+noun)
 	if open := sv.needsAttentionCount(); open > 0 {
 		head += " " + s.Warning.Render(fmt.Sprintf("✎ %d open", open))
 	}
@@ -531,6 +746,10 @@ func (m *Shell) specViewRender(w, h int) string {
 		b.WriteString(s.Warning.Render("  every open comment has already been answered — x resolves one that the answer addressed; R sends them back again") + "\n")
 	}
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
+	if lines := specListLines(m, sv, w); len(lines) > 0 {
+		b.WriteString(strings.Join(lines, "\n") + "\n")
+		b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
+	}
 
 	// the status header used to belong to read mode alone, which meant
 	// the mode you could actually act in was the one that never told you
@@ -543,6 +762,148 @@ func (m *Shell) specViewRender(w, h int) string {
 	used := strings.Count(b.String(), "\n")
 	b.WriteString(sv.renderSource(m, w, max(h-used-1, 3)))
 	return b.String()
+}
+
+// specListLines is a session's specs, one row each, the open one marked:
+// its title, its state, its newest revision (and the one an open run
+// froze), its runs and its done-when count (DESIGN §25.3).
+func specListLines(m *Shell, sv *specView, w int) []string {
+	if len(sv.specs) == 0 {
+		return nil
+	}
+	s := m.styles
+	out := make([]string, 0, len(sv.specs))
+	for _, e := range sv.specs {
+		lead := "  "
+		title := s.Subtle
+		if e.N == sv.n {
+			lead, title = s.Cursor.Render("▸ "), s.Title
+		}
+		state := s.Faint
+		switch e.State {
+		case "met":
+			state = s.Success
+		case "running":
+			state = s.Info
+		case "partial":
+			state = s.Warning
+		}
+		facts := []string{fmt.Sprintf("rev %d", e.Rev)}
+		if e.Frozen > 0 {
+			facts[0] += fmt.Sprintf(" (run froze rev %d)", e.Frozen)
+		}
+		switch len(e.Runs) {
+		case 0:
+		case 1:
+			facts = append(facts, fmt.Sprintf("%s · run %d", e.Runs[0].Recipe, e.Runs[0].N))
+		default:
+			facts = append(facts, fmt.Sprintf("%d runs", len(e.Runs)))
+		}
+		if e.DoneWhen > 0 {
+			facts = append(facts, fmt.Sprintf("DW %d/%d", e.Met, e.DoneWhen))
+		} else {
+			facts = append(facts, "no done-when yet")
+		}
+		row := lead + s.Faint.Render(fmt.Sprintf("S%d ", e.N)) + title.Render(padTo(sanitize(e.Title), 34)) + " " +
+			state.Render(padTo(e.State, 8)) + " " + s.Faint.Render(strings.Join(facts, " · "))
+		out = append(out, ansi.Truncate(row, max(w, 8), "…"))
+	}
+	if len(sv.specs) > 1 {
+		out = append(out, s.Faint.Render("  [ ] switch spec"))
+	}
+	return append(out, specRunLines(m, sv, w)...)
+}
+
+// specRunsShown is how many of a spec's runs its view lists, newest
+// first: one digit key each.
+const specRunsShown = 9
+
+// specRuns are the open spec's runs, newest first, as many as the view
+// lists.
+func (sv *specView) specRuns() []webapi.SpecRun {
+	var out []webapi.SpecRun
+	for _, e := range sv.specs {
+		if e.N != sv.n {
+			continue
+		}
+		for i := len(e.Runs) - 1; i >= 0 && len(out) < specRunsShown; i-- {
+			out = append(out, e.Runs[i])
+		}
+	}
+	return out
+}
+
+// specRunLines lists the open spec's runs, newest first (§25.9): the
+// digit that jumps to its block in the thread, its glyph, recipe and run,
+// its state, its checked items met, its spend and when it ended.
+func specRunLines(m *Shell, sv *specView, w int) []string {
+	runs := sv.specRuns()
+	if len(runs) == 0 {
+		return nil
+	}
+	s := m.styles
+	out := []string{s.Subtle.Render(fmt.Sprintf("  runs of S%d", sv.n)) + s.Faint.Render(" · a digit jumps to one in the thread")}
+	for i, r := range runs {
+		mark := r.Mark
+		if mark == "" {
+			mark = "·"
+		}
+		facts := []string{fmt.Sprintf("%s · run %d", r.Recipe, r.N), r.State}
+		if r.Checked > 0 {
+			facts = append(facts, fmt.Sprintf("met %d/%d", r.Met, r.Checked))
+		}
+		facts = append(facts, domain.FormatDollars(r.Spent))
+		if !r.Ended.IsZero() {
+			facts = append(facts, "ended "+endedWhen(r.Ended, m.now()))
+		}
+		row := "  " + s.KeyHint.Render(strconv.Itoa(i+1)) + " " + specRunStyle(s, r.State).Render(mark) + " " + s.Subtle.Render(sanitize(strings.Join(facts, " · ")))
+		out = append(out, ansi.Truncate(row, max(w, 8), "…"))
+	}
+	return out
+}
+
+// specRunStyle colours a listed run's glyph by its state.
+func specRunStyle(s *theme.Styles, state string) lipgloss.Style {
+	switch domain.RunState(state) {
+	case domain.RunDone:
+		return s.Success
+	case domain.RunPartial:
+		return s.Warning
+	case domain.RunRunning, domain.RunPaused:
+		return s.Info
+	}
+	return s.Faint
+}
+
+// endedWhen is when a run ended, as a list says it: the time today, else
+// the day and the time.
+func endedWhen(t, now time.Time) string {
+	t, now = t.Local(), now.Local()
+	if y, mo, d := t.Date(); y == now.Year() && mo == now.Month() && d == now.Day() {
+		return t.Format("15:04")
+	}
+	return t.Format("Jan 2 15:04")
+}
+
+// jumpToRun leaves the spec for the thread and jumps to run n's block, as
+// alt+w does, unfolded whole: the run a spec's list row names.
+func (m *Shell) jumpToRun(n int) tea.Cmd {
+	r, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	var cmd tea.Cmd
+	m.spec, m.diff, m.stats, m.logv = nil, nil, nil, nil
+	if !m.cardOpen {
+		cmd = m.openCard()
+	}
+	if m.wf.folds == nil {
+		m.wf.folds = map[string]bool{}
+	}
+	m.wf.folds[runFoldKey(r.F.ID, n)] = false
+	m.wf.focus, m.wf.cursor, m.wf.jump = true, runTarget{n: n}, true
+	m.threadScroll = 0
+	return cmd
 }
 
 // reviewerMarker returns the last unresolved `@reviewer` marker in a
@@ -654,7 +1015,6 @@ func (sv *specView) needsAttentionCount() int {
 func (sv *specView) renderStatus(m *Shell, w int) string {
 	s := m.styles
 	var b strings.Builder
-	b.WriteString(sv.renderDependencyStatus(m, w))
 
 	var blocking, reviewed, agentNotes []spec.Thread
 	for _, t := range sv.doc.OpenQuestions() {
@@ -713,49 +1073,6 @@ func (sv *specView) renderStatus(m *Shell, w int) string {
 	// gate's vocabulary; what the reader needs to know is that nothing is
 	// waiting on them.
 	renderThreadGroup("prompts the stages will answer — nothing waiting on you", agentNotes, nil)
-	return b.String()
-}
-
-// renderDependencyStatus renders each direct dependency of the spec's
-// feature with its live status — ID, current stage, and whether it is done
-// or still pending — resolved from the dependency store at render, plus an
-// all-done line when every dependency is Done. Returns empty when there is
-// no store or no dependencies, so it composes cleanly onto the read view.
-func (sv *specView) renderDependencyStatus(m *Shell, w int) string {
-	if m.store == nil {
-		return ""
-	}
-	ctx := context.Background()
-	ids, err := m.store.ListDependencies(ctx, sv.f.ID)
-	if err != nil || len(ids) == 0 {
-		return ""
-	}
-	s := m.styles
-	var b strings.Builder
-	b.WriteString(s.Subtitle.Render("Dependencies") + "\n")
-	allDone := true
-	for _, id := range ids {
-		dep, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return ""
-		}
-		done := dep.Stage == domain.StageDone
-		if !done {
-			allDone = false
-		}
-		mark := s.Warning.Render("◌")
-		status := s.Warning.Render("pending")
-		if done {
-			mark = s.Success.Render("✔")
-			status = s.Success.Render("done")
-		}
-		line := fmt.Sprintf("  %s %s @ %s · %s",
-			mark, s.Base.Render(string(id)), s.Base.Render(string(dep.Stage)), status)
-		b.WriteString(ansi.Truncate(line, w, "…") + "\n")
-	}
-	if allDone {
-		b.WriteString(s.Success.Render("  all dependencies done") + "\n")
-	}
 	return b.String()
 }
 

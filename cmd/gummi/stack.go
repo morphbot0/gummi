@@ -26,13 +26,13 @@ func runStackNew(fl cliFlags, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("stack new takes exactly one card")
 	}
-	env, err := openDepsEnv()
+	env, err := openCardEnv()
 	if err != nil {
 		return err
 	}
 	defer env.cleanup()
 	ctx := context.Background()
-	bottom, err := resolveDepsID(ctx, env.store, args[0])
+	bottom, err := resolveCardID(ctx, env.store, args[0])
 	if err != nil {
 		return err
 	}
@@ -49,14 +49,14 @@ func runStackAdd(fl cliFlags, args []string) error {
 	if len(args) != 2 {
 		return fmt.Errorf("stack add takes a stack and a card")
 	}
-	env, err := openDepsEnv()
+	env, err := openCardEnv()
 	if err != nil {
 		return err
 	}
 	defer env.cleanup()
 	ctx := context.Background()
 	id := domain.StackID(args[0])
-	card, err := resolveDepsID(ctx, env.store, args[1])
+	card, err := resolveCardID(ctx, env.store, args[1])
 	if err != nil {
 		return err
 	}
@@ -73,13 +73,13 @@ func runStackRm(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("stack rm takes exactly one card")
 	}
-	env, err := openDepsEnv()
+	env, err := openCardEnv()
 	if err != nil {
 		return err
 	}
 	defer env.cleanup()
 	ctx := context.Background()
-	card, err := resolveDepsID(ctx, env.store, args[0])
+	card, err := resolveCardID(ctx, env.store, args[0])
 	if err != nil {
 		return err
 	}
@@ -107,13 +107,13 @@ func runStackMv(args []string) error {
 	if _, err := fmt.Sscanf(args[1], "%d", &pos); err != nil {
 		return fmt.Errorf("%q is not a position", args[1])
 	}
-	env, err := openDepsEnv()
+	env, err := openCardEnv()
 	if err != nil {
 		return err
 	}
 	defer env.cleanup()
 	ctx := context.Background()
-	card, err := resolveDepsID(ctx, env.store, args[0])
+	card, err := resolveCardID(ctx, env.store, args[0])
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func runStackMv(args []string) error {
 // runStackList implements `gummi stack list [<stack>]`: every stack, or
 // the members of one.
 func runStackList(args []string) error {
-	env, err := openDepsEnv()
+	env, err := openCardEnv()
 	if err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func resolveStackID(ctx context.Context, store *state.Store, arg string) (domain
 	if _, err := store.GetStack(ctx, domain.StackID(arg)); err == nil {
 		return domain.StackID(arg), nil
 	}
-	card, err := resolveDepsID(ctx, store, arg)
+	card, err := resolveCardID(ctx, store, arg)
 	if err != nil {
 		return "", fmt.Errorf("%q is neither a stack nor a card", arg)
 	}

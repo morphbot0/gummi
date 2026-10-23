@@ -2,20 +2,18 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // TestAnAgentRunsInItsHome: an agent's working directory is its home — a
 // directory of its own under .gummi/homes, not the workspace's repository
-// — what a turn writes stays there, and the hint says so. It may not
-// delegate: it holds no branch for a card to fork from.
+// — what a turn writes stays there, and the hint says so. What it may
+// not do is refused by the engine, in its own words.
 func TestAnAgentRunsInItsHome(t *testing.T) {
 	var workDir string
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
@@ -70,18 +68,7 @@ func TestAnAgentRunsInItsHome(t *testing.T) {
 		t.Errorf("a main-checkout hint reached an agent:\n%s", joined)
 	}
 
-	// what an agent may not do is refused by the engine, in its own words,
-	// and before anything is spent
-	if err := e.SetDelegation(ctx, f.ID, domain.Delegation{Budget: 500}); err == nil || !strings.Contains(err.Error(), "is an agent") {
-		t.Errorf("SetDelegation = %v, want the agent refusal", err)
-	}
-	turns := fmt.Sprint(ag.SessionSendCounts())
-	if err := e.StartHandoffBrief(ctx, f.ID); err == nil || !strings.Contains(err.Error(), "is an agent") {
-		t.Errorf("StartHandoffBrief = %v, want the agent refusal", err)
-	}
-	if got := fmt.Sprint(ag.SessionSendCounts()); got != turns {
-		t.Errorf("the refused brief spent a turn (%s -> %s)", turns, got)
-	}
+	// what an agent may not do is refused by the engine, in its own words
 	if _, err := e.SetRepo(ctx, f.ID, ""); err == nil || !strings.Contains(err.Error(), "is an agent") {
 		t.Errorf("SetRepo = %v, want the agent refusal", err)
 	}

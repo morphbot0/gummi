@@ -41,9 +41,6 @@ const (
 	ItemDecision ItemType = "decision"
 	// ItemNote is gummi's own narration: a pause, a hand-off.
 	ItemNote ItemType = "note"
-	// ItemStretch marks where an autopilot stretch opened or closed, with
-	// its label and tally.
-	ItemStretch ItemType = "stretch"
 )
 
 // Item is one entry in a card's thread.
@@ -77,21 +74,11 @@ type Item struct {
 	// Exited, Verdict and Credits close a stage divider once its stage
 	// exited (a verify item carries Exited and Verdict too); Outcome is
 	// the divider's mark, "ok", "fail" or "" for neutral.
-	Exited  bool    `json:"exited,omitempty"`
-	Verdict string  `json:"verdict,omitempty"`
-	Credits float64 `json:"credits,omitempty"`
-	Outcome string  `json:"outcome,omitempty"`
-	// Label and Tally describe a stretch marker ("autopilot", "3 gates").
-	// Edge is "open" or "close"; a closing marker says How the stretch
-	// ended and the Reason its closing event gave. Mode is the autopilot
-	// mode the stretch ran in.
-	Label  string     `json:"label,omitempty"`
-	Tally  string     `json:"tally,omitempty"`
-	Edge   string     `json:"edge,omitempty"`
-	How    string     `json:"how,omitempty"`
-	Reason string     `json:"reason,omitempty"`
-	Mode   string     `json:"mode,omitempty"`
-	Tools  []ToolCall `json:"tools,omitempty"`
+	Exited  bool       `json:"exited,omitempty"`
+	Verdict string     `json:"verdict,omitempty"`
+	Credits float64    `json:"credits,omitempty"`
+	Outcome string     `json:"outcome,omitempty"`
+	Tools   []ToolCall `json:"tools,omitempty"`
 	// Items is an activity item's run, oldest first: tools items and
 	// thinking messages.
 	Items   []Item     `json:"items,omitempty"`
@@ -100,6 +87,8 @@ type Item struct {
 	// Decision is the decision a decision item raised, with Answer set once
 	// someone answered it.
 	Decision *ThreadDecision `json:"decision,omitempty"`
+	// Run is a run item's block (ItemRun).
+	Run *RunBlock `json:"run,omitempty"`
 	// Supersedes holds the keys of items this one takes the place of: the
 	// decisions a receipt answered. A page that drew one of them while it
 	// waited drops it — a paged read (after=) never sends an item that is
@@ -283,6 +272,10 @@ type Conversation struct {
 	// Objective is a freeform session's objective (DESIGN §19.11), absent
 	// when it has none: the strip above the composer draws it.
 	Objective *Objective `json:"objective,omitempty"`
+	// Runs places the session's workflow runs among Turns, where each was
+	// proposed (threadfold.RunPlace): a run proposed before the first of
+	// them is not here, and stands among the thread's settled items.
+	Runs []RunPlace `json:"runs,omitempty"`
 }
 
 // Objective is what a session keeps going toward, and where it stands.
@@ -298,15 +291,6 @@ type Objective struct {
 	Note string `json:"note,omitempty"`
 	// Auditing is true while the turn that just ended is being judged.
 	Auditing bool `json:"auditing,omitempty"`
-}
-
-// DelegationRequest is POST /api/cards/{id}/delegation's body: the
-// credits a freeform card's session may give cards it creates (zero
-// withdraws the delegation), and whether the person stops being asked
-// about each one.
-type DelegationRequest struct {
-	Budget     int  `json:"budget"`
-	ConfirmAll bool `json:"confirm_all"`
 }
 
 // RewindRequest is POST /api/cards/{id}/rewind's body: how many of the

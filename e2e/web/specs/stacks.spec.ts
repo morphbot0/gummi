@@ -13,13 +13,24 @@ let ids: { wave: string; shrug: string; nod: string };
 test.use({
   seed: {
     run: async (ws) => {
-      const wave = await ws.seedVerified('Add a wave helper');
-      const shrug = await ws.seedVerified('Add a shrug helper');
-      const nod = await ws.seedDesignGate('Add a nod helper');
+      const wave = await ws.seedReady('Add a wave helper');
+      const shrug = await seedOwnFile(ws, 'Add a shrug helper', 'shrug.txt');
+      const nod = await seedOwnFile(ws, 'Add a nod helper', 'nod.txt');
       ids = { wave, shrug, nod };
     },
   },
 });
+
+// a session whose commit is a file of its own rather than the NOTES.md
+// every scripted turn appends to, so a card replayed onto another does
+// not conflict with it
+async function seedOwnFile(ws: Workspace, title: string, file: string): Promise<string> {
+  const id = await ws.seedSession(title);
+  const tree = ws.worktree(id);
+  await ws.exec('git', ['rm', '-q', '--cached', 'NOTES.md'], { cwd: tree });
+  await ws.exec('sh', ['-c', `rm -f NOTES.md && echo "${title}" > ${file} && git add ${file} && git commit -q -m "feat: ${title.toLowerCase()}"`], { cwd: tree });
+  return id;
+}
 
 async function openStacks(page: Page) {
   await page.getByTestId('rail-more').click();
@@ -96,7 +107,7 @@ test('a stack is started, grown, reordered, trimmed and restacked', async ({ pai
   // the workspace's repository has no remote: the line says there is
   // nothing to push, rather than naming an origin that is not there
   await expect(box.getByTestId('stack-push-line').first()).toContainText('no remote is configured');
-  await expect(box.getByTestId('stack-push-line').first()).toContainText('feat/add-a-shrug-helper');
+  await expect(box.getByTestId('stack-push-line').first()).toContainText('ff/add-a-shrug-helper');
   await expect(box.getByTestId('stack-push-line').first()).not.toContainText('origin');
   await box.getByTestId('stack-push-copy').first().click();
   await expect(page.getByTestId('toast').filter({ hasText: /copied|selected/ })).toHaveCount(1);

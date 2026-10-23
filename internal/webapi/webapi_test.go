@@ -38,14 +38,13 @@ func TestBoardShape(t *testing.T) {
 			},
 			{
 				ID: "BG-003", Kind: "bug", Type: "Bug", Title: "Crash on empty board", Stage: "implement", Status: StatusRunning,
-				Running: &RowRunning{Verb: "editing board.go", Autopilot: true},
-				Spend:   3, Envelope: 500, Severity: "high", Autopilot: true,
-				Goal: &RowGoal{ID: "GL-001", Title: "Stable board"}, Waits: []string{"FD-010"},
+				Running: &RowRunning{Verb: "editing board.go"},
+				Spend:   3, Envelope: 500, Severity: "high",
+				Waits: []string{"FD-010"},
 			},
 			{ID: "FD-001", Kind: "feature", Type: "Feature", Title: "Landed thing", Stage: "done", Status: StatusDone, Landed: true, PR: "#12 merged"},
 			{ID: "FF-020", Kind: "freeform", Type: "Agent", Title: "Watch the nightly CI", Stage: "open", Status: StatusIdle, Home: ".gummi/homes/FF-020"},
 		},
-		Resume:  &ResumeOffer{Cards: []CardRef{{ID: "FD-012", Title: "Dark mode", Stage: "plan"}}, Since: "3m ago", At: at},
 		EventID: "1760000000000042",
 	}))
 }
@@ -81,7 +80,6 @@ func TestThreadShape(t *testing.T) {
 			{Key: "msg-5", Seq: 5, T: ItemMessage, Time: at, Text: "The plan is **ready**."},
 			{Key: "rcpt-6", Seq: 6, T: ItemReceipt, Time: at, Receipt: &Receipt{Kind: "gate", OK: true, Text: "design approved", By: "Simon"}, Supersedes: []string{"ev:5"}},
 			{Key: "rcpt-7", Seq: 7, T: ItemReceipt, Time: at, Receipt: &Receipt{Kind: "park", Text: "Simon parked it", By: "Simon"}},
-			{Key: "stretch-8", Seq: 8, T: ItemStretch, Time: at, Label: "autopilot", Tally: "2 gates crossed"},
 			{Key: "verify-9", Seq: 9, T: ItemVerify, Time: at, Checks: []CheckRun{{Name: "build", Cmd: "go build ./...", OK: false, Ms: 900, Output: "boom"}}},
 		},
 		Live:    &Live{Busy: true, Verb: "thinking", Since: at, Spent: 1.25, State: "running"},
@@ -177,25 +175,6 @@ func TestChangeKey(t *testing.T) {
 	}
 }
 
-// TestWritespecShapes pins what the writespec flow puts on the wire: the
-// request field the edited brief rides in (it has one of its own — Message
-// carries the title, and a multi-paragraph brief is not an input any other
-// action takes), and the draft the dialog fetches once at open, labeled by
-// where it came from.
-func TestWritespecShapes(t *testing.T) {
-	golden.RequireEqual(t, marshal(t, struct {
-		Request  ActionRequest
-		Live     WritespecDraft
-		Cold     WritespecDraft
-		Drafting WritespecDraft
-	}{
-		Request:  ActionRequest{Message: "Configurable sync retries", Brief: "asked\n- why the retry test flakes\n\ndecided\n- retry twice", Number: &[]int{300}[0]},
-		Live:     WritespecDraft{Brief: "asked\n- why the retry test flakes\n\ndecided\n- retry twice\n\ndone\n- the loop retries twice\n\nremaining\n- make the count configurable", Source: "live"},
-		Cold:     WritespecDraft{Brief: "asked:\n- rewrite the retry loop", Source: "assembled"},
-		Drafting: WritespecDraft{Drafting: true},
-	}))
-}
-
 // TestMemoryShape pins the fields the page reads for a freeform card's
 // project memory: the three documents, each a path and its content, and
 // the none-answer a workflow card gets.
@@ -217,25 +196,16 @@ func TestMemoryShape(t *testing.T) {
 	}))
 }
 
-// The new-card form's adopt list reads each branch's adoptability beside
-// the branch list itself.
+// TestFormShape: the new-card form's choices.
 func TestFormShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, Form{
-		Kinds:      []Choice{{Value: "feature", Label: "Feature"}},
-		Profiles:   []string{"balanced"},
-		Repos:      []string{},
-		Severities: []string{"high"},
-		Branches:   []string{"main", "feat/dark", "fd-001-wave", "stale"},
-		Adoptable: []AdoptChoice{
-			{Branch: "main", Why: "the branch it lands on"},
-			{Branch: "feat/dark"},
-			{Branch: "fd-001-wave", Why: "FD-001 has it", Held: "FD-001"},
-			{Branch: "stale", Why: "no commits past main"},
-		},
-		Stackable:  []CardRef{},
-		Dependable: []CardRef{},
-		Envelope:   2000,
-		Sessions:   SessionModels{Default: SessionModel{Backend: "copilot", Model: "gpt-5"}, Agents: []SessionAgent{}, Recent: []SessionModel{}},
+		Kinds:     []Choice{{Value: "freeform", Label: "Session"}},
+		Profiles:  []string{"balanced"},
+		Repos:     []string{},
+		Branches:  []string{"main", "feat/dark", "fd-001-wave", "stale"},
+		Stackable: []CardRef{},
+		Envelope:  2000,
+		Sessions:  SessionModels{Default: SessionModel{Backend: "copilot", Model: "gpt-5"}, Agents: []SessionAgent{}, Recent: []SessionModel{}},
 	}))
 }
 

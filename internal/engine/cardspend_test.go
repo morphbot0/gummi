@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // The card's running total is carried on the session so a render can
@@ -30,19 +29,17 @@ func TestCardSpentTracksTheStoreRow(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	createFeature(t, store, f)
 	// earlier stages already spent against this card's envelope
 	if err := store.AddSpend(ctx, f.ID, 300, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateDone)
+	attach(t, e, f)
+	waitIdle(t, e, "FF-001")
 
-	cur, err := store.GetFeature(ctx, "FD-001")
+	cur, err := store.GetFeature(ctx, "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +47,7 @@ func TestCardSpentTracksTheStoreRow(t *testing.T) {
 	if want != 306.5 {
 		t.Fatalf("store row = %v, want 300 carried + 6.5 spent", want)
 	}
-	if got := e.Get("FD-001").CardSpent(); got != want {
+	if got := liveSession(e, "FF-001").CardSpent(); got != want {
 		t.Errorf("CardSpent() = %v, want %v (the store's running total)", got, want)
 	}
 }
@@ -68,15 +65,12 @@ func TestCardSpentSeededForInteractiveChat(t *testing.T) {
 	})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "chat", domain.StagePlan)
+	f := freeformCard(1, "chat")
 	createFeature(t, store, f)
 	if err := store.AddSpend(context.Background(), f.ID, 120, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	s, err := e.Attach(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := attach(t, e, f)
 	if got := s.CardSpent(); got != 120 {
 		t.Errorf("CardSpent() on attach = %v, want 120 (the card's spend so far)", got)
 	}

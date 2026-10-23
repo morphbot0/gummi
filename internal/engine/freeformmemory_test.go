@@ -353,23 +353,6 @@ func TestMemoryRefusesAnOversizeWrite(t *testing.T) {
 	}
 }
 
-// TestMemoryToolsAreRefusedOutsideFreeform: a stage session's durable
-// context carrier is the spec, and the memory tools belong to no stage —
-// the dispatch refuses them the way it refuses watch on a stage.
-func TestMemoryToolsAreRefusedOutsideFreeform(t *testing.T) {
-	e := newEngine(t, agent.NewFake("ack"))
-	ctx := context.Background()
-	s, err := e.Attach(ctx, feature(1, "spec work", domain.StagePlan))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{memoryReadToolName, memoryWriteToolName} {
-		if got := driveMemoryTool(t, e, s, name, `{"which":"memory","content":"x"}`); !strings.Contains(got, "only available in a freeform session") {
-			t.Errorf("%s on a stage session resolved %q", name, got)
-		}
-	}
-}
-
 // TestMemoryMigratesTheFormerPlanName: a card whose session memory still
 // sits in plan.md keeps it — the first tool read, the first write and
 // the spawn hint all move the file to memory.md before touching it, and
@@ -456,7 +439,7 @@ func TestMemoryMigratesTheFormerPlanName(t *testing.T) {
 func TestAFreeformMCPEndpointAdvertisesMemory(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f := domain.Feature{ID: "FF-001", Stage: domain.StageOpen, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, memoryReadTool(), memoryWriteTool())
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f, memoryReadTool(), memoryWriteTool())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -100,21 +100,3 @@ func (s Stage) SuperState() SuperState {
 	}
 	return SuperTodo
 }
-
-// AtOrPastCoding reports whether st is the coding stage or beyond — the
-// point at which a card's dependencies are considered settled and it may
-// no longer take on new ones. Kind is orthogonal: one stage list covers
-// both features and bugs. The dependency gate and the TUI dependency
-// picker share this single definition.
-func AtOrPastCoding(st Stage) bool {
-	switch st {
-	case StageImplement, StageVerify, StageDone:
-		return true
-	case StageOpen:
-		// A freeform card is coding from the moment it is minted, so its
-		// dependencies are settled from then too: there is no design stage
-		// in which taking one on could still change what gets built.
-		return true
-	}
-	return false
-}

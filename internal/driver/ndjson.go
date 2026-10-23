@@ -1,91 +1,38 @@
 package driver
 
 import (
-	"encoding/json"
 	"io"
-	"sync"
 
-	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/verifydoc"
+	"github.com/morphis/gummi/internal/cardops"
 )
 
-// emitter serializes the run's event stream as NDJSON — one compact JSON
-// object per line — to w. The default stream is milestones (created,
-// stage, gate, done) plus decision boundaries (question, blocked,
-// escalation, exhausted, timeout, error); verbose additionally emits
-// per-tool-call activity lines. Writes are serialized so a concurrent
-// activity line can't interleave with a milestone.
-type emitter struct {
-	mu      sync.Mutex
-	w       io.Writer
-	verbose bool
-}
+// emitter is the run's NDJSON stream (cardops.Emitter).
+type emitter = cardops.Emitter
 
-func newEmitter(w io.Writer, verbose bool) *emitter { return &emitter{w: w, verbose: verbose} }
+func newEmitter(w io.Writer, verbose bool) *emitter { return cardops.NewEmitter(w, verbose) }
 
-// emit writes one event object as a line. A marshal error is dropped
-// rather than aborting the run — the stream is advisory, the exit code is
-// authoritative.
-func (e *emitter) emit(v any) {
-	line, err := json.Marshal(v)
-	if err != nil {
-		return
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	_, _ = e.w.Write(append(line, '\n'))
-}
-
-// The event payloads. Every object carries an "event" discriminator and,
-// where an item exists, its id. omitempty keeps optional fields off the
-// wire so the default stream stays terse.
+// The event payloads. Every object carries an "event" discriminator and
+// the session's id; omitempty keeps optional fields off the wire.
 
 type createdEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id"`
-	Ref   string `json:"ref,omitempty"`
-	// omitempty because a research card never gets a branch: every
-	// research stage is worktree-less (workflow.NeedsWorktree), so a
-	// name here would be one nothing will ever create, and a caller
-	// could act on it.
+	Event    string `json:"event"`
+	ID       string `json:"id"`
+	Ref      string `json:"ref,omitempty"`
 	Branch   string `json:"branch,omitempty"`
-	Route    string `json:"route"`
 	Envelope int    `json:"envelope"`
+	// AlwaysAllow says the session's workflow runs start without asking:
+	// `gummi run` always allows them, the envelope the only cap.
+	AlwaysAllow bool `json:"always_allow"`
 }
 
 type resumedEvent struct {
 	Event string `json:"event"`
 	ID    string `json:"id"`
 	Ref   string `json:"ref,omitempty"`
-	Stage string `json:"stage"`
 }
 
-// envelopeRaisedEvent reports a `resume --envelope N` top-up: the feature's
-// credit budget went From→To before the parked stage re-ran. Emitted only
-// when the new envelope actually exceeds the old one (a no-op raise is silent).
-// sayEvent is --say's whole answer: what the reader made of the line and
-// what the card would have done with it. Reader is false when no scribe
-// backend was configured, in which case the act is a bare resume's.
-type sayEvent struct {
-	Event    string   `json:"event"`
-	ID       string   `json:"id"`
-	Line     string   `json:"line"`
-	Reader   bool     `json:"reader"`
-	Intent   string   `json:"intent,omitempty"`
-	Action   string   `json:"action"`
-	Target   string   `json:"target,omitempty"`
-	Path     []string `json:"path,omitempty"`
-	Edit     *sayEdit `json:"edit,omitempty"`
-	Confirms bool     `json:"confirms"`
-	Reason   string   `json:"reason"`
-}
-
-type sayEdit struct {
-	Section string `json:"section"`
-	Text    string `json:"text"`
-}
-
+// envelopeRaisedEvent reports a `resume --envelope` raise, emitted only when
+// the new envelope exceeds the old one.
 type envelopeRaisedEvent struct {
 	Event string `json:"event"`
 	ID    string `json:"id"`
@@ -93,418 +40,109 @@ type envelopeRaisedEvent struct {
 	To    int    `json:"to"`
 }
 
-type stageEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Stage  string `json:"stage"`
-	Round  int    `json:"round,omitempty"`
-	Result string `json:"result,omitempty"`
-}
-
-// notedEvent reports a goal decision handed to a goal another process is
-// conducting: the row is written, that conductor acts on it, and this
-// invocation drove nothing.
-type notedEvent struct {
+// replyEvent is one finished reply of the session's agent.
+type replyEvent struct {
 	Event string `json:"event"`
 	ID    string `json:"id"`
-	What  string `json:"what"`
+	Text  string `json:"text"`
 }
 
-type gateEvent struct {
-	Event    string `json:"event"`
-	ID       string `json:"id"`
-	From     string `json:"from"`
-	To       string `json:"to"`
-	Decision string `json:"decision"`
+// workflowEvent reports a workflow run of the session changing state:
+// proposed, queued, running, paused, and its ending — done, partial,
+// stopped or denied. An ended run's report rides it.
+type workflowEvent struct {
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Run    int    `json:"run"`
+	Recipe string `json:"recipe,omitempty"`
+	Spec   int    `json:"spec,omitempty"`
+	State  string `json:"state"`
+	// Spent is what the run's steps have spent so far, in credits, from
+	// the session's envelope.
+	Spent  float64 `json:"spent"`
+	Steps  int     `json:"steps,omitempty"`
+	Report string  `json:"report,omitempty"`
 }
 
+// crewEvent is the workflow event under the name it had while crews ran
+// (§25.11), emitted beside it for one release: crew is the run's number
+// and nodes its recipe's step count; done reads "finished" and denied
+// "declined". A run has no budget of its own, so the crew's is gone.
+type crewEvent struct {
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Crew   int    `json:"crew"`
+	State  string `json:"state"`
+	Nodes  int    `json:"nodes,omitempty"`
+	Report string `json:"report,omitempty"`
+}
+
+// questionEvent is every stop that waits on a person. Kind says whose
+// question it is: "ask" (the session's ask_user); "workflow_proposal",
+// "workflow_plan", "workflow_max", "workflow_unjudged" or
+// "workflow_budget" (a workflow run's decision); "workflow_ask" (a step's own ask_user); or
+// "workflow_paused". CrewKind is the kind a crew's stop of the same sort
+// carried, emitted beside it for one release (§25.11).
 type questionEvent struct {
 	Event       string   `json:"event"`
 	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	CrewKind    string   `json:"crew_kind,omitempty"`
 	Q           string   `json:"q"`
 	Options     []string `json:"options,omitempty"`
 	Recommended string   `json:"recommended,omitempty"`
-	// FreeForm is always true: every question gummi asks takes the
-	// answerer's own words as well as its options (engine.Ask), so
-	// `--answer "<anything>"` is always a legal reply to this stop. It
-	// stays on the wire — a stream consumer reading the field learns the
-	// same thing it always did, and learns it without having to know that
-	// gummi settled the question.
-	FreeForm bool   `json:"free_form"`
+	// FreeForm is true when the person's own words are an answer too.
+	FreeForm bool `json:"free_form"`
+	// Run is the workflow run's number and Step the step's path the
+	// question is about; Crew and Node repeat them under their old names.
+	Run  int    `json:"run,omitempty"`
+	Step string `json:"step,omitempty"`
+	Crew int    `json:"crew,omitempty"`
+	Node string `json:"node,omitempty"`
+	// Decision is the id of the open decision this question stands for.
+	Decision string `json:"decision,omitempty"`
 	Resume   string `json:"resume"`
-	// Next is the copy-pasteable command that advances this stop — the exact
-	// `gummi resume <id> …` verb for this event, so a caller driving the
-	// stream never has to recall which flag a given stop takes. Free-form
-	// values (an answer, a change note) appear as a <placeholder> to fill in.
+	// Next is the copy-pasteable command that continues the run.
 	Next string `json:"next,omitempty"`
-	// Decision is the id of the durable decision_open row this question
-	// opened, so a caller can correlate the stream's checkpoint with the
-	// row `gummi status`-level tooling reads. Empty on legacy streams.
-	Decision string `json:"decision,omitempty"`
-}
-
-type gatePendingEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Resume string `json:"resume"`
-	Next   string `json:"next,omitempty"`
-	// Decision is the id of the decision_open row this checkpoint raised —
-	// the same id the eventual gate event (the crossing) carries in its
-	// payload, so a driving script can correlate the stop with its answer.
-	Decision string `json:"decision,omitempty"`
-}
-
-type blockedEvent struct {
-	Event    string `json:"event"`
-	ID       string `json:"id"`
-	Gate     string `json:"gate"`
-	OpenSpec int    `json:"open_questions,omitempty"`
-	OpenDiff int    `json:"open_diff,omitempty"`
-	// BlockingDeps names each outstanding dependency (its ID and current
-	// stage) when a coding gate is held by an unmet dependency.
-	BlockingDeps []engine.BlockingDep `json:"blocking_deps,omitempty"`
-	// Document summarizes a research card's failing citation/coverage
-	// floor when a StatusBlockedDocument gate holds the card at verify.
-	Document *documentSummary `json:"document,omitempty"`
-	// Reason carries a free-form gate message for statuses that don't fit
-	// the numeric blockers (e.g. the omission gate). Existing emits leave
-	// it zero and omitempty keeps it off the wire.
-	Reason string `json:"reason,omitempty"`
-	// Undrafted names the sections a stage left undrafted when the draft
-	// floor holds its gate shut.
-	Undrafted []string `json:"undrafted,omitempty"`
-	Resume    string   `json:"resume"`
-}
-
-// documentSummary is the NDJSON-facing shape of a verifydoc.Report: counts
-// only, so the stream stays compact — the full report is available in the
-// TUI's spec view for anyone who needs the detail.
-type documentSummary struct {
-	OpenThreads int `json:"open_threads,omitempty"`
-	Citations   int `json:"citations,omitempty"`
-	Coverage    int `json:"coverage,omitempty"`
-}
-
-// newDocumentSummary converts an engine document report to its NDJSON
-// summary.
-func newDocumentSummary(r verifydoc.Report) *documentSummary {
-	return &documentSummary{
-		OpenThreads: r.OpenThreads,
-		Citations:   len(r.Citations),
-		Coverage:    len(r.Coverage),
-	}
-}
-
-type escalationEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Stage  string `json:"stage"`
-	Reason string `json:"reason"`
-	// MintedIDs carries the FD ids a decompose partial-mint failure managed
-	// to create (and back-annotate) before it hit the error — present only
-	// on that exit, so a caller can see exactly which rows settled.
-	MintedIDs []string `json:"minted_ids,omitempty"`
-	Resume    string   `json:"resume"`
-	Next      string   `json:"next,omitempty"`
-}
-
-// decomposeProposalWire is the NDJSON-facing shape of one decompose
-// proposal — enough for an operator (or a scripted caller) to review
-// before approving, without the full draft-seed prose.
-type decomposeProposalWire struct {
-	Title     string   `json:"title"`
-	OneLiner  string   `json:"one_liner,omitempty"`
-	DependsOn []string `json:"depends_on,omitempty"`
-}
-
-// decomposeCoverageWire is the NDJSON-facing shape of one coverage entry.
-type decomposeCoverageWire struct {
-	Requirement string `json:"requirement"`
-	Feature     string `json:"feature,omitempty"`
-	Status      string `json:"status"`
-}
-
-// decomposeQuestionEvent is the RS card's verify→done decompose gate's
-// checkpoint: the architect's proposals + coverage map, awaiting
-// --approve (mint them) or --request-changes (re-run with a note). The RS
-// card stays at done throughout — this is a side-effect of the crossing,
-// never a gate the crossing itself waits on. Decision is the id of the
-// decision_open row the checkpoint raised; the eventual --approve /
-// --request-changes answer closes it with the same id.
-type decomposeQuestionEvent struct {
-	Event     string                  `json:"event"`
-	ID        string                  `json:"id"`
-	Decision  string                  `json:"decision,omitempty"`
-	Proposals []decomposeProposalWire `json:"proposals"`
-	Coverage  []decomposeCoverageWire `json:"coverage,omitempty"`
-	Resume    string                  `json:"resume"`
-	Next      string                  `json:"next,omitempty"`
-}
-
-// decomposeMintedEvent reports a successful `--approve`: every pending
-// proposal was minted into a real FD and back-annotated into its source
-// `## Slices` row, in doc order.
-type decomposeMintedEvent struct {
-	Event      string   `json:"event"`
-	ID         string   `json:"id"`
-	FeatureIDs []string `json:"feature_ids"`
-}
-
-// wireDecomposeProposals converts an IngestResult's proposals to their
-// NDJSON-facing shape, in doc order.
-func wireDecomposeProposals(res domain.IngestResult) []decomposeProposalWire {
-	out := make([]decomposeProposalWire, 0, len(res.Proposals))
-	for _, p := range res.Proposals {
-		out = append(out, decomposeProposalWire{Title: p.Title, OneLiner: p.OneLiner, DependsOn: p.DependsOn})
-	}
-	return out
-}
-
-// wireDecomposeCoverage converts an IngestResult's coverage map to its
-// NDJSON-facing shape.
-func wireDecomposeCoverage(res domain.IngestResult) []decomposeCoverageWire {
-	if len(res.Coverage) == 0 {
-		return nil
-	}
-	out := make([]decomposeCoverageWire, 0, len(res.Coverage))
-	for _, c := range res.Coverage {
-		out = append(out, decomposeCoverageWire{Requirement: c.Requirement, Feature: c.Feature, Status: string(c.Status)})
-	}
-	return out
 }
 
 type exhaustedEvent struct {
-	Event     string  `json:"event"`
-	ID        string  `json:"id"`
-	Stage     string  `json:"stage"`
-	Spent     float64 `json:"spent_credits"`
-	Envelope  int     `json:"envelope"`
-	Committed bool    `json:"committed"`
-	Resume    string  `json:"resume"`
-	Next      string  `json:"next,omitempty"`
-	// Preconditions carry probes a caller should run BEFORE acting on `next`
-	// (see resumePreconditions). Their point is to catch the "orphan gummi
-	// still running" race: a bare retry there hits ErrLocked and looks like a
-	// fresh failure. Empty when nothing is worth checking.
+	Event    string  `json:"event"`
+	ID       string  `json:"id"`
+	Spent    float64 `json:"spent_credits"`
+	Envelope int     `json:"envelope"`
+	Resume   string  `json:"resume"`
+	Next     string  `json:"next,omitempty"`
+	// Preconditions carry probes to run before acting on `next`.
 	Preconditions *resumePreconditions `json:"preconditions,omitempty"`
 }
 
 type timeoutEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id"`
-	Stage string `json:"stage"`
-	// Hint names the most likely cause (a backend stall/disconnect/auth
-	// loss rather than a gummi hang), so a caller reading the stream can act
-	// without re-diagnosing an opaque timeout.
-	Hint string `json:"hint,omitempty"`
-	// StageTimeoutUsed is the --stage-timeout value that fired, so a caller
-	// tuning it after a timeout has the misconfigured number in hand rather
-	// than guessing the default. Formatted as Go's Duration string (e.g.
-	// "20m0s"). Absent when the timeout was disabled (--stage-timeout 0).
-	StageTimeoutUsed string               `json:"stage_timeout_used,omitempty"`
-	Resume           string               `json:"resume"`
-	Next             string               `json:"next,omitempty"`
-	Preconditions    *resumePreconditions `json:"preconditions,omitempty"`
+	Event         string               `json:"event"`
+	ID            string               `json:"id"`
+	Hint          string               `json:"hint,omitempty"`
+	TimeoutUsed   string               `json:"timeout_used,omitempty"`
+	Resume        string               `json:"resume"`
+	Next          string               `json:"next,omitempty"`
+	Preconditions *resumePreconditions `json:"preconditions,omitempty"`
 }
 
-// resumePreconditions is the small set of probes a caller should run before
-// following a terminal event's `next` command. Right now it carries just
-// check_running — the shell one-liner that detects an orphan gummi process
-// still driving a card. Structured (not a free-form hint) so a programmatic
-// caller can enumerate the checks rather than parse prose.
+// resumePreconditions is the probes a caller runs before following a
+// stop's `next`: CheckRunning prints a warning when the card's recorded
+// gummi pid is still alive.
 type resumePreconditions struct {
-	// CheckRunning is a shell one-liner that prints a warning when the
-	// workspace's recorded pid is still alive — a caller should wait rather
-	// than immediately retrying `next`, which would hit ErrLocked. The pid
-	// file is a best-effort hint across concurrent drives, not a unique
-	// governor of the workspace.
 	CheckRunning string `json:"check_running,omitempty"`
 }
 
-// stoppedEvent is the --until terminal milestone: a clean early stop at the
-// named design stage, resumable. Exit 0 (a caller tells it apart from done
-// by the event, not the code).
-type stoppedEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Stage  string `json:"stage"`
-	Resume string `json:"resume"`
-	Next   string `json:"next,omitempty"`
-}
-
-type verifiedEvent struct {
+// doneEvent: the session is idle with no workflow run open.
+type doneEvent struct {
 	Event  string  `json:"event"`
 	ID     string  `json:"id"`
-	Branch string  `json:"branch"`
-	Spec   string  `json:"spec,omitempty"`
+	Branch string  `json:"branch,omitempty"`
 	Spent  float64 `json:"spent_credits"`
-	// ReviewRounds is how many times a work stage's diff was judged BY
-	// THIS INVOCATION — the critiques this process dispatched. A card
-	// driven across several `resume` calls reports a share of its total
-	// on each one, which is why the card's own running total is a
-	// separate field rather than this one.
-	ReviewRounds int `json:"review_rounds"`
-	// UnprovenFiles names the files this branch changed that no check
-	// that ran exercised, as verify itself declared them. It qualifies
-	// `verified`: a caller that reads only the verdict cannot otherwise
-	// tell a branch every check covered from one where a whole tree was
-	// never compiled. Absent when verify declared none.
-	UnprovenFiles []string `json:"unproven_files,omitempty"`
-	// CorrectiveRounds is the CARD's cumulative rework: every pass it was
-	// sent back to do again — review→fix rounds, verify bounces, conflict
-	// handoffs — persisted across processes and never reset mid-card. It
-	// is the number to read when asking "how much did this card have to
-	// be redone", and the one `gummi status` prints.
-	CorrectiveRounds int `json:"corrective_rounds"`
-	// Message reiterates the linked PR (e.g. "PR #42 — merge on GitHub, then
-	// pull main") when the card is linked; absent otherwise.
-	Message string `json:"message,omitempty"`
-	// PullRequest mirrors the linked PullRequestRef verbatim, same shape as
-	// `status --json`'s pull_request object; absent when unlinked.
+	// PullRequest mirrors a linked PR, the shape `status --json` prints.
 	PullRequest any `json:"pull_request,omitempty"`
-	// Goal is a goal's hand-over: how many done-when items were met,
-	// whether it is partial, which cards landed and which were dropped.
-	// Absent for every other kind.
-	Goal *goalDoneEvent `json:"goal,omitempty"`
 }
 
-// cardVerifiedEvent reports a goal card reaching its verified branch: its
-// goal lands it on the goal branch next. It is a notification mid-run, not
-// a terminal event — the run continues afterwards — which is why it does
-// not share a name with the `verified` the run itself ends on.
-type cardVerifiedEvent struct {
-	Event  string  `json:"event"`
-	ID     string  `json:"id"`
-	Goal   string  `json:"goal"`
-	Branch string  `json:"branch"`
-	Spent  float64 `json:"spent_credits"`
-}
-
-// mergedEvent reports a successful headless landing: the feature branch
-// reached main by Method — squash (one commit) or merge (a merge commit
-// keeping the branch's commits). Commit is the landed commit's sha — exactly
-// what the landing created — so a driving script can record which commit
-// reached main without re-reading git.
-type mergedEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Branch string `json:"branch"`
-	Commit string `json:"commit"`
-	Method string `json:"method"`
-}
-
-// committedEvent reports a successful `gummi commit`: the card's own
-// uncommitted worktree changes were committed onto its own branch. Commit is
-// the new commit's sha — exactly what CommitAll created — so a driving
-// script can record it without re-reading git. On the no-op path (worktree
-// already clean) Commit returns before emitting this event at all.
-type committedEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Branch string `json:"branch"`
-	Commit string `json:"commit"`
-}
-
-// cleanedEvent reports a successful headless cleanup: a landed card's
-// worktree and branch were removed (the card record stays as a done entry).
-type cleanedEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Branch string `json:"branch"`
-	// Cards are the goal's own cards this cleanup took with it, and Kept
-	// the ones it left standing because they carry work no merge has.
-	// Both are empty for every card but a goal (Engine.CleanGoalCards).
-	Cards []string `json:"cards,omitempty"`
-	Kept  []string `json:"kept,omitempty"`
-	// BranchKept marks a clean that deliberately left the card's branch
-	// alone: gummi did not cut it (DESIGN §10 D22), or the card was closed
-	// without landing or pushing and the branch is the only copy of its
-	// work. Absent on every ordinary clean, where the branch went with the
-	// worktree.
-	BranchKept bool `json:"branch_kept,omitempty"`
-}
-
-// handedOffEvent reports a successful `gummi handoff`: the card moved to
-// done with its branch deliberately left where it is. Branch names what
-// the caller now owns — the whole point of the verb is that gummi is not
-// going to merge it, so a driving script needs the name to push, PR or
-// cherry-pick it.
-type handedOffEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Branch string `json:"branch"`
-}
-
-// squashedEvent reports a successful `gummi squash`: the card's branch was
-// rewritten, in place, to one commit. BeforeSHA/AfterSHA/BaseSHA let a
-// driving script audit exactly what moved without re-reading git; on the
-// no-op path (branch already collapsed) Squash returns before emitting this
-// event at all.
-type squashedEvent struct {
-	Event          string `json:"event"`
-	ID             string `json:"id"`
-	Branch         string `json:"branch"`
-	BeforeSHA      string `json:"before_sha"`
-	AfterSHA       string `json:"after_sha"`
-	BaseSHA        string `json:"base_sha"`
-	MessageSubject string `json:"message_subject"`
-}
-
-type errorEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id,omitempty"`
-	Error string `json:"error"`
-	// Resumable is true when the failure left a durable, non-terminal
-	// feature card behind (earlier stages committed real progress) — the
-	// error's exit code is still 1, but a `resume <id>` may finish it. Stage
-	// is that card's parked stage. Both are absent when the failure happened
-	// before an id existed (creation/validation) or the card is terminal.
-	Resumable bool   `json:"resumable"`
-	Stage     string `json:"stage,omitempty"`
-	// Hint is a short remediation note when the error looks like a backend
-	// disconnect, stall, or auth failure — absent otherwise.
-	Hint string `json:"hint,omitempty"`
-	// Next is the resume command to retry, present only when Resumable (a
-	// durable non-terminal card exists); absent for pre-id setup failures.
-	Next string `json:"next,omitempty"`
-}
-
-type activityEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id"`
-	Stage string `json:"stage"`
-	Line  string `json:"line"`
-}
-
-// checkpointFailedEvent reports a checkpoint commit failure that did not
-// stop the stage — the failure carries no resume/next: the stage isn't
-// stopped, so there is nothing to resume.
-type checkpointFailedEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id"`
-	Stage string `json:"stage"`
-	Error string `json:"error"`
-}
-
-// activity emits a per-tool-call line, only under verbose.
-func (e *emitter) activity(id, stage, line string) {
-	if !e.verbose {
-		return
-	}
-	e.emit(activityEvent{Event: "activity", ID: id, Stage: stage, Line: line})
-}
-
-// askLabels flattens an Ask's options to their labels, for the question
-// event's options array.
-func askLabels(a *engine.Ask) []string {
-	if a == nil {
-		return nil
-	}
-	out := make([]string, 0, len(a.Options))
-	for _, o := range a.Options {
-		out = append(out, o.Label)
-	}
-	return out
-}
+// errorEvent is a failure on the stream (cardops.ErrorEvent).
+type errorEvent = cardops.ErrorEvent

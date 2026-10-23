@@ -44,9 +44,9 @@ async function commitOn(ws: Workspace, id: string, subject: string): Promise<voi
   }
 }
 
-test.describe('a verified card on a repository with a github.com remote', () => {
+test.describe('a session on a repository with a github.com remote', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedVerified('Add a wave helper'); } } });
+  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedReady('Add a wave helper'); } } });
 
   test('is opened as a pull request, updated and readied from the page', async ({ pairedPage: page, server, api, workspace }, info) => {
     test.setTimeout(120_000);
@@ -92,37 +92,28 @@ test.describe('a verified card on a repository with a github.com remote', () => 
     await expect(page.getByTestId('pr-publish')).toContainText('ready for review');
     await shot(page, info, 'publish-4-opened');
 
-    // a commit made since is not on GitHub, and it is not verified: the
-    // one push on offer returns the ready PR to draft first
+    // a commit made since is not on GitHub: the one push on offer takes
+    // it there
     await commitOn(workspace, id, 'Fix a typo by hand');
     await page.getByTestId('pr-refresh').click();
     await expect(page.getByTestId('pr-publish')).toContainText('1 commit not on GitHub', { timeout: 15_000 });
     await shot(page, info, 'publish-5-unpushed');
     await page.getByTestId('pr-publish').getByRole('button').first().click();
     await expect(dialog).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('publish-confirm')).toHaveText('Push and return to draft');
+    await expect(page.getByTestId('publish-confirm')).toHaveText('Push');
     await page.getByTestId('publish-details').locator('summary').click();
     await shot(page, info, 'publish-6-update');
     await page.getByTestId('publish-confirm').click();
     await expect(dialog).toHaveCount(0, { timeout: 30_000 });
     expect(await remoteTip(workspace, branch)).toBe(await tipOf(workspace, id));
-    expect(workspace.ghCalls().some((a) => a[0] === 'pr' && a[1] === 'ready' && a.includes('--undo'))).toBe(true);
-    await expect(page.getByTestId('pr-publish')).toContainText('draft', { timeout: 15_000 });
-    await expect(page.getByTestId('pr-publish')).not.toContainText('not on GitHub');
-
-    // the floor: a tip nobody verified is not marked ready from here, and
-    // the strip says why instead of offering it
-    await expect(page.getByTestId('pr-publish-ready')).toHaveCount(0);
-    await expect(page.getByTestId('pr-publish-why')).toContainText('is not verified');
-    const facts = (await api('GET', `/api/cards/${id}/publish?act=ready`)).json;
-    expect(facts.error?.code).toBe('not-verified');
-    expect(facts.error?.fix).toBeTruthy();
+    await expect(page.getByTestId('pr-publish')).not.toContainText('not on GitHub', { timeout: 15_000 });
     await shot(page, info, 'publish-7-updated');
 
     // the card's thread says what was published, and who did it
     const thread = JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json.items);
     expect(thread).toContain('Tester');
     expect(thread).toMatch(/#12/);
+
     if (phone(info)) await page.getByTestId('tab-thread').click();
     await shot(page, info, 'publish-8-thread');
   });
@@ -156,7 +147,7 @@ test.describe('a verified card on a repository with a github.com remote', () => 
 
 test.describe('a publish GitHub is slow to answer', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedVerified('Add a wave helper'); } } });
+  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedReady('Add a wave helper'); } } });
 
   test('says what it is waiting on, step by step', async ({ pairedPage: page, server, workspace }, info) => {
     test.setTimeout(120_000);
@@ -203,7 +194,7 @@ test.describe('a repository whose push runs a hook', () => {
     seed: {
       run: async (ws) => {
         await ws.addGitHubRemote();
-        id = await ws.seedVerified('Add a wave helper');
+        id = await ws.seedReady('Add a wave helper');
         const hook = path.join(ws.repo, '.git', 'hooks', 'pre-push');
         await fs.promises.writeFile(hook, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
       },
@@ -228,7 +219,7 @@ test.describe('a repository whose push runs a hook', () => {
 
 test.describe('a card that may not be published as it stands', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedVerified('Add a wave helper'); } } });
+  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedReady('Add a wave helper'); } } });
 
   test('is refused in the dialog, in words, with nothing to confirm', async ({ pairedPage: page, server, workspace }, info) => {
     const branch = await branchOf(workspace, id);
@@ -294,7 +285,7 @@ test.describe('a machine where gh is not signed in', () => {
     seed: {
       run: async (ws) => {
         await ws.addGitHubRemote();
-        id = await ws.seedVerified('Add a wave helper');
+        id = await ws.seedReady('Add a wave helper');
         await fs.promises.writeFile(path.join(ws.ghData, 'signed-out'), '');
       },
     },
@@ -316,7 +307,7 @@ test.describe('a card on a fork', () => {
     seed: {
       run: async (ws) => {
         await ws.addGitHubRemote();
-        id = await ws.seedVerified('Add a wave helper');
+        id = await ws.seedReady('Add a wave helper');
         await ws.setGh('repo-view.json', {
           nameWithOwner: 'e2e/tiny', viewerPermission: 'WRITE', isFork: true, parent: { name: 'tiny', owner: { login: 'upstream' } },
         });

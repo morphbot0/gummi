@@ -80,23 +80,21 @@ func TestAnAnswerReachesAQuestionWhoseBackendDied(t *testing.T) {
 	}))
 	e := newEngine(t, ag.Fake)
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	if err := e.cfg.Store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
+	attach(t, e, f)
 	waitFor(t, e, EventQuestion)
-	waitFor(t, e, EventError)
-	if e.Get(f.ID).Snapshot().PendingAsk == nil {
+	waitErr(t, e, f.ID)
+	if liveSession(e, f.ID).Snapshot().PendingAsk == nil {
 		t.Fatal("the question went with the backend")
 	}
 
 	if err := e.Answer(ctx, f.ID, "synced"); err != nil {
 		t.Fatalf("the answer was refused: %v", err)
 	}
-	waitFor(t, e, EventIdle)
+	waitTurn(t, e)
 	turns := ag.sent()
 	if len(turns) != 1 {
 		t.Fatalf("the answer reached a backend as %d turns, want 1: %q", len(turns), turns)
@@ -106,7 +104,7 @@ func TestAnAnswerReachesAQuestionWhoseBackendDied(t *testing.T) {
 			t.Errorf("the answering turn lacks %q:\n%s", want, turns[0])
 		}
 	}
-	if got := e.Get(f.ID).Snapshot(); got.PendingAsk != nil {
+	if got := liveSession(e, f.ID).Snapshot(); got.PendingAsk != nil {
 		t.Errorf("the question is still open after its answer landed: %+v", got.PendingAsk)
 	}
 	if n := len(askEvents(t, e, f.ID)); n != 1 {
@@ -120,16 +118,13 @@ func TestAnAnswerReachesAQuestionWhoseBackendDied(t *testing.T) {
 // the log and the question stay exactly as they were.
 func TestAnAnswerThatCannotLandLeavesNoRecord(t *testing.T) {
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	e := newEngine(t, agent.NewFake("ack"))
 	if err := e.cfg.Store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 	s.setPendingAsk(&Ask{
 		CallID:     "mcp-1",
 		Question:   "Persist where?",
@@ -157,86 +152,13 @@ func TestAnAnswerThatCannotLandLeavesNoRecord(t *testing.T) {
 	}
 }
 
-// A run that spends its envelope behind its question stops on its budget
-// with the question still up, and the page puts the question first. The
-// answer stands — the question closes on it — but it does not run the
-// stage again: that is the top-up's call, which widens the card's reach
-// and which autopilot may never make. The exchange opens the run the
-// top-up starts instead.
-func TestAnAnswerDoesNotRunPastABudgetStop(t *testing.T) {
-	args := askArgs(t, Ask{
-		ChangesSection: "Problem", Question: "Persist where?",
-		Options: []AskOption{{Label: "per-device"}, {Label: "synced"}},
-	})
-	var mu sync.Mutex
-	var sent []string
-	ag := &agent.Fake{Caps: agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}}
-	ag.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
-		mu.Lock()
-		defer mu.Unlock()
-		sent = append(sent, msg)
-		if len(sent) == 1 {
-			// asks, then goes on spending while the person reads
-			return []agent.Event{
-				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "call-1", Name: "ask_user", Args: args}},
-				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 200}},
-				{Kind: agent.EventIdle},
-			}
-		}
-		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
-	}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 100})
-	t.Cleanup(func() { e.Close() })
-	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StagePlan)
-	if err := store.CreateFeature(ctx, &f); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventExhausted)
-	s := e.Get(f.ID)
-	if s.Snapshot().PendingAsk == nil {
-		t.Fatal("the budget stop took the question with it")
-	}
-
-	if err := e.AnswerAs(ctx, f.ID, "synced", state.ActorAutopilot); err != nil {
-		t.Fatalf("the answer was refused: %v", err)
-	}
-	if e.Get(f.ID) != s || s.State() != StateDone {
-		t.Fatalf("the answer ran the stage past its budget stop (state %s)", e.Get(f.ID).State())
-	}
-	if s.Snapshot().PendingAsk != nil {
-		t.Error("the question is still open after its answer")
-	}
-	opens, err := store.OpenDecisions(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(opens[f.ID]) != 1 || opens[f.ID][0].Kind != state.DecisionKindBudget {
-		t.Fatalf("open decisions = %+v, want the budget stop alone", opens[f.ID])
-	}
-
-	if err := e.Run(f); err != nil { // the top-up's run
-		t.Fatal(err)
-	}
-	waitState(t, e, f.ID, StateDone)
-	mu.Lock()
-	defer mu.Unlock()
-	if len(sent) != 2 || !strings.Contains(sent[1], "The answer is: synced") {
-		t.Fatalf("the top-up's run did not open with the answer: %q", sent)
-	}
-}
-
 // Two answers to a question whose backend is gone, given at once: bringing
 // a backend up takes a while, and a second answer arriving meanwhile used
 // to find the question still open and bring up a backend of its own. One
 // answer lands; the other is told the question is no longer open.
 func TestTwoAnswersToAQuestionWhoseBackendIsGoneLandOnce(t *testing.T) {
 	ctx := context.Background()
-	f := feature(1, "Greeting prefix", domain.StagePlan)
+	f := freeformCard(1, "Greeting prefix")
 	var mu sync.Mutex
 	var turns []string
 	ag := agent.NewFake("")
@@ -247,11 +169,8 @@ func TestTwoAnswersToAQuestionWhoseBackendIsGoneLandOnce(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
 	}
 	e := newEngine(t, ag)
-	s, err := e.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	s := attach(t, e, f)
+	waitTurn(t, e)
 	s.setPendingAsk(&Ask{Question: "How should the prefix be configured?", DecisionID: "call:1:mcp-5"})
 	s.agent().Close()
 	s.clearAgent()
@@ -270,7 +189,7 @@ func TestTwoAnswersToAQuestionWhoseBackendIsGoneLandOnce(t *testing.T) {
 			failed++
 		}
 	}
-	waitFor(t, e, EventIdle)
+	waitTurn(t, e)
 	time.Sleep(100 * time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()

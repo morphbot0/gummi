@@ -13,13 +13,12 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-// A clean verify asks how the work leaves gummi, and the branch's own
+// A retired workflow card's answers are its endings, and the branch's own
 // name is in the row that keeps it — a reader about to go push something
 // should not have to derive it.
-func TestVerifyAnswerSetOffersHandOff(t *testing.T) {
+func TestALegacyCardOffersHandOff(t *testing.T) {
 	in := nextInput{
-		stage: domain.StageVerify, kind: domain.KindFeature,
-		attn: attnGate, verdict: verdictPass,
+		stage: domain.StageVerify, kind: domain.KindFeature, hasWorktree: true,
 		base: "main", branch: "gummi/FD-042-json-export",
 	}
 	acts := stageActions(in)
@@ -30,10 +29,7 @@ func TestVerifyAnswerSetOffersHandOff(t *testing.T) {
 		}
 	}
 	if keep == nil {
-		t.Fatalf("a clean verify offers no hand-off: %+v", acts)
-	}
-	if acts[0].id != "advance" {
-		t.Errorf("landing lost its place as the recommendation: %q leads", acts[0].id)
+		t.Fatalf("a retired card offers no hand-off: %+v", acts)
 	}
 	if !strings.Contains(keep.detail, "gummi/FD-042-json-export") {
 		t.Errorf("the hand-off row does not name the branch it keeps: %q", keep.detail)
@@ -43,49 +39,11 @@ func TestVerifyAnswerSetOffersHandOff(t *testing.T) {
 	}
 }
 
-// With a PR open the landing is already someone else's, so the hand-off
-// row says the PR carries it rather than offering the reader a branch to
-// go push.
-func TestVerifyAnswerSetHandOffUnderAnOpenPR(t *testing.T) {
-	in := nextInput{
-		stage: domain.StageVerify, kind: domain.KindFeature,
-		attn: attnGate, verdict: verdictPass,
-		base: "main", branch: "gummi/FD-042-json-export",
-		pullRequest: domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"},
-	}
-	for _, a := range stageActions(in) {
-		if a.id == "handoff" {
-			if !strings.Contains(a.detail, "PR") {
-				t.Errorf("the linked card's hand-off row does not mention the PR: %q", a.detail)
-			}
-			return
-		}
-	}
-	t.Fatal("a linked, verified card offers no hand-off — the only other row is advisory")
-}
-
-// A verify that did not pass is not at an ending: the answers there are
-// still fix-it or overrule-it, so neither the hand-off row nor the
-// link-a-PR route rides above the fold.
-func TestFailedVerifyOffersNoEnding(t *testing.T) {
-	for _, in := range []nextInput{
-		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, verdict: verdictFail, escalated: true, hasWorktree: true},
-		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, failedCheck: "unit", hasWorktree: true},
-		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, verdict: verdictBlocked, hasWorktree: true},
-	} {
-		for _, a := range nextActions(in) {
-			if a.id == "handoff" || a.id == "prlink" {
-				t.Errorf("verdict %v / check %q offers %q", in.verdict, in.failedCheck, a.id)
-			}
-		}
-	}
-}
-
 // The confirm names what is kept before it names anything else: keeping
 // the branch is the whole reason anyone reaches for this.
 func TestHandOffDetailNamesWhatIsKept(t *testing.T) {
 	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
-	d := handOffDetail(f, "main", nil, nil, false)
+	d := handOffDetail(f, "main", nil, false)
 	for _, want := range []string{f.BranchName(), f.WorktreePath(), "kept", "nothing lands"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("confirm detail does not mention %q:\n%s", want, d)
@@ -96,26 +54,11 @@ func TestHandOffDetailNamesWhatIsKept(t *testing.T) {
 	}
 }
 
-// The one consequence nothing else on the board will say: a dependent
-// unblocks on Stage == done, so it is free to start coding from a base
-// branch that does not contain this work.
-func TestHandOffDetailNamesDependents(t *testing.T) {
-	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
-	one := handOffDetail(f, "main", []domain.FeatureID{"BG-051"}, nil, false)
-	if !strings.Contains(one, "BG-051 depends on this and will start from main") {
-		t.Errorf("single dependent not named in the singular:\n%s", one)
-	}
-	two := handOffDetail(f, "main", []domain.FeatureID{"BG-051", "FD-060"}, nil, false)
-	if !strings.Contains(two, "BG-051, FD-060 depend on this") {
-		t.Errorf("two dependents not named in the plural:\n%s", two)
-	}
-}
-
 // A branch a remote already holds goes with the card, and the confirm
 // says so in the same two lines that otherwise say "kept".
 func TestHandOffDetailNamesWhatIsRemoved(t *testing.T) {
 	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
-	d := handOffDetail(f, "main", nil, nil, true)
+	d := handOffDetail(f, "main", nil, true)
 	if strings.Contains(d, "kept") || strings.Count(d, "removed") != 2 {
 		t.Errorf("confirm detail does not say the branch and worktree are removed:\n%s", d)
 	}
@@ -147,7 +90,7 @@ func TestHandOffDetailNamesDrift(t *testing.T) {
 		FeatureID: f.ID, Branch: f.BranchName(),
 		Recorded: "a8854cb68f693f0043cdb12564bdfdd85ae63df2", MainHead: "3fed2f2", Base: "add-improvements-v2",
 	}
-	d := handOffDetail(f, "add-improvements-v2", nil, drift, false)
+	d := handOffDetail(f, "add-improvements-v2", drift, false)
 	for _, want := range []string{"add-improvements-v2 moved", "a8854cb", "nothing here rebases", "rebase it yourself"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("confirm detail does not say %q:\n%s", want, d)
@@ -156,7 +99,7 @@ func TestHandOffDetailNamesDrift(t *testing.T) {
 	if strings.Contains(d, drift.Recorded) {
 		t.Errorf("a forty-character sha in a confirm sentence:\n%s", d)
 	}
-	if plain := handOffDetail(f, "main", nil, nil, false); strings.Contains(plain, "moved") {
+	if plain := handOffDetail(f, "main", nil, false); strings.Contains(plain, "moved") {
 		t.Errorf("an undrifted card was told its base moved:\n%s", plain)
 	}
 }
@@ -188,29 +131,30 @@ func TestBoardBadgesTheHandOff(t *testing.T) {
 	}
 }
 
-// Hand-off is offered where the card has actually ended. `m` lands a
-// branch, which is a thing you might do at any point; this closes the
-// card, and there is nothing to close before the work is finished.
-func TestHandOffActionOnlyAtVerify(t *testing.T) {
-	for _, stage := range []domain.Stage{domain.StageTodo, domain.StagePlan, domain.StageImplement, domain.StageDone} {
-		in := nextInput{stage: stage, kind: domain.KindFeature, hasWorktree: true}
-		r := cardRow(domain.KindFeature, stage, false, true)
+// Hand-off is offered on a card that has not closed: it is the ending
+// that keeps the branch, and a closed card has nothing left to end.
+func TestHandOffActionUntilTheCardCloses(t *testing.T) {
+	offers := func(in nextInput, r featureRow) bool {
 		for _, a := range cardActionsFor(in, r) {
 			if a.id == "handoff" {
-				t.Errorf("stage %s offers hand-off", stage)
+				return true
 			}
 		}
+		return false
 	}
-	in := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, hasWorktree: true}
-	r := cardRow(domain.KindFeature, domain.StageVerify, false, true)
-	var found bool
-	for _, a := range cardActionsFor(in, r) {
-		if a.id == "handoff" {
-			found = true
+	for _, stage := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify} {
+		in := nextInput{stage: stage, kind: domain.KindFeature, hasWorktree: true}
+		if !offers(in, cardRow(domain.KindFeature, stage, false, true)) {
+			t.Errorf("a retired card at %s offers no hand-off", stage)
 		}
 	}
-	if !found {
-		t.Error("verify does not offer hand-off")
+	done := nextInput{stage: domain.StageDone, kind: domain.KindFeature, hasWorktree: true}
+	if offers(done, cardRow(domain.KindFeature, domain.StageDone, false, true)) {
+		t.Error("a closed card offers hand-off")
+	}
+	sess := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true}
+	if !offers(sess, freeformRow(12, "drop the leaked pty fd", true)) {
+		t.Error("a session offers no hand-off")
 	}
 }
 
@@ -242,21 +186,6 @@ func TestCleanUpIsOfferedOnAHandedOffCard(t *testing.T) {
 	}
 	if got := cleanUpDetail(m.rows[m.sel]); !strings.Contains(got, "only copy") {
 		t.Errorf("confirm = %q, want it to say the branch is kept while it is the only copy", got)
-	}
-}
-
-// Hand-off ends a card that finished. A card mid-flight has nothing to
-// end, and the refusal says which stage it is actually at rather than
-// leaving the reader to guess why the key did nothing.
-func TestHandOffKeyRefusesBeforeVerify(t *testing.T) {
-	m := populatedShell(100, 30)
-	m.sel = 1 // implement, with a worktree
-	m.boardVerb("h")
-	if !strings.Contains(m.notice.text, "hand-off ends a verified card") {
-		t.Errorf("notice = %q, want the stage refusal", m.notice.text)
-	}
-	if !strings.Contains(m.notice.text, string(domain.StageImplement)) {
-		t.Errorf("notice = %q, want it to name the card's actual stage", m.notice.text)
 	}
 }
 

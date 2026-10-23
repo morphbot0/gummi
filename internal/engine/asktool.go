@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,12 +82,6 @@ type Ask struct {
 	// D18) — so it carries none, and the surfaces that offer it say why
 	// rather than presenting a bare chat row as all the agent offered.
 	Restored bool `json:"-"`
-	// onAnswer, when set, turns the person's answer into what the agent's
-	// blocked call returns: the tool that asked acts on the answer itself
-	// (card_create mints the card) and tells the agent what happened. It
-	// lives only in this process — an ask restored after a restart has
-	// none, and the agent then gets the person's answer as plain text.
-	onAnswer func(answer string) string
 }
 
 // AskOption is one selectable answer.
@@ -149,72 +142,16 @@ const (
 	specReplaceSectionToolName = "spec_replace_section"
 )
 
-// The verdict-semantics constants are the shared clauses used by both
-// tool descriptions (below) and the stage-hint prose (hints.go's
-// review/plan-critique hints). Restating them in more than one place
-// let them drift; the tool description and the fallback VERDICT: line
-// contract must always mean the same thing per stage.
-const (
-	// verdictPassBlockingFindings is the shared pass-verdict base for
-	// review/critique — nits ride along on a pass.
-	verdictPassBlockingFindings = "no blocking findings (nits alone pass)"
-	// verdictChangesBase is the shared changes-verdict base for
-	// review/critique — a single blocking finding is enough.
-	verdictChangesBase = "at least one blocking finding"
-)
-
-// stageTools returns the gummi-owned client tools offered on a stage.
-// ask_user is interactive-only (it blocks on a human, and only the chat
-// picker can answer it); spec_annotate is offered to the interactive
-// architect; submit_verdict to the reviewer/verifier; resolve_annotation
-// to the implementer/fixer so it can mark diff review comments addressed
-// (DESIGN §6.1's resolve event for diffs — always registered on those
-// stages because comments can also arrive mid-run as a live turn). Every
-// stage that works with the design artifact reads and rewrites it through
-// spec_view/spec_replace_section rather than raw file access, so a backend
-// caged to the worktree still has a gummi-mediated path to it. The
-// non-blocking tools (annotate, verdict, resolve, spec_view,
-// spec_replace_section) are gummi-resolved immediately, so they are safe
-// on autonomous stages. The plan-critique pass reviews the plan and files
-// findings, so it gets both; the rebase-resolve pass is judged by git
-// state alone and gets none.
-func stageTools(stage domain.Stage, flavor runFlavor, deciding []string) []agent.ToolDef {
-	switch flavor {
-	case flavorCritique:
-		// spec_view because the artifact lives beside the workspace, not
-		// in the worktree: a backend that cages its file tools to the
-		// worktree (opencode denies every other directory) left the
-		// critique no way to read the plan it exists to refute, and it
-		// spent its turns probing the cage instead
-		return []agent.ToolDef{critiqueVerdictTool(), specAnnotateTool(), specViewTool()}
-	case flavorRebase:
-		return nil
-	}
-	switch stage {
-	case domain.StagePlan:
-		// the design stage: it converges with the user and writes the
-		// artifact, so it keeps ask_user and the annotation tools the
-		// three design stages used to share between them.
-		return []agent.ToolDef{askUserTool(deciding), specAnnotateTool(), specViewTool(), specReplaceSectionTool()}
-	case domain.StageVerify:
-		return []agent.ToolDef{verifyVerdictTool(), specViewTool(), specReplaceSectionTool()}
-	case domain.StageImplement:
-		return []agent.ToolDef{resolveAnnotationTool(), specViewTool(), specReplaceSectionTool()}
-	case domain.StageOpen:
-		// A freeform card (DESIGN §19): ask_user and resolve_annotation. It
-		// gets resolve_annotation because the reader's diff comments are
-		// exactly how work is steered on such a card, and the count has to
-		// burn down as they are addressed. It gets ask_user (the no-
-		// artifact form, below) because a freeform card is otherwise an
-		// ordinary coding-agent session, and an ordinary coding-agent
-		// session that needs a decision asks for one instead of guessing —
-		// the person being in the thread already is not a reason to take
-		// its one way of stopping and waiting away. It gets no spec tools:
-		// it has no artifact to read or write.
-		return []agent.ToolDef{askUserToolFreeform(), resolveAnnotationTool()}
-	default:
-		return nil
-	}
+// freeformTools is the gummi tool surface of a session (a freeform card,
+// DESIGN §19): ask_user and resolve_annotation. It gets resolve_annotation
+// because the reader's diff comments are exactly how work is steered on
+// such a card, and the count has to burn down as they are addressed. It
+// gets ask_user (the no-artifact form, below) because a session that
+// needs a decision asks for one instead of guessing — the person being
+// in the thread already is not a reason to take its one way of stopping
+// and waiting away.
+func freeformTools() []agent.ToolDef {
+	return []agent.ToolDef{askUserToolFreeform(), resolveAnnotationTool()}
 }
 
 // A read-only research session used to be served a STRIPPED gummi surface:
@@ -245,65 +182,6 @@ func stageTools(stage domain.Stage, flavor runFlavor, deciding []string) []agent
 //
 // So there is no filter. A stage's gummi surface is stageTools, read-only
 // or not, and the read-only contract means what it says: the repository.
-
-// askUserTool builds the ask_user definition. deciding is this spec's own
-// list of sections an answer could change, which the description names
-// outright when it is known.
-//
-// It is named rather than described in the abstract because the runtime
-// refuses a design-stage question that does not carry changes_section,
-// and the refusal's whole value was listing the headings the model
-// should have chosen from. The schema said the field was optional and
-// the runtime said it was required, so the model learned the rule by
-// being refused: measured on one goal, eight of ten questions were
-// asked twice — a wasted call, a wasted turn and a refusal message
-// each — to arrive at a list gummi could have handed over up front.
-func askUserTool(deciding []string) agent.ToolDef {
-	return agent.ToolDef{
-		Name: askToolName,
-		Description: "Ask the user a question with a small set of options and wait for their " +
-			"answer. Use this whenever you need a decision from the user: it is cheaper and " +
-			"clearer than asking in prose. Returns the chosen option(s) — or, since every " +
-			"question also offers to talk it over, whatever the user wrote instead. Read the " +
-			"result as an answer in their own words when it matches none of your options.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"question": map[string]any{
-					"type":        "string",
-					"description": "The question to put to the user.",
-				},
-				"options": map[string]any{
-					"type":        "array",
-					"description": "2–6 distinct options.",
-					"items": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"label":  map[string]any{"type": "string", "description": "Short choice text."},
-							"detail": map[string]any{"type": "string", "description": "Optional one-line explanation."},
-						},
-						"required": []any{"label"},
-					},
-				},
-				"multi_select": map[string]any{"type": "boolean", "description": "Allow choosing more than one option."},
-				"gate": map[string]any{
-					"type": "boolean",
-					"description": "Set true ONLY for the question that closes an attended stage — " +
-						"\"may this card move on?\". gummi replaces the options with its own " +
-						"(move on / not yet / say what is wrong), because answering a gate IS the " +
-						"crossing. Write the question and the spec_anchor; leave the choices to gummi.",
-				},
-				"spec_anchor": map[string]any{
-					"type": "string",
-					"description": "Optional: a unique snippet of a spec line this decision belongs to. " +
-						"gummi records the answer as a resolved %% marker under it.",
-				},
-				"changes_section": changesSectionSchema(deciding),
-			},
-			"required": []any{"question", "options"},
-		},
-	}
-}
 
 // askUserToolFreeform is ask_user stripped to what a card with no
 // artifact and no stage can use: no changes_section (there is no
@@ -343,53 +221,6 @@ func askUserToolFreeform() agent.ToolDef {
 			"required": []any{"question", "options"},
 		},
 	}
-}
-
-// changesSectionDescription names this spec's own deciding sections when
-// they are known, and falls back to the general rule when they are not.
-func changesSectionDescription(deciding []string) string {
-	base := "The name of the spec section whose CONTENT would be different depending on " +
-		"which option is chosen. It must be a section this stage decides — the Verification " +
-		"plan, Progress and Review are rewritten by later stages, so an answer that only " +
-		"changes one of those changes nothing about the work and is your call, not the " +
-		"user's. If you cannot name a deciding section, this is not a decision for the " +
-		"user — record your recommendation in the spec and carry on without asking."
-	if len(deciding) == 0 {
-		return "At the design stage, required. " + base +
-			" (e.g. \"Chosen approach\", \"Out of scope\", \"Implementation notes\")"
-	}
-	return "Required unless gate is true. " + base +
-		" This spec's deciding sections are: " + strings.Join(deciding, ", ") + "."
-}
-
-// changesSectionSchema constrains the field to this spec's own sections, so
-// a backend that validates arguments catches a wrong one before the call
-// is made rather than after it is refused. Nil when the sections are not
-// known, which leaves the field unconstrained rather than guessing.
-//
-// The field stays out of "required" on purpose. A gate ask IS the
-// crossing rather than a decision inside it, carries no changes_section,
-// and is exempted by the runtime for that reason; a schema demanding one
-// outright would make the model invent a section for a question that
-// changes none. Naming the sections and the exemption in the description
-// is the part that costs nothing and was missing.
-func changesSectionSchema(deciding []string) map[string]any {
-	out := map[string]any{
-		"type":        "string",
-		"description": changesSectionDescription(deciding),
-	}
-	if len(deciding) == 0 {
-		// No enum key at all rather than an empty one: a typed nil under
-		// an interface is not absent, and a schema carrying "enum": null
-		// is a schema some backend will read as "no value is valid".
-		return out
-	}
-	vals := make([]any, 0, len(deciding))
-	for _, h := range deciding {
-		vals = append(vals, h)
-	}
-	out["enum"] = vals
-	return out
 }
 
 func specAnnotateTool() agent.ToolDef {
@@ -452,80 +283,6 @@ func specReplaceSectionTool() agent.ToolDef {
 	}
 }
 
-func submitVerdictTool() agent.ToolDef {
-	return agent.ToolDef{
-		Name: verdictToolName,
-		Description: "Submit your review verdict. Call this exactly once at the end of a review " +
-			"to drive gummi's automatic review→fix→review loop.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"verdict": map[string]any{
-					"type": "string",
-					"enum": []any{"pass", "changes"},
-					"description": "pass = " + verdictPassBlockingFindings + ", ready to verify; " +
-						"changes = " + verdictChangesBase + ", bounce back to implement.",
-				},
-				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
-			},
-			"required": []any{"verdict"},
-		},
-	}
-}
-
-// critiqueVerdictTool is submit_verdict with the plan-critique's
-// outcome vocabulary: there is no code to bounce to yet — "changes"
-// sends the plan back for a replan round, "pass" hands it to the
-// human's approval gate. Only blocking findings justify "changes";
-// nit-level threads ride along to the gate on a pass.
-func critiqueVerdictTool() agent.ToolDef {
-	return agent.ToolDef{
-		Name: verdictToolName,
-		Description: "Submit your critique verdict. Call this exactly once at the end of your " +
-			"critique to drive gummi's automatic critique→replan loop.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"verdict": map[string]any{
-					"type": "string",
-					"enum": []any{"pass", "changes"},
-					"description": "pass = " + verdictPassBlockingFindings + ", ready for the " +
-						"user's approval; changes = " + verdictChangesBase + ", the plan must be revised.",
-				},
-				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
-			},
-			"required": []any{"verdict"},
-		},
-	}
-}
-
-// verifyVerdictTool is submit_verdict with the Verify stage's outcome
-// vocabulary: verification held up (pass), it didn't (fail), or the
-// environment couldn't execute the plan at all (blocked) — there is no
-// reviewer to negotiate changes with.
-func verifyVerdictTool() agent.ToolDef {
-	return agent.ToolDef{
-		Name: verdictToolName,
-		Description: "Submit your verification verdict. Call this exactly once at the end, " +
-			"after recording the evidence in the design artifact — gummi gates on it.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"verdict": map[string]any{
-					"type": "string",
-					"enum": []any{"pass", "fail", "blocked"},
-					"description": "pass = everything verified, ready to land; fail = verification " +
-						"found real problems in this feature's changes; blocked = the environment " +
-						"cannot execute the verification plan — name each missing prerequisite in " +
-						"your summary and in the artifact.",
-				},
-				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
-			},
-			"required": []any{"verdict"},
-		},
-	}
-}
-
 func resolveAnnotationTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: resolveToolName,
@@ -546,51 +303,8 @@ func resolveAnnotationTool() agent.ToolDef {
 	}
 }
 
-// toolHint tells a client-tool-capable agent which gummi tools this
-// stage offers and when to use them. Implement/fix stages return no
-// hint here: resolve_annotation is explained by the diff-comments turn
-// itself (CompileDiffComments), which only exists when there are
-// comments to resolve.
-func toolHint(stage domain.Stage, flavor runFlavor) string {
-	if flavor == flavorRebase {
-		return "" // no gummi tools: the rebase outcome is read from git state
-	}
-	if flavor == flavorCritique {
-		return `You have three gummi tools. spec_view: read the spec's sections —
-pass the section heading text for one section's body, omit it for the
-whole document (read-only); read the plan with it rather than opening
-the spec file, which may sit outside what your file tools can reach.
-spec_annotate: attach each finding to the plan line it indicts and let
-gummi place the %% marker with correct anchoring, instead of writing %%
-lines yourself. submit_verdict: call it exactly once at the end of your
-critique (verdict "pass" or "changes") to drive gummi's critique→replan
-loop, instead of writing a VERDICT: line.`
-	}
-	switch stage {
-	case domain.StagePlan:
-		return `You have four gummi tools. ask_user: put a decision to the user as a
-few options and get their choice back — prefer it over asking in prose
-(faster for the user, cheaper); lead with your recommended option,
-marked as such in its label; ask one question at a time (parallel
-ask_user calls are bounced); pass spec_anchor to have gummi record
-the answer into the artifact. spec_annotate: attach an open question to a
-line and let gummi place the %% marker with correct anchoring, instead
-of writing %% lines yourself. spec_view: read the spec's sections — pass
-the section heading text for one section's body, omit it for the whole
-document (read-only). spec_replace_section: rewrite a whole section
-between its ## heading and the next — heading match is case-insensitive.
-The write is a naive splice: re-emit any %% @user: marker lines yourself,
-since gummi does not preserve them for you; never include a top-level
-## heading in the body.`
-	case domain.StageVerify:
-		return `Record the verification evidence in the design artifact with
-spec_view and spec_replace_section (a section's body sits between its ##
-heading and the next; re-emit any %% @user: marker lines yourself), then
-call the submit_verdict tool exactly once at the end (verdict "pass",
-"fail", or "blocked") instead of writing a VERDICT: line — gummi gates
-on it.`
-	case domain.StageOpen:
-		return `You have two gummi tools. ask_user: put a decision to the user as a
+// freeformToolHint tells a session which gummi tools it has (freeformTools).
+const freeformToolHint = `You have two gummi tools. ask_user: put a decision to the user as a
 few options and get their choice back — prefer it over asking in prose
 (faster for the user, cheaper); lead with your recommended option, marked
 as such in its label; ask one question at a time (parallel ask_user calls
@@ -598,10 +312,6 @@ are bounced). This card has no gate and no artifact, so leave gate and
 changes_section unset. resolve_annotation: mark a diff review comment
 addressed — call it once per comment, right after you make the edit it
 asks for.`
-	default:
-		return ""
-	}
-}
 
 // askConventionHint is the fallback for backends without client tools:
 // the agent emits a fenced block gummi parses into the same picker.
@@ -613,23 +323,6 @@ const askConventionHint = "When you need a decision from the user, end your mess
 	"delivers their answer as the next message, in their own words if that is how they " +
 	"gave it. " +
 	"Ask about one decision at a time."
-
-// unattendedAskHint is appended for a card running on GateAutopilot, whichever
-// way it asks. On that mode nobody is at the keyboard: gummi takes the
-// agent's own recommended option and the run carries on. The agent is
-// told so plainly, because a recommendation that will be acted on
-// unread has to be defensible in a way a recommendation someone is
-// about to weigh does not — and because the alternative, letting it
-// believe a human is reading, would make its own reasoning wrong.
-//
-// It is deliberately not an instruction to stop asking. The question is
-// still the record of what was decided and why, and it is what the run's
-// receipt is built from; suppressing it would buy nothing and lose that.
-const unattendedAskHint = "This card is running unattended: no one will read your question " +
-	"before it is answered. gummi takes your recommended option automatically and the run " +
-	"continues, so make sure the option you mark as recommended is the one you would defend " +
-	"on the evidence you have, and put the reason in its detail. Ask anyway when a decision " +
-	"is real — the question and the answer taken are recorded for the user to read afterwards."
 
 // handleClientTool routes a client-tool invocation. ask_user parses into
 // a pending question surfaced to the UI/inbox; an unparseable ask or an
@@ -644,8 +337,6 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleAsk(s, tc)
 	case annotateToolName:
 		e.handleAnnotate(s, tc)
-	case verdictToolName:
-		e.handleVerdict(s, tc)
 	case resolveToolName:
 		e.handleResolveAnnotation(s, tc)
 	case specViewToolName:
@@ -656,8 +347,12 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleWatchTool(s, tc)
 	case memoryReadToolName, memoryWriteToolName:
 		e.handleMemoryTool(s, tc)
-	case cardCreateToolName, cardListToolName, cardLandToolName:
-		e.handleDelegateTool(s, tc)
+	case specStartToolName:
+		e.handleSpecStart(s, tc)
+	case specListToolName:
+		e.handleSpecList(s, tc)
+	case workflowRecipesToolName, workflowRunToolName, workflowStatusToolName, workflowSteerToolName, workflowStopToolName:
+		e.handleWorkflowTool(s, tc)
 	case skillReadTool, skillManageTool:
 		e.handleSkillTool(s, tc)
 	default:
@@ -802,13 +497,18 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 		e.bounceAsk(s, tc.ID, reason)
 		return
 	}
+	// a workflow step's question is the person's, on the step's card, and
+	// the faces draw it under the step (DESIGN §25.7)
+	if st := e.stepOf(context.Background(), s.Feature); st != nil {
+		e.installAsk(s, tc.ID, ask)
+		e.workflowEvent(st.Session)
+		return
+	}
 	e.installAsk(s, tc.ID, ask)
 }
 
 // installAsk puts a parsed ask to the person: the pending question, its
-// durable decision row and the event that surfaces it. ask_user is one
-// caller; a tool that needs the person's yes first (card_create, under a
-// freeform card's delegation) is the other.
+// durable decision row and the event that surfaces it, for ask_user.
 func (e *Engine) installAsk(s *Session, callID string, ask *Ask) {
 	// mint the decision id before the ask installs: the pump goroutine owns
 	// the ask's identity until takePendingAsk hands it over, and minting
@@ -883,7 +583,11 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 		e.resolveNow(s, tc.ID, "spec_annotate needs an anchor and a note")
 		return
 	}
-	path := s.SpecPath()
+	n, path, err := e.specToolPath(s, tc.Args)
+	if err != nil {
+		e.resolveNow(s, tc.ID, err.Error())
+		return
+	}
 	// Serialize the full read → annotate → write against the UI comment path
 	// and the answer-capture path, which touch the same file; and write
 	// atomically so a crash can't tear the artifact.
@@ -910,6 +614,7 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 	}
 	s.appendActivity("annotated spec: " + a.Note)
 	e.persist(s)
+	e.noteSessionSpecWrite(s, n, path)
 	e.resolveNow(s, tc.ID, "annotation added to the spec")
 }
 
@@ -923,7 +628,12 @@ func (e *Engine) handleSpecView(s *Session, tc *agent.ToolCall) {
 		Section string `json:"section"`
 	}
 	_ = json.Unmarshal(tc.Args, &a)
-	raw, err := os.ReadFile(s.SpecPath())
+	_, path, err := e.specToolPath(s, tc.Args)
+	if err != nil {
+		e.resolveNow(s, tc.ID, err.Error())
+		return
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
 		return
@@ -949,7 +659,11 @@ func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 		e.resolveNow(s, tc.ID, "spec_replace_section needs a section name")
 		return
 	}
-	path := s.SpecPath()
+	n, path, err := e.specToolPath(s, tc.Args)
+	if err != nil {
+		e.resolveNow(s, tc.ID, err.Error())
+		return
+	}
 	unlock := spec.LockFile(path)
 	defer unlock()
 	raw, err := os.ReadFile(path)
@@ -971,8 +685,12 @@ func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 		return
 	}
 	note := "updated " + matchedTitle + " section"
+	if specs, _ := e.SessionSpecs(context.Background(), s.Feature); len(specs) > 1 {
+		note = fmt.Sprintf("updated spec %d's %s section", n, matchedTitle)
+	}
 	s.appendActivity(note)
 	e.persist(s)
+	e.noteSessionSpecWrite(s, n, path)
 	e.resolveNow(s, tc.ID, note)
 }
 
@@ -1026,58 +744,6 @@ func (e *Engine) handleResolveAnnotation(s *Session, tc *agent.ToolCall) {
 	// nudge the UI: open-count badges on the card and diff surface burn down
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventAnnotations})
 	e.resolveNow(s, tc.ID, fmt.Sprintf("comment [%d] resolved — %d still open", a.ID, open))
-}
-
-// allowedVerdicts is the verdict vocabulary of the session's contract:
-// critique and review negotiate changes; verify reports pass/fail and
-// may declare the environment unable to run the plan (blocked). Scoping
-// per session keeps one stage's vocabulary from leaking into another's
-// loop — a review "blocked" or a verify "changes" is a contract
-// violation, bounced back to the agent to retry. Stages that offer no
-// submit_verdict tool return nil, so a stray call is refused instead of
-// silently accepted (the fallthrough previously admitted a "fail"
-// verdict on Review, which no downstream loop distinguished from
-// "changes").
-func allowedVerdicts(s *Session) []string {
-	switch {
-	case s.Feature.Stage == domain.StageVerify:
-		return []string{"pass", "fail", "blocked"}
-	case s.Critique:
-		return []string{"pass", "changes"}
-	default:
-		return nil
-	}
-}
-
-// handleVerdict records a review verdict and resolves immediately. The
-// review loop prefers this structured verdict over parsing prose.
-func (e *Engine) handleVerdict(s *Session, tc *agent.ToolCall) {
-	var v struct {
-		Verdict string `json:"verdict"`
-		Summary string `json:"summary"`
-	}
-	if err := json.Unmarshal(tc.Args, &v); err != nil {
-		e.resolveNow(s, tc.ID, "submit_verdict needs a verdict")
-		return
-	}
-	verdict := strings.ToLower(strings.TrimSpace(v.Verdict))
-	allowed := allowedVerdicts(s)
-	if len(allowed) == 0 {
-		e.resolveNow(s, tc.ID, "this stage does not accept a verdict")
-		return
-	}
-	if !slices.Contains(allowed, verdict) {
-		e.resolveNow(s, tc.ID, `verdict must be one of "`+strings.Join(allowed, `", "`)+`"`)
-		return
-	}
-	s.setVerdict(verdict)
-	note := "verdict: " + verdict
-	if v.Summary != "" {
-		note += " — " + v.Summary
-	}
-	s.appendActivity(note)
-	e.persist(s)
-	e.resolveNow(s, tc.ID, "verdict recorded")
 }
 
 // resolveNow answers a tool call directly (no user involved), for calls
@@ -1332,18 +998,13 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	mu, _ := e.answering.LoadOrStore(id, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
-	s := e.Get(id)
-	// e.live never holds a freeform card's session (DESIGN §19: no
-	// nothing scheduled) — its own session lives in
-
-	// e.freeform instead, and this is the one place that difference would
-	// otherwise matter: an ask_user call blocks on a person exactly the
-	// same way there, and the answer has to reach it the same way.
-	var ff *FreeformSession
-	if s == nil {
-		if ff = e.Freeform(id); ff != nil {
-			s = ff.Session()
-		}
+	// Every session that can ask is a freeform card's (DESIGN §24): the
+	// answer reaches its own session, the same way whether its call is
+	// still blocked or the question was restored.
+	var s *Session
+	ff := e.Freeform(id)
+	if ff != nil {
+		s = ff.Session()
 	}
 	if s == nil {
 		return fmt.Errorf("no session for %s", id)
@@ -1387,32 +1048,15 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		return fmt.Errorf("answer for %s not delivered: the agent stopped waiting on the question "+
 			"and is finishing its turn — answer again when it has", id)
 	}
-	// a run whose backend is gone is run again, carrying the answer; a
-	// conversation is attached to again, and the answer is its next turn
-	rerun := false
+	// a session whose backend is gone gets a fresh one carrying its own
+	// transcript (or resuming it natively), exactly as its next ordinary
+	// turn would spawn one, and the answer is its next turn
 	if !byCall && !s.takesTurns() {
-		switch {
-		case ff != nil:
-			// A freeform card's own reconnection: a fresh backend carrying
-			// this session's own transcript (or resuming it natively),
-			// exactly as its next ordinary turn would spawn one.
-			// Engine.Attach is the stage session's reconnection path (the
-			// headless driver's `resume --answer`, the TUI's enter) and
-			// does not apply to a card with no stage to resume into.
-			ns, err := ff.ensureBackend(ctx)
-			if err != nil {
-				return err
-			}
-			s = ns
-		case s.Interactive:
-			ns, err := e.reattachForAnswer(ctx, s)
-			if err != nil {
-				return err
-			}
-			s = ns
-		default:
-			rerun = true
+		ns, err := ff.ensureBackend(ctx)
+		if err != nil {
+			return err
 		}
+		s = ns
 	}
 	ask := s.takePendingAsk()
 	if ask == nil {
@@ -1446,9 +1090,6 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// first, so the bridge's blocked call resumes exactly like a native
 	// one. The turn carries the answer text; the transcript above already
 	// recorded it, so delivery must not append it a second time.
-	if byCall && ask.onAnswer != nil {
-		answer = ask.onAnswer(answer)
-	}
 	if byCall {
 		// Only treat the bridge's blocked call as resolved when it is
 		// actually live. A buffered send alone proves nothing: the backend
@@ -1499,27 +1140,6 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// artifact and re-derive the repo from scratch. reentryTurn restates
 	// the exchange the answer belongs to; the transcript still shows the
 	// person's own words.
-	if rerun {
-		// the run that asked is over; the stage runs again, and its
-		// kickoff carries the exchange to a session that did not ask
-		carried := *ask
-		carried.CallID, carried.Outlived = "", false
-		turn := reentryTurn(&carried, answer)
-		if s.isExhausted() {
-			// ...unless it stopped on its budget. The answer stands, but
-			// running the stage again is the top-up's call: it widens the
-			// card's reach, and autopilot may never take it (§10.17). The
-			// exchange waits for the run the top-up starts, and the card
-			// is left on its budget stop.
-			s.holdAnswerForNextRun(turn)
-			return nil
-		}
-		if err := e.run(s.Feature, turn, s.flavor()); err != nil {
-			s.trySetPendingAsk(ask)
-			return err
-		}
-		return nil
-	}
 	if err := e.deliverTurn(ctx, s, reentryTurn(ask, answer), nil); err != nil {
 		// Restore the question, exactly as every other failing branch
 		// above does. This is the branch a restored ask always takes, and
@@ -1559,39 +1179,6 @@ func (e *Engine) answerPermission(ctx context.Context, s *Session, ask *Ask, ans
 	e.persist(s)
 	e.resumeAfterAnswer(s)
 	return nil
-}
-
-// reattachForAnswer brings a backend up behind a conversation's question
-// whose answer has to ride a turn and whose session can take none: one
-// restored after a restart, one stopped under its question, or one whose
-// backend died or failed its turn while the question was up. It is the
-// attach the headless driver does before `resume --answer` and the TUI
-// does on enter; the web face has no such step, and every answer given
-// there was refused ("still starting", "no longer waiting")
-// while the question stayed up asking for one. (A run in the same state
-// is run again instead — see AnswerAs — so it carries on to its gate.)
-//
-// The question travels: Attach carries the pending ask, the transcript
-// and the backend's conversation id over to the new session. It is
-// carried as a question the new session did not ask — cut from any call
-// the old one made, and not outlived, whose guidance tells the session
-// that asked to carry on from where it left off — because a new backend
-// session did not ask it, whatever conversation it resumes.
-func (e *Engine) reattachForAnswer(ctx context.Context, s *Session) (*Session, error) {
-	// a stopped or dead backend still hangs off the session, and Attach
-	// would reuse it; stop is idempotent and closes it for good
-	s.stop()
-	s.clearAgent()
-	ns, err := e.Attach(ctx, s.Feature)
-	if err != nil {
-		return nil, err
-	}
-	if ask := ns.takePendingAsk(); ask != nil {
-		carried := *ask
-		carried.CallID, carried.Outlived = "", false
-		ns.setPendingAsk(&carried)
-	}
-	return ns, nil
 }
 
 // reentryTurn renders the turn that carries a restored ask's answer into a
@@ -1777,6 +1364,13 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer, by string) string {
 		return ""
 	}
 	path := s.SpecPath()
+	if isSession(s.Feature) {
+		// a session's answer goes into its spec when it keeps exactly one;
+		// with several, an anchor alone does not say which
+		if _, p, err := e.specTarget(s.Feature, nil); err == nil {
+			path = p
+		}
+	}
 	if path == "" {
 		return ""
 	}
@@ -1876,21 +1470,4 @@ func IsAnswerNote(note string) bool {
 	return note == AnswerCapturedNote ||
 		strings.HasPrefix(note, AnswerAppendedPrefix) ||
 		strings.HasPrefix(note, AnswerNotSavedPrefix)
-}
-
-// decidingHeadings is the sections of a card's artifact whose content an
-// answer could change — what askChangesSomething holds a question to, and
-// therefore what ask_user's schema should have been naming all along.
-// Empty when there is no readable artifact yet, which leaves the tool
-// described in the general terms it always was.
-func (e *Engine) decidingHeadings(f *domain.Feature) []string {
-	path := e.artifactFile(f)
-	if path == "" {
-		return nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return spec.DecidingHeadings(string(raw))
 }

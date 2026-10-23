@@ -11,7 +11,6 @@ package state
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -241,9 +240,9 @@ const (
 // distinction survives.
 //
 // Event is additive, in the same sense as GatePayload.ID and
-// AskPayload.ID/Choice/By: appendAutopilotEvent (below) predates the
-// took-over/handed-back vocabulary and, on every SetGateApproval mode
-// change, writes a row with only Mode set and Event left as "". That row
+// AskPayload.ID/Choice/By: the gate-approval mode changes recorded before
+// the took-over/handed-back vocabulary existed are rows with only Mode
+// set and Event left as "". That row
 // records a different fact — the card's stored gate-approval mode
 // changed to X — not a takeover or a handback, so a reader must check
 // Event and not treat every EventAutopilot row as a boundary crossing.
@@ -592,31 +591,6 @@ func (s *Store) QuitStopped(ctx context.Context) (map[domain.FeatureID]bool, err
 	return out, rows.Err()
 }
 
-// appendAutopilotEvent records a gate-approval mode change in the card's
-// own event log. SetGateApproval is the single write path every caller
-// (TUI and driver) already funnels through, so calling this there means
-// no future caller can change a card's mode without it appearing in the
-// card's own history. Best-effort: a log failure never unwinds the
-// already-committed mode change. Deduped at second granularity on the
-// (card, mode) pair, loose enough that a caller retrying the identical
-// SetGateApproval call within the same second can't double-write, while
-// a later, deliberate change back to the same mode still gets its own
-// event.
-//
-// This predates AppendAutopilot's took-over/handed-back vocabulary and
-// leaves Event unset on purpose — see the note on AutopilotPayload.Event.
-func (s *Store) appendAutopilotEvent(ctx context.Context, id domain.FeatureID, mode string) {
-	payload, err := json.Marshal(AutopilotPayload{Mode: mode})
-	if err != nil {
-		return
-	}
-	now := time.Now().UTC()
-	_ = s.AppendEvent(ctx, CardEvent{
-		Feature: id, Kind: EventAutopilot, At: now, Payload: string(payload),
-		Dedupe: string(id) + ":autopilot:" + mode + ":" + now.Format("2006-01-02T15:04:05"),
-	})
-}
-
 // PruneStageOutput applies the log's retention rule to a stage that is
 // no longer live: every event is kept forever, but the two fields that
 // can grow without bound are kept only where they still earn their place.
@@ -734,42 +708,6 @@ func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage
 	return tx.Commit()
 }
 
-// appendGateEventTx records a stage crossing inside the caller's own
-// transaction, so the event and the transition it describes commit
-// together or not at all. Unlike the best-effort mirror writes, a failure
-// here fails the crossing: a history that silently skipped a gate would
-// under-report exactly the crossings nobody watched. It reports whether
-// the row was actually inserted (a deduped retried crossing inserts
-// nothing), so the caller reports the crossing to hooks only when the
-// log took it.
-//
-// answerID, when non-empty, correlates the crossing to the open
-// EventDecisionOpen it answers — the newest still-open gate decision,
-// looked up by the caller in this same transaction so the crossing and
-// its answer cannot diverge. The dedupe key rides that id (scoped per
-// generation when the decision was minted), so a retried transaction
-// cannot leave two events behind, and two crossings of the same edge can
-// no longer collide on a shared timestamp; crossings with no open
-// decision to answer keep the crossing's own timestamp as their key.
-func appendGateEventTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID, from, to domain.Stage, actor string, at time.Time, answerID string) (bool, error) {
-	payload, err := json.Marshal(GatePayload{From: string(from), To: string(to), Actor: actor, ID: answerID})
-	if err != nil {
-		return false, fmt.Errorf("encoding gate event for %s: %w", id, err)
-	}
-	dedupe := "gate:" + string(from) + "->" + string(to) + ":" + at.Format(timeFmt)
-	if answerID != "" {
-		dedupe = "decision:" + answerID
-	}
-	res, err := tx.ExecContext(ctx, appendEventSQL,
-		string(id), string(from), EventGate, "", at.Format(timeFmt),
-		string(payload), "", dedupe)
-	if err != nil {
-		return false, fmt.Errorf("recording gate event for %s: %w", id, err)
-	}
-	inserted, err := res.RowsAffected()
-	return inserted > 0, err
-}
-
 // AppendPark records a card coming to a stop and waiting for someone,
 // with why. Best-effort by contract: parking is something the caller has
 // already decided and usually already told the user about, so a log
@@ -821,34 +759,4 @@ func (s *Store) AppendRebase(ctx context.Context, id domain.FeatureID, stage dom
 		return fmt.Errorf("encoding rebase event for %s: %w", id, err)
 	}
 	return s.AppendEvent(ctx, CardEvent{Feature: id, Stage: stage, Kind: EventRebase, At: at, Payload: string(payload)})
-}
-
-// AppendAutopilot records the autonomous loop taking a card over (event
-// = AutopilotTookOver) or handing it back (event = AutopilotHandedBack),
-// with why and under which gate-approval mode. Best-effort by contract,
-// like AppendPark: the takeover or handback is something the caller has
-// already acted on, so a log failure must never unwind it — callers
-// discard the error.
-//
-// dedupe may be empty; pass a key only where the same boundary can
-// otherwise be recorded twice (e.g. a retried save re-observing the same
-// takeover).
-func (s *Store) AppendAutopilot(ctx context.Context, id domain.FeatureID, stage domain.Stage, event, reason, mode, dedupe string, at time.Time) error {
-	return s.AppendAutopilotBy(ctx, id, stage, event, reason, mode, "", dedupe, at)
-}
-
-// AppendAutopilotBy is AppendAutopilot for a gesture a named person made
-// (AutopilotPayload.By).
-func (s *Store) AppendAutopilotBy(ctx context.Context, id domain.FeatureID, stage domain.Stage, event, reason, mode, by, dedupe string, at time.Time) error {
-	if by == ActorUser {
-		by = ""
-	}
-	payload, err := json.Marshal(AutopilotPayload{Event: event, Reason: reason, Mode: mode, By: by})
-	if err != nil {
-		return fmt.Errorf("encoding autopilot event for %s: %w", id, err)
-	}
-	return s.AppendEvent(ctx, CardEvent{
-		Feature: id, Stage: stage, Kind: EventAutopilot, At: at,
-		Payload: string(payload), Dedupe: dedupe,
-	})
 }

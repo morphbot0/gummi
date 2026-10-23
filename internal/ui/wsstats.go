@@ -242,7 +242,7 @@ func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow
 func (m *Shell) boardBusy() map[domain.FeatureID]bool {
 	out := map[domain.FeatureID]bool{}
 	for _, r := range m.rows {
-		if m.webRow(r, nil).Status == webapi.StatusRunning {
+		if m.webRow(r).Status == webapi.StatusRunning {
 			out[r.F.ID] = true
 		}
 	}

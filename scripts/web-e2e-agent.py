@@ -25,6 +25,9 @@ artifact):
                    puts the choice to the person with ask_user (two options,
                    changes_section "Chosen approach"), and finishes the spec
                    with whatever the answer was.
+    [ask-where]    a session asks where the helper lives (two options) and
+                   says back "Decided with the user: <answer>"; the
+                   [ask-*] variants below do the same in a session.
     [ask-multi]    as [ask], but the question takes several answers
                    (multi_select), so a test can pick more than one.
     [ask-long]     as [ask], but the question is a multi-paragraph text of
@@ -66,11 +69,6 @@ A rebase-resolve pass (the board's "let the agent resolve them") runs
 the command its kickoff names; a conflicted path takes the card's side,
 and an untracked file in the way is moved aside and folded back in.
 
-A goal (GL-*) is started from a complete doc (`gummi goal --plan-file`):
-its plan stage agrees it untouched, its critique and review pass, and its
-lead's turns are acknowledged; the cards the doc names take their own
-keywords.
-
 An ingest pass (`gummi ingest`, the board's ingest dialog) proposes one
 feature per `## ` heading of the source document; a heading that starts
 `Unmapped:` is reported in the coverage map as a requirement no proposal
@@ -81,13 +79,40 @@ turn) gets a short acknowledgement quoting it; a freeform card's turn
 also edits a file so its diff is non-empty. A freeform turn
 containing [watch] starts a Monitor watch it leaves open, one containing
 [ask] asks the person which way with ask_user and says back what they
-answered, and one containing [tasks-done] completes its checklist. A message opening
-with [slow] is streamed slowly, so a test can interrupt it.
+answered, one containing [spec] writes the session's spec before its edit,
+and one containing [tasks-done] completes its checklist.
+
+A session turn containing [workflow] proposes a workflow run (DESIGN §25):
+it starts a spec (spec_start), writes its Done when as two items -- one
+checked by `test -f made.txt`, one judged -- and calls workflow_run with the
+bundled deliver recipe, or the one [workflow=<name>] names, or (for
+[workflow-inline]) a recipe written out as recipe_yaml. Each step is
+answered by its role, read off its brief: a writing role (contractor,
+implementer, tester, scribe) writes the run's artifacts its task names and,
+for an implementer or tester, every file a `test -f` check of the spec looks
+for; a reviewer writes {"verdict": "APPROVED"} into review.json where its
+task names it, answers MET: for every done-when item where it is asked to
+validate, and APPROVED otherwise; a scout reports; a planner keeps the plan.
+The session acknowledges the run's report, and its baseline (a check that
+proves nothing), without touching its tree. A
+[workflow] turn that also says [step-asks] marks its spec so, and the run's
+implementer asks its person with ask_user (keep made.txt plain, or add a
+header) before it writes, naming the answer in its output; an answer
+that reaches a fresh process (the one that asked has ended) is the step's
+too, read off the brief in its hints. A person's
+message to a step after it ended is answered "Noted: <its first line>". A
+[workflow] turn that says [step-slow] marks its spec so too, and every step
+of the run runs one shell call, then works quietly GUMMI_E2E_STEP_SECONDS
+before it answers (an implementer that asks, again after the answer; a
+step a person talks to after it ended, before it says "Noted"), so steps
+are seen running with nothing streaming. A
+message opening with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
     GUMMI_E2E_FAST=1          skip the small pacing beats (the suite sets it;
                               [slow] cards stay slow regardless)
     GUMMI_E2E_SLOW_SECONDS    total streaming time of one [slow] stage
+    GUMMI_E2E_STEP_SECONDS    how long a [step-slow] run's step works (4)
     GUMMI_E2E_AGENT_LOG       append every frame in and out to this file
 """
 
@@ -105,6 +130,7 @@ SLOW_SECONDS = float(os.environ.get("GUMMI_E2E_SLOW_SECONDS") or "6")
 ASK_TIMEOUT = float(os.environ.get("GUMMI_E2E_ASK_TIMEOUT") or "2")
 ASK_SPEND = float(os.environ.get("GUMMI_E2E_ASK_SPEND") or "5000")
 FOLD_PAUSE = float(os.environ.get("GUMMI_E2E_FOLD_SECONDS") or "2.5")
+STEP_SECONDS = float(os.environ.get("GUMMI_E2E_STEP_SECONDS") or "4")
 LOG = os.environ.get("GUMMI_E2E_AGENT_LOG")
 CREDITS = 12  # per turn; small enough that no envelope in the suite runs dry
 
@@ -526,18 +552,9 @@ def plan_research(turn):
     turn.say("The question, its constraints and the direction are set.")
 
 
-def plan_goal(turn):
-    """A goal's plan is the doc `gummi goal --plan-file` started it from:
-    the architect reads it and agrees, touching nothing."""
-    turn.tool("read", os.path.basename(turn.ctx["spec"]) or "goal doc")
-    turn.say("The goal doc is complete: every done-when item is checked and served by a card.")
-
-
 def stage_plan(turn, answer=None):
     kind = turn.ctx["kind"]
-    if kind == "GL":
-        plan_goal(turn)
-    elif kind == "RS":
+    if kind == "RS":
         plan_research(turn)
     elif kind == "BG":
         plan_bug(turn)
@@ -654,34 +671,44 @@ def stage_verify(turn, kickoff):
 
 
 def freeform_turn(turn, text):
-    if "[delegate]" in text:
-        # a session with a delegation budget hands work to a workflow
-        # card: card_create blocks until the person says yes or no
-        result = call_tool("card_create", args={
-            "kind": "FD",
-            "description": "Add a greeting helper\n\nHanded off by the session.",
-            "envelope": 300,
-        })
-        turn.say("card_create: %s" % result.strip())
+    if STEP_RE.search(text):
+        workflow_step(turn, text)
         return
-    if "[cards]" in text:
-        turn.say("card_list: %s" % call_tool("card_list", args={}).strip())
+    if STEP:
+        step_followup(turn, text)
         return
-    land = re.search(r"\[land ([A-Z]{2}-\d+)\]", text)
-    if land:
-        # the landing refuses a worktree with tracked changes: the
-        # session commits its own work first, as the tool asks
-        wd = turn.ctx["workdir"]
-        if subprocess.run(["git", "-C", wd, "status", "--porcelain", "--untracked-files=no"],
-                          capture_output=True, text=True).stdout.strip():
-            git(wd, "commit", "-qam", "chore: the session's own notes")
-        turn.say("card_land: %s" % call_tool("card_land", args={"card": land.group(1)}).strip())
+    if re.match(r"Workflow run \d+'s baseline", text):
+        # a run's baseline found a check that proves nothing; hearing it
+        # changes nothing in the session's tree
+        turn.say("Noted the baseline; the spec's checks stand for now.")
+        return
+    if re.match(r"Workflow run \d+ has reported", text):
+        # the run's report reaches the session as a turn; reading it
+        # changes nothing in the session's tree
+        turn.say("The run reported; its changes are in the tree for you to read.")
+        return
+    if "[workflow" in text:
+        workflow_session(turn, text)
         return
     if "[watch]" in text:
         # a Monitor watch the turn leaves open: no result comes for it, so
         # the card reads as watching once the turn is over
         turn.tool("Monitor", "tail -f build.log", "ff-watch")
         turn.say("Watching the build; I will tell you when it breaks.")
+        return
+    answered = re.search(r"^The answer is: (.*)$", text, re.M)
+    if answered and turn.ctx.get("step_brief"):
+        # a step's answer reaching a fresh process: its brief rides the
+        # hints, so the step does its task with the answer in hand
+        workflow_step(turn, turn.ctx["step_brief"], answered.group(1).strip())
+        return
+    if answered:
+        # an answer that reaches the session as a turn of its own (its
+        # backend was replaced, or gave up on the call that asked)
+        turn.say("Decided with the user: %s" % answered.group(1).strip())
+        return
+    if any(k in text for k in SESSION_ASKS):
+        session_where_ask(turn, text)
         return
     if "[ask]" in text:
         # blocks inside ask_user until the person answers, then echoes the
@@ -693,6 +720,13 @@ def freeform_turn(turn, text):
         })
         turn.say("You said: %s" % answer.strip().splitlines()[0])
         return
+    if "[spec]" in text:
+        # the session writes its spec first, then edits its tree as any
+        # turn does, so a test has a spec and a diff to read
+        call_tool("spec_start", args={"title": "Notes for the helper"})
+        call_tool("spec_replace_section", args={"section": "Problem", "body": "The helper needs a note.\n"})
+        call_tool("spec_replace_section", args={"section": "Approach", "body": "Write it in NOTES.md.\n"})
+        call_tool("spec_replace_section", args={"section": "Done when", "body": WORKFLOW_DONE_WHEN})
     wd = turn.ctx["workdir"]
     notes = os.path.join(wd, "NOTES.md")
     with open(notes, "a", encoding="utf-8") as fh:
@@ -704,6 +738,196 @@ def freeform_turn(turn, text):
     second = "completed" if "[tasks-done]" in text else "in_progress"
     turn.tasks(("Note the fix", "completed"), ("Say what was done", second))
     turn.say("Done: noted it in NOTES.md.")
+
+
+# The question variants a session can be started with: each asks where the
+# helper lives, the way the retired plan stage's [ask] did, and its answer
+# comes back as "Decided with the user: <answer>".
+SESSION_ASKS = ("[ask-where]", "[ask-multi]", "[ask-long]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]")
+
+
+def session_where_ask(turn, text):
+    ctx = turn.ctx
+    gives_up = "[ask-gives-up]" in text
+    dies = "[ask-dies]" in text
+    spends = "[ask-spends]" in text
+    long_q = "[ask-long]" in text
+    turn.say("There are two ways to place the helper. I need you to pick one.")
+    options = [
+        {"label": "A new file (recommended)", "detail": "one function and its test, nothing else touched"},
+        {"label": "Extend the existing file", "detail": "fewer files, noisier diff"},
+    ]
+    if long_q:
+        options.append({"label": "A shared package", "detail": "a new package other cards can import too"})
+    answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up or dies else None,
+                       spend=ASK_SPEND if spends else 0, args={
+        "question": (LONG_QUESTION % ctx["card"]) if long_q else "Where should %s's helper live?" % ctx["card"],
+        "options": options,
+        **({"multi_select": True} if "[ask-multi]" in text else {}),
+    })
+    turn.say("Decided with the user: %s" % answer.strip().splitlines()[0])
+
+
+WORKFLOW_DONE_WHEN = """```gummi-done-when
+- id: DW-1
+  says: made.txt exists
+  check: test -f made.txt
+- id: DW-2
+  says: made.txt reads well
+  judge: true
+```
+"""
+
+# the step brief's head: "You are step build/1/implement of workflow run 1
+# (the deliver recipe) in gummi: a implementer. ..."
+STEP_RE = re.compile(r"You are step (\S+) of workflow run (\d+) \(([^)]*)\) in gummi: an? (\w+)\.")
+
+# STEP is the step this process answers for, once its brief has arrived: a
+# step's card keeps its agent across its turns, so a later turn on it (a
+# carry-on, a steer, the person's message) is the step's too.
+STEP = {}
+
+
+# the recipe a [workflow-inline] turn writes out: an implementer makes what
+# the spec's checks look for, a reviewer judges the done-when items
+INLINE_RECIPE = """name: made-inline
+description: Make what the spec asks for, then read it
+steps:
+  - id: make
+    role: implementer
+    prompt: |
+      Make what the spec below asks for.
+
+      {{spec}}
+  - id: read
+    role: reviewer
+    prompt: |
+      Read {{run.diff}} against the spec's done-when items. End with one
+      line per item: MET: DW-n or UNMET: DW-n <why>.
+
+      {{spec}}
+"""
+
+
+def workflow_session(turn, text):
+    """A session turn asking for a workflow: a spec with done-when items, then workflow_run."""
+    m = re.search(r"\[workflow=([\w-]+)\]", text)
+    recipe = m.group(1) if m else "deliver"
+    # a second [workflow] turn finds a spec already there and adds another;
+    # the run then names the newest
+    started = call_tool("spec_start", args={"title": "Make the workflow file"})
+    n = re.search(r"\bspec (\d+)\b", started)
+    spec = int(n.group(1)) if n else 1
+    asks = " [step-asks]" if "[step-asks]" in text else ""
+    if "[step-slow]" in text:
+        asks += " [step-slow]"
+    for section, body in (("Problem", "made.txt is missing.%s\n" % asks),
+                          ("Approach", "The workflow's steps write it.\n"),
+                          ("Done when", WORKFLOW_DONE_WHEN)):
+        call_tool("spec_replace_section", args={"spec": spec, "section": section, "body": body})
+    if "[workflow-inline]" in text:
+        # a recipe written out for the work in hand, which a person may save
+        result = call_tool("workflow_run", args={"recipe_yaml": INLINE_RECIPE, "spec": spec})
+    else:
+        result = call_tool("workflow_run", args={"recipe": recipe, "spec": spec})
+    turn.say("workflow_run: %s" % result.strip())
+
+
+def slow_work(turn):
+    """A slow run's step at work: one command, then a quiet while, as a
+    model thinking does, so a face can watch steps run side by side with
+    nothing streaming."""
+    turn.tool("bash", "go test ./...")
+    deadline = time.time() + STEP_SECONDS
+    while time.time() < deadline:
+        time.sleep(0.2)
+        poll_interrupt()
+
+
+def workflow_step(turn, brief, answer=""):
+    """A workflow step's turn, answered by its role (DESIGN §25.4). answer
+    is the person's answer to the step's question when it reaches a fresh
+    process (the one that asked has ended): the step carries on with it."""
+    m = STEP_RE.search(brief)
+    path, role = m.group(1), m.group(4)
+    STEP.update(path=path, role=role, brief=brief)
+    sid = path.rsplit("/", 1)[-1]
+    task = brief.split("Your task:", 1)[-1]
+    wd = turn.ctx["workdir"]
+    def work():
+        if "[step-slow]" in task:
+            slow_work(turn)
+
+    work()
+    artifacts = re.findall(r"(/\S+?/\.gummi/runs/\S+?\.(?:md|json))", task)
+    if role == "reviewer":
+        review = [p for p in artifacts if p.endswith("review.json")]
+        if review:
+            # the verdict step: the reviews merged into the artifact a
+            # repeat's until reads
+            os.makedirs(os.path.dirname(review[0]), exist_ok=True)
+            with open(review[0], "w", encoding="utf-8") as fh:
+                json.dump({"verdict": "APPROVED", "findings": []}, fh)
+            turn.tool("write", os.path.basename(review[0]), "step-write")
+            turn.tool_result("step-write", "write")
+            turn.say("The reviews agree.\nAPPROVED")
+        elif "MET: DW-" in task:
+            # the validate step: one line per done-when item of the spec
+            ids = sorted(set(re.findall(r"^- id: (DW-\d+)", task, re.M))) or ["DW-1"]
+            turn.tool("read", "the run's diff")
+            turn.say("Read the run's diff against the spec.\n" + "\n".join("MET: %s" % i for i in ids))
+        else:
+            turn.tool("read", "the run's diff")
+            turn.say("Read %s's change against the spec. No findings.\nAPPROVED" % sid)
+        return
+    if role == "scout":
+        turn.tool("read", "the tree")
+        turn.say("Mapped what bears on the spec.\nDECISION: none")
+        return
+    if role == "planner":
+        turn.say("The plan stands.")
+        return
+    # a writing role: its artifacts, and what the spec's checks look for
+    wrote = []
+    for p in artifacts:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("# %s\n\nWritten by step %s.\n" % (sid, path))
+        wrote.append(os.path.basename(p))
+    if answer:
+        STEP["asked"] = True
+    if role == "implementer" and "[step-asks]" in task and not STEP.get("asked"):
+        # blocks until the person answers the step's question
+        STEP["asked"] = True
+        answer = call_tool("ask_user", args={
+            "question": "Keep made.txt plain, or give it a header?",
+            "options": [{"label": "Keep it plain (recommended)", "detail": "one line per step"},
+                        {"label": "Give it a header"}],
+        }).strip()
+        work()
+    if role in ("implementer", "tester"):
+        files = re.findall(r"check:\s*\"?test -f (\S+?)\"?\s*$", task, re.M) or ["WORKFLOW.md"]
+        for f in files:
+            target = os.path.join(wd, f)
+            os.makedirs(os.path.dirname(target) or wd, exist_ok=True)
+            with open(target, "a", encoding="utf-8") as fh:
+                fh.write("made by step %s\n" % path)
+            wrote.append(f)
+    turn.tool("edit", ", ".join(wrote) or "nothing", "step-edit")
+    turn.tool_result("step-edit", "edit")
+    told = " The person said: %s." % answer if answer else ""
+    turn.say("Wrote %s.%s\nDECISION: plain text, one line" % (", ".join(wrote) or "nothing", told))
+
+
+def step_followup(turn, text):
+    """A later turn on a step's card: a carry-on runs its task again; any
+    other line (a steer, the person's message) is acknowledged."""
+    if text.startswith("The run was paused and now carries on"):
+        workflow_step(turn, STEP["brief"])
+        return
+    if "[step-slow]" in STEP.get("brief", ""):
+        slow_work(turn)
+    turn.say("Noted: %s" % (text.strip().splitlines() or [""])[0])
 
 
 def ingest(turn):
@@ -783,7 +1007,7 @@ def scribe(ctx, prompt):
 # session
 # --------------------------------------------------------------------------
 
-KEYWORDS = ("[ask-multi]", "[ask-long]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[fold]", "[slow]", "[research]")
+KEYWORDS = ("[ask-where]", "[ask-multi]", "[ask-long]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[fold]", "[slow]", "[research]")
 
 
 def detect(frame):
@@ -795,7 +1019,7 @@ def detect(frame):
         "has_propose_tool": any(t.get("name") == "propose_features" for t in frame.get("tools") or []),
         "card": "", "kind": "", "title": "", "stage": "", "spec": "",
     }
-    m = re.search(r"You are the \w+ for \w+ ((FD|BG|RS|FF|GL)-\d+): (.*)", hints)
+    m = re.search(r"You are the \w+ for \w+ ((FD|BG|RS|FF)-\d+): (.*)", hints)
     if m:
         ctx["card"], ctx["kind"], ctx["title"] = m.group(1), m.group(2), m.group(3).strip().rstrip(".")
     else:
@@ -807,10 +1031,8 @@ def detect(frame):
         ctx["stage"] = "rebase"
     elif "a freeform card" in hints:
         ctx["stage"] = "open"
-    elif re.search(r"^(Stage: Plan critique|Stage: Goal plan critique|Research critique)", hints, re.M):
+    elif re.search(r"^(Stage: Plan critique|Research critique)", hints, re.M):
         ctx["stage"] = "critique"
-    elif re.search(r"^Stage: Goal review", hints, re.M):
-        ctx["stage"] = "review"
     else:
         m = re.search(r"^Stage: (\w+)", hints, re.M)
         if m:
@@ -818,22 +1040,29 @@ def detect(frame):
     m = re.search(r"The source document is at (\S+?)\.? \(relative to your working directory\)", hints)
     if m:
         ctx["ingest_source"] = m.group(1)
+    if STEP_RE.search(hints):
+        # a step's card restarted: its brief is in the hints
+        ctx["step_brief"] = hints[STEP_RE.search(hints).start():]
     m = re.search(r"at (/\S+\.md)", hints)
     if m:
         ctx["spec"] = m.group(1).rstrip(".")
     # the scenario keywords, from the title/brief in the hints and the artifact
     blob = (hints + "\n" + read_doc(ctx["spec"])).lower()
-    # a goal's doc names its cards, keywords and all; those are the cards'
-    # scenarios, not the goal's own
-    ctx["keywords"] = [] if ctx["kind"] == "GL" else [k for k in KEYWORDS if k in blob]
+    ctx["keywords"] = [k for k in KEYWORDS if k in blob]
     return ctx
 
 
 def handle_send(ctx, text, first):
     turn = Turn(ctx)
+    if STEP_RE.search(text) or STEP:
+        # a workflow step's turn: its brief quotes the spec, which no
+        # scribe pattern may read as one of its prompts
+        freeform_turn(turn, text)
+        turn.usage()
+        return
     if text.lstrip().startswith("[slow]"):
         # a line that opens with [slow] asks to be streamed slowly; one that
-        # merely quotes a [slow] card's title (a goal lead's turn) does not
+        # merely quotes a [slow] card's title does not
         turn.slow = True
     reply = scribe(ctx, text)
     if reply is not None:

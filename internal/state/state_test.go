@@ -370,54 +370,6 @@ func TestStoreCRUD(t *testing.T) {
 	}
 }
 
-func TestStoreTransition(t *testing.T) {
-	s := openStore(t)
-	ctx := context.Background()
-
-	f := feat(1, "Auth fix")
-	if err := s.CreateFeature(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := s.Transition(ctx, f.ID, domain.StagePlan, "user")
-	if err != nil || got.Stage != domain.StagePlan {
-		t.Fatalf("transition: %+v, %v", got.Stage, err)
-	}
-
-	// illegal jump: plan → done
-	if _, err := s.Transition(ctx, f.ID, domain.StageDone, "user"); err == nil {
-		t.Fatal("illegal transition accepted")
-	}
-	// stage unchanged after rejection
-	cur, _ := s.GetFeature(ctx, f.ID)
-	if cur.Stage != domain.StagePlan {
-		t.Fatalf("stage moved despite rejection: %s", cur.Stage)
-	}
-
-	// skip flag honored
-	g := feat(2, "Tiny tweak")
-	if err := s.CreateFeature(ctx, g); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Transition(ctx, g.ID, domain.StagePlan, "user"); err != nil {
-		t.Fatalf("skip-brainstorm transition rejected: %v", err)
-	}
-
-	// unknown feature
-	if _, err := s.Transition(ctx, "FD-999", domain.StagePlan, "user"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("err=%v, want ErrNotFound", err)
-	}
-
-	hist, err := s.History(ctx, f.ID)
-	if err != nil || len(hist) != 1 {
-		t.Fatalf("history = %+v, err=%v", hist, err)
-	}
-	h := hist[0]
-	if h.From != domain.StageTodo || h.To != domain.StagePlan || h.Actor != "user" || h.At.IsZero() {
-		t.Errorf("bad history record: %+v", h)
-	}
-}
-
 func TestMintFeatureNumSkipsUsedNumbers(t *testing.T) {
 	w, err := Init(gitRoot(t), gitRoot(t))
 	if err != nil {
@@ -951,6 +903,41 @@ func TestSessionMessageImagesRoundTrip(t *testing.T) {
 	}
 	if len(snaps[0].Transcript[1].Images) != 0 {
 		t.Errorf("assistant message Images = %+v, want none", snaps[0].Transcript[1].Images)
+	}
+}
+
+// TestSessionMessageStampAndAuthorRoundTrip: when a turn was written and
+// who typed it survive a save and load, and a turn with neither stays
+// without them — a restored thread places its runs by them.
+func TestSessionMessageStampAndAuthorRoundTrip(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "Stamps round trip")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 23, 4, 9, 1, 500, time.UTC)
+	if err := s.SaveSession(ctx, SessionSnapshot{
+		Feature: f.ID, Stage: f.Stage, Role: "implementer", State: "running",
+		Transcript: []SessionMessage{
+			{Author: "user", Content: "Run 1 has reported.", At: at, By: "workflow"},
+			{Author: "assistant", Content: "ok"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snaps, err := s.LoadSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) != 1 || len(snaps[0].Transcript) != 2 {
+		t.Fatalf("LoadSessions = %+v", snaps)
+	}
+	if m := snaps[0].Transcript[0]; !m.At.Equal(at) || m.By != "workflow" {
+		t.Errorf("the stamped turn came back as %v by %q", m.At, m.By)
+	}
+	if m := snaps[0].Transcript[1]; !m.At.IsZero() || m.By != "" {
+		t.Errorf("the unstamped turn came back as %v by %q", m.At, m.By)
 	}
 }
 

@@ -7,7 +7,7 @@ import { $, h, icon, clear, append, kindTag, typeName, STAGES, cr, ctxMeter, isM
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
-import { draftHead, writeSpecButton, delegateButton, openDelegate } from './session.js?v=__ASSET_V__'
+import { draftHead } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
 
 let ctx = {}
@@ -71,8 +71,6 @@ function render () {
         foldAt(1, commitButton(c, actions)),
         foldAt(2, publishButton(c, actions)),
         foldAt(3, landButton(c, actions)),
-        foldAt(0, writeSpecButton(state.card)),
-        foldAt(0, delegateButton(state.card)),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, data: { fold: '2' }, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
         menuBtn)),
     h('div', { class: 'subline' },
@@ -83,8 +81,6 @@ function render () {
       c.pr ? h('span', { class: 'mono', testid: 'card-pr' }, c.pr) : null,
       c.elsewhere ? h('span', null, 'driven by another gummi') : null,
       c.waits?.length ? h('span', null, 'waits on ', c.waits.map((w, i) => [i ? ', ' : '', h('button', { class: 'link', type: 'button', onclick: () => ctx.select(w) }, cardName(w))])) : null,
-      c.kind === 'goal' ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: 'Open the goal page: its budget, done-when, cards and log', onclick: () => openView('goal', { id: c.id }) }, 'goal page') : null,
-      c.goal ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: c.goal.title ? `Open the goal: ${c.goal.title}` : 'Open the goal', onclick: () => openView('goal', { id: c.goal.id }) }, 'goal ', h('span', { class: 'mono' }, cardName(c.goal.id))) : null,
       c.stack ? h('button', { class: ['badge stack', c.stack.stale && 'stale'], type: 'button', testid: 'card-stack', title: `Open the stack ${c.stack.name || c.stack.id}`, onclick: () => openView('stacks', { id: c.stack.id }) }, `stack ${c.stack.pos + 1} of ${c.stack.of}`) : null,
       spend(c),
       ctxMeter(c.context, 'card-context')),
@@ -145,11 +141,6 @@ export function openActions (line = '') {
   const items = list.map(a => ({
     label: a.label, danger: a.danger, testid: `action-${a.id}`, hint: a.detail, onClick: () => runAction(state.card, a)
   }))
-  // the delegate button is the page's own, not a menu action: its entry
-  // here is where it is reached once the head has folded it away
-  if (delegateButton(state.card)) {
-    items.push({ label: 'Delegate to cards…', testid: 'action-delegate', hint: 'Let this session create workflow cards under a budget', onClick: () => openDelegate(state.card) })
-  }
   openMenu(btn, items, { testid: 'card-actions-menu' })
   return true
 }

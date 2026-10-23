@@ -215,14 +215,10 @@ func TestWebRequestChangesRefusalsAndPullPR(t *testing.T) {
 	if !errors.Is(err, ErrNoCard) {
 		t.Errorf("pull on an unknown card: err = %v", err)
 	}
-	_, err = m.WebRequestSpecChanges("FD-404", "sam", "")
-	wantWebErr(t, "spec changes, unknown card", err, WebNotFound)
-	_, err = m.WebRequestDiffChanges("FD-404", "sam", "")
+	_, err = m.WebRequestDiffChanges("FD-404")
 	wantWebErr(t, "diff changes, unknown card", err, WebNotFound)
-	_, err = m.WebRequestSpecChanges(string(d.f.ID), "sam", "")
-	wantWebErr(t, "spec changes with no document", err, WebConflict)
 	// no comments to send: the refusal is the terminal's sentence
-	if _, err = m.WebRequestDiffChanges(string(d.f.ID), "sam", ""); err == nil {
+	if _, err = m.WebRequestDiffChanges(string(d.f.ID)); err == nil {
 		t.Fatal("sending no comments was accepted")
 	}
 }

@@ -64,16 +64,6 @@ alive() {
 
 section() { printf '\n== %s ==\n' "$1"; }
 
-# goto <label> — press Down until "▸ <label>" is showing (max 14 tries).
-goto() {
-  local want="$1" i
-  for i in $(seq 1 14); do
-    if pane | grep -qE -- "▸ $want"; then return 0; fi
-    send Down
-  done
-  return 1
-}
-
 # ---------------------------------------------------------------- setup
 rm -rf "$WS"; mkdir -p "$WS/repo-b" "$WS/repo-c"
 git -C "$WS" init -q -b main
@@ -91,22 +81,20 @@ pane() { tmux capture-pane -t $S -p 2>/dev/null; }
 lit()  { tmux send-keys -t $S -l "$1"; sleep 0.35; }
 clear_composer() { tmux send-keys -t $S C-u; sleep 0.3; }
 
-# reopen <id> — return to a known state from the backlog list, land on
-# the card, open its page, and empty the composer. Sections do not inherit
-# each other's focus, draft, or overlay state.
-reopen() {
-  local want="$1" i
-  for i in 1 2 3 4; do
-    pane | grep -qE 'BACKLOG.*cards' && break
-    send Escape
+# tab_to_buttons — press Tab until the new-card form's button row has the
+# focus (the options rows in between vary with what the form offers).
+tab_to_buttons() {
+  local i
+  for i in $(seq 1 10); do
+    pane | grep -q 'enter activate' && return 0
+    send Tab
   done
-  goto "$want" || { echo "reopen: could not reach $want"; exit 2; }
-  send Enter
-  clear_composer
+  return 1
 }
 
 tmux kill-session -t $S 2>/dev/null
-tmux new-session -d -s $S -x 120 -y 40 "cd '$WS' && '$BIN'"
+tmux new-session -d -s $S -x 120 -y 40 \
+  "cd '$WS' && GUMMI_AGENT=headless GUMMI_AGENT_CMD='$ROOT/scripts/web-e2e-agent.py' '$BIN'"
 sleep 1.8
 # first start opens the agent-tab CLI picker over the board; dismiss it.
 send Escape
@@ -116,80 +104,79 @@ section "1. empty board / splash"
 expect "splash advertises the command menu"          'space commands'
 send 'Space'
 expect "menu footer appears"                         '↑↓ move'
-expect "menu lists New feature"                      'New feature'
-expect "menu marks engine-only entries"              'Ingest a spec into features'
+expect "menu lists New session"                      'New session'
 send Escape
 
-section "2. create a card through the menu and the form's buttons only"
+section "2. create a session through the menu and the form's buttons only"
 send 'Space'
-send 'feat'
-expect "typing filters the menu"        'New feature'
+lit 'sess'
+expect "typing filters the menu"        'New session'
 refute "filter excludes non-matches"    'Quit gummi'
 send Enter
-expect "menu ran New feature"           'new feature'
-expect "repo field renders first"       'repo: b'
-send 'pty smoke card'
-send Tab; send Tab; send Tab; send Tab
+expect "menu ran New session"           'new card'
+expect "repo field renders first"       'repo +choose one'
+send '1'
+expect "1 chose the first repo"         'repo +1 ▸ b'
+lit 'pty smoke card'
+tab_to_buttons || true
 expect "tab reaches the button row"     '\[ Cancel \]'
 expect "button-row hint replaces the field hint" 'enter activate'
 send Right
 send Enter
-expect "Create minted the card"         'FD-001'
+expect "Create minted the session and opened it" 'FF-001 · pty smoke card'
 alive  "still alive after create"
 
-section "3. duplicate has no accelerator; y is inert on the board"
-send 'y'
-refute "y no longer opens duplicate"    'duplicate FD-001\?'
-alive  "still alive after y"
-
-section "4. opening the card page from the board"
-send Enter
-expect "the card page opened"           'esc backlog'
-expect "the masthead names the card"    'FD-001'
-expect "the stage strip renders"        'todo'
+section "3. the card page a new session opens on"
+expect "the breadcrumb leads back to the board" '‹ esc board'
+expect "the masthead names the branch"  'ff/pty-smoke-card'
 expect "the composer is present"        '┃ '
-alive  "still alive after opening the card"
+alive  "still alive on the card page"
 
-section "5. the composer takes the keyboard immediately"
+section "4. the composer takes the keyboard immediately"
+clear_composer
 lit 'test text'
 expect "typing enters the composer"     '┃ test text'
 clear_composer
-expect "ctrl+u clears the composer"     '┃ '
+refute "ctrl+u clears the composer"     '┃ test text'
 
-section "6. esc leaves the card page and keeps the draft"
+section "5. esc leaves the card page and keeps the draft"
 lit 'draft text here'
 send Escape
-expect "esc returned to the backlog"    'BACKLOG'
+expect "esc returned to the board"      'BOARD'
+expect "the board lists the session"    'Session +pty smoke card'
+
+section "6. duplicate has no accelerator; y is inert on the board"
+send 'y'
+refute "y no longer opens duplicate"    'duplicate'
+alive  "still alive after y"
+
+section "7. reopening the card from the board"
 send Enter
 expect "the draft survived"             '┃ draft text here'
+expect "masthead shows the card id"     'FF-001 · pty smoke card'
+clear_composer
 alive  "still alive after reopening"
 
-section "7. the masthead, breadcrumb, and stage strip on a card page"
-expect "breadcrumb shows navigation"    '‹ esc backlog'
-expect "masthead shows the card id"     'FD-001 · pty smoke card'
-expect "stage strip shows the workflow" 'todo.*brainstorm.*spec'
-
-section "8. command menu: unavailable entries refuse but stay visible"
+section "8. command menu: a filter that matches nothing says so"
 send Escape
 send 'Space'
-send 'ingest'
-expect "unavailable entry still listed" 'Ingest a spec into features'
-send Enter
-# on a board with a card, ingest is available and opens; close it and verify
-# the menu path still works. if ingest were unavailable it would refuse here.
+lit 'ingest'
+expect "a retired command is not listed" 'no commands match'
 send Escape
-expect "menu back after ingest close"   'commands'
-send Escape
+refute "esc closed the menu"            '↑↓ move'
+alive  "still alive after the menu"
 
 section "9. help overlay is reachable and honest"
 send '?'
-expect "help opens"                     'keys · backlog'
+expect "help opens"                     'keys · board'
 expect "help lists the menu key"        'open the command menu'
-expect "help shows its last row"        'q +quit'
+# with a card on the board the table outgrows the pane, so it scrolls
+send PageDown; send PageDown
+expect "help scrolls to its last row"   'q +quit'
 refute "help no longer advertises y"    'y +duplicate'
 send Escape
 alive  "esc out of help does not panic"
-refute "help closed"                    'keys · backlog'
+refute "help closed"                    'keys · board'
 
 section "10. ctrl+c is hoisted above the overlay"
 send 'Space'

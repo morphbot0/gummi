@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -35,20 +34,4 @@ func resumeSessionPath(w state.Workspace, id domain.FeatureID, role agent.Role, 
 		panic(fmt.Sprintf("resumeSessionPath: unknown flavor %d", flavor))
 	}
 	return filepath.Join(dir, "sessions", string(id)+"-"+string(role)+suffix+".jsonl")
-}
-
-// clearResumeTranscript removes any pre-existing transcript at the derived
-// path so a FRESH session starts clean. IsNotExist is silent; any other
-// error is appended to the session's activity so it stays visible without
-// blocking the spawn — the worst case is that the FRESH session continues
-// an old transcript, and the very next turn's session_id event overwrites
-// it anyway.
-func (e *Engine) clearResumeTranscript(s *Session, flavor runFlavor) {
-	path := resumeSessionPath(e.cfg.Workspace, s.Feature.ID, s.Role, flavor)
-	if path == "" {
-		return
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		s.appendActivity(fmt.Sprintf("could not clear prior session transcript at %s: %v", path, err))
-	}
 }

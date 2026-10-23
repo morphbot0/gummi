@@ -79,7 +79,7 @@ func TestRunRequiresEnvelope(t *testing.T) {
 // GUMMI_ENVELOPE supplies the envelope when --envelope is absent.
 func TestDriverOptionsEnvelopeFallback(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "2.50")
-	opts, err := driverOptions(parsedFlags(t, "run"), "")
+	opts, err := driverOptions(parsedFlags(t, "run"))
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
@@ -88,79 +88,43 @@ func TestDriverOptionsEnvelopeFallback(t *testing.T) {
 	}
 }
 
-// An unknown --gate-approval value is rejected, and the rest of the shared
-// driving surface threads through to driver.Options unchanged.
-func TestDriverOptionsGateValidation(t *testing.T) {
-	bad := parsedFlags(t, "run", "--envelope", "100", "--gate-approval", "sometimes")
-	if _, err := driverOptions(bad, ""); err == nil {
-		t.Fatal("bad gate-approval accepted")
-	}
+// The shared driving surface threads through to driver.Options unchanged.
+func TestDriverOptionsThreadThrough(t *testing.T) {
 	fl := parsedFlags(t, "run",
-		"--envelope", "100", "--gate-approval", driver.GateAttended,
-		"--stage-timeout", "0", "--autonomous", "--verbose",
-		"--ref", "JIRA-9", "--until", "plan", "--base", "release-2.1")
-	opts, err := driverOptions(fl, "must handle empty input")
+		"--envelope", "100", "--timeout", "0", "--verbose",
+		"--ref", "JIRA-9", "--base", "release-2.1", "--profile", "cheap")
+	opts, err := driverOptions(fl)
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
-	if opts.GateApproval != driver.GateAttended || !opts.Autonomous || opts.Ref != "JIRA-9" {
+	if opts.Envelope != 10000 || opts.Timeout != 0 || !opts.Verbose || opts.Ref != "JIRA-9" ||
+		opts.Base != "release-2.1" || opts.Profile != "cheap" {
 		t.Fatalf("options not threaded through: %+v", opts)
 	}
-	if opts.Acceptance != "must handle empty input" || opts.Until != "plan" || opts.Base != "release-2.1" {
-		t.Fatalf("acceptance/until/base not threaded through: %+v", opts)
-	}
 }
 
-// A verb that does not offer one of the shared driving flags still
-// assembles its options: goal takes no --repo, and resume changes neither
-// repo nor base. Reading an absent flag must be "" rather than a panic.
-func TestDriverOptionsToleratesAbsentSharedFlags(t *testing.T) {
-	for _, verb := range []string{"goal", "resume"} {
-		opts, err := driverOptions(parsedFlags(t, verb, "--envelope", "100"), "")
-		if err != nil {
-			t.Fatalf("%s: driverOptions: %v", verb, err)
-		}
-		if opts.Repo != "" {
-			t.Errorf("%s: Repo = %q, want empty", verb, opts.Repo)
-		}
-	}
-}
-
-// --until is validated against the feature route before any workspace work
-// begins: an off-route or unknown stage fails as a plain usage error,
-// straight out of runRun, before driverOptions or withRunEngine ever run.
-// The positive (accepted) cases are covered at the driver level by
-// internal/driver/steer_test.go's TestUntilStops family.
-func TestRunUntilValidation(t *testing.T) {
+// The workflow's driving flags are gone from run: a script still passing
+// one is told so at parse rather than having it silently ignored.
+func TestRunRefusesRetiredFlags(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "100")
-	// a real stage that is not a stop on the route → rejected. The design
-	// gate is the one stop, so every other stage lands here.
-	if err := runCLI("run", "--until", "implement", "a feature"); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
-		t.Fatalf("err = %v, want a --until rejection naming the valid stops", err)
-	}
-	// an unknown stage is always rejected.
-	if err := runCLI("run", "--until", "banana", "a feature"); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
-		t.Fatalf("err = %v, want a --until rejection naming the valid stops", err)
+	for _, flag := range []string{"--until=plan", "--gate-approval=attended", "--autonomous", "--stage-timeout=1m", "--acceptance=x"} {
+		if err := runCLI("run", flag, "a feature"); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Errorf("run %s: err = %v, want an unknown-flag refusal", flag, err)
+		}
 	}
 }
 
 // driverExit maps each terminal status to its process exit code, and done
 // to a clean (nil) return.
 func TestDriverExitMapping(t *testing.T) {
-	if err := driverExit(driver.Outcome{Status: driver.StatusVerified}, nil); err != nil {
+	if err := driverExit(driver.Outcome{Status: driver.StatusDone}, nil); err != nil {
 		t.Fatalf("done → %v, want nil", err)
 	}
-	// --until's clean stop also exits 0 (nil return).
-	if err := driverExit(driver.Outcome{Status: driver.StatusStopped}, nil); err != nil {
-		t.Fatalf("stopped → %v, want nil (exit 0)", err)
-	}
 	cases := map[driver.Status]int{
-		driver.StatusQuestion:   2,
-		driver.StatusBlocked:    3,
-		driver.StatusEscalation: 4,
-		driver.StatusExhausted:  5,
-		driver.StatusTimeout:    6,
-		driver.StatusError:      1,
+		driver.StatusNeedsYou:  2,
+		driver.StatusExhausted: 5,
+		driver.StatusTimeout:   6,
+		driver.StatusError:     1,
 	}
 	for st, code := range cases {
 		err := driverExit(driver.Outcome{Status: st}, nil)
@@ -171,60 +135,32 @@ func TestDriverExitMapping(t *testing.T) {
 	}
 }
 
-// resumeInput enforces at most one decision flag and preserves an
-// explicitly-empty answer as a (rejectable) decision rather than a
-// silent re-run. It reads the flags `gummi resume` really declares, so a
-// case here cannot describe a flag surface the binary does not have.
-func TestResumeInputMutuallyExclusive(t *testing.T) {
+// resumeInput takes --answer or a message, never both, and keeps an
+// explicitly-empty answer as a (rejectable) answer.
+func TestResumeInput(t *testing.T) {
 	rf := func(argv ...string) cliFlags { return parsedFlags(t, "resume", argv...) }
 
-	if _, err := resumeInput(rf("--answer", "no", "--approve")); err == nil {
-		t.Fatal("both --answer and --approve accepted")
+	if _, err := resumeInput(rf("--answer", "no"), []string{"and a turn"}); err == nil {
+		t.Fatal("both --answer and a message accepted")
 	}
-	in, err := resumeInput(rf("--answer", "no"))
-	if err != nil || in.Answer == nil || *in.Answer != "no" {
+	in, err := resumeInput(rf("--answer", "no"), nil)
+	if err != nil || in.Answer == nil || *in.Answer != "no" || in.Message != "" {
 		t.Fatalf("answer input = %+v, err=%v", in, err)
 	}
-	in, err = resumeInput(rf("--approve"))
-	if err != nil || !in.Approve {
-		t.Fatalf("approve input = %+v, err=%v", in, err)
+	in, err = resumeInput(rf(), []string{"now add tests"})
+	if err != nil || in.Answer != nil || in.Message != "now add tests" {
+		t.Fatalf("message input = %+v, err=%v", in, err)
 	}
-	// no flags set → an all-zero input (re-run the parked stage).
-	in, err = resumeInput(rf())
-	if err != nil || in.Answer != nil || in.Approve || in.RequestChanges != nil || in.Bounce != nil {
+	if _, err := resumeInput(rf(), []string{""}); err == nil {
+		t.Fatal("an empty message accepted")
+	}
+	// nothing → an all-zero input (carry on).
+	in, err = resumeInput(rf(), nil)
+	if err != nil || in.Answer != nil || in.Message != "" {
 		t.Fatalf("empty resume input = %+v, err=%v", in, err)
 	}
-}
-
-// --bounce is a fourth mutually-exclusive decision (the verify/review
-// rewind), and --note is only meaningful when carried by --bounce — an
-// orphan --note is a usage error, not a silent no-op.
-func TestResumeInputBounce(t *testing.T) {
-	rf := func(argv ...string) cliFlags { return parsedFlags(t, "resume", argv...) }
-
-	// --bounce alone → empty-note bounce.
-	in, err := resumeInput(rf("--bounce"))
-	if err != nil || in.Bounce == nil || *in.Bounce != "" {
-		t.Fatalf("bounce input = %+v, err=%v", in, err)
-	}
-	// --bounce --note "why" → bounce carrying the note.
-	in, err = resumeInput(rf("--bounce", "--note", "flaky mock"))
-	if err != nil || in.Bounce == nil || *in.Bounce != "flaky mock" {
-		t.Fatalf("bounce+note input = %+v, err=%v", in, err)
-	}
-	// --bounce combined with any other decision is refused.
-	if _, err := resumeInput(rf("--answer", "no", "--bounce")); err == nil {
-		t.Fatal("both --answer and --bounce accepted")
-	}
-	if _, err := resumeInput(rf("--approve", "--bounce")); err == nil {
-		t.Fatal("both --approve and --bounce accepted")
-	}
-	if _, err := resumeInput(rf("--request-changes", "changes", "--bounce")); err == nil {
-		t.Fatal("both --request-changes and --bounce accepted")
-	}
-	// --note without --bounce is a usage error, not a silently-dropped flag.
-	if _, err := resumeInput(rf("--note", "orphan")); err == nil {
-		t.Fatal("--note accepted without --bounce")
+	if err := runCLI("resume", "FF-1", "one", "two"); err == nil {
+		t.Fatal("two messages accepted")
 	}
 }
 
@@ -235,9 +171,8 @@ func TestResumeBadID(t *testing.T) {
 	}
 }
 
-// GUMMI_ENVELOPE is dollars wherever it is read — run, ingest and bugs
-// alike — so the same export never gives one command's cards a hundredth
-// of another's budget.
+// GUMMI_ENVELOPE is dollars, as --envelope is, so the same export never
+// gives a run a hundredth of the budget the flag would.
 func TestEnvEnvelopeIsDollars(t *testing.T) {
 	for v, want := range map[string]int{"20": 2000, "$12.50": 1250, "1,200": 120000, "": 0, "0": 0, "-5": 0, "lots": 0} {
 		t.Setenv("GUMMI_ENVELOPE", v)

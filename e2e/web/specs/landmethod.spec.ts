@@ -22,9 +22,9 @@ async function menu(page: Page, action: string) {
 
 const phone = (info: { project: { name: string } }) => info.project.name === 'phone';
 
-test.describe('a verified card that may keep its commits', () => {
+test.describe('a session that may keep its commits', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a farewell helper'); } } });
+  test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a farewell helper'); } } });
 
   test('lands as a merge commit when the merge-commit method is chosen', async ({ pairedPage: page, server, workspace, api }, info) => {
     // the tip is read first: a landing takes the branch with it
@@ -37,7 +37,7 @@ test.describe('a verified card that may keep its commits', () => {
     await expect(method).toBeVisible();
     await expect(method).toHaveValue('squash');
     await expect(page.getByTestId('action-input')).toBeVisible();
-    await expect(page.getByTestId('action-hint')).toContainText('this is what lands');
+    await expect(page.getByTestId('action-hint')).toContainText('Nothing was drafted yet');
     await method.selectOption('merge');
     // a merge commit takes git's message: no box, no hint, nothing to draft
     await expect(page.getByTestId('action-input')).toBeHidden();

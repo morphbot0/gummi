@@ -32,6 +32,8 @@ type Pack struct {
 	Cache string // .gummi/state/skillpacks
 	// StageDir holds each card's staged changes (stage.go).
 	StageDir string // .gummi/state/skillstage
+	// BuiltinDir holds gummi's own skills, written out (builtin.go).
+	BuiltinDir string // .gummi/state/skillbuiltin
 	// Missing, when set, names the paths of paths that the base branch of
 	// the repository a scope names does not have: the grounding lint. A
 	// general skill names no repository and is not checked.
@@ -44,9 +46,10 @@ type Pack struct {
 // and whose state directory is stateDir.
 func New(gummiDir, stateDir string) *Pack {
 	return &Pack{
-		Dir:      filepath.Join(gummiDir, "skills"),
-		Cache:    filepath.Join(stateDir, "skillpacks"),
-		StageDir: filepath.Join(stateDir, "skillstage"),
+		Dir:        filepath.Join(gummiDir, "skills"),
+		Cache:      filepath.Join(stateDir, "skillpacks"),
+		StageDir:   filepath.Join(stateDir, "skillstage"),
+		BuiltinDir: filepath.Join(stateDir, "skillbuiltin"),
 	}
 }
 

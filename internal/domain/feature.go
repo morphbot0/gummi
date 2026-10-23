@@ -14,44 +14,15 @@ import (
 	"unicode"
 )
 
-// Gate approval modes: who crosses a feature's gates on an unattended
-// resume. There are two, and the axis is "how much do I trust this card"
-// rather than a per-gate policy:
-//
-//   - GateAttended stops at every gate. The stage asks whether to
-//     advance; you review, comment, and answer. This is the default when
-//     the field is empty.
-//   - GateAutopilot stops at none. It runs all the way to a verified
-//     branch on its own — gates, critique bounces and conflict handoffs
-//     all auto-cross — and stops there: it never lands on main by itself.
-//
-// This replaces three modes with two, and the default gets STRICTER in
-// the process. The retired middle mode ("gates") auto-crossed design
-// gates while still stopping for a mid-stage question, and it was the
-// default; attended stops at all of them. The trade is that each stop is
-// a question in the conversation rather than a control to go find.
-//
-// The mode is chosen at `run` and persisted on the card so an unattended
-// `resume` keeps it instead of silently reverting to the default. Empty
-// reads as GateAttended. These are the canonical, stored values — the
-// only ones ValidGateApproval accepts. The spellings that came before
-// them ("off", "gates", "caller", "auto" → attended; "full" →
-// autopilot) are still accepted as INPUT through NormalizeGateApproval,
-// so existing scripts keep working and old rows migrate, but they are
-// never stored and nothing branches on them.
+// Gate approval modes: who crossed a workflow card's gates — a person at
+// each one (GateAttended, also the empty default) or nobody until the
+// branch was verified (GateAutopilot). Workflow cards are retired; the
+// spellings survive because a legacy card's log still records its mode
+// changes, and the thread renders them (threadfold.ModeLine).
 const (
 	GateAttended  = "attended"
 	GateAutopilot = "autopilot"
 )
-
-// ValidGateApproval reports whether s is a storable gate-approval mode:
-// empty, "attended", or "autopilot". Empty is valid and reads as
-// GateAttended. It does not accept the retired input spellings — those
-// are resolved to their canonical form by NormalizeGateApproval before
-// anything reaches storage or Validate.
-func ValidGateApproval(s string) bool {
-	return s == "" || s == GateAttended || s == GateAutopilot
-}
 
 // NormalizeGateApproval resolves a gate-approval mode as given by a
 // caller (CLI flag, MCP tool argument, a persisted row written by an
@@ -69,8 +40,7 @@ func ValidGateApproval(s string) bool {
 // which is autopilot exactly.
 //
 // "" passes through unchanged — the empty string carries no default
-// here; the caller decides what empty means for it (persisted rows and
-// Feature.GateApproval read it as GateAttended).
+// here; the caller decides what empty means for it.
 func NormalizeGateApproval(s string) (string, bool) {
 	switch s {
 	case "":
@@ -331,11 +301,9 @@ type Spend struct {
 	InputTokens      int64
 	OutputTokens     int64
 
-	// Decompose* mirror Credits/InputTokens/OutputTokens but count only
-	// the FD-081 decompose pass's own spend, so it stays distinguishable
-	// in reporting. Store.AddDecomposeSpend increments the pair (overall,
-	// decompose) together, so DecomposeCreditEquivalentAt(rate) can never
-	// exceed CreditEquivalentAt(rate) at any rate.
+	// Decompose* are the part of Credits/InputTokens/OutputTokens a
+	// research card's decompose pass spent, read back from rows written
+	// before decomposition was retired; nothing books them any more.
 	DecomposeCredits      float64
 	DecomposeInputTokens  int64
 	DecomposeOutputTokens int64
@@ -408,29 +376,22 @@ type Feature struct {
 	// branch is cut from this card's, so it carries every commit here and
 	// lands them on a verified branch; this card landing them too would
 	// put the same work on main a second way, past the floor the person
-	// just sent it to. MayLandAfterAll refuses it. Freeform-only, and set
-	// once, on the hand-off that continued it.
+	// just sent it to. MayLandAfterAll refuses it. Freeform-only. Legacy:
+	// "write a spec" is retired, so only a session continued before then
+	// carries one.
 	ContinuedAs FeatureID
-	// ParentID is the freeform card whose session created this card under
-	// its delegation, empty for every other card. Like a goal's card, a
-	// delegated card's branch forks from the freeform card's branch and
-	// lands back on it, so its work reaches main only through the person's
-	// read of the freeform card's diff. It never also belongs to a goal:
-	// two budgets would hold the same credits.
+	// ParentID is the session (a freeform card) this card is a hidden
+	// child of (Child), empty for every other card. A child resolves to the
+	// manager rooted at the session's worktree (worktree.Pool.ManagerFor),
+	// so its work reaches main only through the person's read of the
+	// session's diff. A legacy card a session once created under its
+	// delegation carries one too.
 	ParentID FeatureID
-	// Delegate is a freeform card's delegation: what its session may give
-	// cards it creates. Zero on every other card, and on a freeform card
-	// whose person has not opted in — the session is then not offered the
-	// card tools at all.
-	Delegate Delegation
-	// GateApproval is who crosses this card's gates on an unattended
-	// resume: GateAttended (default) or GateAutopilot.
-	// Persisted at creation so a `resume` that doesn't re-pass
-	// --gate-approval inherits the run's choice rather than reverting to
-	// the default. Empty reads as GateAttended.
-	GateApproval string
-	Budget       Budget
-	Spend        Spend // metered cost across all stages
+	// Child marks a session's hidden child: a workflow step's card, or an
+	// old crew's (ChildLink). Zero on every card a person works.
+	Child  ChildLink
+	Budget Budget
+	Spend  Spend // metered cost across all stages
 	// ExternalRef ties a bug back to its source (e.g. a GitHub issue URL),
 	// so re-ingesting the same source skips items already imported. Empty
 	// for manually created features and bugs.
@@ -548,32 +509,12 @@ type Feature struct {
 	// local squash-merge (see the driver/UI landing guards): a card lands
 	// either via its PR or locally, never both. Empty() until linked.
 	PullRequest PullRequestRef
-	// GoalID is the goal this card belongs to, empty for a card on the open
-	// board. A goal card's branch forks from the goal's branch and lands
-	// back on it; its budget is carved out of the goal's. Goals do not
-	// nest, so a goal never carries one.
-	GoalID FeatureID
-	// GoalAttached marks a card that existed before its goal and was handed
-	// to it, rather than created by it. Dropping an attached card returns
-	// it to the board with its work kept; dropping one the goal created
-	// closes it inside the goal.
-	GoalAttached bool
-	// GoalDroppedAt is stamped when a goal drops this card: it stays where
-	// it stopped, spends nothing more, and no longer counts toward the
-	// goal. Zero on every card a goal has not dropped.
-	GoalDroppedAt time.Time
 	// FoundBy names the CARD this one was filed from — provenance, not
 	// dependency: nothing about it blocks, schedules or orders work.
 	//
-	// It was written only by a goal at first ("found along the way": a
-	// goal filing something real but outside its objective, as an
-	// open-board card it never works), because a goal was the only thing
-	// that ever filed a card. A finished card's follow-up is the second,
-	// and it means exactly the same thing — this came out of that.
+	// A finished card's follow-up is filed from it, and it means exactly
+	// that — this came out of that.
 	FoundBy FeatureID
-	// Goal holds the settings only a goal card carries. Zero on every
-	// other kind.
-	Goal GoalSettings
 	// StackID is the stack this card sits in, empty for a card that is not
 	// stacked. A stack is TOPOLOGY, not scheduling: it says this card's
 	// branch forks from the branch of the card below it, and it never
@@ -594,38 +535,6 @@ type Feature struct {
 	// structural rather than a rule that could be violated.
 	StackPos int
 }
-
-// GoalSettings are the goal-only fields of a card: how many of its cards
-// may run at once, the reserve the lead holds back, and how it is ending.
-type GoalSettings struct {
-	// Lanes is how many of the goal's cards may run at the same time. 0
-	// reads as DefaultGoalLanes.
-	Lanes int
-	// Reserve is the lead's current estimate, in credits, of what finishing
-	// cleanly costs. 0 means the lead has not estimated yet and the default
-	// formula (DefaultGoalReserve) applies.
-	Reserve int
-	// WrapUpAt is stamped when the goal must finish now — you stopped it,
-	// its budget reached the reserve, or its lead kept failing. Nothing new
-	// starts after it; verified work lands and the rest is dropped.
-	WrapUpAt time.Time
-	// Partial is why a finished goal is partial, empty while it is whole.
-	Partial string
-}
-
-// DefaultGoalLanes is the lane count a goal gets when its plan names none.
-const DefaultGoalLanes = 2
-
-// LaneCount returns the goal's lanes with the default resolved.
-func (g GoalSettings) LaneCount() int {
-	if g.Lanes <= 0 {
-		return DefaultGoalLanes
-	}
-	return g.Lanes
-}
-
-// WrappingUp reports whether the goal has been told to finish now.
-func (g GoalSettings) WrappingUp() bool { return !g.WrapUpAt.IsZero() }
 
 // PullRequestRef records an outbound pull request a card is linked to: a
 // point-in-time snapshot taken at link time, not a live view. Repo is the
@@ -740,9 +649,6 @@ func (f *Feature) kind() Kind {
 	}
 }
 
-// IsGoal reports whether the card is a goal.
-func (f *Feature) IsGoal() bool { return f.kind() == KindGoal }
-
 // IsFreeform reports whether the card is a freeform card: one that is not
 // in the workflow at all (KindFreeform). It is the question every graph
 // reader asks before assuming a card has a stage to advance, and every
@@ -797,85 +703,31 @@ func (f *Feature) CheckoutName() string {
 	return "the main checkout"
 }
 
-// ErrNotVerified is the refusal a card in the workflow gets when it is
-// asked to land before its branch is verified. It is a sentinel so a
-// caller can tell "this card has not earned a landing yet" from a git or
-// store failure, and so the two headless landing verbs and the TUI say
-// the same thing.
-var ErrNotVerified = errors.New("not at a verified branch")
-
-// MayLand reports whether this card may become a commit on main, and says
-// why not when it may not.
+// MayLand reports whether this card may become a commit on its base,
+// and says why not when it may not.
 //
-// There are two floors, because there are two kinds of card, and this is
-// the one place that says so:
+// There is one floor, and it is not here: a card lands on a person's read
+// of its diff (DESIGN §19.1, decision 27). Unresolved diff comments hold
+// the landing, enforced by the same open-comment check every landing
+// crosses, and an open workflow run holds its session's (Engine.RunHolds). What
+// this refuses is the card that has no landing of its own: a session
+// whose work went on as a spec, which that spec lands; a legacy goal,
+// which never landed; and a legacy research card, which holds no branch.
 //
-//   - A card in the workflow lands on a VERIFIED branch — it walked the
-//     graph, its critique passed and its checks ran. That is DESIGN §10
-//     D3's quality floor, and nothing softens it.
-//   - A freeform card (KindFreeform) has no stage to be at and no verify
-//     to have passed: it lands on a human's read of its diff, which is
-//     the whole of what freeform means (DESIGN §19). Its own floor is
-//     the diff surface — unresolved annotations hold the landing, which
-//     is enforced by the same GateBlockers check every landing crosses,
-//     not here.
-//
-// A handed-off card is neither case: it already closed with a verified
-// stamp on it and landing it after all stays available, so callers check
-// HandedOff before asking, and ask MayLandAfterAll instead.
+// A handed-off card asks the same question: hand-off closes a card with
+// its branch left unlanded, and landing it after all stays available for
+// as long as the branch is there.
 func (f *Feature) MayLand() error {
-	if f.IsFreeform() {
-		return nil
+	if f.ContinuedAs != "" {
+		return fmt.Errorf("%w — its work continues as %s, which lands it", ErrContinued, f.ContinuedAs)
 	}
-	if f.Stage != StageVerify || f.VerifiedAt.IsZero() {
-		return fmt.Errorf("%w (stage %s)", ErrNotVerified, f.Stage)
-	}
-	return nil
-}
-
-// ErrVerifyStale is the refusal a verified card gets when its branch is
-// no longer the revision the verify pass ran on. It wraps ErrNotVerified:
-// what would land has not been verified, which is the same floor said
-// more precisely.
-var ErrVerifyStale = fmt.Errorf("%w: the branch moved since verify passed", ErrNotVerified)
-
-// MayLandAt is MayLand for a landing that knows what it would land: head
-// is the branch tip the squash would take. The verified floor is about
-// that revision, not about the card — a commit added after the verify
-// pass (by hand, by a later turn, by a landing's own final checkpoint) is
-// work no check has run on, so the card lands only once a verify has run
-// on its tip again. Every landing door asks this right before it lands.
-//
-// A card stamped before the revision was recorded (VerifiedAt set,
-// VerifiedRev empty) reads as stale: gummi cannot say what that pass saw,
-// and the safe answer to "was this verified?" without the evidence is
-// "verify it again" — a cheap re-run of the checks, which records the
-// revision from then on.
-//
-// A goal is not asked: its landing spans one branch per repository and
-// re-runs its checks itself whenever its last catch-up moved one
-// (Engine.LandGoal), so no single revision describes what it verified.
-// A freeform card has no verify, and a handed-off card is checked by its
-// callers before they ask, as with MayLand.
-func (f *Feature) MayLandAt(head string) error {
-	if err := f.MayLand(); err != nil || f.IsFreeform() || f.IsGoal() {
-		return err
-	}
-	if f.VerifiedRev == "" {
-		return fmt.Errorf("%w (verified before gummi recorded the revision it ran on)", ErrVerifyStale)
-	}
-	if head != f.VerifiedRev {
-		return fmt.Errorf("%w (verified %s, now %s)", ErrVerifyStale, ShortRev(f.VerifiedRev), ShortRev(head))
+	switch f.kind() {
+	case KindGoal:
+		return errors.New("a goal no longer lands")
+	case KindResearch:
+		return errors.New("a research card holds no branch to land")
 	}
 	return nil
-}
-
-// VerifyStale reports a card whose verify pass passed on a revision its
-// branch has since moved off (MayLandAt's refusal, asked of a card that
-// is otherwise ready to land), for the surfaces that offer a re-verify in
-// place of the landing.
-func (f *Feature) VerifyStale(head string) bool {
-	return f.MayLand() == nil && head != "" && errors.Is(f.MayLandAt(head), ErrVerifyStale)
 }
 
 // ShortRev is a commit id cut to the length a sentence quotes it at.
@@ -884,63 +736,6 @@ func ShortRev(rev string) string {
 		return rev[:7]
 	}
 	return rev
-}
-
-// InGoal reports whether the card belongs to a goal.
-func (f *Feature) InGoal() bool { return f.GoalID != "" }
-
-// GoalDropped reports whether the card's goal dropped it.
-func (f *Feature) GoalDropped() bool { return !f.GoalDroppedAt.IsZero() }
-
-// Conducted reports whether this card's goal is driving it. Inside a
-// running goal the lead is the driver (§17): it starts the card, answers
-// its questions, raises its envelope and lands it on the goal branch, and
-// the card's stops wake the goal rather than a person (§17.5). So a
-// person watches such a card; they do not steer it, for the same reason
-// two gummi processes never drive one card at once.
-//
-// Two cards wear a GoalID and are nobody's to conduct: one the goal
-// dropped (it is closed where it stands and the person may adopt it back)
-// and one already done. A card the goal only attached is conducted while
-// it is held — releasing it clears the GoalID entirely.
-//
-// The done case is only half the answer, and a card cannot hold the other
-// half: whether the goal is still conducting. A card the goal LANDED
-// while the goal runs is still the goal's — its branch is inside the
-// goal's worktree — so the board pairs this with the goal's own stage
-// (ui.featureRow.conducted, §17.6). Nothing here can do that without the
-// goal card, which is why this stays the card's half of it.
-func (f *Feature) Conducted() bool {
-	return f.InGoal() && !f.GoalDropped() && f.Stage != StageDone
-}
-
-// GoalSettled reports a goal that has nothing left which could make the
-// changes its own review asks for: it has wrapped up, so nothing new
-// starts, or it has already recorded done-when items it gave up on
-// because every card serving them was dropped.
-//
-// It is read off the card alone so both driving loops answer it the same
-// way without a store round-trip, and so neither can hold its own idea of
-// when a goal's review has stopped being actionable
-// (gatepolicy.Input.GoalSettled).
-func (f *Feature) GoalSettled() bool {
-	return f.IsGoal() && (f.Goal.WrappingUp() || f.Goal.Partial != "")
-}
-
-// GateMode returns the feature's gate-approval mode with the empty
-// default resolved, the same job kind() does for Kind. Every read of
-// GateApproval that branches on the mode must go through this: the field
-// is documented as "empty reads as GateAttended" and ValidGateApproval
-// accepts empty as storable, so a bare `f.GateApproval == GateAttended`
-// silently classifies an unset card as autopilot. That is exactly what
-// the engine's old pool split did — every card minted by `bugs new` stores the
-// empty string, so every bug card competed in the autopilot lane pool
-// while its own card page read "autopilot: off".
-func (f *Feature) GateMode() string {
-	if f.GateApproval == GateAutopilot {
-		return GateAutopilot
-	}
-	return GateAttended
 }
 
 // HandedOff reports whether the card was ended by hand-off — closed with
@@ -953,25 +748,14 @@ func (f *Feature) HandedOff() bool { return !f.HandedOffAt.IsZero() }
 // spec: that spec lands it (Feature.ContinuedAs).
 var ErrContinued = errors.New("continued as a spec")
 
-// MayLandAfterAll is the floor a handed-off card meets when it is landed
-// after all, which every landing door asks in place of MayLand. It holds
-// one card: a freeform session continued as a spec, whose work lands
-// through that spec on a verified branch and not from here.
-func (f *Feature) MayLandAfterAll() error {
-	if f.ContinuedAs != "" {
-		return fmt.Errorf("%w — its work continues as %s, which lands it on a verified branch", ErrContinued, f.ContinuedAs)
-	}
-	return nil
-}
-
 // Ending names how a card left gummi. It is the one word every surface
 // uses for that — the board badge, `gummi status`, `status --json`, the
 // card's own closing block — so that a reader never has to combine flags
 // to name one fact.
 //
 // It is derived, never stored: each ending already has its own record
-// (LandedSHA, GoalDroppedAt, HandedOffAt), and a second field naming what
-// those three already say is a field that can disagree with them.
+// (LandedSHA, HandedOffAt), and a second field naming what
+// those two already say is a field that can disagree with them.
 type Ending string
 
 const (
@@ -980,11 +764,6 @@ const (
 	EndingLanded Ending = "landed"
 	// EndingHandedOff: closed with the branch deliberately kept.
 	EndingHandedOff Ending = "handed_off"
-	// EndingDropped: a goal gave up on the card. Nobody chose this one,
-	// which is exactly why it needs a name of its own — it used to borrow
-	// the hand-off stamp to get through the landing floor, and reported
-	// itself as handed off ever after.
-	EndingDropped Ending = "dropped"
 	// EndingNone: the card has not ended. Every open card, and a done card
 	// whose ending predates the records above.
 	EndingNone Ending = ""
@@ -1005,8 +784,6 @@ func (f *Feature) Ending(landedOnBase bool) Ending {
 	switch {
 	case landedOnBase || f.LandedSHA != "":
 		return EndingLanded
-	case f.GoalDropped():
-		return EndingDropped
 	case f.HandedOff():
 		return EndingHandedOff
 	}
@@ -1041,6 +818,11 @@ func (f *Feature) Ending(landedOnBase bool) Ending {
 func (f *Feature) BranchName() string {
 	if f.BranchScheme == BranchSchemeAdopted {
 		return f.Branch
+	}
+	if f.IsChild() {
+		// a step works in its session's tree, and keeps no branch; an old
+		// crew's branches are left in the repository as they were
+		return ""
 	}
 	if f.BranchScheme == BranchSchemeKind {
 		return f.kind().branchPrefix() + "/" + f.Slug
@@ -1179,14 +961,11 @@ func (f *Feature) Validate() error {
 			return fmt.Errorf("feature %s: an agent is in no repository, but names %q", f.ID, f.Repo)
 		}
 		if f.ParentID != "" {
-			return fmt.Errorf("feature %s: an agent is nobody's delegated card", f.ID)
+			return fmt.Errorf("feature %s: an agent is nobody's child card", f.ID)
 		}
 	}
 	if f.Budget.Envelope < 0 {
 		return fmt.Errorf("feature %s: negative budget", f.ID)
-	}
-	if !ValidGateApproval(f.GateApproval) {
-		return fmt.Errorf("feature %s: unknown gate-approval mode %q", f.ID, f.GateApproval)
 	}
 	if !f.Mode.Valid() {
 		return fmt.Errorf("feature %s: unknown research mode %q", f.ID, f.Mode)
@@ -1209,24 +988,12 @@ func (f *Feature) Validate() error {
 			return fmt.Errorf("feature %s: %w", f.ID, err)
 		}
 	}
-	if f.GoalID != "" {
-		if f.kind() == KindGoal {
-			return fmt.Errorf("feature %s: goals do not nest (belongs to %s)", f.ID, f.GoalID)
-		}
-		if _, err := ParseFeatureID(string(f.GoalID)); err != nil || f.GoalID.Kind() != KindGoal {
-			return fmt.Errorf("feature %s: goal %q is not a goal id", f.ID, f.GoalID)
-		}
-	}
-	if err := f.validateDelegation(); err != nil {
+	if err := f.validateParent(); err != nil {
 		return err
 	}
 	if f.FoundBy != "" {
-		// Any card id, not a goal's: the field means "this came out of
-		// that" (its doc comment above), and a finished card's follow-up
-		// is as much a filing as a goal's is. It was goal-only while a
-		// goal was the only thing that filed cards, and the check outlived
-		// that by a feature — a bug minted from a done card was refused
-		// here, which is the whole "open a bug from this" row.
+		// Any card id: the field means "this came out of that" (its doc
+		// comment above).
 		if _, err := ParseFeatureID(string(f.FoundBy)); err != nil {
 			return fmt.Errorf("feature %s: found-by %q is not a card id", f.ID, f.FoundBy)
 		}
@@ -1235,9 +1002,6 @@ func (f *Feature) Validate() error {
 		if f.FoundBy == f.ID {
 			return fmt.Errorf("feature %s: found-by names the card itself", f.ID)
 		}
-	}
-	if f.Goal.Lanes < 0 || f.Goal.Reserve < 0 {
-		return fmt.Errorf("feature %s: negative goal lanes or reserve", f.ID)
 	}
 	// Base, when set, must be a plain branch name. The check is the same
 	// shape as Repo's and for the same reason: this value is handed to git

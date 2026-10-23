@@ -120,11 +120,11 @@ func TestAStagedSkillReachesItsCardUntilTheCuratorDecides(t *testing.T) {
 	}
 
 	cf.Caps.SkillNamespace = true
-	mine := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FF-1"}, "FF-1", false)
+	mine := packDirsFor(ctx, e, cf, &domain.Feature{ID: "FF-1"}, "FF-1", false)
 	if got := baseNames(mine); got != "make-test,one-off" {
 		t.Errorf("FF-1's session gets %q", got)
 	}
-	if got := e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FF-2"}, "FF-2", false); len(got) != 0 {
+	if got := packDirsFor(ctx, e, cf, &domain.Feature{ID: "FF-2"}, "FF-2", false); len(got) != 0 {
 		t.Errorf("FF-2's session gets %v", got)
 	}
 
@@ -145,7 +145,7 @@ func TestAStagedSkillReachesItsCardUntilTheCuratorDecides(t *testing.T) {
 	if got := cardSkill(t, e, "FF-1", skillManageTool, map[string]any{"action": "list"}); !strings.Contains(got, "one-off: rejected — the curator: a one-off fact") || strings.Contains(got, "make-test") {
 		t.Errorf("FF-1's list = %q", got)
 	}
-	if got := baseNames(e.skillDirsFor(ctx, cf, &domain.Feature{ID: "FF-2"}, "FF-2", false)); got != "make-test" {
+	if got := baseNames(packDirsFor(ctx, e, cf, &domain.Feature{ID: "FF-2"}, "FF-2", false)); got != "make-test" {
 		t.Errorf("after the review FF-2 gets %q, want the accepted skill", got)
 	}
 }

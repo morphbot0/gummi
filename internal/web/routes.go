@@ -11,14 +11,14 @@ package web
 //	routes_files.go    a card's worktree files, opened in the browser
 //	routes_term.go     a shell in a card's worktree (--terminal)
 //	routes_create.go   the new-card form
-//	routes_goals.go    goals and stacks
+//	routes_stacks.go   stacks
 //	routes_repos.go    repositories and their branches
 //	routes_schedules.go  schedules and heartbeats
 //	routes_curator.go  the skill pack and its curator
-//	routes_ingest.go   spec ingest and bug import
 //	routes_system.go   doctor and the fleet's stats
 //	routes_push.go     Web Push subscriptions
 //	routes_attachments.go  image upload and serve
+//	routes_spec.go     a session spec's writes
 //
 // Register authenticated routes with s.api and the few that answer without
 // a cookie with s.public. Every write passes the same-origin check in
@@ -29,14 +29,15 @@ func (s *Server) routes() {
 	s.boardRoutes()
 	s.cardRoutes()
 	s.docsRoutes()
+	s.specRoutes()
+	s.runRoutes()
 	s.fileRoutes()
 	s.termRoutes()
 	s.createRoutes()
-	s.goalRoutes()
+	s.stackRoutes()
 	s.repoRoutes()
 	s.scheduleRoutes()
 	s.curatorRoutes()
-	s.ingestRoutes()
 	s.systemRoutes()
 	s.pushRoutes()
 	s.attachmentRoutes()

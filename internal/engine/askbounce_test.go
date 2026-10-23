@@ -1,13 +1,11 @@
 package engine
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // TestBouncedAskIsVisibleOnTheCard locks the rule that a question the
@@ -27,13 +25,9 @@ func TestBouncedAskIsVisibleOnTheCard(t *testing.T) {
 	}
 
 	t.Run("malformed payload", func(t *testing.T) {
-		ctx := context.Background()
-		f := feature(1, "Dark mode", domain.StagePlan)
+		f := freeformCard(1, "Dark mode")
 		e := newEngine(t, agent.NewFake("ack"))
-		s, err := e.Attach(ctx, f)
-		if err != nil {
-			t.Fatal(err)
-		}
+		s := attach(t, e, f)
 		// an option with no label: parseAsk rejects it at the boundary
 		args := json.RawMessage(`{"changes_section":"Problem","question":"Which?","options":[{"detail":"no label here"}]}`)
 		e.handleClientTool(s, &agent.ToolCall{ID: "c1", Name: askToolName, Args: args})
@@ -46,13 +40,9 @@ func TestBouncedAskIsVisibleOnTheCard(t *testing.T) {
 	})
 
 	t.Run("second ask while one is pending", func(t *testing.T) {
-		ctx := context.Background()
-		f := feature(2, "Dark mode", domain.StagePlan)
+		f := freeformCard(2, "Dark mode")
 		e := newEngine(t, agent.NewFake("ack"))
-		s, err := e.Attach(ctx, f)
-		if err != nil {
-			t.Fatal(err)
-		}
+		s := attach(t, e, f)
 		first := json.RawMessage(`{"changes_section":"Problem","question":"First?","options":[{"label":"a"},{"label":"b"}]}`)
 		e.handleClientTool(s, &agent.ToolCall{ID: "c1", Name: askToolName, Args: first})
 		if s.Snapshot().PendingAsk == nil {

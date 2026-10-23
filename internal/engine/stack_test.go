@@ -336,18 +336,6 @@ func TestStackOrdersLandingOnly(t *testing.T) {
 	if _, blocked := f.eng.StackLandBlocker(ctx, &a); blocked {
 		t.Error("the bottom card must never be blocked from landing")
 	}
-
-	// And the ordering is ONLY about landing: both cards are at implement
-	// and neither is held out of its stage by the other. Advance's
-	// dependency gate is the thing that blocks work, and a stack writes
-	// no dependency edges — assert that directly.
-	deps, err := f.store.ListDependencies(ctx, b.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(deps) != 0 {
-		t.Errorf("stacking wrote %d dependency edge(s); a stack is topology, not scheduling", len(deps))
-	}
 }
 
 // A conflict stops the walk where it happened: the conflicted card's
@@ -449,59 +437,6 @@ func TestChosenBaseForksFromThatBranch(t *testing.T) {
 	}
 	if _, merr := mgr.SquashMerge(ctx, &c, "hotfix"); merr == nil {
 		t.Error("landing onto the wrong checked-out branch was allowed")
-	}
-}
-
-// A finished session stays in the engine's map for its thread; it must not
-// read as a session running on the card, or a stack whose cards have all
-// run in this process never replays again.
-func TestAFinishedSessionDoesNotHoldAReplay(t *testing.T) {
-	f := newStackFixture(t)
-	ctx := context.Background()
-	a := f.card(1, "parser", "chain", 0)
-	b := f.card(2, "eval", "chain", 1)
-	f.cut(a, "a.txt", "a\n")
-	f.cut(b, "b.txt", "b\n")
-	aTree := filepath.Join(f.root, ".gummi", "worktrees", string(a.ID))
-	if werr := os.WriteFile(filepath.Join(aTree, "a.txt"), []byte("a fixed\n"), 0o600); werr != nil {
-		t.Fatal(werr)
-	}
-	f.gitIn(aTree, "commit", "-q", "-a", "--amend", "-m", "A: work, fixed")
-
-	f.eng.mu.Lock()
-	for _, c := range []domain.Feature{a, b} {
-		sctx, cancel := context.WithCancel(context.Background())
-		f.eng.live[c.ID] = &Session{Feature: c, Role: "reviewer", state: StateDone, done: make(chan struct{}), ctx: sctx, cancel: cancel}
-	}
-	f.eng.mu.Unlock()
-
-	view, err := f.eng.StackSnapshot(ctx, "chain")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, m := range view.Snapshot.Members {
-		if m.Running {
-			t.Errorf("%s reads as running with only a finished session", m.ID)
-		}
-	}
-	res, err := f.eng.Restack(ctx, "chain")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Replayed) != 1 || res.Replayed[0] != b.ID || res.Waiting != "" {
-		t.Fatalf("restack replayed %v, waiting %q; want B replayed", res.Replayed, res.Waiting)
-	}
-
-	// a session that is working still holds the replay
-	f.eng.mu.Lock()
-	f.eng.live[b.ID].state = StateRunning
-	f.eng.mu.Unlock()
-	view, err = f.eng.StackSnapshot(ctx, "chain")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !view.Snapshot.Members[1].Running {
-		t.Error("a running session no longer holds its card's replay")
 	}
 }
 

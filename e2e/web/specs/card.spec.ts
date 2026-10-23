@@ -13,7 +13,7 @@ import { shot } from '../fixtures/shots';
 // actions.spec.ts and newcard.spec.ts.
 
 let id: string;
-test.use({ seed: { run: async (ws) => { id = await ws.seedDesignGate('Add a wave helper'); await ws.seedBacklog(['Add a shrug helper']); } } });
+test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a wave helper'); await ws.seedSessions(['Add a shrug helper']); } } });
 
 test('the thread folds past stages and draws every item kind', async ({ pairedPage: page }, info) => {
   await mockCard(page, id);
@@ -33,12 +33,6 @@ test('the thread folds past stages and draws every item kind', async ({ pairedPa
   await expect(items.locator('script')).toHaveCount(0);
   await expect(items).toContainText('<script>alert(1)</script>');
   await expect(items.locator('a[href="https://example.com/design"]')).toHaveAttribute('rel', /noopener/);
-  // a past stage in the head's strip opens its segment
-  await page.getByTestId('stage-group-plan').locator(':scope > summary').click();
-  if (info.project.name !== 'phone') {
-    await page.getByTestId('stage-implement').click();
-    await expect(page.getByTestId('stage-group-implement')).toHaveAttribute('open', '');
-  }
   await shot(page, info, 'thread');
 });
 

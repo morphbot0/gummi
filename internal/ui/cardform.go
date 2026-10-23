@@ -29,8 +29,6 @@ import (
 //
 // PROPOSAL-new-card.md holds the rationale and the settled decisions.
 type cardForm struct {
-	ct domain.CardType
-
 	// sessionBackend and sessionModel are the agent and model a freeform
 	// card's session will run on. The form has no row for them — the web
 	// face's session draft picks them in its composer and webFill sets
@@ -50,15 +48,6 @@ type cardForm struct {
 
 	profiles []string
 	profile  int
-	sev      int
-
-	// after is the dependency chips; afterCands the cards on offer (every
-	// card not yet done, any repo), filtered live by afterFilter while the
-	// row has focus.
-	after       []domain.FeatureID
-	afterCands  []afterCand
-	afterFilter textinput.Model
-	afterCursor int
 
 	// base is the branch the card's work forks from, and baseCands the
 	// branches the chosen repo actually has. An empty base means "what
@@ -71,15 +60,6 @@ type cardForm struct {
 	// (setRepoData), kept so a repo picked by hand offers its own branches.
 	checkedOut map[string]string
 	branchesOf map[string][]string
-	// adopt is an existing branch to mint this card ONTO rather than
-	// cutting one for it (DESIGN §10 D22). Empty — the default, and what
-	// every card does — means gummi cuts the branch.
-	//
-	// It shares baseCands: the branches on offer to adopt are the same
-	// branches on offer to fork from, because they are simply the
-	// repository's branches. What differs is what the card then does with
-	// the one it is given, which the row's own label says.
-	adopt string
 	// stackOnto names the card this one is being stacked on top of, and
 	// stackCands the cards the row can name. stackInto names an existing
 	// stack to join instead. All empty is a standalone card.
@@ -92,11 +72,7 @@ type cardForm struct {
 	// from — so the one case where stacking matters says so without the
 	// reader opening anything.
 	//
-	// The row cycles its candidates rather than opening a searchable list
-	// like `runs after` does, and that is the whole of keeping the two
-	// apart on sight: a stack position is topology and a dependency is
-	// scheduling (DESIGN §18.1), so the row that sets one must not look
-	// like the row that sets the other. T stays the one-key path — it
+	// T stays the one-key path — it
 	// preselects a card here — but a reader who opened the dialog with
 	// `n` and only then thought of the card below is no longer told to
 	// cancel and start again.
@@ -128,9 +104,6 @@ type cardForm struct {
 	// once alt+g has accepted an offer; fetching marks the round trip.
 	imported *importedIssue
 	fetching bool
-	// fromPicker marks a form filled from the browse picker: Create then
-	// returns to the picker rather than the board.
-	fromPicker bool
 
 	focus   int // a cardStop, always one of stops()
 	errText string
@@ -139,10 +112,8 @@ type cardForm struct {
 	onSubmit func(formResult) tea.Cmd
 	// onImport fetches ref (never bare: the caller resolved it against the
 	// chosen repo's origin) and delivers the result back through
-	// applyIssue. onBrowse opens the issue picker for the chosen repo; the
-	// form is popped while it is open and pushed back when it returns.
+	// applyIssue.
 	onImport func(ref domain.IssueRef, repo string) tea.Cmd
-	onBrowse func(repo string) tea.Cmd
 	// onCancel runs when the form is abandoned — esc, or the Cancel
 	// button. Nil for the plain new-card door, where abandoning it loses
 	// nothing that was not typed into it. It is set by the caller that
@@ -151,14 +122,6 @@ type cardForm struct {
 	// card page, and dropping the form has to give that line back rather
 	// than being the one gesture in the package that discards prose.
 	onCancel func() tea.Cmd
-}
-
-// afterCand is one card the `after` row can name.
-type afterCand struct {
-	ID    domain.FeatureID
-	Title string
-	Repo  string
-	Stage domain.Stage
 }
 
 // stackCand is one card the `stack` row can fork from. Touched orders
@@ -203,41 +166,26 @@ func (o repoOrigin) label() string {
 
 // The dialog's focus stops. Not every stop is live at once: repo needs a
 // choice to be one, runs is the collapsed options line and expands the
-// moment focus reaches it, severity exists for bugs only. stops() is the
-// live list; focus always names one of its entries.
+// moment focus reaches it. stops() is the live list; focus always names one of its entries.
 const (
-	cardStopKind = iota
-	cardStopRepo
+	cardStopRepo = iota
 	cardStopText
 	cardStopRuns
 	cardStopEnvelope
 	cardStopProfile
-	cardStopSeverity
-	cardStopAfter
 	cardStopWhere
 	cardStopBase
-	cardStopAdopt
 	cardStopStack
 	cardStopButtons
 )
 
-// The kind row's choices are domain.CardTypes, which is five entries for
-// four kinds: research appears twice, once as the survey and once as the
-// diagnosis. They share the RS prefix because they are one kind, so the
-// `becomes` line's prefix does not tell them apart — the kind word
-// beside it does.
-
-// newCardForm builds the door. kind presets the kind row; repos and
-// hasDefault shape the repo row as in every other creation dialog;
+// newCardForm builds the door: it makes a session (an agent is the
+// session's "where" choice). repos and hasDefault shape the repo row as in every other creation dialog;
 // lastRepo preselects the repo chosen last time this session (a name
-// that is not configured is ignored); cands are the cards the `after`
-// row may name; defaultEnvelope prefills the budget.
-func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, lastRepo string, cands []afterCand, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *cardForm {
+// that is not configured is ignored); defaultEnvelope prefills the budget.
+func newCardForm(profiles, repos []string, hasDefault bool, lastRepo string, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *cardForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
-	}
-	if !ct.Valid() {
-		ct = domain.CardType{Kind: domain.KindFeature}
 	}
 	text := textarea.New()
 	text.CharLimit = 4096
@@ -248,10 +196,6 @@ func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, 
 	env.SetWidth(12)
 	env.CharLimit = 12
 	env.SetValue(domain.DollarsInput(defaultEnvelope))
-	filter := textinput.New()
-	filter.Placeholder = "id or title…"
-	filter.CharLimit = 60
-	filter.SetWidth(24)
 
 	repo := newRepoPicker(repos, hasDefault)
 	for i, name := range repo.options() {
@@ -260,57 +204,29 @@ func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, 
 		}
 	}
 	d := &cardForm{
-		ct: ct, repo: repo, origins: map[string]repoOrigin{},
+		repo: repo, origins: map[string]repoOrigin{},
 		text: text, env: env, profiles: profiles,
-		afterCands: cands, afterFilter: filter,
-		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}, button{label: "Create & autopilot"}),
+		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}),
 		onSubmit: onSubmit,
 	}
 	d.buttons.SetCursor(1)
 	// the repository is the one field with no default, so a form that
 	// still needs one opens on it; everything else opens in the text.
-	// A goal is never asked (asksRepo), so it opens in the text like any
-	// card in a workspace with one repository.
 	if d.asksRepo() && d.repo.needsChoice() {
 		d.setFocus(cardStopRepo)
 	} else {
 		d.setFocus(cardStopText)
 	}
-	d.text.Placeholder = cardPlaceholderFor(ct)
+	d.text.Placeholder = cardPlaceholder
 	return d
 }
 
-// cardPlaceholderFor is the box's manual for one kind, shown only while
-// the box is empty. It used to be one constant that listed a bug's
-// headings and a feature's `## Acceptance` line together regardless of
-// which kind was selected — a research card saw both hints and neither
-// applied, and a feature card saw the bug headings it would never use.
-// setKind refreshes this whenever the kind row moves, so only the
-// selected kind's own hint is ever on screen.
-func cardPlaceholderFor(c domain.CardType) string {
-	head := "Describe it. The first line is the title.\n\n" +
-		"  #123 or an issue link on the first line: alt+g imports it\n"
-	if c.Mode == domain.ModeDiagnosis {
-		return head + "  the rest becomes the symptom — what you saw, where, how often"
-	}
-	switch c.Kind {
-	case domain.KindBug:
-		return head + "  headings: Steps to reproduce · Expected · Actual · Environment"
-	case domain.KindResearch:
-		return head + "  the rest becomes the research brief"
-	case domain.KindGoal:
-		return "Describe the outcome you want. The first line is the title.\n\n" +
-			"  next, the architect agrees with you what done means and which\n" +
-			"  cards get there; then the goal runs them and comes back when ready"
-	case domain.KindFreeform:
-		return "Say what you want done. The first line is the title.\n\n" +
-			"  it starts working in this card's own branch straight away —\n" +
-			"  no plan, no gates: you read the diff and land it when it's right\n" +
-			"  alt+o: runs in the main checkout, without a branch or worktree"
-	default: // domain.KindFeature
-		return head + "  ## Acceptance seeds the verification plan"
-	}
-}
+// cardPlaceholder is the box's manual, shown only while the box is empty.
+const cardPlaceholder = "Say what you want done. The first line is the title.\n\n" +
+	"  it starts working in this card's own branch straight away:\n" +
+	"  you read the diff and land it when it's right\n" +
+	"  #123 or an issue link on the first line: alt+g imports it\n" +
+	"  alt+o: runs in the main checkout, without a branch or worktree"
 
 // ID implements overlay.Dialog.
 func (d *cardForm) ID() string { return "new-card" }
@@ -331,45 +247,23 @@ func (d *cardForm) SetText(s string) { d.text.SetValue(s) }
 // Text is the box's current content.
 func (d *cardForm) Text() string { return d.text.Value() }
 
-// Kind is the kind the row's current choice mints.
-func (d *cardForm) Kind() domain.Kind { return d.ct.Kind }
-
-// CardType is the row's current choice, kind and research mode together.
-func (d *cardForm) CardType() domain.CardType { return d.ct }
-
-// asksRepo reports whether this card's repository is the dialog's to ask
-// for. Every kind's is, except a goal's: a goal is not in a repository —
-// you describe an outcome, and the cards that meet it name their own
-// (DESIGN §17.2). Its own home is derived from those cards at its plan
-// gate, so asking here would be asking for an answer nobody has yet.
+// asksRepo reports whether the dialog has a repository to ask for: only
+// in a workspace with more than one.
 func (d *cardForm) asksRepo() bool {
-	return d.ct.Kind != domain.KindGoal && d.repo.multi()
+	return d.repo.multi()
 }
 
 // stops is the live focus ring, in tab order.
 func (d *cardForm) stops() []int {
-	s := []int{cardStopKind}
+	var s []int
 	if d.asksRepo() {
 		s = append(s, cardStopRepo)
 	}
 	s = append(s, cardStopText)
 	if d.expanded {
-		s = append(s, cardStopEnvelope, cardStopProfile)
-		if d.ct.Kind == domain.KindBug {
-			s = append(s, cardStopSeverity)
-		}
-		s = append(s, cardStopAfter)
-		if d.ct.Kind == domain.KindFreeform {
-			// the one choice only a session makes: where it works. A card
-			// in the workflow exists to end as a branch, so it is never
-			// asked.
-			s = append(s, cardStopWhere)
-		}
+		s = append(s, cardStopEnvelope, cardStopProfile, cardStopWhere)
 		if len(d.baseCands) > 1 && !d.mainCheckout {
 			s = append(s, cardStopBase)
-		}
-		if d.asksAdopt() {
-			s = append(s, cardStopAdopt)
 		}
 		if d.asksStack() {
 			s = append(s, cardStopStack)
@@ -398,7 +292,9 @@ func (d *cardForm) advanceFocus(dir int) {
 		if dir > 0 {
 			next = cardStopEnvelope
 		} else {
-			next = cardStopAfter
+			// the last option row: the one just above the buttons
+			opts := d.stops()
+			next = opts[len(opts)-2]
 		}
 	}
 	d.setFocus(next)
@@ -420,54 +316,16 @@ func (d *cardForm) setFocus(f int) {
 	d.focus = f
 	d.text.Blur()
 	d.env.Blur()
-	d.afterFilter.Blur()
 	switch f {
 	case cardStopText:
 		d.text.Focus()
 	case cardStopEnvelope:
 		d.env.Focus()
-	case cardStopAfter:
-		d.afterFilter.Focus()
-		d.afterCursor = 0
 	}
 }
 
-// setKind moves the kind row. A severity stop that no longer exists
-// hands focus to the next row rather than dangling. The placeholder is
-// re-picked too — it teaches what the free text turns into, and that
-// differs by kind (see cardPlaceholderFor).
-func (d *cardForm) setKind(c domain.CardType) {
-	d.ct = c
-	d.text.Placeholder = cardPlaceholderFor(c)
-	if c.Kind != domain.KindFreeform {
-		// the where row goes with the kind; so does the choice it holds
-		d.mainCheckout, d.home = false, false
-	}
-	if d.focus == cardStopSeverity && c.Kind != domain.KindBug {
-		d.setFocus(cardStopAfter)
-	}
-	if d.focus == cardStopRepo && !d.asksRepo() {
-		d.setFocus(cardStopText)
-	}
-}
-
-func (d *cardForm) cycleKind(delta int) {
-	n := len(domain.CardTypes)
-	i := 0
-	for j, c := range domain.CardTypes {
-		if c == d.ct {
-			i = j
-		}
-	}
-	d.setKind(domain.CardTypes[((i+delta)%n+n)%n])
-}
-
-// formRepo is the repository the card is created in: the chosen one, and
-// nothing at all for a goal, whose home the plan gate settles.
+// formRepo is the repository the card is created in: the chosen one.
 func (d *cardForm) formRepo() string {
-	if d.ct.Kind == domain.KindGoal {
-		return ""
-	}
 	return d.repo.name()
 }
 
@@ -517,7 +375,7 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			// of their own brief before noticing. Opening the options
 			// means editing them.
 			d.setFocus(d.firstOptionStop())
-		case !d.expanded && (d.focus == cardStopEnvelope || d.focus == cardStopProfile || d.focus == cardStopSeverity || d.focus == cardStopAfter):
+		case !d.expanded && (d.focus == cardStopEnvelope || d.focus == cardStopProfile || d.focus == cardStopWhere):
 			d.setFocus(cardStopText)
 		}
 		return false, nil
@@ -539,25 +397,12 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		case "right", "l":
 			d.buttons.Move(1)
 		case "enter":
-			switch d.buttons.Cursor() {
-			case 0:
+			if d.buttons.Cursor() == 0 {
 				return true, d.cancel()
-			case 1:
-				return d.submit(false)
-			default:
-				return d.submit(true)
 			}
+			return d.submit()
 		}
 		return false, nil
-	case cardStopKind:
-		if delta, ok := selectCycleDelta(k); ok {
-			d.cycleKind(delta)
-			return false, nil
-		}
-		if k == "enter" {
-			return d.submit(false)
-		}
-		return d.fallThrough(key)
 	case cardStopRepo:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.moveRepo(func() { d.repo.cycle(delta) })
@@ -570,18 +415,18 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			return false, nil
 		}
 		if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 		return d.fallThrough(key)
 	case cardStopText:
 		if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 		d.text, _ = d.text.Update(key)
 		d.errText = ""
 	case cardStopEnvelope:
 		if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 		d.env, _ = d.env.Update(key)
 		d.errText = ""
@@ -590,43 +435,25 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			n := len(d.profiles)
 			d.profile = ((d.profile+delta)%n + n) % n
 		} else if k == "enter" {
-			return d.submit(false)
-		}
-	case cardStopSeverity:
-		if delta, ok := selectCycleDelta(k); ok {
-			n := len(bugSeverityChoices)
-			d.sev = ((d.sev+delta)%n + n) % n
-		} else if k == "enter" {
-			return d.submit(false)
-		}
-	case cardStopAfter:
-		if !d.handleAfterKey(key) {
-			// enter with nothing to add is enter: create
-			return d.submit(false)
+			return d.submit()
 		}
 	case cardStopWhere:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.cycleWhere(delta)
 		} else if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 	case cardStopBase:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.cycleBase(delta)
 		} else if k == "enter" {
-			return d.submit(false)
-		}
-	case cardStopAdopt:
-		if delta, ok := selectCycleDelta(k); ok {
-			d.cycleAdopt(delta)
-		} else if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 	case cardStopStack:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.cycleStack(delta)
 		} else if k == "enter" {
-			return d.submit(false)
+			return d.submit()
 		}
 	}
 	return false, nil
@@ -654,75 +481,10 @@ func digitKey(key tea.KeyPressMsg) int {
 	return int(key.Text[0] - '0')
 }
 
-// handleAfterKey drives the dependency row: typing filters the list,
-// up/down move over it, enter adds the highlighted card as a chip,
-// backspace with an empty filter removes the last chip. It reports
-// false for the one key it leaves alone: enter with no card to add.
-func (d *cardForm) handleAfterKey(key tea.KeyPressMsg) bool {
-	vis := d.afterVisible()
-	switch key.String() {
-	case "up", "ctrl+p":
-		d.afterCursor = max(d.afterCursor-1, 0)
-		return true
-	case "down", "ctrl+n":
-		d.afterCursor = min(d.afterCursor+1, max(len(vis)-1, 0))
-		return true
-	case "enter":
-		if len(vis) == 0 {
-			return false
-		}
-		c := vis[min(d.afterCursor, len(vis)-1)]
-		for _, id := range d.after {
-			if id == c.ID {
-				return true
-			}
-		}
-		d.after = append(d.after, c.ID)
-		d.afterFilter.SetValue("")
-		d.afterCursor = 0
-		return true
-	case "backspace":
-		if d.afterFilter.Value() == "" {
-			if n := len(d.after); n > 0 {
-				d.after = d.after[:n-1]
-			}
-			return true
-		}
-	}
-	d.afterFilter, _ = d.afterFilter.Update(key)
-	d.afterCursor = 0
-	return true
-}
-
-// afterVisible is the candidate list as the row shows it: the chosen
-// repo's cards first, then the rest, both filtered by id or title and
-// with already-chosen cards left out.
-func (d *cardForm) afterVisible() []afterCand {
-	q := strings.ToLower(strings.TrimSpace(d.afterFilter.Value()))
-	chosen := map[domain.FeatureID]bool{}
-	for _, id := range d.after {
-		chosen[id] = true
-	}
-	var mine, others []afterCand
-	for _, c := range d.afterCands {
-		if chosen[c.ID] {
-			continue
-		}
-		if q != "" && !strings.Contains(strings.ToLower(string(c.ID)), q) && !strings.Contains(strings.ToLower(c.Title), q) {
-			continue
-		}
-		if c.Repo == d.repo.name() {
-			mine = append(mine, c)
-		} else {
-			others = append(others, c)
-		}
-	}
-	return append(mine, others...)
-}
-
-// github is alt+g: refetch an import, import the offered reference, or
-// browse — whichever the form's state calls for. Every branch that needs
-// a repository and has none moves focus to the repo row and says so.
+// github is alt+g: refetch an import or import the offered reference,
+// whichever the form's state calls for; with no reference in the box it
+// does nothing. A bare reference with no repository chosen moves focus
+// to the repo row and says so.
 func (d *cardForm) github() (bool, tea.Cmd) {
 	if d.fetching {
 		return false, nil
@@ -740,15 +502,7 @@ func (d *cardForm) github() (bool, tea.Cmd) {
 	}
 	ref, ok := d.reference()
 	if !ok {
-		if d.repo.needsChoice() {
-			d.errText = "choose a repository to browse its issues"
-			d.setFocus(cardStopRepo)
-			return false, nil
-		}
-		if d.onBrowse == nil {
-			return false, nil
-		}
-		return true, d.onBrowse(d.repo.name())
+		return false, nil
 	}
 	if ref.Bare() {
 		if d.repo.needsChoice() {
@@ -775,8 +529,7 @@ func (d *cardForm) github() (bool, tea.Cmd) {
 // applyIssue is the import's landing: the reference line in the box is
 // replaced by the issue's title and body — and only that line; anything
 // else the person typed stays — and the `from` line turns from offer to
-// provenance. Severity is read from the labels; the kind row is not
-// touched, the labels are reported beside the reference instead. A
+// provenance. The issue's labels are reported beside the reference. A
 // refetch replaces exactly the text the previous import inserted.
 func (d *cardForm) applyIssue(p domain.BugProposal, ref domain.IssueRef) {
 	d.fetching = false
@@ -804,25 +557,6 @@ func (d *cardForm) applyIssue(p domain.BugProposal, ref domain.IssueRef) {
 	d.text.SetValue(cur)
 	d.text.MoveToBegin()
 	d.imported = &importedIssue{prop: p, ref: ref, text: inserted}
-	if p.Severity != "" {
-		for i, s := range bugSeverityChoices {
-			if s == p.Severity {
-				d.sev = i
-			}
-		}
-	}
-}
-
-// fill is the browse picker's landing: the same as an import, with the
-// form marked so Create returns to the picker.
-func (d *cardForm) fill(p domain.BugProposal) {
-	ref, _ := domain.ParseIssueRef(p.ExternalRef)
-	if ref.Number == 0 {
-		ref.Number = p.Number
-	}
-	d.applyIssue(p, ref)
-	d.fromPicker = true
-	d.setFocus(cardStopText)
 }
 
 // failImport is the import's other landing.
@@ -831,8 +565,8 @@ func (d *cardForm) failImport(err error) {
 	d.errText = "import: " + sanitize(err.Error())
 }
 
-// submit validates and fires onSubmit. start marks Create & autopilot.
-func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
+// submit validates and fires onSubmit.
+func (d *cardForm) submit() (bool, tea.Cmd) {
 	if d.asksRepo() && d.repo.needsChoice() {
 		d.errText = repoUnchosenErr
 		d.setFocus(cardStopRepo)
@@ -865,18 +599,6 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	}
 	var env *int
 	trimmed := strings.TrimSpace(d.env.Value())
-	if trimmed == "" && d.ct.Kind == domain.KindGoal {
-		d.errText = "budget required — a goal's budget is the ceiling for everything it runs"
-		return false, nil
-	}
-	if trimmed == "" && d.ct.Kind == domain.KindResearch {
-		// "budget", like the row label and the collapsed "runs as"
-		// readout above it. A refusal is the one string in this dialog a
-		// reader is guaranteed to stop and read, so it is the last place
-		// that should still be calling a spend cap an envelope.
-		d.errText = "budget required — a research card carries no default"
-		return false, nil
-	}
 	if trimmed != "" {
 		n, err := domain.ParseDollars(trimmed)
 		if err != nil {
@@ -895,20 +617,18 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		return false, nil
 	}
 	res := formResult{
-		Kind: d.ct.Kind, Mode: d.ct.Mode, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
-		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
-		Base: d.base, Adopt: d.adopt, StackOnto: d.stackOnto, StackInto: d.stackInto,
-		Start: start, FromPicker: d.fromPicker,
+		Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
+		Repo: d.formRepo(),
+		Base: d.base, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
 		MainCheckout: d.mainCheckout, Home: d.home,
 	}
-	if d.ct.Kind == domain.KindBug {
-		res.Severity = bugSeverityChoices[d.sev]
-	}
 	if d.imported != nil {
-		res.Source = d.imported.prop.Source
 		res.ExternalRef = d.imported.prop.ExternalRef
-		res.Discussion = d.imported.prop.Report.Discussion
+		// the issue's comments are part of what the session is asked
+		if disc := strings.TrimSpace(d.imported.prop.Report.Discussion); disc != "" {
+			res.Desc += "\n\n## Discussion\n\n" + disc
+		}
 	}
 	if d.onSubmit == nil {
 		return true, nil
@@ -917,8 +637,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 }
 
 // HandlePaste implements overlay.Paster: pasted text goes into the text
-// while it's focused, newlines intact — and into the after filter or the
-// budget when those are.
+// while it's focused, newlines intact — and into the budget when that is.
 func (d *cardForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	switch d.focus {
 	case cardStopText:
@@ -926,9 +645,7 @@ func (d *cardForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 		d.errText = ""
 	case cardStopEnvelope:
 		d.env, _ = d.env.Update(msg)
-	case cardStopAfter:
-		d.afterFilter, _ = d.afterFilter.Update(msg)
-	case cardStopKind, cardStopRepo:
+	case cardStopRepo:
 		d.setFocus(cardStopText)
 		d.text, _ = d.text.Update(msg)
 		d.errText = ""
@@ -1155,7 +872,7 @@ const optionLabelW = 4 + 11
 // optionLabel is an expanded option row's label cell: indented under
 // "runs as", banded when its row has focus — and, since the band alone
 // used to be the only tell, carrying a leading ▸ too. The rows here
-// (budget, profile, severity, runs after) each show their own value with
+// (budget, profile, severity, runs in) each show their own value with
 // choices()' own "▸" beside whichever option is picked, on every row,
 // focused or not — that answers "what is this row set to", never "which
 // row is tab on right now". A reader driving the dialog with no working
@@ -1164,11 +881,8 @@ const optionLabelW = 4 + 11
 // actually on; the label's own margin is that mark, and it costs no
 // width — "  ▸ " and "    " are both four columns.
 func optionLabel(s *theme.Styles, focused bool, label string) string {
-	// 11, not 10: "runs after" (the old "after") is itself 10 characters,
-	// and a %-10s cell would then butt the label straight up against the
-	// row's value with no gap at all ("runs after—   tab to..."). Every
-	// other label here is shorter than 10, so the extra column only ever
-	// shows up as one more space of padding for them.
+	// 11, not 10: "forks from" is itself 10 characters, and a %-10s cell
+	// would butt the label straight up against the row's value.
 	cell := fmt.Sprintf("%-11s", label)
 	if focused {
 		return "  ▸ " + s.Band(cell, 0, true)
@@ -1221,9 +935,7 @@ func (d *cardForm) fromLine(s *theme.Styles) string {
 }
 
 // becomesLine reads back the card the text would create: the id prefix
-// (with the kind word beside it, so FD/BG/RS are spelled out at least
-// once, right where the id is minted), the derived title, and a bug's
-// severity. No number — that is minted at Create.
+// with the kind word beside it, and the derived title. No number — that is minted at Create.
 //
 // This used to show the branch slug instead of the title, which hid a
 // live truncation: DeriveTitle caps a title at maxTitleLen characters
@@ -1249,7 +961,8 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 	if _, err := domain.Slugify(title); err != nil {
 		return cardLabel(s, "becomes") + s.Error.Render("the first line needs a letter or digit to make a title")
 	}
-	out := d.ct.Prefix() + " (" + d.ct.Name() + ") · " + title
+	f := domain.Feature{Kind: domain.KindFreeform, Home: d.home}
+	out := domain.CardType{Kind: f.Kind}.Prefix() + " (" + strings.ToLower(f.TypeName()) + ") · " + title
 	// Name where the branch comes from whenever it is not the plain
 	// default. This is the line that keeps the S gesture honest: the
 	// stack row itself is folded away in the options, so this readout is
@@ -1261,30 +974,18 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 	if d.mainCheckout {
 		out += " · in " + d.whereChoices()[d.whereIdx()]
 	}
-	if d.ct.Kind == domain.KindBug && bugSeverityChoices[d.sev] != "" {
-		out += " · severity " + string(bugSeverityChoices[d.sev])
-		if d.imported != nil && d.imported.prop.Severity == bugSeverityChoices[d.sev] {
-			out += s.Faint.Render(" from label")
-		}
-	}
 	return cardLabel(s, "becomes") + out
 }
 
 // runsLine is the collapsed options readout.
 func (d *cardForm) runsLine(s *theme.Styles) string {
 	env := strings.TrimSpace(d.env.Value())
-	switch {
-	case env == "" && (d.ct.Kind == domain.KindResearch || d.ct.Kind == domain.KindGoal):
-		env = s.Error.Render("budget required")
-	case env == "":
+	if env == "" {
 		env = "default budget"
-	default:
+	} else {
 		env = "$" + strings.TrimPrefix(env, "$")
 	}
 	out := env + " · " + d.profiles[d.profile]
-	if len(d.after) > 0 {
-		out += " · runs after " + joinIDs(d.after)
-	}
 	if st := d.stackSummary(); st != "" {
 		out += " · " + st
 	}
@@ -1297,69 +998,20 @@ func (d *cardForm) runsLine(s *theme.Styles) string {
 	return cardLabel(s, "runs as") + out + "   " + s.KeyHint.Render("alt+o") + s.Faint.Render(" edit")
 }
 
-func joinIDs(ids []domain.FeatureID) string {
-	parts := make([]string, len(ids))
-	for i, id := range ids {
-		parts[i] = id.Ref()
-	}
-	return strings.Join(parts, ", ")
-}
-
-// optionRows are the expanded options: budget, profile, severity (bugs),
-// runs after — and the after list while that row has focus.
+// optionRows are the expanded options: budget, profile, where it runs, what it forks from and its stack.
 func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
-	hint := envelopeHintCapped
-	if d.ct.Kind == domain.KindResearch || d.ct.Kind == domain.KindGoal {
-		hint = envelopeHintRequired
-	}
 	rows := []string{
 		cardLabel(s, "runs as"),
-		optionLabel(s, d.focus == cardStopEnvelope, "budget") + d.env.View() + " " + s.Faint.Render(hint),
+		optionLabel(s, d.focus == cardStopEnvelope, "budget") + d.env.View() + " " + s.Faint.Render(envelopeHintCapped),
 	}
 	// profiles.yaml sets how many presets there are, so the profile row
 	// folds the same way the repo row does rather than setting the
 	// dialog's width from the config file.
 	rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopProfile, "profile"), optionLabelW,
 		choiceCells(s, d.focus == cardStopProfile, d.profiles, d.profile, "", false), d.profile, width, maxLines)...)
-	if d.ct.Kind == domain.KindBug {
-		labels := make([]string, len(bugSeverityChoices))
-		for i, sev := range bugSeverityChoices {
-			labels[i] = string(sev)
-			if sev == "" {
-				labels[i] = "unset"
-			}
-		}
-		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopSeverity, "severity"), optionLabelW,
-			choiceCells(s, d.focus == cardStopSeverity, labels, d.sev, "", false), d.sev, width, maxLines)...)
-	}
-	chips := make([]string, len(d.after))
-	for i, id := range d.after {
-		chips[i] = s.KeyHint.Render(string(id))
-	}
-	// "after" read as an unlabelled dash to anyone who hadn't already
-	// tabbed onto it and found the dependency picker underneath — it
-	// named neither what the row was nor what filling it in would do.
-	// "runs after" names the relationship on sight; the collapsed hint
-	// spells out the effect rather than just the key.
-	line := optionLabel(s, d.focus == cardStopAfter, "runs after") + strings.Join(chips, " ")
-	switch {
-	case d.focus == cardStopAfter:
-		if len(chips) > 0 {
-			line += "  "
-		}
-		line += s.KeyHint.Render("/ ") + d.afterFilter.View()
-	case len(chips) == 0:
-		line += s.Faint.Render("—   tab to wait on another card")
-	}
-	rows = append(rows, line)
-	if d.focus == cardStopAfter {
-		rows = append(rows, d.afterListRows(s, width)...)
-	}
-	if d.ct.Kind == domain.KindFreeform {
-		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopWhere, "runs in"), optionLabelW,
-			choiceCells(s, d.focus == cardStopWhere, d.whereChoices(), d.whereIdx(), "", false),
-			d.whereIdx(), width, maxLines)...)
-	}
+	rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopWhere, "runs in"), optionLabelW,
+		choiceCells(s, d.focus == cardStopWhere, d.whereChoices(), d.whereIdx(), "", false),
+		d.whereIdx(), width, maxLines)...)
 	// The base row appears only when there is a choice to make: a repo
 	// with one branch has nothing to offer, and an unanswerable row is
 	// a tab stop that teaches nothing. A session in the main checkout
@@ -1369,11 +1021,6 @@ func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopBase, "forks from"), optionLabelW,
 			choiceCells(s, d.focus == cardStopBase, d.baseChoices(), d.baseIdx(), "", false),
 			d.baseIdx(), width, maxLines)...)
-	}
-	if d.asksAdopt() {
-		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopAdopt, "works on"), optionLabelW,
-			choiceCells(s, d.focus == cardStopAdopt, d.adoptChoices(), d.adoptIdx(), "", false),
-			d.adoptIdx(), width, maxLines)...)
 	}
 	if d.asksStack() {
 		label := optionLabel(s, d.focus == cardStopStack, "stack")
@@ -1387,41 +1034,6 @@ func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 		rows = append(rows, foldedRow(s, label, optionLabelW,
 			choiceCells(s, d.focus == cardStopStack, d.stackChoices(), d.stackIdx(), "", false),
 			d.stackIdx(), width, maxLines)...)
-	}
-	return rows
-}
-
-// afterListRows renders the filtered candidates under the after row:
-// the chosen repo's first, a divider, then the rest; at most five rows
-// windowed around the cursor.
-func (d *cardForm) afterListRows(s *theme.Styles, width int) []string {
-	vis := d.afterVisible()
-	if len(vis) == 0 {
-		return []string{"               " + s.Faint.Render("no open card matches")}
-	}
-	const maxRows = 5
-	d.afterCursor = min(d.afterCursor, len(vis)-1)
-	start := max(0, min(d.afterCursor-maxRows/2, len(vis)-maxRows))
-	var rows []string
-	dividerDone := false
-	for i := start; i < len(vis) && i < start+maxRows; i++ {
-		c := vis[i]
-		if !dividerDone && c.Repo != d.repo.name() && (i == 0 || vis[i-1].Repo == d.repo.name()) {
-			rows = append(rows, "               "+s.Faint.Render("── other repos ──"))
-			dividerDone = true
-		}
-		marker := "  "
-		style := s.Faint
-		if i == d.afterCursor {
-			marker = s.KeyHint.Render("▸ ")
-			style = s.Base
-		}
-		meta := string(c.Stage)
-		if c.Repo != "" {
-			meta = c.Repo + " · " + meta
-		}
-		title := ansi.Truncate(c.Title, max(width-cardLabelW-len(c.ID)-len(meta)-14, 8), "…")
-		rows = append(rows, "             "+marker+style.Render(c.ID.Ref()+"  "+title)+"  "+s.Faint.Render(meta))
 	}
 	return rows
 }
@@ -1508,18 +1120,8 @@ func (d *cardForm) layout(s *theme.Styles, textW, h, fold int, hint, spacers boo
 		}
 		return nil
 	}
-	kinds := make([]string, len(domain.CardTypes))
-	kindIdx := 0
-	for i, c := range domain.CardTypes {
-		kinds[i] = c.Name()
-		if c == d.ct {
-			kindIdx = i
-		}
-	}
-
 	rows = append(rows, s.DialogTitle.Render("new card"), "")
-	rows = append(rows, choiceRowLines(s, d.focus == cardStopKind, "kind", kinds, kindIdx, "", false, textW, fold)...)
-	if d.repo.shown() && d.ct.Kind != domain.KindGoal {
+	if d.repo.shown() {
 		rows = append(rows, d.repoRows(s, textW, fold)...)
 	}
 	if from := d.fromLine(s); from != "" {
@@ -1562,35 +1164,25 @@ func (d *cardForm) hint() string {
 	switch d.focus {
 	case cardStopRepo:
 		return "←/→ or 1–9 choose a repo · typing goes to the text · tab next · esc cancel"
-	case cardStopKind:
-		return "←/→ choose the kind · typing goes to the text · tab next · esc cancel"
 	case cardStopText:
-		g := "alt+g browse issues"
+		g := ""
 		if d.imported != nil {
-			g = "alt+g refetch"
+			g = "alt+g refetch · "
 		} else if _, ok := d.reference(); ok {
-			g = "alt+g import"
+			g = "alt+g import · "
 		}
-		// shift+tab is named here, not just tab. The composer is where focus
-		// starts and `kind` is the row directly ABOVE it — one shift+tab
-		// away and five tabs the other way round the cycle. A reader who
-		// types a bug description, sees "becomes  FD (feature) · …" and
-		// wants to fix it was being shown only the long way (round 3 §6).
-		return "tab/shift+tab rows · " + g + " · alt+o options · alt+enter newline · enter create · esc cancel"
+		// shift+tab is named here, not just tab: the rows above the
+		// composer are one shift+tab away and several tabs the other way
+		// round the cycle.
+		return "tab/shift+tab rows · " + g + "alt+o options · alt+enter newline · enter create · esc cancel"
 	case cardStopEnvelope:
 		return "type a dollar amount · alt+o collapse · tab next · esc cancel"
 	case cardStopProfile:
 		return "←/→ choose the profile · alt+o collapse · tab next · esc cancel"
-	case cardStopSeverity:
-		return "←/→ choose the severity · alt+o collapse · tab next · esc cancel"
-	case cardStopAfter:
-		return "type to filter · ↑/↓ move · enter add · backspace remove last · alt+o collapse · tab next · esc cancel"
 	case cardStopWhere:
 		return "←/→ choose where the session works · alt+o collapse · tab next · esc cancel"
 	case cardStopBase:
 		return "←/→ choose the branch it forks from · alt+o collapse · tab next · esc cancel"
-	case cardStopAdopt:
-		return "←/→ work on an existing branch instead of cutting one · alt+o collapse · tab next · esc cancel"
 	case cardStopStack:
 		// The cells are bare ids, so the title of the chosen card is
 		// named here rather than on the row: the hint line is the one
@@ -1604,7 +1196,7 @@ func (d *cardForm) hint() string {
 	case cardStopRuns:
 		// stops() offers this as the collapsed "runs as" line's tab stop,
 		// but advanceFocus always converts landing here into
-		// cardStopEnvelope or cardStopAfter (expanding the row instead of
+		// cardStopEnvelope or the last option row (expanding the row instead of
 		// focusing it bare) before setFocus runs, so d.focus is never
 		// actually this value. Named anyway so the switch has no silent
 		// gap if that ever stops being true.
@@ -1612,11 +1204,6 @@ func (d *cardForm) hint() string {
 	default:
 		return "tab rows · esc cancel"
 	}
-}
-
-// sortAfterCands orders candidates by id for a stable list.
-func sortAfterCands(c []afterCand) {
-	sort.Slice(c, func(i, j int) bool { return c[i].ID < c[j].ID })
 }
 
 // --- base and stack ------------------------------------------------------
@@ -1655,23 +1242,10 @@ func (d *cardForm) setStackCands(c []stackCand) {
 	d.stackCands = c
 }
 
-// asksAdopt reports whether the "works on" row is offered. Adopting needs
-// a branch to adopt, and two kinds have no business with one: a research
-// card has no branch of its own to put one on, and a freeform card is
-// refused outright at the mint (cardmint.Mint) — an adopted card walks the
-// whole workflow (DESIGN §10 D22) and a freeform card walks none of it, so
-// offering the row here would be offering a refusal.
-func (d *cardForm) asksAdopt() bool {
-	return len(d.baseCands) > 0 &&
-		d.ct.Kind != domain.KindResearch && d.ct.Kind != domain.KindFreeform
-}
-
-// asksStack is whether the stack row is worth a tab stop: a research
-// card has no branch of its own to fork, a goal's cards share the goal's
-// branch rather than stacking (DESIGN §18.5), and a session running in
-// the main checkout holds no branch to be stacked onto.
+// asksStack is whether the stack row is worth a tab stop: a session
+// running in the main checkout holds no branch to be stacked onto.
 func (d *cardForm) asksStack() bool {
-	return d.ct.Kind != domain.KindResearch && d.ct.Kind != domain.KindGoal && !d.mainCheckout
+	return !d.mainCheckout
 }
 
 // stackVisible is the row's cycle: the chosen repository's cards, since
@@ -1813,42 +1387,6 @@ func (d *cardForm) baseIdx() int {
 		}
 	}
 	return 0
-}
-
-// adoptChoices is the adopt row's cells: cutting a fresh branch, which is
-// the default and reads first, then every branch that could be adopted
-// instead.
-func (d *cardForm) adoptChoices() []string {
-	out := make([]string, 0, len(d.baseCands)+1)
-	out = append(out, "a new branch")
-	return append(out, d.baseCands...)
-}
-
-// adoptIdx is the selected cell of adoptChoices.
-func (d *cardForm) adoptIdx() int {
-	if d.adopt == "" {
-		return 0
-	}
-	for i, b := range d.baseCands {
-		if b == d.adopt {
-			return i + 1
-		}
-	}
-	return 0
-}
-
-// cycleAdopt moves the adopt row by dir over adoptChoices.
-func (d *cardForm) cycleAdopt(dir int) {
-	choices := d.adoptChoices()
-	i := (d.adoptIdx() + dir) % len(choices)
-	if i < 0 {
-		i += len(choices)
-	}
-	if i == 0 {
-		d.adopt = ""
-		return
-	}
-	d.adopt = choices[i]
 }
 
 // whereChoices is the "runs in" row's cells: the card's own worktree,

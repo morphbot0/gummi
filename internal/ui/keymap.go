@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/statusbar"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -62,6 +61,8 @@ func helpRows(bs []binding) [][2]string {
 func (m *Shell) activeSurface() (string, []binding) {
 	live := m.boardSurfacesLive()
 	switch {
+	case live && m.cardOpen && m.stepv != nil:
+		return "step", m.stepBindings()
 	case live && m.spec != nil:
 		// with a card page underneath, the artifact is one of that page's
 		// tabs (cardtabs.go) and its table has to name the way to the
@@ -72,22 +73,14 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "diff", m.withCardTabsIf(m.cardOpen, m.diff.bindings())
 	case live && m.logv != nil:
 		return "log", m.withCardTabsIf(m.cardOpen, m.logv.bindings())
-	case live && m.ingest != nil:
-		return "ingest", m.ingest.bindings()
-	case live && m.bugIngest != nil:
-		return "import bugs", m.bugIngest.bindings()
-	case live && m.deps != nil:
-		return "dependencies", m.deps.bindings()
-	case live && m.goalPage != nil:
-		return "goal", m.goalPage.bindings()
-	case live && m.ingestRun != nil && !m.ingestRun.hidden:
-		return "ingest", ingestRunBindings
 	// the inbox owns the main pane whenever it's active. It has its own
 	// table now (inboxview.go), not a placeholder.
 	case m.tab == TabStats:
 		return "stats", m.wsStatsBindings()
 	case m.tab == TabInbox:
 		return "inbox", m.inboxBindings()
+	case m.tab == TabBoard && len(m.rows) > 0 && m.cardOpen && m.wf.focus:
+		return "runs", m.runBindings()
 	case m.tab == TabBoard && len(m.rows) > 0 && m.cardOpen:
 		return "card", m.cardPageBindings()
 	case m.tab == TabBoard && len(m.rows) > 0:
@@ -161,8 +154,8 @@ func (m *Shell) helpOverlay() *helpDialog {
 // not named here (there should be nothing: every boardBindings() key is
 // covered) reads as the last group rather than silently vanishing.
 var boardHelpKeyGroup = map[string]int{
-	// moves the card through its workflow, or spends credits on it now
-	"enter": 0, "p": 0, "g": 0, "h": 0, "b": 0, "v": 0, "u": 0, "A": 0,
+	// works the card, or spends credits on it now
+	"enter": 0, "p": 0, "h": 0, "u": 0,
 	// reads the card without changing anything
 	"s": 1, "d": 1, "t": 1, "i": 1, "P": 1,
 	// branch/worktree plumbing
@@ -235,16 +228,13 @@ func boardHelpRows(bs []binding) [][2]string {
 	heading("glyphs")
 	rows = append(rows, boardGlyphLegend()...)
 	rows = append(rows,
-		[2]string{"⟲", "rounds burned so far — the badge names which loop it counts (plan, review, or corrective)"},
 		[2]string{"~", "estimated — not yet the metered spend"},
 	)
 	return rows
 }
 
 // boardBindings is the board's key table. The bar subset adapts to the
-// selected card: enter reads "chat" or "run" by stage, becomes "watch"
-// while that feature's agent is running (attach the transcript), and
-// "p pause" joins the bar alongside it.
+// selected card: a card another process drives reads "watch" on enter.
 func (m *Shell) boardBindings() []binding {
 	// base is the branch f actually lands on — resolved from the selected
 	// row when there is one, worktree.DefaultBaseBranchName otherwise
@@ -256,46 +246,9 @@ func (m *Shell) boardBindings() []binding {
 	if r, ok := m.selected(); ok {
 		base = r.baseBranch()
 	}
-	enter := binding{key: "enter", label: "chat", help: "chat (brainstorm/spec) · run (autonomous)", bar: true}
-	pause := binding{key: "p", label: "pause", help: "pause the running agent; else open the dependency picker"}
+	enter := binding{key: "enter", label: "open", help: "open the card's page — its thread, diff and decisions", bar: true}
+	pause := binding{key: "p", label: "stop", help: "stop the session's turn in flight"}
 	peek := binding{key: "t", label: "open", help: "open the card's thread without starting or attaching anything"}
-	// "next stage", not "advance". g wore four names at once — "advance" in
-	// the board footer, the action inventory and the slash menu, "approve" in
-	// the artifact and diff footers, "land on <base>" in the decision block —
-	// and this table's own help row was the only place that said it in words
-	// (round 3 §5.3). The label now says what the help says.
-	advance := binding{key: "g", label: "next stage", help: "move the card to its next stage", bar: true}
-	if r, ok := m.selected(); ok && r.F.Stage == domain.StageVerify {
-		advance.help = "approve — squash-merge the branch and land it on " + base
-	}
-	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {
-		// FD-081: a done RS card has nothing left to advance — g re-runs
-		// decompose instead.
-		advance.label = "decompose"
-		advance.help = "on a done RS: re-run decompose"
-	}
-	if r, ok := m.selected(); ok && autonomousStage(r.F.Stage) {
-		enter.label = "run"
-		if s := m.sessionFor(r.F.ID); s != nil {
-			switch s.State() {
-			case engine.StateRunning:
-				enter.label = "watch"
-				enter.help = "watch the running agent (scrollable transcript)"
-			case engine.StateDone, engine.StatePaused:
-				// a finished/paused run: reading what happened is the
-				// draw, so surface it (enter would re-run the stage)
-				peek.bar = true
-			}
-			pause.bar = true
-		}
-	}
-	// "bounce" is the accelerator's old name for "send it back" — the
-	// decision block (decision.go) already says "send it back" for the
-	// identical act, and the table §5 settled on that one name everywhere.
-	bounce := binding{key: "b", label: "send back", help: "send it back to implement"}
-	if r, ok := m.selected(); ok && r.F.Stage == domain.StageImplement {
-		bounce.help = "send it back to plan"
-	}
 	bs := []binding{
 		{key: "j/k ↓↑", label: "select", help: "select card"},
 		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
@@ -308,17 +261,12 @@ func (m *Shell) boardBindings() []binding {
 		// key, so the bar can spend its width on the two ways in instead.
 		{key: "s", label: "spec", help: "spec — comment, resolve and approve in place"},
 		{key: "d", label: "diff", help: "diff — comment, resolve and approve in place"},
-		advance,
-		// the third ending, beside advance's landing — it reads next to
-		// the key it is an alternative to rather than down among the git
-		// plumbing, which is where its first draft put it.
+		// the second ending, beside the landing — it reads next to the
+		// diff it ends on rather than down among the git plumbing.
 		{key: "h", label: "hand off", help: handOffHelp},
-		bounce,
-		{key: "v", label: "verify", help: "run verify checks"},
 		{key: "u", label: "budget", help: "set the card's budget (dollars; 0 = uncapped)"},
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "open a terminal agent in this card's worktree"},
-		{key: "A", label: "autopilot", help: "set how far this card runs on its own, and start it"},
 		{key: "tab", label: "next tab", help: "cycle the tabs (board, stats, inbox, agent)"},
 		{key: tabChords, label: "tab", help: "jump straight to board / stats / inbox / agent"},
 		{key: "i", label: "inbox", help: "open the needs-you inbox"},
@@ -332,22 +280,15 @@ func (m *Shell) boardBindings() []binding {
 		{key: "W", label: "this week", help: "what the last seven days produced: endings, cost, rework"},
 		{key: "L", label: "schedules", help: "schedules and heartbeats — what comes back on a clock without a person typing"},
 		{key: "E", label: "skills", help: "the skill pack and its curator — pin, revert, run now"},
-		{key: "n", label: "new", help: "new card — feature, bug, research or goal, or paste an issue link to import one", bar: true},
-		{key: "f", label: "fold goal", help: "fold or unfold a goal's cards under it"},
-		{key: "P", label: "goal page", help: "a goal's page — done-when, cards, budget, lead's log"},
-		{key: "B", label: "bug", help: "same screen as n, straight to the bug preset"},
-		{key: "R", label: "research", help: "same screen as n, straight to the research preset"},
+		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
+		{key: "f", label: "fold archive", help: "fold or unfold the archive of cards that settled a while ago"},
 		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},
-		{key: "I", label: "ingest", help: "split a document into cards"},
-		{key: "G", label: "import", help: "same screen as n, straight to importing a bug from a GitHub issue — browse the repo's issues"},
-		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},
 		{key: "D", label: "delete", help: "delete card (uppercase: it destroys work)"},
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},
 	}
 	if r, ok := m.selected(); ok && r.watchOnly() {
-		// something else is driving this card — another gummi process, or
-		// the lead of its goal: every verb that would write to it is
+		// another gummi process is driving this card: every verb that would write to it is
 		// refused (shell.go's boardVerb), so the bar and the ? help
 		// overlay must stop offering them — the same reasoning as the
 		// research-card filter below. enter still works, as the way to
@@ -366,31 +307,14 @@ func (m *Shell) boardBindings() []binding {
 		return filtered
 	}
 	if r, ok := m.selected(); ok && r.F.IsFreeform() {
-		// A freeform card is not in the workflow (DESIGN §19): there is no
-		// stage to advance, no artifact to open, no stage to send it back
-		// to, no verification plan to run, and no gates for autopilot to
-		// cross. Every one of those keys refuses on such a card, so the bar
-		// and the ? help overlay must not offer them — the same reasoning
-		// as the research filter below. What it keeps is the diff, the
-		// branch verbs, and its two endings.
+		// A session has no artifact to open (DESIGN §19): s refuses on
+		// one, so the bar and the ? help overlay must not offer it.
 		filtered := bs[:0:0]
 		for _, b := range bs {
-			switch b.key {
-			case "g", "s", "b", "v", "A":
+			if b.key == "s" {
 				continue
 			}
 			filtered = append(filtered, b)
-		}
-		// w is the freeform card's own third ending: continue the work as
-		// a feature, planned from the conversation and the branch. It has
-		// no meaning on any other card, so it is only ever offered here —
-		// and only while the board could run the handoff brief's turn at
-		// all.
-		if r.F.Stage == domain.StageOpen && m.engine != nil {
-			filtered = append(filtered, binding{
-				key: "w", label: "write a spec",
-				help: "continue this work as a feature — its architect plans from this conversation and the branch",
-			})
 		}
 		bs = filtered
 	}
@@ -425,20 +349,8 @@ func (m *Shell) splashBindings() []binding {
 	}
 	return []binding{
 		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
-		{key: "n", label: "new", help: "new card — feature, bug or research, or paste an issue link to import one", bar: true},
-		{key: "B", label: "bug", help: "same screen as n, straight to the bug preset"},
-		{key: "R", label: "research", help: "same screen as n, straight to the research preset"},
-		{key: "I", label: "ingest", help: "split a document into cards"},
-		{key: "G", label: "import", help: "same screen as n, straight to importing a bug from a GitHub issue — browse the repo's issues"},
+		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit", bar: true},
 	}
-}
-
-// ingestRunBindings is the live ingest feed's table. The feed is
-// watch-only; these keys background and re-foreground it.
-var ingestRunBindings = []binding{
-	{key: "esc", label: "board", help: "background the feed — the pass keeps running", bar: true},
-	{key: "I", label: "ingest feed", help: "bring the backgrounded feed forward", bar: true},
-	{key: "?", label: "help", bar: true},
 }

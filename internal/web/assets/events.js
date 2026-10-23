@@ -16,10 +16,9 @@
 
 import { set, state } from './store.js?v=__ASSET_V__'
 
-// ingest runs report progress on their own kind; a view listens with onEvent
-// and a device asking to join is "pairing" (approvals.js); "work" is what
-// the board is waiting on GitHub for (work.js)
-const KINDS = ['board', 'card', 'live', 'toast', 'viewers', 'ingest', 'pairing', 'work']
+// a device asking to join is "pairing" (approvals.js); "work" is what the
+// board is waiting on GitHub for (work.js)
+const KINDS = ['board', 'card', 'live', 'toast', 'viewers', 'pairing', 'work']
 const listeners = new Map()
 
 let es = null
@@ -29,7 +28,7 @@ let timer = 0
 let fresh = true // the current EventSource was created by us, not retried
 let since = '' // the event id to resume from: what the page has drawn is as of it
 
-// onEvent lets a view (a goal page, ingest) hear one kind of event while
+// onEvent lets a view hear one kind of event while
 // it is mounted. It returns the unsubscribe function.
 export function onEvent (kind, fn) {
   if (!listeners.has(kind)) listeners.set(kind, new Set())

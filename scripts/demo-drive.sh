@@ -110,10 +110,9 @@ typeline() {
 }
 
 # press_when <screen-regex> <key> <keycap> <narration> [wait] [after]
-# Press only if the thing the key is meant for is actually on screen. An
-# autonomous card can cross a gate by itself between two cues, and a blind
-# Enter then lands on whatever decision replaced it -- which is how a
-# stray squash-merge dialog once opened three chapters early.
+# Press only if the thing the key is meant for is actually on screen. A
+# blind Enter lands on whatever decision is up at that moment, which is not
+# always the one the caption is talking about.
 press_when() {
     local re="$1" key="$2" cap="$3" note="$4" waitfor="${5:-10}" after="${6:-2.0}" i
     tm set -g @note "$note"
@@ -165,27 +164,6 @@ await() {
     return 0
 }
 
-# The card page draws a stage rail and pads the active stage with an extra
-# space on each side ("─ todo ─  plan  ─ implement ─"). That is the one
-# progress signal that stays on screen, so stage waits anchor to it rather
-# than to thread text, which scrolls away between two polls.
-STAGES=(todo plan implement verify done)
-
-# await_stage <stage> [timeout] -- wait until the card is AT that stage or
-# past it. "Or past it" is the load-bearing half: an autonomous tail can
-# outrun the narration, and a wait for a stage that already went by would
-# otherwise burn its whole timeout as dead air.
-await_stage() {
-    local want="$1" limit="${2:-120}" re="" seen=0 s
-    for s in "${STAGES[@]}"; do
-        [ "$s" = "$want" ] && seen=1
-        [ "$seen" = 1 ] && re="${re}${re:+|}─  ${s}  ─"
-    done
-    # "done" is the last rung and has no trailing "─" on the rail.
-    re="${re}|─  done"
-    await "$re" "$limit"
-}
-
 # --------------------------------------------------------------------------
 # the scenario
 # --------------------------------------------------------------------------
@@ -195,19 +173,18 @@ cues() {
 
     # -- 1 ------------------------------------------------------------------
     chapter "1 · One board, not five terminals" "canonical/lxd"
-    say "Every unit of work is a card. Each one owns a git worktree and a branch." 3.2
-    say "They are grouped by how far along they are — todo, in progress, review." 3.0
-    repeat Down "j" "j and k walk the backlog. There is only ever one list on screen." 3 0.7
-    say "A bug, two features mid-flight, and one already at a verified branch." 3.0
+    say "Every unit of work is a session: a coding agent on a worktree and a branch of its own." 3.6
+    repeat Down "j" "j and k walk the board. There is only ever one list on screen." 3 0.7
+    say "Two sessions finished their work; one is waiting on its person's answer." 3.0
 
     # -- 2 ------------------------------------------------------------------
-    chapter "2 · A new feature" "lxc list is missing a column"
-    press n "n" "n opens the whole creation form. There is nothing else to fill in." 1.6
+    chapter "2 · A new session" "lxc list is missing a column"
+    press n "n" "n starts a session. The first line is its title and its first message." 1.6
     typeline "lxc list: add a disk usage percent column" \
-        "The first line becomes the title; anything past it seeds the spec's Problem."
-    say "The quiet row underneath picks the model profile and the route." 2.6
-    press Enter "enter" "Create it." 2.5
-    await "disk usage percent column" 20
+        "Say what you want, the way you would to a colleague."
+    press Enter "enter" "Create it. The session opens on its own thread." 2.5
+    await "Which denominator" 60
+    say "It read lxc/list.go first, then brought the one choice that is yours." 3.4
 
     # A smoke run stops here: enough to prove the pipeline, cheap to redo.
     if [ -n "${DEMO_SMOKE:-}" ]; then
@@ -217,105 +194,50 @@ cues() {
     fi
 
     # -- 3 ------------------------------------------------------------------
-    chapter "3 · Design is a conversation" "the plan stage"
-    # Selection does not follow a newly created card, and chapter 1 left it
-    # further down the list -- so re-anchor on card 1 and step to the new
-    # one rather than assuming where the cursor is.
-    press 1 "1" "Digits jump straight to a card." 1.2
-    press Down "j" "The new feature is the second card in todo." 1.4
-    press Enter "enter" "Open it. The card page is a thread." 2.6
-    await "disk usage percent column" 20
-    say "Nothing has run yet, so gummi pins the one decision that is open." 2.8
-    press Enter "enter" "Start the design flow." 2.4
-    press Enter "enter" "Now start the architect." 1.5
-    await "denominator" 90
-    say "It read lxc/list.go first, then wrote the Problem section from what it found." 3.4
-    say "One question at a time, with its recommendation attached — so you can agree in one key." 3.6
-    press_when "denominator" Enter "enter" "Take the recommendation: the pool total, not the quota." 15 2.0
-    await "shorthand char" 90
-    say "Second decision: d and D are both taken, so the disk pair cannot mirror m and M." 3.6
-    press_when "shorthand char" Enter "enter" "U it is." 15 1.2
-    await "ready for your gate" 90
-    say "It chose an approach, wrote tracer-bullet steps, and resolved its own open thread." 3.6
-    say "Before the plan reaches you, a fresh reviewer tries to refute it." 3.2
-    await "VERDICT: pass" 90
-
-    # -- the spec ----------------------------------------------------------
-    chapter "3 · Design is a conversation" "the spec is the artifact"
-    say "The transcript is not the deliverable — the spec is. It lives in the repo." 3.2
-    press Up "↑" "The composer keeps the keyboard, so the card's verbs live behind ↑." 2.4
-    say "Every verb this card has, in one list." 2.4
-    repeat Down "j" "Walk down to the spec." 4 0.45
-    press Enter "enter" "Open it." 2.8
-    say "Open questions are tracked as %% threads, listed above the document." 3.2
-    repeat Down "j" "Move to the line you want to say something about." 9 0.16
-    press c "c" "c comments on the line under the cursor." 2.0
-    typeline "worth saying explicitly: a blank cell, never 0.0%" \
-        "Your words go into the spec, not into a chat that scrolls away."
-    press Enter "enter" "Save it." 2.4
-    say "It landed as a %% marker — and notice it now blocks approval." 3.4
-    press Down "j" "Your open question is a gate, not a note." 1.2
-    press x "x" "x resolves the thread once you are satisfied." 2.6
-    press Enter "enter" "A reason is optional; enter resolves it." 2.0
-
-    # -- the gate ----------------------------------------------------------
-    chapter "3 · Design is a conversation" "crossing the one gate"
-    press g "g" "g crosses the gate. There is one design gate, and it is yours." 3.0
-    say "Approving is the moment gummi creates the worktree and the branch." 3.2
-    await_stage implement 60
+    chapter "3 · Agree it, then write it down" "the session's spec"
+    say "Every question comes with its recommendation attached — agree in one key." 3.2
+    press_when "Which denominator" Enter "enter" "The pool total, not the quota." 15 2.0
+    await "Run deliver" 60
+    say "It wrote what you agreed into the session's spec — with done-when items gummi can run." 3.8
+    say "The work deserves a design, a reviewed build and a validation, so it offers a workflow." 3.6
 
     # -- 4 ------------------------------------------------------------------
-    # From here the card is running, so the stages advance themselves and
-    # the cues only narrate. Await the stage rail, not thread text: the
-    # thread scrolls, and a line can pass by between two polls.
-    chapter "4 · Implementation runs alone" "in the card's own worktree"
-    say "A worktree and a branch now exist. The spec rides along on the branch." 3.4
-    press_when "run implement" Enter "enter" "Start the implementer." 15 2.0
-    say "Implement runs alone in the worktree, streaming what it does into the card." 3.6
-    await "untouched" 150
-    say "Mid-turn the implementer needs a decision, so it asks — inline, with options." 3.8
-    say "The blocked turn spends no tokens while it waits for you." 3.0
-    press_when "untouched" Enter "enter" "Take the recommendation." 15 2.4
-    say "Three steps, real edits to lxc/list.go, and a commit on the card's branch." 3.6
+    chapter "4 · A workflow, when the work is worth one" "proposed, then allowed by you"
+    press_when "Run deliver" Enter "enter" "Yes: run deliver." 15 2.0
+    await "Run the deliver workflow" 60
+    say "The proposal shows every step, its role and its estimate, and the checks it will run." 3.6
+    say "No agent allows its own run. That is your key to press." 3.0
+    press_when "Run the deliver workflow" Enter "enter" "Allow." 15 2.0
 
     # -- 5 ------------------------------------------------------------------
-    chapter "5 · Review has no shared context" "a fresh session, the spec and the diff"
-    await "implement · reviewer" 150
-    say "The reviewer never saw the implementer's session. Only the spec and the diff." 3.8
-    say "It found the missing test — blocking — so the work bounces back automatically." 3.8
-    say "The implementer fixes it and resolves the thread with how, then review runs again." 4.0
-    await_stage verify 180
-    say "Round two passed. Verify now runs the repo's own checks from the spec." 3.8
-    say "go build and go vet really ran, against the real LXD tree." 3.6
-    say "Verification passed — and gummi stops here to ask what happens next." 3.4
+    chapter "5 · The run works" "every step a fresh agent, in the session's own tree"
+    say "A designer, then an implementer; two fresh reviewers read the run's diff." 3.4
+    say "They find the help text never learned about U, so the build loops once." 3.6
+    await "commit it" 240
+    say "Then a validation reads every done-when item against the diff." 3.2
 
     # -- 6 ------------------------------------------------------------------
-    # Autopilot comes before the landing beat because the verify decision's
-    # own default IS the landing dialog: going to the board first keeps the
-    # two ideas from colliding in one modal.
-    chapter "6 · Autopilot" "how far a card runs on its own"
-    to_board "Back to the board — esc leaves a card page in one press."
-    say "Single-letter verbs work here: the board has the keyboard, not a composer." 3.2
-    press 1 "1" "Take the untriaged bug at the top." 1.6
-    press_when "BOARD " A "A" "A sets how far a card runs unattended — and starts it where it sits." 10 3.2
-    say "off stops at every gate · gates crosses the design gates · full runs to a verified branch." 4.4
-    say "On full it answers its own questions and bounces its own failed verify." 3.4
-    say "What it never does is widen its own reach. And it never lands on main." 3.6
-    press Escape "esc" "Leave this one as it was." 2.0
+    chapter "6 · The run reports to the session" "and the session carries on"
+    say "The report comes back to the session, which tells you what it means." 3.4
+    say "Nothing was committed: the run left its changes in the tree." 3.2
+    typeline "commit it" "Tell it to commit what the run left in the tree."
+    press Enter "enter" "Send it." 2.0
+    await "Committed the run" 60
+    say "One commit, made by the session on purpose: gummi commits nothing." 3.8
+    press M-d "alt+d" "alt+d reads the diff: the column, its guard, its test." 3.2
+    t 2.4
 
     # -- 7 ------------------------------------------------------------------
-    chapter "7 · Done means a verified branch" "landing is still yours"
-    to_board "The feature we drove is finished: reviewed, verified, on its own branch."
-    # A digit, not four j's: a dialog closing above swallows the first
-    # keystroke after it, which silently lands the cursor one card short.
-    press 5 "5" "Jump straight to the card we drove." 2.0
-    press_when "BOARD " m "m" "m squash-merges it into main." 10 3.4
-    say "gummi drafts the landing message from the spec and the branch's own commits…" 3.8
-    say "…and then stops. You read it, edit it, approve it. Nothing lands unreviewed." 4.2
+    chapter "7 · Landing is yours" "a person's read of the diff"
+    to_board "Back to the board."
+    press_when "BOARD " m "m" "m squash-merges the session into main." 10 3.4
+    await "DISK USAGE% column under -c U" 30
+    say "gummi drafts the landing message from the branch's own commits…" 3.4
+    say "…and then stops. You read it, edit it, land it. Nothing lands unread." 3.8
     press Escape "esc" "Not today — the branch keeps." 2.2
 
     chapter "gummi" "a meta-harness for coding agents"
-    say "One board. Every stage gated. Frontier models only where they earn them." 4.2
+    say "Sessions by default. A workflow of fresh agents when the work is worth one." 4.2
     t 2.0
 }
 
@@ -328,7 +250,7 @@ main() {
     cleanup
     tm new-session -d -s demo -x "${DEMO_COLS:-132}" -y "${DEMO_ROWS:-38}" \
         "cd '$repo' && GUMMI_AGENT=headless GUMMI_AGENT_CMD='$agent' \
-         GUMMI_ENVELOPE=2400 GUMMI_NOTIFY=off GOTOOLCHAIN=auto '$bin'"
+         GUMMI_NOTIFY=off GOTOOLCHAIN=auto '$bin'"
     tm set -g window-size latest
     tm set -g aggressive-resize on
     tm set -g status-keys emacs

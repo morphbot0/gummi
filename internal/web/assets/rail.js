@@ -97,7 +97,7 @@ function quality (r) {
 // word is the row's status in words, the second line's lead.
 function word (r) {
   if (r.status === 'needs') return needsWord(r.needs, r.stage)
-  if (r.status === 'running') return r.running?.pausing ? 'pausing' : (r.running?.autopilot || r.autopilot) ? 'autopilot' : (r.running?.verb || 'working')
+  if (r.status === 'running') return r.running?.pausing ? 'pausing' : (r.running?.verb || 'working')
   if (r.status === 'watching') return 'watching'
   if (r.status === 'paused') return 'paused'
   const session = r.home ? 'agent' : (r.stage === 'open' || r.kind === 'freeform') && 'session'
@@ -116,7 +116,7 @@ function matches (r, repo) {
   if (repo !== 'all' && (r.home || (r.repo || '') !== repo)) return false
   if (!state.filter) return true
   const group = GROUPS.find(g => g[0] === r.status)?.[1] || ''
-  return `${r.id} ${ref(r.id)} ${typeName(r)} ${r.title} ${r.stage} ${word(r)} ${group} ${KINDS[kindTag(r)] || ''} ${r.repo || ''} ${r.pr || ''} ${r.stack?.name || ''} ${r.goal?.title || ''}`.toLowerCase().includes(state.filter)
+  return `${r.id} ${ref(r.id)} ${typeName(r)} ${r.title} ${r.stage} ${word(r)} ${group} ${KINDS[kindTag(r)] || ''} ${r.repo || ''} ${r.pr || ''} ${r.stack?.name || ''}`.toLowerCase().includes(state.filter)
 }
 
 // visibleIds is the rail's rows in on-screen order: what j and k walk.
@@ -372,7 +372,6 @@ function showHover (id) {
       fact('Repository', r.repo),
       fact('Home', r.home),
       fact('Stack', r.stack ? `${r.stack.name || 'stack'} · ${r.stack.pos + 1} of ${r.stack.of}${r.stack.stale ? ' · base moved' : ''}` : ''),
-      fact('Goal', r.goal ? `${ref(r.goal.id)}${r.goal.title ? ' · ' + r.goal.title : ''}` : ''),
       fact('Waits on', r.waits?.map(ref).join(', ')),
       fact('Pull request', r.pr),
       fact('Profile', r.profile),
@@ -390,14 +389,10 @@ function renderFoot (unpair, newSession) {
   const more = h('button', { class: 'iconbtn', testid: 'rail-more', title: 'More', 'aria-label': 'More', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('more'))
   more.addEventListener('click', () => {
     const items = [
-      item('goals', 'Goals', 'goal'),
       item('stacks', 'Stacks', 'stack'),
       item('repos', 'Repositories', 'repo'),
       item('schedules', 'Schedules', 'clock'),
       item('skills', 'Skills', 'skill'),
-      'sep',
-      item('ingest', 'Import spec', 'import'),
-      item('bugs', 'Import bugs', 'bug'),
       'sep',
       item('doctor', 'Doctor', 'doctor'),
       item('settings', 'Settings', 'settings')
@@ -407,12 +402,10 @@ function renderFoot (unpair, newSession) {
     openMenu(more, items, { up: true, testid: 'rail-more-menu' })
   })
   // what else can be started, behind the one button's arrow
-  const other = h('button', { class: 'split-more', testid: 'rail-new-menu', title: 'New agent, new card, or import', 'aria-label': 'New agent, new card, or import', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('chevron'))
+  const other = h('button', { class: 'split-more', testid: 'rail-new-menu', title: 'New agent, or the full form', 'aria-label': 'New agent, or the full form', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('chevron'))
   other.addEventListener('click', () => openMenu(other, [
     { label: 'New agent', icon: 'home', testid: 'rail-new-agent', hint: 'A session with a home of its own, in no repository', onClick: () => newSession?.({ home: true }) },
-    { label: 'New card', icon: 'plus', testid: 'rail-new', hint: 'Work that walks the stages: plan, implement, verify', onClick: () => openView('newcard') },
-    { ...item('ingest', 'Import spec', 'import'), testid: 'rail-new-ingest' },
-    { ...item('bugs', 'Import bugs', 'bug'), testid: 'rail-new-bugs' }
+    { label: 'New session…', icon: 'plus', testid: 'rail-new', hint: 'The full form: budget, profile, repository, base', onClick: () => openView('newcard') }
   ], { up: true, testid: 'rail-new-menu-list' }))
   foot.append(
     h('div', { class: 'split' },

@@ -16,7 +16,7 @@ const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, 
 test.use({
   seed: {
     run: async (ws) => {
-      id = await ws.seedVerified('Add a log helper');
+      id = await ws.seedReady('Add a log helper');
       const wt = ws.worktree(id);
       for (const n of ['one', 'two']) {
         fs.writeFileSync(path.join(wt, `${n}.txt`), `${n}\n`);
@@ -59,9 +59,4 @@ test('the log lists the branch, and squash and reword rewrite it without changin
   expect(git(wt, 'log', '-1', '--format=%s')).toBe('feat: add the wip files');
   expect(git(wt, 'status', '--porcelain')).toBe('');
 
-  // the verify gate is pinned to the branch head, which moved: the page
-  // re-reads the card and offers the decision against the new head
-  if (info.project.name !== 'phone') {
-    await expect(page.getByText(`at ${git(wt, 'rev-parse', '--short=7', 'HEAD')}`).first()).toBeVisible();
-  }
 });

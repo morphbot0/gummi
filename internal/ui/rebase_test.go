@@ -5,18 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 )
 
 // rebaseFeatureFixture creates a feature with a worktree branched from
@@ -140,340 +134,6 @@ func TestRebaseRecoversStrandedRebase(t *testing.T) {
 	}
 }
 
-// conflictOnMain gives FD-001 (created by chatWorkspace) a worktree via
-// the stage flow, then commits conflicting README.md edits on both the
-// branch and main, returning the refreshed feature.
-func conflictOnMain(t *testing.T, m *Shell) (*Shell, domain.Feature) {
-	t.Helper()
-	m = advanceTo(t, m, domain.StageVerify)
-	root := m.wt.Root()
-	wt := filepath.Join(root, ".gummi", "worktrees", "FD-001")
-	if err := os.WriteFile(filepath.Join(wt, "README.md"), []byte("feature version\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git(t, wt, "add", ".")
-	git(t, wt, "commit", "-qm", "feature edit")
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("main version\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git(t, root, "add", ".")
-	git(t, root, "commit", "-qm", "main edit")
-	f, err := m.store.GetFeature(context.Background(), "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return m, f
-}
-
-func TestAgentRebaseEscalatesWhenUnresolved(t *testing.T) {
-	// the agent claims success but resolves nothing; the git state, not
-	// the transcript, decides — and it says escalate.
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "All resolved."},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	m, eng := chatWorkspace(t, ag)
-	m, f := conflictOnMain(t, m)
-
-	m = pump(t, m, m.rebaseFeature(f))
-	top := m.Overlay.Top()
-	if top == nil || top.ID() != "agent-rebase" {
-		t.Fatalf("conflict did not offer the agent hand-off (notice %q)", m.notice.text)
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if !strings.Contains(m.notice.text, "dispatched") {
-		t.Fatalf("confirm did not dispatch the agent: notice = %q", m.notice.text)
-	}
-	settleChat(t, eng)
-	m = drainEngineLoop(t, m)
-
-	if !m.notice.isErr || !strings.Contains(m.notice.text, "agent rebase failed") {
-		t.Errorf("notice = %q (err=%v), want agent rebase failed", m.notice.text, m.notice.isErr)
-	}
-	escalated := false
-	for _, it := range m.inbox.list() {
-		if it.Feature == "FD-001" && it.Kind == attnGate && it.Escalated {
-			escalated = true
-		}
-	}
-	if !escalated {
-		t.Error("unresolved agent rebase did not escalate to the inbox")
-	}
-	if f.Stage != domain.StageVerify {
-		t.Errorf("stage moved to %s", f.Stage)
-	}
-}
-
-func TestAgentRebaseSuccessReVerifies(t *testing.T) {
-	// a scripted agent that really performs the rebase in the worktree;
-	// on success the feature re-enters verify automatically.
-	var rebases atomic.Int32
-	shaRe := regexp.MustCompile(`git rebase ([0-9a-f]+)`)
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if strings.Contains(msg, "Proceed with the rebase") {
-			rebases.Add(1)
-			sha := shaRe.FindStringSubmatch(msg)
-			if sha == nil {
-				t.Error("rebase kickoff names no target commit")
-				return []agent.Event{{Kind: agent.EventIdle}}
-			}
-			gitIn := func(mustPass bool, args ...string) {
-				out, err := exec.CommandContext(context.Background(), "git",
-					append([]string{"-C", opts.WorkDir}, args...)...).CombinedOutput()
-				if mustPass && err != nil {
-					t.Errorf("agent git %v: %v\n%s", args, err, out)
-				}
-			}
-			gitIn(false, "rebase", sha[1]) // stops on the conflict
-			if err := os.WriteFile(filepath.Join(opts.WorkDir, "README.md"), []byte("merged version\n"), 0o600); err != nil {
-				t.Error(err)
-			}
-			gitIn(true, "add", "README.md")
-			gitIn(true, "-c", "core.editor=true", "rebase", "--continue")
-			return []agent.Event{
-				{Kind: agent.EventMessage, Text: "Conflicts resolved, rebase complete."},
-				{Kind: agent.EventIdle},
-			}
-		}
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "Checks green.\nVERDICT: pass"},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	m, eng := chatWorkspace(t, ag)
-	m, f := conflictOnMain(t, m)
-
-	m = pump(t, m, m.rebaseFeature(f))
-	if top := m.Overlay.Top(); top == nil || top.ID() != "agent-rebase" {
-		t.Fatalf("conflict did not offer the agent hand-off (notice %q)", m.notice.text)
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	settleChat(t, eng)
-	m = drainEngineLoop(t, m)
-
-	if n := rebases.Load(); n != 1 {
-		t.Fatalf("rebase sessions = %d, want 1", n)
-	}
-	if ok, err := m.wt.RebasedOnBase(context.Background(), &f); !ok || err != nil {
-		t.Fatalf("branch not rebased onto main: %v %v", ok, err)
-	}
-	// the judged-ok rebase re-anchored the fork to main's head, so drift is
-	// clear for the feature re-run.
-	if err := m.wt.AssertNoForkDrift(context.Background(), &f); err != nil {
-		t.Fatalf("agent rebase left drift: %v", err)
-	}
-	// the quality floor: verify re-ran (a fresh non-rebase session), and
-	// its pass raised the landing gate
-	s := eng.Get("FD-001")
-	if s == nil || s.Snapshot().Rebase {
-		t.Fatal("verify re-run did not replace the rebase session")
-	}
-	gated := false
-	for _, it := range m.inbox.list() {
-		if it.Feature == "FD-001" && it.Kind == attnGate && strings.Contains(it.Text, "verify passed") {
-			gated = true
-		}
-	}
-	if !gated {
-		t.Errorf("re-verify did not raise the landing gate; inbox: %+v", m.inbox.list())
-	}
-}
-
-// midTurnHold blocks stage sessions' turns until released — the steady
-// state of a card running unattended while the operator reaches for the
-// rebase. Release is idempotent and runs in t.Cleanup.
-func midTurnHold(t *testing.T) (wait <-chan struct{}, release func()) {
-	t.Helper()
-	ch := make(chan struct{})
-	var once sync.Once
-	release = func() { once.Do(func() { close(ch) }) }
-	t.Cleanup(release)
-	return ch, release
-}
-
-// waitLiveSession waits until the engine holds a live session for the card.
-func waitLiveSession(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
-	t.Helper()
-	deadline := time.After(testWaitTimeout)
-	for {
-		if s := eng.Get(id); s != nil {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatal("no live session started")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-// conflictBranchAndMain gives the card's branch and main conflicting
-// README.md edits, the shape that stops the board's own rebase.
-func conflictBranchAndMain(t *testing.T, m *Shell) domain.Feature {
-	t.Helper()
-	root := m.wt.Root()
-	wtDir := filepath.Join(root, ".gummi", "worktrees", "FD-001")
-	if err := os.WriteFile(filepath.Join(wtDir, "README.md"), []byte("feature version\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git(t, wtDir, "add", ".")
-	git(t, wtDir, "commit", "-qm", "feature edit")
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("main version\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git(t, root, "add", ".")
-	git(t, root, "commit", "-qm", "main edit")
-	f, err := m.store.GetFeature(context.Background(), "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
-}
-
-// TestAgentRebaseReRunsTheInterruptedStage: a hand-off dispatched over a
-// mid-turn stage session interrupts that session (the engine swaps the
-// rebase pass in), and when the rebase settles successfully nothing else
-// re-runs the stage it stopped — no stage crossing opens an idle
-// decision, the finished rebase session's idle is judged from git state,
-// and the interrupted session's stop reaches no loop — so the settlement
-// re-runs it itself. Without that, a card running unattended ends
-// silently idle mid-stage after its rebase.
-func TestAgentRebaseReRunsTheInterruptedStage(t *testing.T) {
-	hold, release := midTurnHold(t)
-	var rebases atomic.Int32
-	shaRe := regexp.MustCompile(`git rebase ([0-9a-f]+)`)
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if strings.Contains(msg, "Rebase this branch onto") {
-			rebases.Add(1)
-			sha := shaRe.FindStringSubmatch(msg)
-			if sha == nil {
-				t.Error("rebase kickoff names no target commit")
-				return []agent.Event{{Kind: agent.EventIdle}}
-			}
-			gitIn := func(mustPass bool, args ...string) {
-				out, err := exec.CommandContext(context.Background(), "git",
-					append([]string{"-C", opts.WorkDir}, args...)...).CombinedOutput()
-				if mustPass && err != nil {
-					t.Errorf("agent git %v: %v\n%s", args, err, out)
-				}
-			}
-			gitIn(false, "rebase", sha[1]) // stops on the conflict
-			if err := os.WriteFile(filepath.Join(opts.WorkDir, "README.md"), []byte("merged version\n"), 0o600); err != nil {
-				t.Error(err)
-			}
-			gitIn(true, "add", "README.md")
-			gitIn(true, "-c", "core.editor=true", "rebase", "--continue")
-			return []agent.Event{
-				{Kind: agent.EventMessage, Text: "Conflicts resolved, rebase complete."},
-				{Kind: agent.EventIdle},
-			}
-		}
-		if strings.Contains(msg, "Survey this repository") || strings.Contains(msg, "Estimate the total cost") {
-			// the design-gate crossing's one-shot passes (check
-			// discovery, plan-time estimation) run on the same fake; let
-			// them through so the fixture reaches the work stage
-			return []agent.Event{{Kind: agent.EventMessage, Text: "n/a"}, {Kind: agent.EventIdle}}
-		}
-		// hold the stage session mid-turn
-		<-hold
-		return []agent.Event{{Kind: agent.EventMessage, Text: "working"}, {Kind: agent.EventIdle}}
-	}}
-	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageImplement)
-	f := conflictBranchAndMain(t, m)
-
-	// the card mid-run: its implement session holds a turn
-	if err := eng.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitLiveSession(t, eng, "FD-001")
-
-	// the hand-off, dispatched the way the board's confirm does, while
-	// the stage session is live and running
-	m = pump(t, m, m.agentRebase(rebaseConflictMsg{f: f, files: []string{"README.md"}}))
-	if !strings.Contains(m.notice.text, "dispatched") {
-		t.Fatalf("hand-off did not dispatch: notice = %q", m.notice.text)
-	}
-	settleCard(t, eng, "FD-001")
-	m = drainQuietEngineLoop(t, m)
-
-	if n := rebases.Load(); n != 1 {
-		t.Fatalf("rebase sessions = %d, want 1", n)
-	}
-	if ok, err := m.wt.RebasedOnBase(context.Background(), &f); !ok || err != nil {
-		t.Fatalf("branch not rebased onto main: %v %v", ok, err)
-	}
-	// the settlement re-ran the interrupted stage: a fresh non-rebase
-	// session, still at the stage the interrupt stopped — not advanced,
-	// and not the rebase pass left standing in its place
-	s := eng.Get("FD-001")
-	if s == nil {
-		t.Fatal("no live session after the settlement — the interrupted stage did not re-run")
-	}
-	snap := s.Snapshot()
-	if snap.Rebase || snap.State != engine.StateRunning {
-		t.Fatalf("post-settlement session: rebase=%v state=%s, want the stage session re-running", snap.Rebase, snap.State)
-	}
-	if snap.Feature.Stage != domain.StageImplement {
-		t.Fatalf("re-run moved the stage to %s", snap.Feature.Stage)
-	}
-	release()
-}
-
-// TestAgentRebaseInterruptedStageEscalatesWhenUnresolved: the failure arm
-// is unchanged by the interrupt — a settlement that finds the branch
-// unrebased drops the session and escalates, and does NOT re-run the
-// stage. An unattended card parks loudly rather than resuming silently
-// over a rebase that never happened.
-func TestAgentRebaseInterruptedStageEscalatesWhenUnresolved(t *testing.T) {
-	hold, _ := midTurnHold(t)
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		if strings.Contains(msg, "Rebase this branch onto") {
-			// claims success, resolves nothing — the git state decides
-			return []agent.Event{
-				{Kind: agent.EventMessage, Text: "All resolved."},
-				{Kind: agent.EventIdle},
-			}
-		}
-		if strings.Contains(msg, "Survey this repository") || strings.Contains(msg, "Estimate the total cost") {
-			// the design-gate crossing's one-shot passes; let them through
-			return []agent.Event{{Kind: agent.EventMessage, Text: "n/a"}, {Kind: agent.EventIdle}}
-		}
-		<-hold
-		return []agent.Event{{Kind: agent.EventMessage, Text: "working"}, {Kind: agent.EventIdle}}
-	}}
-	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageImplement)
-	f := conflictBranchAndMain(t, m)
-
-	if err := eng.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitLiveSession(t, eng, "FD-001")
-
-	m = pump(t, m, m.agentRebase(rebaseConflictMsg{f: f, files: []string{"README.md"}}))
-	settleCard(t, eng, "FD-001")
-	m = drainEngineLoop(t, m)
-
-	if s := eng.Get("FD-001"); s != nil {
-		snap := s.Snapshot()
-		if !snap.Rebase {
-			t.Fatalf("failed settlement re-ran the stage (rebase=%v state=%s)", snap.Rebase, snap.State)
-		}
-	}
-	escalated := false
-	for _, it := range m.inbox.list() {
-		if it.Feature == "FD-001" && it.Kind == attnGate && it.Escalated {
-			escalated = true
-		}
-	}
-	if !escalated {
-		t.Error("failed settlement of an interrupted stage did not escalate")
-	}
-}
-
 // driftUnder rewinds main to an unrelated lineage under the feature
 // worktree, so the recorded fork is no longer an ancestor of main's HEAD.
 func driftUnder(t *testing.T, root string) {
@@ -537,4 +197,40 @@ func TestRebaseDriftedDirtyRecovers(t *testing.T) {
 	if err != nil || string(content) != "uncommitted edit\n" {
 		t.Fatalf("uncommitted edit lost after recovery: %q, %v", content, err)
 	}
+}
+
+// TestAgentRebaseIsATurnInTheSession: a conflicted rebase handed to the
+// agent is a turn in the card's own session, carrying the command the
+// board ran and the files it stopped on — the person reads it in the
+// thread, and nothing judges it.
+func TestAgentRebaseIsATurnInTheSession(t *testing.T) {
+	m, eng := sessionWorkspace(t, agent.NewFake("on it"))
+	settleChat(t, eng)
+	ctx := context.Background()
+	f, err := m.store.GetFeature(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtDir, err := m.wt.Ensure(ctx, &f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := m.wt.Root()
+	if err := os.WriteFile(filepath.Join(wtDir, "README.md"), []byte("feature version\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wtDir, "add", ".")
+	git(t, wtDir, "commit", "-qm", "feature edit")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("main version\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-qm", "main edit")
+
+	m = pump(t, m, m.agentRebase(rebaseConflictMsg{f: f, files: []string{"README.md"}}))
+	if m.notice.isErr || !strings.Contains(m.notice.text, "asked the agent to rebase") {
+		t.Fatalf("notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	waitForTurn(t, eng, sessionID, "Rebase this branch onto")
+	waitForTurn(t, eng, sessionID, "README.md")
 }

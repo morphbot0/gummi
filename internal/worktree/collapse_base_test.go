@@ -3,7 +3,6 @@ package worktree
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -37,15 +36,6 @@ func advanceMain(t *testing.T, root, content string) {
 	mustGit(t, root, "commit", "-q", "-m", "unrelated main progress")
 }
 
-// dependentFeature builds a feature parked before its coding stage, so
-// AddDependency's late-attachment guard doesn't refuse the edge these tests
-// need to set up.
-func dependentFeature(num int, title string) *domain.Feature {
-	f := feature(num, title)
-	f.Stage = domain.StagePlan
-	return f
-}
-
 func TestResolveCollapseBase(t *testing.T) {
 	t.Run("no parent resolves to fork point with main", func(t *testing.T) {
 		root := newRepo(t)
@@ -66,122 +56,12 @@ func TestResolveCollapseBase(t *testing.T) {
 		advanceMain(t, root, "other.txt")
 		fakeOriginMain(t, root, mustGit(t, root, "rev-parse", "HEAD"))
 
-		base, err := ResolveCollapseBase(ctx, store, m, f)
+		base, err := ResolveCollapseBase(ctx, m, f)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if base != forkPoint {
 			t.Errorf("base = %s, want fork point %s", base, forkPoint)
-		}
-	})
-
-	t.Run("one parent resolves to fork point with parent branch", func(t *testing.T) {
-		root := newRepo(t)
-		forkPoint := mustGit(t, root, "rev-parse", "HEAD")
-		fakeOriginMain(t, root, forkPoint)
-		m := newManager(t, root)
-		store := openTestStore(t)
-
-		parent := feature(1, "Parent card")
-		if err := store.CreateFeature(ctx, parent); err != nil {
-			t.Fatal(err)
-		}
-		pPath, err := m.Create(ctx, parent)
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeFile(t, pPath, "parent.txt", "parent work\n")
-		mustGit(t, pPath, "add", ".")
-		mustGit(t, pPath, "commit", "-q", "-m", "parent work")
-
-		child := dependentFeature(2, "Child card")
-		if err := store.CreateFeature(ctx, child); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.AddDependency(ctx, child.ID, parent.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := m.Create(ctx, child); err != nil {
-			t.Fatal(err)
-		}
-
-		// Parent keeps moving after the child was forked; the collapse base
-		// must stay at the fork point, not chase the parent's live tip.
-		writeFile(t, pPath, "parent2.txt", "more parent work\n")
-		mustGit(t, pPath, "add", ".")
-		mustGit(t, pPath, "commit", "-q", "-m", "parent work 2")
-		parentTip := mustGit(t, root, "rev-parse", parent.BranchName())
-
-		base, err := ResolveCollapseBase(ctx, store, m, child)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if base == parentTip {
-			t.Errorf("base == parent tip %s; want the fork point", parentTip)
-		}
-		if base != forkPoint {
-			t.Errorf("base = %s, want fork point %s", base, forkPoint)
-		}
-	})
-
-	t.Run("two or more parents is a hard error", func(t *testing.T) {
-		root := newRepo(t)
-		fakeOriginMain(t, root, mustGit(t, root, "rev-parse", "HEAD"))
-		m := newManager(t, root)
-		store := openTestStore(t)
-
-		p1, p2 := feature(1, "Parent one"), feature(2, "Parent two")
-		if err := store.CreateFeature(ctx, p1); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.CreateFeature(ctx, p2); err != nil {
-			t.Fatal(err)
-		}
-		child := dependentFeature(3, "Child card")
-		if err := store.CreateFeature(ctx, child); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.AddDependency(ctx, child.ID, p1.ID); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.AddDependency(ctx, child.ID, p2.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := m.Create(ctx, child); err != nil {
-			t.Fatal(err)
-		}
-
-		_, err := ResolveCollapseBase(ctx, store, m, child)
-		if err == nil || !strings.Contains(err.Error(), "2 dependencies") {
-			t.Fatalf("err = %v, want a 2-dependencies error", err)
-		}
-	})
-
-	t.Run("unresolvable parent branch is a hard error, not a fallback", func(t *testing.T) {
-		root := newRepo(t)
-		fakeOriginMain(t, root, mustGit(t, root, "rev-parse", "HEAD"))
-		m := newManager(t, root)
-		store := openTestStore(t)
-
-		parent := feature(1, "Parent card")
-		if err := store.CreateFeature(ctx, parent); err != nil {
-			t.Fatal(err)
-		}
-		// Parent has never had a worktree/branch created for it.
-		child := dependentFeature(2, "Child card")
-		if err := store.CreateFeature(ctx, child); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.AddDependency(ctx, child.ID, parent.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := m.Create(ctx, child); err != nil {
-			t.Fatal(err)
-		}
-
-		_, err := ResolveCollapseBase(ctx, store, m, child)
-		if err == nil {
-			t.Fatal("unresolvable parent branch accepted")
 		}
 	})
 }
@@ -217,7 +97,7 @@ func TestCollapseWithAdvancedOriginMain(t *testing.T) {
 	advanceMain(t, root, "other.txt")
 	fakeOriginMain(t, root, mustGit(t, root, "rev-parse", "HEAD"))
 
-	base, err := ResolveCollapseBase(ctx, store, m, f)
+	base, err := ResolveCollapseBase(ctx, m, f)
 	if err != nil {
 		t.Fatalf("ResolveCollapseBase: %v", err)
 	}
@@ -286,7 +166,7 @@ func TestResolveCollapseBaseStackedCard(t *testing.T) {
 	mustGit(t, aPath, "add", ".")
 	mustGit(t, aPath, "commit", "-q", "-m", "above work")
 
-	base, err := ResolveCollapseBase(ctx, store, m, above)
+	base, err := ResolveCollapseBase(ctx, m, above)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +206,7 @@ func TestResolveCollapseBaseRebasedOnChosenBase(t *testing.T) {
 	featTip := mustGit(t, root, "rev-parse", "feat")
 	mustGit(t, p, "rebase", "-q", "feat")
 
-	base, err := ResolveCollapseBase(ctx, store, m, f)
+	base, err := ResolveCollapseBase(ctx, m, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +253,7 @@ func TestResolveCollapseBaseOfADriftedCardIsItsRecordedFork(t *testing.T) {
 			mustGit(t, p, "commit", "-q", "-m", "card work")
 			drift(t, root)
 
-			base, err := ResolveCollapseBase(ctx, store, m, f)
+			base, err := ResolveCollapseBase(ctx, m, f)
 			if err != nil || base != fork {
 				t.Fatalf("base = %q, %v; want the recorded fork %s", base, err, fork)
 			}

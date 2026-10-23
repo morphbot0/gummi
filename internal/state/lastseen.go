@@ -38,8 +38,7 @@ import (
 
 // SetLastSeen records that a card's event log has been read through seq
 // (inclusive) on this machine — the mark the card thread lays down when
-// it opens or scrolls to the bottom. Like SetGateApproval it is a
-// side-channel write: it neither touches updated_at nor moves the
+// it opens or scrolls to the bottom. It is a side-channel write: it neither touches updated_at nor moves the
 // stage, and an upsert rather than a read-modify-write, so a concurrent
 // mark can't be lost to a stale read. seq must be non-negative; 0 is the
 // same value an absent row already reads as, so setting it explicitly

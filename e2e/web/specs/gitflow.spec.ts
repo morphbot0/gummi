@@ -17,7 +17,7 @@ test.describe('the working tree tab', () => {
   test.use({
     seed: {
       run: async (ws) => {
-        id = await ws.seedVerified('Add a notes helper');
+        id = await ws.seedReady('Add a notes helper');
         const wt = ws.worktree(id);
         fs.writeFileSync(path.join(wt, 'notes.txt'), 'a\nb\nc\n');
         git(wt, 'add', 'notes.txt');
@@ -65,7 +65,7 @@ test.describe('fetching from a chosen remote', () => {
   test.use({
     seed: {
       run: async (ws) => {
-        id = await ws.seedVerified('Add a fetch helper');
+        id = await ws.seedReady('Add a fetch helper');
         for (const name of ['origin', 'upstream']) {
           const bare = path.join(path.dirname(ws.repo), `${name}-${path.basename(ws.repo)}.git`);
           execFileSync('git', ['clone', '-q', '--bare', ws.repo, bare]);
@@ -102,7 +102,7 @@ test.describe('a remote that closes cards by push', () => {
   test.use({
     seed: {
       run: async (ws) => {
-        id = await ws.seedVerified('Add a wave helper');
+        id = await ws.seedReady('Add a wave helper');
         bare = path.join(path.dirname(ws.repo), `internal-${path.basename(ws.repo)}.git`);
         execFileSync('git', ['clone', '-q', '--bare', ws.repo, bare]);
         git(bare, 'config', 'maintenance.auto', 'false');

@@ -37,7 +37,7 @@ async function stage(api: (m: string, p: string) => Promise<{ json: any }>, id: 
 
 test.describe('landing', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a tidy helper'); } } });
+  test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a tidy helper'); } } });
 
   test('takes the worktree and branch by default', async ({ pairedPage: page, server, workspace, api }, info) => {
     const branch = (await api('GET', `/api/cards/${id}`)).json.branch as string;
@@ -73,7 +73,7 @@ test.describe('landing', () => {
 
 test.describe('hand-off', () => {
   let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a parting helper'); } } });
+  test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a parting helper'); } } });
 
   test('of a branch only this machine has keeps it, and does not offer the choice', async ({ pairedPage: page, server, workspace, api }, info) => {
     const branch = (await api('GET', `/api/cards/${id}`)).json.branch as string;
@@ -104,44 +104,6 @@ test.describe('hand-off', () => {
   });
 });
 
-test.describe('from the decision', () => {
-  let id: string;
-  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a decided helper'); } } });
-
-  test('a landing keeps the worktree and branch when asked', async ({ pairedPage: page, server, workspace, api }, info) => {
-    const branch = (await api('GET', `/api/cards/${id}`)).json.branch as string;
-    await open(page, server, id, phone(info));
-    await page.getByTestId('decision-option-advance').click();
-    await expect(page.getByTestId('landing-dialog')).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId('landing-message')).not.toHaveValue('');
-    const keep = page.getByTestId('landing-dialog').getByTestId('keep-branch');
-    await expect(keep).not.toBeChecked();
-    await keep.check();
-    await page.getByTestId('landing-confirm').click();
-    await expect.poll(() => stage(api, id), { timeout: 60_000 }).toBe('done');
-    expect(await branchExists(workspace, branch)).toBe(true);
-    expect(fs.existsSync(workspace.worktree(id))).toBe(true);
-  });
-
-  test('a hand-off of a pushed branch offers the choice beside its yes', async ({ pairedPage: page, server, workspace, api }, info) => {
-    const branch = (await api('GET', `/api/cards/${id}`)).json.branch as string;
-    await workspace.addGitHubRemote();
-    await workspace.git('push', '-q', 'origin', branch);
-    await open(page, server, id, phone(info));
-    await page.getByTestId('decision-option-handoff').click();
-    const confirm = page.getByTestId('decision-confirm');
-    await expect(confirm).toBeVisible();
-    const keep = confirm.getByTestId('keep-branch');
-    await expect(keep).not.toBeChecked();
-    await keep.check();
-    await shot(page, info, 'closeout-handoff-decision');
-    await page.getByTestId('decision-confirm-yes').click();
-    await expect.poll(() => stage(api, id)).toBe('done');
-    expect(await branchExists(workspace, branch)).toBe(true);
-    expect(fs.existsSync(workspace.worktree(id))).toBe(true);
-  });
-});
-
 test.describe('clean up all', () => {
   const ids: string[] = [];
   test.use({
@@ -153,9 +115,9 @@ test.describe('clean up all', () => {
         await fs.promises.appendFile(path.join(ws.repo, '.gummi', 'config.yaml'), 'repos:\n  a: git/a\n  b: git/b\n');
         for (const name of ['a', 'b']) execFileSync('git', ['clone', '-q', ws.repo, path.join(ws.repo, 'git', name)], { stdio: 'ignore' });
         for (const name of ['a', 'b']) {
-          const r = await ws.drive(['run', '--gate-approval', 'autopilot', '--repo', name, `Add a keeper helper in ${name}`]);
-          ids.push(r.id);
-          await ws.gummiOK(['merge', r.id, '-m', `feat: add a keeper helper in ${name}`, '--keep-branch']);
+          const id = await ws.seedReady(`Add a keeper helper in ${name}`, { repo: name });
+          ids.push(id);
+          await ws.gummiOK(['merge', id, '-m', `feat: add a keeper helper in ${name}`, '--keep-branch']);
         }
       },
     },

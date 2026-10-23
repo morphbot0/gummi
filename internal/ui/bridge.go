@@ -265,7 +265,6 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 	if m.changeHook == nil {
 		return
 	}
-	m.syncWebIngest(msg)
 	// whatever the message was, a card whose busy word, session state or
 	// chip moved is reported (freshness.go): the whitelist below covers
 	// what a message says, this covers what it did
@@ -275,8 +274,6 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 		m.emitRowChanges(msg)
 	case openDecisionsMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-	case sentBackMsg:
-		m.emitChanges(msg.notice)
 	case landConflictMsg:
 		m.emitChanges(msg.notice)
 	case noticeMsg:
@@ -294,22 +291,8 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 		}
 	case engineClosedMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-	case pausedMsg:
-		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(msg.id)})
-		m.emitChanges(msg.inner)
-	case autopilotSettledMsg:
-		m.emitChanges(msg.inner)
 	case todaySpentMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-	case verifyResultMsg:
-		// a menu verify's result lives in the status bar and the Shell's
-		// own check table, neither of which a page reads: say it, and
-		// have the card (and its spec's checks) read again
-		if m.notice.text != "" {
-			m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(msg.feature), Text: m.notice.webText(), Err: m.notice.isErr})
-		}
-		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(msg.feature)})
 	case blockersMsg:
 		// the decision's answers read the counts (a send-back carrying
 		// the diff comments), and so does the board's needs line
@@ -325,6 +308,7 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 // decision and the board row too.
 func (m *Shell) emitEngineChange(ev engine.Event) {
 	id := string(ev.Feature)
+	m.emitStepChange(ev)
 	switch ev.Kind {
 	case engine.EventUpdated:
 		if id == "" {
@@ -361,6 +345,27 @@ func (m *Shell) emitEngineChange(ev engine.Event) {
 	}
 }
 
+// emitStepChange carries a workflow step's activity to its session's
+// page: the run's block there draws each step's last action, spend and
+// question (DESIGN §25.9). A streaming delta that moves none of those
+// moves nothing there.
+func (m *Shell) emitStepChange(ev engine.Event) {
+	f, ok := m.children[ev.Feature]
+	if !ok || m.engine == nil {
+		return
+	}
+	now, _ := m.engine.StepNow(ev.Feature)
+	key := fmt.Sprintf("%t|%s|%.1f|%t", now.Busy, now.Action, now.Spent, now.Ask != nil)
+	if ev.Kind == engine.EventUpdated && m.webStep[ev.Feature] == key {
+		return
+	}
+	if m.webStep == nil {
+		m.webStep = map[domain.FeatureID]string{}
+	}
+	m.webStep[ev.Feature] = key
+	m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(f.Child.Of)})
+}
+
 // setWebState records what the web last saw of card id: busy and watching.
 func (m *Shell) setWebState(id domain.FeatureID, busy, watching bool) {
 	if m.webBusy == nil {
@@ -383,16 +388,12 @@ func (m *Shell) webCardWatching(id domain.FeatureID) bool {
 	return ff != nil && ff.Watching()
 }
 
-// webCardBusy is whether card id has an agent mid-turn: its freeform
-// session, or its stage session.
+// webCardBusy is whether card id has an agent mid-turn in its session.
 func (m *Shell) webCardBusy(id domain.FeatureID) bool {
 	if m.engine != nil {
 		if ff := m.engine.Freeform(id); ff != nil {
 			return ff.Busy()
 		}
-	}
-	if sess := m.sessionFor(id); sess != nil {
-		return sess.Busy()
 	}
 	return false
 }

@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 	"testing"
 
@@ -53,20 +52,20 @@ func (s *delayedIDSession) SessionID() string {
 	return s.id
 }
 
+// A process-backed adapter learns its durable conversation id from the
+// first backend event, after NewSession returned: the session takes it
+// from there, so a restart can resume that conversation.
 func TestSessionIDLearnedFromEventsIsPersisted(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	f := feature(1, "dynamic-id", domain.StageImplement)
+	f := freeformCard(1, "dynamic-id")
 	createFeature(t, store, f)
-	withWorktree(t, wt, f)
 	ag := delayedIDAgent{Agent: &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}}}
 	e := persistEngine(t, ag, ws, store, wt)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
-	if got := e.Get(f.ID).Snapshot().AgentSessionID; got != "learned-after-send" {
+	attach(t, e, f)
+	waitTurn(t, e)
+	if got := liveSession(e, f.ID).Snapshot().AgentSessionID; got != "learned-after-send" {
 		t.Fatalf("dynamic session id = %q", got)
 	}
 }
@@ -84,18 +83,17 @@ func TestSessionPersistAndRestore(t *testing.T) {
 	ctx := context.Background()
 
 	// an interactive feature with a persisted conversation
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	createFeature(t, store, f)
 
 	e1 := persistEngine(t, agent.NewFake("Two approaches, per-device vs synced."), ws, store, wt)
-	if _, err := e1.Attach(ctx, f); err != nil {
+	attach(t, e1, f)
+	waitTurn(t, e1) // kickoff turn completes
+	if err := e1.Freeform(f.ID).Send(ctx, "how should it persist?"); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, e1, EventIdle) // kickoff turn completes
-	if err := e1.Send(ctx, f.ID, "how should it persist?"); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e1, EventIdle)
+	waitTurn(t, e1)
+	before := liveSession(e1, f.ID).Snapshot().Transcript
 	e1.Close()
 
 	// a fresh engine restores the session from the store
@@ -103,22 +101,29 @@ func TestSessionPersistAndRestore(t *testing.T) {
 	if err := e2.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
-	s := e2.Get(f.ID)
+	s := liveSession(e2, f.ID)
 	if s == nil {
 		t.Fatal("session not restored")
 	}
-	// kickoff (system) + reply, then the user turn + reply
+	// the opening turn + reply, then the user turn + reply
 	snap := s.Snapshot()
 	if len(snap.Transcript) != 4 {
 		t.Fatalf("restored transcript = %+v", snap.Transcript)
 	}
-	if snap.Transcript[0].Author != AuthorSystem ||
+	if snap.Transcript[0].Author != AuthorUser ||
 		snap.Transcript[2].Content != "how should it persist?" ||
 		snap.Transcript[3].Content != "Two approaches, per-device vs synced." {
 		t.Errorf("restored transcript wrong: %+v", snap.Transcript)
 	}
 	if snap.Spend.Credits != 2 {
 		t.Errorf("restored spend = %+v", snap.Spend)
+	}
+	// each turn keeps when it was written: a restored thread places its
+	// workflow runs among the turns by it
+	for i, m := range snap.Transcript {
+		if m.At.IsZero() || !m.At.Equal(before[i].At) {
+			t.Errorf("turn %d restored at %v, written at %v", i, m.At, before[i].At)
+		}
 	}
 	if s.State() != StateInteractive {
 		t.Errorf("restored interactive session state = %s", s.State())
@@ -151,7 +156,7 @@ func TestToolResultsAndSessionIDSurviveRestart(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()
 
-	f := feature(1, "impl", domain.StageImplement)
+	f := freeformCard(1, "impl")
 	createFeature(t, store, f)
 	withWorktree(t, wt, f)
 
@@ -169,13 +174,11 @@ func TestToolResultsAndSessionIDSurviveRestart(t *testing.T) {
 		},
 	}}
 	e1 := persistEngine(t, ag, ws, store, wt)
-	if err := e1.Run(f); err != nil {
-		t.Fatal(err)
-	}
+	attach(t, e1, f)
 	// EventIdle is sent after the turn's persist, so the snapshot below
 	// is durably written before the restart (waitState would race it).
-	waitFor(t, e1, EventIdle)
-	if got := e1.Get(f.ID).Snapshot().AgentSessionID; got != "cli-session-42" {
+	waitTurn(t, e1)
+	if got := liveSession(e1, f.ID).Snapshot().AgentSessionID; got != "cli-session-42" {
 		t.Errorf("live AgentSessionID = %q", got)
 	}
 	e1.Close()
@@ -184,7 +187,7 @@ func TestToolResultsAndSessionIDSurviveRestart(t *testing.T) {
 	if err := e2.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
-	s := e2.Get(f.ID)
+	s := liveSession(e2, f.ID)
 	if s == nil {
 		t.Fatal("session not restored")
 	}
@@ -207,119 +210,14 @@ func TestToolResultsAndSessionIDSurviveRestart(t *testing.T) {
 	}
 }
 
-func TestRestoreInterruptedAutonomousComesBackPaused(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	ctx := context.Background()
-
-	f := feature(1, "impl", domain.StageImplement)
-	createFeature(t, store, f)
-	withWorktree(t, wt, f)
-
-	// a blocking responder keeps the session Running when we Close
-	release := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	e1 := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
-	if err := e1.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e1, f.ID, StateRunning)
-	// persisted as running; simulate a crash/restart
-	close(release)
-	e1.Close()
-
-	e2 := persistEngine(t, agent.NewFake("x"), ws, store, wt)
-	if err := e2.Restore(ctx); err != nil {
-		t.Fatal(err)
-	}
-	s := e2.Get(f.ID)
-	if s == nil {
-		t.Fatal("autonomous session not restored")
-	}
-	if s.State() != StatePaused {
-		t.Errorf("interrupted running session restored as %s, want paused", s.State())
-	}
-}
-
-// Restore in the SAME process must not rehydrate over a session that is
-// still in flight: the live one is newer than its persisted row, and
-// handing the driver a paused snapshot reads as "died mid-turn" and
-// re-dispatches the stage. Without a slot cap nothing else stops that
-// double-spawn.
-func TestRestoreKeepsLiveInFlightSession(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	ctx := context.Background()
-
-	f := feature(1, "impl", domain.StageImplement)
-	createFeature(t, store, f)
-	withWorktree(t, wt, f)
-
-	release := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	e := persistEngine(t, ag, ws, store, wt)
-	t.Cleanup(func() { close(release) })
-
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, f.ID, StateRunning)
-	live := e.Get(f.ID)
-
-	if err := e.Restore(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if got := e.Get(f.ID); got != live {
-		t.Error("Restore replaced a session still running in this process")
-	}
-	// a re-dispatch would swap in a fresh Session; the identity check
-	// above is the double-spawn assertion, this is its state.
-	if st := e.Get(f.ID).State(); st != StateRunning {
-		t.Errorf("live session came back %s, want running", st)
-	}
-}
-
-func TestRestoreSkipsStaleStage(t *testing.T) {
-	ws, store, wt := newRepo(t)
-	ctx := context.Background()
-
-	f := feature(1, "x", domain.StagePlan)
-	createFeature(t, store, f)
-	e1 := persistEngine(t, agent.NewFake("hi"), ws, store, wt)
-	if _, err := e1.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e1, EventStarted)
-	e1.Close()
-
-	// the feature advanced past brainstorm since the session was saved
-	if _, err := store.Transition(ctx, f.ID, domain.StageImplement, "user"); err != nil {
-		t.Fatal(err)
-	}
-
-	e2 := persistEngine(t, agent.NewFake("x"), ws, store, wt)
-	if err := e2.Restore(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if e2.Get(f.ID) != nil {
-		t.Error("restored a session whose stage no longer matches the feature")
-	}
-}
-
 func TestDropDeletesPersistedSession(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()
-	f := feature(1, "x", domain.StagePlan)
+	f := freeformCard(1, "x")
 	createFeature(t, store, f)
 
 	e := persistEngine(t, agent.NewFake("hi"), ws, store, wt)
-	if _, err := e.Attach(ctx, f); err != nil {
-		t.Fatal(err)
-	}
+	attach(t, e, f)
 	waitFor(t, e, EventStarted)
 	e.Drop(f.ID)
 
@@ -329,21 +227,5 @@ func TestDropDeletesPersistedSession(t *testing.T) {
 	}
 	if len(snaps) != 0 {
 		t.Errorf("Drop left a persisted session: %+v", snaps)
-	}
-}
-
-// TestToolEventsKeepTheSubagentParent: a subagent's call is mirrored with
-// the spawn that made it, and the thread fold hands that on, so a face
-// can tell it from the agent's own.
-func TestToolEventsKeepTheSubagentParent(t *testing.T) {
-	snap := Snapshot{Feature: domain.Feature{ID: "FF-001", Stage: domain.StageOpen}}
-	m := Message{Author: AuthorTool, Content: "Bash  ls /", Tool: "Bash", Detail: "ls /", CallID: "toolu_B", Parent: "toolu_A"}
-	evs := toolEvents(snap, m, "p", 0)
-	var p state.ToolPayload
-	if err := json.Unmarshal([]byte(evs[0].Payload), &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.Parent != "toolu_A" {
-		t.Errorf("mirrored parent = %q, want toolu_A", p.Parent)
 	}
 }

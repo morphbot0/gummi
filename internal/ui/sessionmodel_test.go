@@ -73,9 +73,8 @@ func TestAFreeformCardOffersTheModelSwitch(t *testing.T) {
 		t.Errorf("a card in the workflow offered the model switch")
 	}
 
-	// and the profile row is withheld from a session at the Shell layer
-	// too — the model row replaces it (DESIGN §19.8) — while a card in
-	// the workflow keeps it: the two faces' inventories agree either way
+	// and no profile row at the Shell layer either — the model row
+	// replaces it (DESIGN §19.8)
 	l := m.cardActions()
 	if containsAction(l.actions, "profile") {
 		t.Errorf("a session's inventory still offers the profile switch: %+v", l.actions)
@@ -91,9 +90,6 @@ func TestAFreeformCardOffersTheModelSwitch(t *testing.T) {
 	}
 	m.rows = append(m.rows, work)
 	m.sel = len(m.rows) - 1
-	if !containsAction(m.cardActions().actions, "profile") {
-		t.Errorf("a card in the workflow lost its profile row: %+v", m.cardActions().actions)
-	}
 	if containsAction(m.cardActions().actions, "model") {
 		t.Errorf("a card in the workflow grew a model row")
 	}

@@ -85,17 +85,7 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid var(
 .app:focus{outline:none}
 
 /* ---------- shell ---------- */
-.app{height:var(--app-h,100%);transform:translateY(var(--app-top,0px));display:grid;grid-template-rows:44px auto minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
-/* the quit-resume question, above the board while it is open */
-.resume-banner{border-bottom:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--panel));padding:8px 16px;display:flex;flex-direction:column;gap:8px}
-.rb-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.rb-dot{width:8px;height:8px;border-radius:50%;background:var(--warn);flex-shrink:0}
-.rb-text{flex:1;min-width:220px;font-size:13px;color:var(--fg2)}
-.rb-text .link{font-size:12.5px}
-.rb-actions{display:flex;gap:6px;flex-wrap:wrap}
-.rb-pick{display:flex;flex-direction:column;gap:6px;max-width:560px}
-.rb-pick .cpick{background:var(--panel);border:1px solid var(--line)}
-.rb-pick-go{display:flex;justify-content:flex-end}
+.app{height:var(--app-h,100%);transform:translateY(var(--app-top,0px));display:grid;grid-template-rows:44px minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
 /* notifications on this device */
 .push-box{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 .push-state{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--fg3)}
@@ -374,9 +364,6 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .receipt .when{margin-left:auto;font-family:var(--mono);font-size:11px;white-space:nowrap}
 .note-ev{font-size:12.5px;color:var(--fg3);font-style:italic;display:flex;gap:10px}
 .note-ev .when{margin-left:auto;font-family:var(--mono);font-size:11px;font-style:normal;white-space:nowrap}
-.stretch{display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--accent)}
-.stretch::before,.stretch::after{content:"";flex:1;height:0;border-top:1px dashed color-mix(in srgb,var(--accent) 40%,var(--line))}
-.stretch b{font-weight:600}
 .ev-dec{border:1px solid color-mix(in srgb,var(--dc,var(--accent)) 35%,var(--line));border-radius:10px;padding:8px 12px;font-size:13px;display:flex;flex-direction:column;gap:2px}
 .ev-dec .k{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:color-mix(in srgb,var(--dc,var(--accent)) var(--t-keep),#000)}
 .ev-dec .a{color:var(--fg3);font-size:12.5px}
@@ -929,14 +916,6 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .aq{margin:0;color:var(--fg);font-size:14px;overflow-wrap:anywhere;white-space:pre-line}
 .aq .sub{display:block;margin-top:4px;color:var(--fg3);font-size:12.5px}
 .aform textarea{font-family:var(--mono);font-size:13px;line-height:1.5}
-.cpicks{display:flex;flex-direction:column;max-height:220px;overflow:auto;border:1px solid var(--line2);border-radius:8px;background:var(--bg);padding:4px}
-.cpick{display:grid;grid-template-columns:auto 64px minmax(0,1fr) auto;gap:8px;align-items:center;padding:5px 8px;border-radius:6px;font-size:13px;color:var(--fg);cursor:pointer}
-.cpick:hover{background:var(--sunk)}
-.cpick .id{font-family:var(--mono);font-size:12px;color:var(--fg3)}
-.cpick .t{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.cpick .s{font-size:11.5px;color:var(--fg3)}
-.cpick input{accent-color:var(--accent);margin:0}
-.cfilter{border:1px solid var(--line2);border-radius:8px;padding:6px 10px;background:var(--bg);outline:0;font-size:13px;color:var(--fg)}
 .menu{position:fixed;z-index:55;min-width:220px;max-width:calc(100vw - 16px);overflow-y:auto;overscroll-behavior:contain;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--shadow);padding:4px;display:flex;flex-direction:column}
 .menu button{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;font-size:13px;text-align:left;color:var(--fg2);white-space:nowrap}
 .menu button:hover,.menu button:focus-visible{background:var(--sunk);color:var(--fg)}
@@ -1005,10 +984,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   #p-conn .ct{display:none}
 }
 @media (max-width:760px){
-  .app{grid-template-rows:44px auto auto minmax(0,1fr) auto;padding-bottom:env(safe-area-inset-bottom,0px)}
-  .resume-banner{padding:8px 12px}
-  .rb-actions{width:100%}
-  .rb-actions .btn{flex:1;justify-content:center}
+  .app{grid-template-rows:44px auto minmax(0,1fr) auto;padding-bottom:env(safe-area-inset-bottom,0px)}
   .app,.app.rail-compact{--rail-w:100%}
   .main{grid-template-columns:minmax(0,1fr)}
   .rail,.center,.right,.resizer{display:none}
@@ -1116,9 +1092,9 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
    the conversation and the line being written steps aside or shrinks */
 @media (max-width:760px){
   /* each piece keeps its own row, so one stepping aside moves nothing else */
-  .app > .top{grid-row:1} .app > .resume{grid-row:2}
-  .app > .mcard{grid-row:3} .app > .main{grid-row:4} .app > .mdec{grid-row:5}
-  html.kb .app{grid-template-rows:0 auto auto minmax(0,1fr) 0;padding-bottom:0}
+  .app > .top{grid-row:1}
+  .app > .mcard{grid-row:2} .app > .main{grid-row:3} .app > .mdec{grid-row:4}
+  html.kb .app{grid-template-rows:0 auto minmax(0,1fr) 0;padding-bottom:0}
   html.kb .top,html.kb .mdec,html.kb .mcard .tabs{display:none}
   /* a phone has no room beside its thread: a notice stands just above
      what is docked at the bottom (toast.js sets --toast-bottom) */
@@ -1153,6 +1129,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 @media (prefers-reduced-motion:reduce){
   .shimmer{animation:none;color:var(--fg2);background:none}
   .spinner{animation:none}
+  .rb-row.s-running .dot{animation:none}
   .dots i{animation:none;opacity:.6}
   .ev-stage .fold,.tools summary::before,.mdec .sum .chev,.doc h2 .sc,.memdoc > summary .chev{transition:none}
 }
@@ -1163,7 +1140,6 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .msg.gummi .body.prompt > summary::-webkit-details-marker{display:none}
 .msg.gummi .body.prompt[open] > summary{display:none}
 .tools pre.tool-out{margin:4px 0 2px;padding:6px 8px;background:var(--sunk);border-radius:6px;color:var(--err);white-space:pre-wrap;font-size:11.5px}
-.stretch.close{color:var(--fg3)}
 .note.prompt{border-left-color:var(--line2);background:var(--sunk);color:var(--fg3)}
 .note.prompt b{color:var(--fg3)}
 .ln.since .m{box-shadow:inset 2px 0 0 var(--accent)}
@@ -1311,3 +1287,225 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .pb-facts dt{color:var(--fg3)} .pb-facts dd{margin:0;overflow-wrap:anywhere}
 .pb-cmds{margin:10px 0 0;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;overflow-wrap:anywhere}
 .btn.ghost{border-color:transparent;background:none;color:var(--fg3)} .btn.ghost:hover{border-color:var(--line2);color:var(--fg)} .btn.ghost.danger{color:var(--err)}
+
+/* a workflow run's turn in the thread (its report): gummi's, not the person's */
+.msg.runturn{display:flex;flex-direction:column;gap:3px}
+.msg.runturn .bubble{background:color-mix(in srgb,var(--ok) 6%,var(--panel));border:1px solid color-mix(in srgb,var(--ok) 30%,var(--line));border-radius:12px;padding:10px 14px}
+.msg.runturn .bubble .body{margin:0}
+.msg.runturn .bubble .body.clamped{max-height:18em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent)}
+.msg.runturn .bubble .more{display:block;margin-top:4px;font-size:12px;color:var(--accent)}
+.msg.runturn .who{font-size:11.5px}
+/* a session's spec: its bar, its editor and its revisions (spec.js) */
+.spec-sbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 0 10px;font-size:12.5px;color:var(--fg3)}
+.spec-sbar .sp{flex:1 1 0}
+.spec-editing{display:flex;flex-direction:column;padding-top:8px}
+.spec-ta{width:100%;min-height:60vh;box-sizing:border-box;font:12.5px/1.55 var(--mono);padding:10px 12px;border:1px solid var(--line2);border-radius:8px;background:var(--sunk);color:var(--fg);resize:vertical}
+.spec-revs{margin-top:18px}
+.spec-revrow{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;color:var(--fg2)}
+.spec-frozen{color:var(--accent);font-size:11.5px}
+.spec-runs{display:flex;flex-direction:column;gap:2px;margin:8px 0 4px}
+.spec-runs > .k{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--fg4)}
+.spec-run{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:none;color:var(--fg2);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;min-height:32px}
+.spec-run:hover{background:color-mix(in srgb,var(--fg) 4%,transparent)}
+.spec-run .st{color:var(--fg3)}
+
+/* a workflow run's block in the thread (DESIGN §25.9, workflow.js) */
+.rb{border:1px solid var(--line2);border-radius:12px;background:var(--panel);overflow:hidden;font-size:13px}
+.rb.rb-on{border-color:color-mix(in srgb,var(--q-run) 55%,var(--line))}
+.rb-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.rb.rb-on .rb-head{background:color-mix(in srgb,var(--q-run) 6%,var(--panel))}
+.rb-proposed .rb-head,.rb-denied .rb-head{border-bottom:0}
+.rb .k{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--fg4)}
+.rb-head b{font-size:13.5px;white-space:nowrap}
+.rb-spec{color:var(--fg2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:36ch}
+.rb-r{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg3);flex-wrap:wrap}
+.rb-r .mono{color:var(--fg2);font-size:12px}
+.rb-r .btn{height:24px;padding:0 9px;font-size:12px}
+.rb-state{font-size:11.5px;color:var(--fg3)}
+.rb-state.s-running{color:var(--q-run)} .rb-state.s-paused,.rb-state.s-proposed,.rb-state.s-asking{color:var(--warn)}
+.rb-state.s-partial,.rb-state.s-stopped,.rb-state.s-failed{color:var(--err)} .rb-state.s-done{color:var(--ok)}
+.rb-why{flex-basis:100%;font-size:12px;color:var(--fg3)}
+.rb-strip{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 12px;font-size:12px;color:var(--fg3);border-bottom:1px solid var(--line)}
+.rb-strip i{font-style:normal;color:var(--fg4)}
+.rb-chip{display:inline-flex;align-items:center;padding:1px 9px;border-radius:999px;border:1px solid var(--line);background:var(--sunk);font-family:var(--mono);font-size:11.5px;white-space:nowrap}
+.rb-chip.s-done{color:var(--ok);border-color:color-mix(in srgb,var(--s-verify) 40%,var(--line));background:color-mix(in srgb,var(--s-verify) 7%,var(--panel))}
+.rb-chip.s-running{color:var(--q-run);border-color:var(--q-run);background:color-mix(in srgb,var(--q-run) 8%,var(--panel));font-weight:600}
+.rb-chip.s-asking{color:var(--warn);border-color:var(--q-needs);background:color-mix(in srgb,var(--q-needs) 8%,var(--panel));font-weight:600}
+.rb-chip.s-failed{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,var(--line))}
+.rb-rows{display:flex;flex-direction:column}
+.rb-row{display:grid;grid-template-columns:10px 34px 92px minmax(0,1fr) 58px 44px;gap:8px;align-items:center;padding:6px 12px;border-top:1px solid var(--line)}
+.rb-rows > .rb-row:first-child{border-top:0}
+.rb-row .dot{width:9px;height:9px;border-radius:50%;background:var(--line2)}
+.rb-row.s-done .dot{background:var(--s-verify)}
+.rb-row.s-running .dot{background:var(--q-run);box-shadow:0 0 0 3px color-mix(in srgb,var(--q-run) 20%,transparent);animation:rb-live 1.6s ease-in-out infinite}
+/* a step at work stands out of the block: lit, barred, its dot breathing */
+.rb-row.s-running{background:color-mix(in srgb,var(--q-run) 7%,var(--panel));box-shadow:inset 3px 0 0 var(--q-run)}
+.rb-row.s-running .ti .n{color:var(--q-run);font-weight:600}
+.rb-row.s-running .ti small{color:var(--fg2)}
+@keyframes rb-live{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--q-run) 6%,transparent)}}
+.rb-row.s-failed .dot{background:var(--q-fail)} .rb-row.s-stopped .dot{background:var(--fg4)}
+.rb-row.asking,.rb-row.waiting{background:color-mix(in srgb,var(--q-needs) 6%,var(--panel))}
+.rb-row.asking .dot,.rb-row.waiting .dot{background:var(--q-needs);box-shadow:0 0 0 3px color-mix(in srgb,var(--q-needs) 22%,transparent)}
+.rb-row.sel{box-shadow:inset 3px 0 0 var(--accent);background:var(--accent-soft)}
+.rb-row .at{color:var(--fg4);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-row .ti{min-width:0;display:flex;flex-direction:column}
+.rb-row .ti .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-row .ti small{font-family:var(--mono);font-size:11.5px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-row .ti small.flag{color:var(--warn)}
+.rb-row.folded .ti .n{font-size:12.5px;color:var(--fg2)}
+.rb-row .cost{font-size:12px;color:var(--fg3);text-align:right}
+.rb-open{justify-self:end;font-size:12px;font-weight:600;border-bottom:0}
+.wrole{display:inline-block;max-width:100%;padding:0 7px;border-radius:999px;font-size:11.5px;font-weight:600;line-height:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg3);background:var(--sunk)}
+.wrole:empty{background:none}
+.wrole.r-contractor,.wrole.r-planner{color:var(--accent);background:var(--accent-soft)}
+.wrole.r-implementer{color:color-mix(in srgb,var(--s-impl) var(--t-keep),#000);background:color-mix(in srgb,var(--s-impl) 14%,transparent)}
+.wrole.r-reviewer,.wrole.r-scout{color:color-mix(in srgb,var(--s-plan) var(--t-keep),#000);background:color-mix(in srgb,var(--s-plan) 11%,transparent)}
+.wrole.r-tester,.wrole.r-scribe{color:color-mix(in srgb,var(--s-verify) var(--t-keep),#000);background:color-mix(in srgb,var(--s-verify) 12%,transparent)}
+.rb-ask{margin:2px 12px 10px;border:1px solid color-mix(in srgb,var(--q-needs) 45%,var(--line));border-radius:10px;padding:9px 12px;background:color-mix(in srgb,var(--q-needs) 6%,var(--panel));display:flex;flex-direction:column;gap:7px}
+.rb-q{white-space:pre-line;overflow-wrap:anywhere}
+.rb-opts{display:flex;flex-direction:column;gap:5px}
+.rb-opts .btn{justify-content:flex-start;height:auto;min-height:28px;padding:4px 12px;white-space:normal;text-align:left}
+.rb-replyrow{display:flex;gap:6px}
+.rb-reply{flex:1;min-width:0;height:28px;padding:0 10px;border:1px solid var(--line2);border-radius:7px;background:var(--panel)}
+.rb-pending{padding:7px 12px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--fg2);background:color-mix(in srgb,var(--q-needs) 6%,var(--panel))}
+.rb-pending .hint{color:var(--fg3)}
+.rb-results{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 12px;font-size:12.5px;color:var(--fg2);border-bottom:1px solid var(--line)}
+.rb-res.v-met > span:first-child{color:var(--ok);font-weight:700}
+.rb-res.v-unmet > span:first-child{color:var(--err);font-weight:700}
+.rb-res.v-unjudged > span:first-child{color:var(--fg4)}
+.rb-base{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:6px 12px;font-size:12px;border-bottom:1px solid var(--line)}
+.wfp .rb-base{padding:0;border:0}
+.rb-fold > summary{padding:7px 12px;font-size:12px;color:var(--fg3);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-fold[open] > summary{border-bottom:1px solid var(--line)}
+.rb-commits{display:flex;flex-direction:column;gap:2px;padding:7px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--fg2)}
+.rb-commits .mono::before{content:"● ";color:var(--s-verify)}
+.rb-foot{display:flex;align-items:center;gap:10px;padding:7px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--fg3)}
+.rb-foot b{color:var(--fg2)}
+.rb-foot .sp{flex:1}
+.rb-foot .link{white-space:nowrap}
+.rb-foot .btn{height:24px;padding:0 9px;font-size:12px}
+.rb-paths{max-height:40vh;overflow:auto;margin:6px 0;padding-left:18px;font-size:12px}
+/* a run's block among the session's turns */
+#thread-live > .rb,#thread-items .rb{margin:6px 0 10px}
+/* an ended run folded to one line: a click unfolds it, ▾ folds it back */
+.rb.rb-folded{border-color:var(--line);background:transparent}
+.rb-line{display:flex;align-items:center;gap:8px;width:100%;padding:6px 12px;border:0;background:none;color:var(--fg2);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;min-height:32px}
+.rb-line:hover{background:color-mix(in srgb,var(--fg) 4%,transparent)}
+.rb-line:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rb-ltext{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-mark.s-done{color:var(--ok)} .rb-mark.s-partial{color:var(--warn)} .rb-mark.s-stopped{color:var(--fg3)}
+.rb-fold-mark{color:var(--fg3)}
+.rb-foldbtn{font-size:13px;color:var(--fg3);padding:0 4px}
+
+/* a workflow step opened beside the thread (DESIGN §25.10) */
+.stp{display:flex;flex-direction:column;gap:10px;min-height:100%}
+.stp-head{display:flex;flex-direction:column;gap:5px}
+.stp-crumb{font-size:12px;color:var(--fg3);display:flex;flex-wrap:wrap;gap:2px;align-items:baseline}
+.stp-crumb b{color:var(--fg2)}
+.stp-title{display:flex;align-items:center;gap:8px;font-size:15px}
+.stp-meta{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:12px;color:var(--fg3)}
+.stp-meta .mono{color:var(--fg2)}
+.stp-live{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--q-run);text-transform:uppercase;letter-spacing:.05em}
+.stp-live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--q-run)}
+.stp-tabs{margin-left:0;align-self:flex-start}
+.stp-transcript{display:flex;flex-direction:column;gap:14px;flex:1}
+.stp-diff .file{margin-bottom:10px}
+.stp-brief{display:flex;flex-direction:column;gap:10px}
+.stp-arts{display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+.stp-art{display:flex;gap:8px;align-items:baseline;min-width:0}
+.stp-art .mono{color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stp-art .hint{color:var(--fg4);font-size:11.5px}
+.stp-prompt,.stp-out pre{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow:auto}
+.stp-out{display:flex;flex-direction:column;gap:4px}
+.stp-comp{position:sticky;bottom:0;display:flex;gap:8px;align-items:flex-end;padding:8px 0 4px;background:var(--panel)}
+.stp-comp .to{font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--fg3);white-space:nowrap;align-self:center}
+.stp-input{flex:1;min-width:0;resize:vertical;border:1px solid var(--line2);border-radius:8px;padding:6px 10px;background:var(--panel);font-size:13px}
+
+/* a run's proposal, on its decision (DESIGN §25.5) */
+.decision > .q.wfpq{white-space:normal;font-size:13px;font-weight:400;flex:0 1 auto;min-height:min(240px,34vh)}
+/* a proposal is read before it is answered: its decision takes more of the column */
+.decision:has(> .q.wfpq){max-height:max(320px,64vh)}
+.wfp{display:flex;flex-direction:column;gap:8px}
+.wfp-head{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.wfp-head b{font-size:14px;font-weight:600}
+.wfp .hint{font-size:12px;color:var(--fg3)}
+.wfp .k{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--fg4)}
+.wfp-steps{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.wfp-step{display:grid;grid-template-columns:minmax(80px,auto) 100px minmax(0,1fr);gap:8px;align-items:center;padding:4px 10px;border-top:1px solid var(--line);font-size:12.5px}
+.wfp-step:first-child{border-top:0}
+.wfp-step .id{padding-left:calc(var(--depth,0) * 12px);color:var(--fg2);white-space:nowrap}
+.wfp-step .ti{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg2)}
+.wfp-step.k-repeat,.wfp-step.k-parallel{background:var(--sunk)}
+.wfp-checks{display:flex;flex-direction:column;gap:2px;font-size:12px}
+.wfp-ticks{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px}
+.wfp-fbrow{display:flex;gap:6px;padding:4px 14px 10px}
+.wfp-fb{flex:1;min-width:0;resize:vertical;min-height:30px;border:1px solid var(--line2);border-radius:8px;padding:5px 10px;background:var(--panel);font-size:13px}
+
+/* a session's specs (DESIGN §25.3, spec.js) */
+.specs{display:flex;flex-direction:column;gap:12px}
+.specs-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+.specs-it{display:flex;flex-direction:column;gap:3px;align-items:flex-start;padding:8px 12px;border-top:1px solid var(--line);text-align:left}
+.specs-it:first-child{border-top:0}
+.specs-it.sel{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.specs-it b{font-size:13.5px}
+.specs-it .m{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:12px;color:var(--fg3)}
+.specs-add{padding:8px 12px;border-top:1px solid var(--line);text-align:left;font-size:12.5px;color:var(--fg3)}
+.specs-add:hover{color:var(--accent)}
+.specs-new{display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--line)}
+.specs-new input{flex:1;min-width:0;height:28px;padding:0 10px;border:1px solid var(--line2);border-radius:7px;background:var(--panel)}
+.sst{font-size:11px;font-weight:700;padding:0 7px;border-radius:999px;line-height:17px;color:var(--fg3);background:var(--sunk)}
+.sst-met{color:var(--ok);background:color-mix(in srgb,var(--s-verify) 12%,transparent)}
+.sst-running{color:var(--q-run);background:color-mix(in srgb,var(--q-run) 12%,transparent)}
+.sst-partial{color:var(--warn);background:color-mix(in srgb,var(--q-needs) 12%,transparent)}
+@media (max-width:760px){
+  .rb-row{grid-template-columns:10px 40px minmax(0,1fr) 44px;grid-template-areas:"dot at ti open" "dot at role cost"}
+  .rb-row .dot{grid-area:dot} .rb-row .at{grid-area:at} .rb-row .ti{grid-area:ti} .rb-row .wrole{grid-area:role;justify-self:start}
+  .rb-row .cost{grid-area:cost} .rb-row > :last-child{grid-area:open}
+  .rb-spec{max-width:none;flex-basis:100%}
+  .wfp-step{grid-template-columns:minmax(70px,auto) minmax(0,1fr)}
+  .wfp-step .wrole{display:none}
+}
+
+/* the live strip: an open run's line above the composer (workflow.js) */
+#run-live-slot:empty{display:none}
+.rls{position:relative;display:flex;align-items:center;gap:10px;min-width:0;padding:6px 8px 6px 12px;border:1px solid color-mix(in srgb,var(--q-run) 50%,var(--line));border-radius:10px;background:color-mix(in srgb,var(--q-run) 6%,var(--panel));font-size:12.5px;color:var(--fg2)}
+.rls .pd{width:8px;height:8px;border-radius:50%;flex:none;background:var(--q-run);box-shadow:0 0 0 4px color-mix(in srgb,var(--q-run) 22%,transparent)}
+.rls-running .pd{animation:rb-live 1.6s ease-in-out infinite}
+.rls .nm{color:var(--fg);white-space:nowrap}
+.rls .sp{display:flex;gap:4px;align-items:center;white-space:nowrap;color:var(--fg3)}
+.rls .sp i{font-style:normal;color:var(--fg4)}
+.rls .sp .s-running,.rls .sp .s-asking{color:var(--q-run);font-weight:600}
+.rls .sp .s-asking{color:var(--q-needs)}
+.rls .sp .s-done{color:var(--ok)}
+.rls .sp .s-failed{color:var(--q-fail)}
+.rls .now{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);font-size:11.5px;color:var(--fg3)}
+.rls .now b{font-family:var(--ui);font-size:12.5px;color:var(--fg)}
+.rls .m{font-family:var(--mono);font-size:11.5px;color:var(--fg3);white-space:nowrap}
+.rls .bt{height:24px;padding:0 9px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);font-size:12px;display:inline-flex;align-items:center;white-space:nowrap;color:var(--fg2);flex:none}
+.rls .bt.pri{border-color:var(--accent);color:var(--accent);font-weight:600}
+.rls .bt:hover{color:var(--fg)}
+.rls-asking,.rls-deciding{border-color:color-mix(in srgb,var(--q-needs) 55%,var(--line));background:color-mix(in srgb,var(--q-needs) 8%,var(--panel))}
+.rls-asking .pd,.rls-deciding .pd{background:var(--q-needs);box-shadow:0 0 0 4px color-mix(in srgb,var(--q-needs) 22%,transparent)}
+.rls-budget,.rls-paused{border-color:var(--line2);background:var(--sunk)}
+.rls-budget .pd,.rls-paused .pd{background:var(--fg4);box-shadow:none}
+.rls .acts{display:flex;gap:6px;align-items:center;flex:none}
+.rls-pickwrap{position:relative;flex:none}
+.rls-pick{position:absolute;right:0;bottom:calc(100% + 6px);z-index:5;display:flex;flex-direction:column;min-width:200px;padding:4px;border:1px solid var(--line2);border-radius:8px;background:var(--panel);box-shadow:0 6px 18px rgb(0 0 0 / .18)}
+.rls-pick button{display:flex;gap:10px;align-items:baseline;text-align:left;padding:5px 8px;border-radius:6px;font-size:12.5px}
+.rls-pick button:hover{background:var(--line)}
+.rls-pick .mono{color:var(--fg3);font-size:11px}
+/* narrower: the recipe's entries go first, then the money and the time */
+@container (max-width:720px){.rls .sp{display:none}}
+@container (max-width:520px){.rls .m{display:none}.rls{gap:7px;padding:5px 6px 5px 10px}.rls .bt{padding:0 7px}}
+/* the pill at the top of the thread: the open run's block is above */
+.run-above-bar{position:sticky;top:6px;height:0;z-index:3;display:flex;justify-content:center;align-items:flex-start;overflow:visible}
+.run-above{font-size:12px;color:var(--fg2);border:1px dashed var(--line2);border-radius:999px;padding:3px 12px;background:var(--panel);box-shadow:0 2px 8px rgb(0 0 0 / .08);white-space:nowrap}
+.run-above:hover{color:var(--fg);border-style:solid}
+.run-above[hidden]{display:none}
+/* a run's block jumped to flashes once */
+.rb.rb-flash{animation:rb-flash 1.6s ease-out}
+@keyframes rb-flash{0%,30%{box-shadow:0 0 0 3px var(--accent)}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion:reduce){
+  .rls-running .pd{animation:none}
+  .rb.rb-flash{animation:none;box-shadow:0 0 0 3px var(--accent)}
+}

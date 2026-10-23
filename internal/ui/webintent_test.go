@@ -9,118 +9,9 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/reentry"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 )
-
-// The quit-resume question a headless board holds is the board's to
-// show and the page's to answer: "not now" settles it and restarts
-// nothing, and picking cards restarts those the quit stopped — and only
-// those.
-func TestHeadlessBoardHoldsTheResumeQuestion(t *testing.T) {
-	b, _, eng, f, _ := headlessBoard(t, agent.NewFake("ok"))
-	ctx := context.Background()
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	quit := time.Date(2026, 9, 1, 8, 58, 0, 0, time.UTC)
-	offer := func() {
-		t.Helper()
-		pausedByQuit(t, b, eng, f)
-		if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-			m.resumeOffer = &quitResumeOffer{cards: []engine.QuitStoppedCard{{Feature: f, ParkedAt: time.Now()}}, since: "2m ago", at: quit}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	offer()
-	bd := waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume != nil })
-	if len(bd.Resume.Cards) != 1 || bd.Resume.Cards[0].ID != "FD-001" || bd.Resume.Since != "2m ago" || !bd.Resume.At.Equal(quit) {
-		t.Fatalf("resume offer = %+v", bd.Resume)
-	}
-	if err := b.Resume(ctx, webapi.ResumeRequest{None: true}, "Simon"); err != nil {
-		t.Fatal(err)
-	}
-	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume == nil })
-	if err := b.Resume(ctx, webapi.ResumeRequest{None: true}, "Simon"); err == nil {
-		t.Error("answering a question nobody asked went through")
-	}
-
-	offer()
-	if err := b.Resume(ctx, webapi.ResumeRequest{Cards: []string{"FD-009"}}, "Simon"); err == nil {
-		t.Error("resuming a card the quit did not stop went through")
-	}
-	if err := b.Resume(ctx, webapi.ResumeRequest{Cards: []string{"FD-001"}}, "Simon"); err != nil {
-		t.Fatal(err)
-	}
-	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume == nil })
-}
-
-// pausedByQuit leaves f's session as a quit leaves it and a reopen
-// restores it: paused, mid-stage.
-func pausedByQuit(t *testing.T, b *Bridge, eng *engine.Engine, f domain.Feature) {
-	t.Helper()
-	ctx := context.Background()
-	var saveErr error
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		saveErr = m.store.SaveSession(ctx, state.SessionSnapshot{
-			Feature: f.ID, Stage: f.Stage, Role: "architect", State: "paused",
-		})
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if saveErr != nil {
-		t.Fatal(saveErr)
-	}
-	if err := eng.Restore(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if s := eng.Get(f.ID); s == nil || s.State() != engine.StatePaused {
-		t.Fatalf("precondition: %s was not restored paused", f.ID)
-	}
-}
-
-// Starting an offered card from its own page answers the question for
-// that card: the banner must not go on offering to resume a card that is
-// already running.
-func TestStartingAnOfferedCardByHandSettlesTheResumeQuestion(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
-	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	b, _, eng, f, _ := headlessBoard(t, ag)
-	ctx := context.Background()
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	pausedByQuit(t, b, eng, f)
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		m.quitCut = map[domain.FeatureID]bool{f.ID: true}
-		m.resumeOffer = &quitResumeOffer{cards: []engine.QuitStoppedCard{{Feature: f, ParkedAt: time.Now()}}, since: "27m ago"}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume != nil })
-
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { return m.runStage(f) }); err != nil {
-		t.Fatal(err)
-	}
-	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume == nil })
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		if m.quitCut[f.ID] {
-			t.Errorf("%s is running and still marked as cut by the quit", f.ID)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.Resume(ctx, webapi.ResumeRequest{None: true}, "Simon"); err == nil {
-		t.Error("the question was settled, and answering it again went through")
-	}
-}
 
 // Nothing on a headless board can see a dialog, so one no intent is
 // answering is closed rather than left to sit on the stack.
@@ -166,60 +57,6 @@ func TestAnIntentFollowsItsCommandsToTheEnd(t *testing.T) {
 	}
 	if e := out.err(); e == nil || e.Error() != "second went wrong" {
 		t.Errorf("err = %v", e)
-	}
-}
-
-// The re-entry chip — a reading of a line the person sent, waiting to be
-// confirmed — is the card's decision on the web face, as it stands where
-// the picker stood in the TUI. "keep it here" is the chip's esc: nothing
-// moves, and the line goes as a message.
-func TestTheReentryChipIsAConfirmDecision(t *testing.T) {
-	b, _, eng, f, _ := headlessBoard(t, agent.NewFake("noted"))
-	ctx := context.Background()
-	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		m.setChip(&reentryReading{
-			id: f.ID, line: "the flag was never in the spec",
-			out: reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}, Reason: "requirement_missing", Note: "the flag was never in the spec"},
-		})
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	c, err := b.Card(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := c.Decision
-	if d == nil || d.Kind != webapi.DecisionConfirm || len(d.Options) != 2 || d.Options[0].ID != webOptionGo || d.Options[1].ID != webOptionKeep {
-		t.Fatalf("decision = %+v", d)
-	}
-	if _, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: d.Ref, Option: webOptionKeep, Against: d.Against.Token}, "Simon"); err != nil {
-		t.Fatal(err)
-	}
-	c, err = b.Card(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Decision != nil && c.Decision.Kind == webapi.DecisionConfirm {
-		t.Error("the chip is still up after keep")
-	}
-	if c.Stage != string(domain.StagePlan) {
-		t.Errorf("keep moved the card to %s", c.Stage)
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if cs := eng.Consult(f.ID); cs != nil {
-			for _, msg := range cs.Snapshot().Transcript {
-				if msg.Content == "the flag was never in the spec" {
-					return
-				}
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the kept line never reached the card's consult session")
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -328,9 +165,5 @@ func TestWebAnswersTheLinkAndReverseDialogs(t *testing.T) {
 	d.webAnswer(nil, &webInput{})
 	if len(got) != 2 || got[0] != "7" || got[1] != "12" {
 		t.Fatalf("link submitted %q, want [7 12]", got)
-	}
-	res := (&reverseDialog{f: domain.Feature{ID: "GL-001"}}).webAnswer(nil, &webInput{})
-	if res.needs != webapi.ActionNeedsDecision || res.cmd != nil {
-		t.Fatalf("reverse answered %+v, want it to ask for the decision", res)
 	}
 }

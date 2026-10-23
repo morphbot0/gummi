@@ -22,11 +22,8 @@ func (e *Engine) SetRepo(ctx context.Context, id domain.FeatureID, repo string) 
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	if f.IsGoal() {
-		// A goal is not in a repository of its own choosing: its home is
-		// settled from its cards at its plan gate (goalrepos.go), and
-		// moving it by hand would strand the branch its cards fork from.
-		return domain.Feature{}, fmt.Errorf("%s: a goal's repository follows its cards; set each card's `repo:` in the goal doc", id)
+	if f.Kind == domain.KindGoal || f.Kind == domain.KindResearch {
+		return domain.Feature{}, fmt.Errorf("%s is a retired %s card, and it no longer runs", id, f.Kind)
 	}
 	if f.Home {
 		return domain.Feature{}, fmt.Errorf("%s is an agent: it runs in its home, in no repository", id)
@@ -68,4 +65,35 @@ func (e *Engine) SetRepo(ctx context.Context, id domain.FeatureID, repo string) 
 		return domain.Feature{}, err
 	}
 	return f, nil
+}
+
+// RequireRepo validates that name selects a configured repository, for the
+// creation surfaces that must reject an unselectable one before they mint
+// an id for it. See requireRepo.
+func (e *Engine) RequireRepo(name string) error { return e.requireRepo(name) }
+
+// requireRepo validates that the repo a card is minted into is selectable:
+// the empty name is the workspace default, valid only when a default exists.
+// In a repos:-only workspace there is no default, so minting without
+// naming a repo fails here — at the point the card needs a repository —
+// rather than at startup for every command.
+func (e *Engine) requireRepo(repo string) error {
+	if e.pool != nil && e.pool.Known(repo) {
+		return nil
+	}
+	if e.pool != nil {
+		if err := e.pool.ClashError(repo); err != nil {
+			return err
+		}
+	}
+	if repo == "" {
+		return fmt.Errorf("no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml")
+	}
+	// Only suggest omitting --repo when omitting it would actually resolve;
+	// a `repos:` workspace has no default, so that advice would send the
+	// user straight into the error above.
+	if e.pool != nil && e.pool.Known("") {
+		return fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", repo)
+	}
+	return fmt.Errorf("repository %q is not configured; name one of the configured `repos:` in .gummi/config.yaml with --repo", repo)
 }

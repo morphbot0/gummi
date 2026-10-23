@@ -11,13 +11,6 @@ package state
 // reporter can say "this happened" without inventing log rows for it.
 // They are never written to card_events.
 
-import (
-	"encoding/json"
-	"time"
-
-	"github.com/morphis/gummi/internal/domain"
-)
-
 // EventCreated is the observer-only kind reporting a card's creation.
 // It is never written to card_events — the features row is the record —
 // but a hook hearing "a card was minted" should not have to poll for it.
@@ -69,17 +62,4 @@ func (s *Store) observe(ev CardEvent) {
 		return
 	}
 	s.observer(ev)
-}
-
-// observeTransition reports one committed crossing: the gate event, with
-// the same payload the log row holds. Called post-commit, so a failure
-// here could only lose a notification. The verified landing is not
-// reported here — SetVerifiedAt owns it, at the gate where the branch
-// actually became ready.
-func (s *Store) observeTransition(id domain.FeatureID, from, to domain.Stage, actor string, at time.Time, answerID string) {
-	payload, err := json.Marshal(GatePayload{From: string(from), To: string(to), Actor: actor, ID: answerID})
-	if err != nil {
-		return
-	}
-	s.observe(CardEvent{Feature: id, Stage: from, Kind: EventGate, At: at, Payload: string(payload)})
 }

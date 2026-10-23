@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,10 +12,10 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// TestDuplicateFeatureFreshCopy: duplicating a mid-flight feature mints a
-// new card in todo that inherits how the work is run (title, one-liner,
-// skips, profile, envelope) but none of what happened (stage, spend,
-// external ref) — and leaves the original untouched.
+// TestDuplicateFeatureFreshCopy: duplicating a session mints a new one
+// that inherits how the work is run (title, one-liner, profile, envelope)
+// but none of what happened (spend, external ref) — and leaves the
+// original untouched.
 func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
@@ -26,20 +27,18 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	// of it may leak into the copy
 	now := m.now()
 	src := domain.Feature{
-		ID: "FD-001", Num: 1, Title: "Add a healthz endpoint",
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform, Title: "Add a healthz endpoint",
 		OneLiner: "So the load balancer can check liveness.",
-		Slug:     "add-a-healthz-endpoint", Stage: domain.StageTodo, Profile: "fast",
-		Budget:      domain.Budget{Envelope: 500},
-		ExternalRef: "https://github.com/o/r/issues/42",
-		CreatedAt:   now, UpdatedAt: now,
+		Slug:     "add-a-healthz-endpoint", Stage: domain.StageOpen, Profile: "fast",
+		BranchScheme: domain.BranchSchemeKind,
+		Budget:       domain.Budget{Envelope: 500},
+		ExternalRef:  "https://github.com/o/r/issues/42",
+		CreatedAt:    now, UpdatedAt: now,
 	}
 	if err := store.CreateFeature(ctx, &src); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.AddSpend(ctx, src.ID, 12.5, 0, 1000, 2000); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Transition(ctx, src.ID, domain.StagePlan, "user"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,15 +48,15 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 		}
 	}
 
-	dup, err := store.GetFeature(ctx, "FD-002")
+	dup, err := store.GetFeature(ctx, "FF-002")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if dup.Title != src.Title || dup.OneLiner != src.OneLiner || dup.Slug != src.Slug {
 		t.Errorf("copy identity = %q/%q/%q, want the original's", dup.Title, dup.OneLiner, dup.Slug)
 	}
-	if dup.Stage != domain.StageTodo {
-		t.Errorf("copy stage = %q, want todo", dup.Stage)
+	if dup.Kind != domain.KindFreeform || dup.Stage != domain.StageOpen {
+		t.Errorf("copy = %q at %q, want a session", dup.Kind, dup.Stage)
 	}
 	if dup.Profile != "fast" {
 		t.Errorf("copy lost run settings: profile=%q", dup.Profile)
@@ -76,7 +75,7 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if orig.Stage != domain.StagePlan || orig.Spend.Zero() || orig.ExternalRef == "" {
+	if orig.Stage != domain.StageOpen || orig.Spend.Zero() || orig.ExternalRef == "" {
 		t.Errorf("original changed by duplicate: stage=%q spend=%+v ref=%q", orig.Stage, orig.Spend, orig.ExternalRef)
 	}
 }
@@ -108,31 +107,19 @@ func TestDuplicateNoLongerOnY(t *testing.T) {
 	}
 }
 
-// TestDuplicateBugStaysABug: a duplicated bug keeps its kind, so the copy
-// gets a BG id and re-enters the bug workflow.
-func TestDuplicateBugStaysABug(t *testing.T) {
+// TestDuplicateRefusesARetiredCard: a retired workflow card is never
+// run again, so there is nothing to copy it into.
+func TestDuplicateRefusesARetiredCard(t *testing.T) {
 	ws, store, wt := uiRepo(t)
-	ctx := context.Background()
 	m := NewShell(theme.GummiDark(), "v0-test")
-	m.now = func() time.Time { return time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC) }
 	m.Attach(store, wt, ws)
-
-	if msg := m.createCard(formResult{Kind: domain.KindBug, Desc: "Crash on empty diff", Severity: domain.SeverityHigh})(); msg != nil {
-		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
-			t.Fatalf("create failed: %s", nm.text)
-		}
+	f := mkFeature(t, store, 1, "crash on empty diff", domain.StageImplement)
+	nm, ok := m.duplicateFeature(f.ID)().(noticeMsg)
+	if !ok || !nm.isErr || !strings.Contains(nm.text, "retired workflow card") {
+		t.Fatalf("duplicate of a retired card = %#v, want a refusal", nm)
 	}
-	if msg := m.duplicateFeature("BG-001")(); msg != nil {
-		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
-			t.Fatalf("duplicate failed: %s", nm.text)
-		}
-	}
-	dup, err := store.GetFeature(ctx, "BG-002")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dup.Kind != domain.KindBug || dup.Stage != domain.StageTodo {
-		t.Errorf("copy = kind %q stage %q, want a bug in todo", dup.Kind, dup.Stage)
+	if _, err := store.GetFeature(context.Background(), "FD-002"); err == nil {
+		t.Error("a copy was minted anyway")
 	}
 }
 
@@ -141,11 +128,9 @@ func TestDuplicateBugStaysABug(t *testing.T) {
 // repos:-only workspace, so dropping it here would mint one mint itself
 // would have refused), the same base, and — for a bug — the same
 // severity. Its branch scheme is stamped to the current default, never
-// the source's stored spelling, and a source that was adopted does not
-// make the copy one. Everything deliberately not carried stays unset:
-// the external ref, the adopted branch, the stack position, the goal
-// membership, the spend, the session backend/model, the main-checkout
-// flag, and the gate approval.
+// the source's stored spelling. Everything deliberately not carried
+// stays unset: the external ref, the stack position, the spend, the
+// session backend/model and the main-checkout flag.
 func TestDuplicateCarriesIdentity(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
@@ -157,19 +142,16 @@ func TestDuplicateCarriesIdentity(t *testing.T) {
 	// below has a value it could have wrongly inherited.
 	now := m.now()
 	src := domain.Feature{
-		ID: "BG-001", Num: 1, Kind: domain.KindBug,
+		ID: "FF-001", Num: 1, Kind: domain.KindFreeform,
 		Title: "Crash on empty diff", OneLiner: "An empty diff panics the renderer.",
-		Slug: "crash-on-empty-diff", Stage: domain.StageTodo, Profile: "fast",
+		Slug: "crash-on-empty-diff", Stage: domain.StageOpen, Profile: "fast",
 		Budget:       domain.Budget{Envelope: 500},
 		Repo:         "a",
 		Base:         "feat/parent",
 		Severity:     domain.SeverityHigh,
-		BranchScheme: domain.BranchSchemeAdopted,
-		Branch:       "somebody-elses/branch",
+		BranchScheme: domain.BranchSchemeGummi,
 		StackID:      "carried-stack",
 		StackPos:     1,
-		GoalID:       "GL-001",
-		GateApproval: domain.GateAutopilot,
 		ExternalRef:  "https://github.com/o/r/issues/7",
 		CreatedAt:    now, UpdatedAt: now,
 	}
@@ -186,7 +168,7 @@ func TestDuplicateCarriesIdentity(t *testing.T) {
 		}
 	}
 
-	dup, err := store.GetFeature(ctx, "BG-002")
+	dup, err := store.GetFeature(ctx, "FF-002")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,23 +178,14 @@ func TestDuplicateCarriesIdentity(t *testing.T) {
 	if dup.Base != src.Base {
 		t.Errorf("copy base = %q, want the source's %q", dup.Base, src.Base)
 	}
-	if dup.Severity != src.Severity {
-		t.Errorf("copy severity = %q, want the source's %q", dup.Severity, src.Severity)
-	}
 	if dup.BranchScheme != domain.DefaultBranchScheme {
 		t.Errorf("copy branch scheme = %q, want the current default %q, never the source's spelling", dup.BranchScheme, domain.DefaultBranchScheme)
-	}
-	if dup.Branch != "" {
-		t.Errorf("copy inherited adopted branch %q — a copy is never adopted", dup.Branch)
 	}
 	if dup.ExternalRef != "" {
 		t.Errorf("copy inherited external ref %q — dedupe lookups must stay unambiguous", dup.ExternalRef)
 	}
 	if dup.StackID != "" || dup.StackPos != 0 {
 		t.Errorf("copy inherited stack position %q/%d", dup.StackID, dup.StackPos)
-	}
-	if dup.GoalID != "" {
-		t.Errorf("copy inherited goal membership %q", dup.GoalID)
 	}
 	if !dup.Spend.Zero() {
 		t.Errorf("copy inherited spend: %+v", dup.Spend)
@@ -222,8 +195,5 @@ func TestDuplicateCarriesIdentity(t *testing.T) {
 	}
 	if dup.MainCheckout {
 		t.Error("copy inherited main-checkout")
-	}
-	if dup.GateApproval != "" {
-		t.Errorf("copy inherited gate approval %q — an unspent copy attends its gates", dup.GateApproval)
 	}
 }

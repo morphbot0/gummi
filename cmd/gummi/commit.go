@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/morphis/gummi/internal/driver"
+	"github.com/morphis/gummi/internal/cardops"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -26,20 +26,20 @@ func runCommit(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, pool *worktree.Pool) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *cardops.Ops, store *state.Store, ws state.Workspace, pool *worktree.Pool) (cardops.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		defer release()
 
 		beforeSHA, err := pool.Head(ctx, &f)
 		if err != nil {
-			return driver.Outcome{}, err
+			return cardops.Outcome{}, err
 		}
 		out, err := d.Commit(ctx, f.ID, message)
 		if err != nil {

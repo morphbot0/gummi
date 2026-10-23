@@ -174,10 +174,10 @@ func (h webRepoHandles) claims(repo string, cards []domain.Feature, out *webapi.
 	for i := range cards {
 		f := &cards[i]
 		// an agent names no repository, which is not the default's name
-		if f.Home || (!f.IsGoal() && f.Repo != repo) {
+		if f.Home || (f.Kind != domain.KindGoal && f.Repo != repo) {
 			continue
 		}
-		if !f.IsGoal() && f.Stage != domain.StageDone {
+		if f.Kind != domain.KindGoal && f.Stage != domain.StageDone {
 			out.Cards++
 		}
 		if f.Base != "" && f.Stage != domain.StageDone {
@@ -190,7 +190,7 @@ func (h webRepoHandles) claims(repo string, cards []domain.Feature, out *webapi.
 		}
 		owners = append(owners, repoview.Owner{
 			Branch: f.BranchName(), Card: f.ID, Title: f.Title, Stage: f.Stage,
-			Goal: f.IsGoal(), Adopted: f.Adopted(),
+			Goal: (f.Kind == domain.KindGoal), Adopted: f.Adopted(),
 			Landed: h.landed[f.ID] || f.LandedSHA != "", Cleanable: h.cleanable[f.ID],
 		})
 	}

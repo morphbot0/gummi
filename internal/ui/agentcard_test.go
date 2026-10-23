@@ -3,11 +3,9 @@ package ui
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -18,7 +16,7 @@ func agentShell(t *testing.T) *Shell {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.now = func() time.Time { return fixedTime }
 	m.Attach(store, wt, ws)
-	if msg := m.createCard(formResult{Kind: domain.KindFreeform, Desc: "Watch the nightly CI", MainCheckout: true, Home: true})(); msg != nil {
+	if msg := m.createCard(formResult{Desc: "Watch the nightly CI", MainCheckout: true, Home: true})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}
@@ -65,7 +63,7 @@ func TestDeletingAnAgentThatNeverRanMakesNoHome(t *testing.T) {
 }
 
 // TestAnAgentIsOfferedNoRepository: its repository cannot move, so the
-// action is not offered, and writing a spec is refused in its own words.
+// action is not offered.
 func TestAnAgentIsOfferedNoRepository(t *testing.T) {
 	m := agentShell(t)
 	f, err := m.store.GetFeature(context.Background(), "FF-001")
@@ -74,8 +72,5 @@ func TestAnAgentIsOfferedNoRepository(t *testing.T) {
 	}
 	if m.repoMovable(featureRow{F: f}) {
 		t.Error("an agent's repository is offered as movable")
-	}
-	if got := writespecDraftable(f, true); !strings.Contains(got, "is an agent") {
-		t.Errorf("writespecDraftable = %q, want the agent refusal", got)
 	}
 }

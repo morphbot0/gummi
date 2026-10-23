@@ -127,7 +127,7 @@ func TestAnAdoptedBranchIsNeverDeleted(t *testing.T) {
 			t.Errorf("%s on an adopted card: err = %v, want ErrAdoptedBranch", tc.name, err)
 		}
 	}
-	if ok, err := m.BranchExistsNamed(ctx, "feat/theirs"); err != nil || !ok {
+	if ok, err := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/feat/theirs"); err != nil || !ok {
 		t.Errorf("the adopted branch is gone (exists = %v, err = %v) — gummi did not cut it and must not destroy it", ok, err)
 	}
 }
@@ -157,44 +157,6 @@ func TestRecreateWillNotInventAnAdoptedBranch(t *testing.T) {
 		t.Fatal("Recreate cut a fresh branch for an adopted card, silently replacing the inherited work")
 	} else if !strings.Contains(err.Error(), "reflog") {
 		t.Errorf("err = %v, want one pointing at how to recover the ref", err)
-	}
-}
-
-func TestInspectBranchReportsWhatIsInherited(t *testing.T) {
-	root := newRepo(t)
-	theirBranch(t, root, "feat/theirs", 2)
-	// main moves on underneath them: an inherited branch is usually old,
-	// and saying how old is gummi's whole answer to that (D22).
-	writeFile(t, root, "main.txt", "moved on\n")
-	mustGit(t, root, "add", ".")
-	mustGit(t, root, "commit", "-q", "-m", "main moves")
-	m := newManager(t, root)
-
-	w, err := m.InspectBranch(ctx, "feat/theirs", "main")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(w.Commits) != 2 {
-		t.Errorf("commits = %d (%v), want the 2 on their branch", len(w.Commits), w.Commits)
-	}
-	if !strings.Contains(w.Stat, "theirs.txt") {
-		t.Errorf("stat = %q, want the inherited file", w.Stat)
-	}
-	if w.Behind != 1 {
-		t.Errorf("behind = %d, want 1", w.Behind)
-	}
-	if !strings.Contains(w.Staleness(), "1 commit behind main") {
-		t.Errorf("staleness = %q", w.Staleness())
-	}
-
-	// A branch with nothing of its own is a typo or a stale ref, and
-	// adopting it would make a card whose whole premise is false.
-	mustGit(t, root, "branch", "feat/empty", "main")
-	if _, err := m.InspectBranch(ctx, "feat/empty", "main"); err == nil {
-		t.Error("a branch with no commits of its own was accepted for adoption")
-	}
-	if _, err := m.InspectBranch(ctx, "main", "main"); err == nil {
-		t.Error("adopting the branch the card lands on was accepted")
 	}
 }
 

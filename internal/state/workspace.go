@@ -60,11 +60,6 @@ func (w Workspace) BugsDir() string { return filepath.Join(w.GummiDir(), "bugs")
 // WorktreesDir holds the nested per-feature git worktrees.
 func (w Workspace) WorktreesDir() string { return filepath.Join(w.GummiDir(), "worktrees") }
 
-// IngestDir holds source documents an ingest pass decomposed into
-// features (DESIGN §11): committed with the repo, so a seeded draft's
-// provenance pointer stays resolvable.
-func (w Workspace) IngestDir() string { return filepath.Join(w.GummiDir(), "ingest") }
-
 // AttachmentsDir holds uploaded images, content-addressed by sha256
 // (internal/attachment). Workspace content, never committed — the same
 // `.gummi/attachments/<id>.<ext>` path a spec-anchored link names, always
@@ -92,22 +87,6 @@ func (w Workspace) SeqFile() string { return filepath.Join(w.GummiDir(), "seq") 
 // checkout rather than a place to drop a file.
 func (w Workspace) ScratchFilesDir(id domain.FeatureID) string {
 	return filepath.Join(w.StateDir(), "scratch", string(id))
-}
-
-// GoalNotebookDir is where a goal keeps what it knows that no card owns —
-// the owner's reference documents, the constants it has decided, what it
-// found to be true (internal/notebook). Beside the goal doc and, like it,
-// never on a branch: a goal is in no repository, so its knowledge is in
-// none.
-func (w Workspace) GoalNotebookDir(goal domain.FeatureID) string {
-	return filepath.Join(w.GummiDir(), "goals", string(goal))
-}
-
-// EvidenceDir holds what an owner's experiment runs left behind — one
-// directory per run (internal/experiment). It is a record, not a cache: a
-// hand-over points into it, so nothing cleans it up behind a reader.
-func (w Workspace) EvidenceDir(owner domain.FeatureID) string {
-	return filepath.Join(w.GummiDir(), "evidence", string(owner))
 }
 
 // HomesDir holds the agents' homes, one directory per agent card (DESIGN
@@ -359,7 +338,6 @@ func Init(ws, repo string) (Workspace, error) {
 		{w.SpecsDir(), 0o750},
 		{w.BugsDir(), 0o750},
 		{w.WorktreesDir(), 0o750},
-		{w.IngestDir(), 0o750},
 	}
 	for _, d := range dirs {
 		if err := MkdirChecked(d.path, d.perm); err != nil {

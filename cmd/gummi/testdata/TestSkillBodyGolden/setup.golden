@@ -22,8 +22,8 @@ Repair each item that isn't `ok`:
   Matching the backend to yourself keeps the whole pipeline on one vendor's
   auth, and it sidesteps the cross-model trap where the claude backend
   forwards each role's model to the Claude CLI as `--model` and the CLI
-  rejects any non-`claude-*` id (a mismatched run passes spec, then dies at
-  implement).
+  rejects any non-`claude-*` id (a mismatched run dies on the first role
+  it reaches).
 - **profile** — **do not rely on the auto-seeded default** (its
   implementer/scribe roles are OpenAI ids the claude backend cannot drive).
   Write the `default` profile in `.gummi/profiles.yaml` yourself, and **ask

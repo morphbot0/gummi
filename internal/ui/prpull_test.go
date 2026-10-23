@@ -16,7 +16,7 @@ func linkFixture(t *testing.T) *Shell {
 	t.Helper()
 	m, _ := diffWorkspace(t)
 	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: strings.Repeat("a", 40)}
-	if err := m.store.SetPullRequest(context.Background(), "FD-001", ref); err != nil {
+	if err := m.store.SetPullRequest(context.Background(), "FF-001", ref); err != nil {
 		t.Fatal(err)
 	}
 	return pump(t, m, m.loadRows)
@@ -66,7 +66,7 @@ func TestPRPullIngestsThreadsAndOpensDiff(t *testing.T) {
 		t.Errorf("notice reported as an error: %q", m.notice.text)
 	}
 
-	anns, err := m.store.ListDiffAnnotations(context.Background(), "FD-001")
+	anns, err := m.store.ListDiffAnnotations(context.Background(), "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestPRPullIngestsThreadsAndOpensDiff(t *testing.T) {
 		t.Fatalf("stored %d annotations, want 2", len(anns))
 	}
 
-	if m.diff == nil || m.diff.f.ID != "FD-001" {
+	if m.diff == nil || m.diff.f.ID != "FF-001" {
 		t.Fatal("pulling new review comments should open the diff view on the card")
 	}
 }
@@ -125,7 +125,7 @@ func TestPRPullRefusesOnUnlinkRaceUnderLock(t *testing.T) {
 		t.Fatal("fixture row should carry the linked PR")
 	}
 
-	if err := m.store.SetPullRequest(context.Background(), "FD-001", domain.PullRequestRef{}); err != nil {
+	if err := m.store.SetPullRequest(context.Background(), "FF-001", domain.PullRequestRef{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -143,7 +143,7 @@ func TestPRPullRefusesOnUnlinkRaceUnderLock(t *testing.T) {
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "no linked PR") {
 		t.Errorf("notice = %q, want a no-linked-PR refusal", m.notice.text)
 	}
-	anns, err := m.store.ListDiffAnnotations(context.Background(), "FD-001")
+	anns, err := m.store.ListDiffAnnotations(context.Background(), "FF-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestPRPullOnAHeadlessBoardMountsNoSurface(t *testing.T) {
 	if !strings.Contains(m.notice.text, "1 new review thread(s)") {
 		t.Fatalf("notice = %q, want 1 new thread", m.notice.text)
 	}
-	if anns, err := m.store.ListDiffAnnotations(context.Background(), "FD-001"); err != nil || len(anns) != 1 {
+	if anns, err := m.store.ListDiffAnnotations(context.Background(), "FF-001"); err != nil || len(anns) != 1 {
 		t.Fatalf("stored %d annotations (%v), want 1", len(anns), err)
 	}
 	if m.diff != nil {

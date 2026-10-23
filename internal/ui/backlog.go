@@ -13,11 +13,9 @@ import (
 // openCard opens the selected card's page. The action list is the only
 // list on that page, so it takes the arrow keys on arrival — there is no
 // second region to hand them to. It also kicks off the selected card's
-// event-log load (shell.go's loadCardEvents) and its excused-check load
-// (loadExcusedChecks): the thread's folded stage receipts need the first
-// and the verify sentence needs the second, and the card page is the one
-// place that reads either, so both are fetched on arrival rather than on
-// every board refresh.
+// event-log load (shell.go's loadCardEvents): the card page is the one
+// place that reads it, so it is fetched on arrival rather than on every
+// board refresh.
 func (m *Shell) openCard() tea.Cmd {
 	r, ok := m.selected()
 	if !ok {
@@ -44,7 +42,8 @@ func (m *Shell) openCard() tea.Cmd {
 	m.threadScroll = 0
 	m.loadThreadDraft(r.F.ID)
 	m.focusThreadInput()
-	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadExcusedChecks(r.F.ID))
+	m.leaveRuns()
+	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadRuns(r.F.ID))
 }
 
 // closeCard returns to the backlog list, stopping a live watch tail —
@@ -53,14 +52,12 @@ func (m *Shell) openCard() tea.Cmd {
 // (F5) — "leaving hides, never discards" applies to the draft too, just
 // scoped to the card that owns it rather than to the shared widget.
 func (m *Shell) closeCard() {
-	if r, ok := m.selected(); ok {
-		m.endChat(r.F.ID)
-	}
 	m.clearTransientNotice()
 	if r, ok := m.selected(); ok {
 		m.saveThreadDraft(r.F.ID)
 	}
 	m.cardOpen = false
+	m.leaveRuns()
 	m.blurActions()
 	m.stopFollow()
 }
@@ -120,12 +117,7 @@ func (m *Shell) jumpToCard(id domain.FeatureID) (tea.Cmd, bool) {
 		return nil, false
 	}
 	if from, ok := m.selected(); ok && from.F.ID != id {
-		// leaving a card is leaving its conversation, the way picking a
-		// row is (decision.go's answerDecision) — the next line typed on
-		// the card arrived at is read, not continued from a thread it was
-		// never part of.
 		m.saveThreadDraft(from.F.ID)
-		m.endChat(from.F.ID)
 	}
 	m.sel = at
 	if !m.cardOpen {
@@ -169,10 +161,11 @@ func (m *Shell) arriveOnCard() tea.Cmd {
 	if ok && m.follow != nil && m.follow.feature != r.F.ID {
 		m.stopFollow()
 	}
+	m.leaveRuns()
 	if !ok {
 		return nil
 	}
-	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadExcusedChecks(r.F.ID))
+	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadRuns(r.F.ID))
 }
 
 // actionsOwnArrows reports whether the card's action list owns ↑↓ and
@@ -185,41 +178,23 @@ func (m *Shell) actionsOwnArrows() bool {
 // backlogKey answers the board tab's keys — movement, enter, and the way
 // in and out of a card page. It reports whether it handled the key;
 // everything it does not handle falls through to boardVerb, so the card
-// verbs (g, v, m, …) keep working from the list exactly as they do on
+// verbs (d, m, h, …) keep working from the list exactly as they do on
 // the card page.
 func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
-	// the ingest feed takes the foreground over the board; its own keys
-	// (esc backgrounds it) must reach boardVerb unintercepted.
-	if m.ingestRun != nil && !m.ingestRun.hidden {
-		return nil, false
-	}
 	if !m.cardOpen {
 		switch key {
 		case "f":
-			// One fold key, two things to fold, and no ambiguity between
-			// them: on a goal or one of its cards it folds that goal, and
-			// anywhere else the only other fold on the board is the
-			// archive.
-			if m.toggleGoalFold() {
-				return nil, true
-			}
 			m.toggleArchive()
 			return nil, true
 		case "enter", "right", "l":
 			return m.openCard(), true
-		case "g":
-			if m.askDesignGate() {
-				return nil, true
-			}
 		}
 		return nil, false
 	}
 	switch key {
 	case "esc", "left":
 		m.closeCard()
-		// a card entered from a goal's page goes back to that page, not
-		// to the board underneath it (goalpage.go's backToGoalPage)
-		return m.backToGoalPage(), true
+		return nil, true
 	case "j", "down":
 		m.moveAction(1)
 		return nil, true
@@ -227,12 +202,8 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 		m.moveAction(-1)
 		return nil, true
 	case "J":
-		// stepping to the next card leaves the goal's page behind: the
-		// reader is walking the board now, and esc means the board again
-		m.goalReturn = ""
 		return m.stepCard(1), true
 	case "K":
-		m.goalReturn = ""
 		return m.stepCard(-1), true
 	case "right":
 		return nil, true
@@ -252,55 +223,6 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 		return nil, true
 	}
 	return nil, false
-}
-
-// askDesignGate raises the design gate's confirmation for the selected
-// card, reporting false when there is nothing to ask about and `g` should
-// go straight to boardVerb as it always did.
-//
-// It confirms the way c (cleanup), m (merge) and D (delete) already do,
-// and for the same class of reason: the board's 1..9 jump keys are
-// positional and positions shift as cards move between sections, so "the
-// card that was at 1 a moment ago" is not the card 1 selects now — and g
-// on the wrong card walked it out of the design phase, plan → implement,
-// with no dialog and no undo. The verify gate already asks (advanceStage
-// there opens the landing dialog), and todo → plan starts a stage rather
-// than closing one, so plan is the one crossing left that spent the
-// reader's judgment without asking for it.
-//
-// It lives here, on the board's own key layer, rather than in boardVerb's
-// g case, because that case is shared: the card page's action list
-// (runCardAction), a typed /approve (threadinput.go's verbKeys) and the
-// "go on" chip (reentry.go's Advance arm) all route through it, and every
-// one of those already made the reader name this card and choose the act.
-// The mis-selection this dialog exists to catch is the board's alone.
-//
-// It asks before the gate's own floor runs, not after, and deliberately
-// does not try to pre-empt a blocked crossing. The board row's blocker
-// fields are a snapshot — a section drafted since the last loadRows, an
-// annotation resolved in the spec view — so a "skip the dialog when the
-// gate is shut" test answers from state that can be a beat old, and an
-// intermittent confirmation is worse than an unconditional one. The
-// dialog asks about intent; engine.Advance still answers about state, and
-// a card whose gate is shut is refused with the same notice it always
-// was, one keypress later.
-func (m *Shell) askDesignGate() bool {
-	r, ok := m.selected()
-	if !ok || r.F.Stage != domain.StagePlan {
-		return false
-	}
-	f := r.F
-	to := forwardEdge(f)
-	m.Overlay.Push(&confirmDialog{
-		card:         f.ID,
-		id:           "confirm-design-gate",
-		cancelLabel:  "Stay",
-		confirmLabel: "Advance",
-		question:     "advance " + f.Name() + ": " + string(f.Stage) + " → " + string(to) + "?",
-		detail:       f.Title + " — crossing approves the " + artifactNoun(f.Kind) + " and closes the design phase",
-		onConfirm:    func() tea.Cmd { return m.advanceStage(f.ID) },
-	})
-	return true
 }
 
 // backlogEntry is one rendered line of the backlog list: a super-state
@@ -328,13 +250,7 @@ func (m *Shell) backlogEntries() []backlogEntry {
 	var out []backlogEntry
 	var last boardGroup
 	splitDone := m.archiveCount() > 0
-	for i, idx := range m.displayOrder(m.sortMode) {
-		if m.isFoldedChild(idx) {
-			// a goal's unfolded card rides under its goal, whatever group
-			// its own stage belongs to
-			out = append(out, backlogEntry{card: true, row: idx, shortcut: i + 1})
-			continue
-		}
+	for i, idx := range m.displayOrder() {
 		if group := m.groupOf(m.rows[idx], splitDone); i == 0 || group != last {
 			if i > 0 {
 				out = append(out, backlogEntry{})
@@ -375,15 +291,11 @@ func (m *Shell) boardNarrationLine(r featureRow) string {
 	if _, waiting := m.inbox.get(r.F.ID); !waiting {
 		return ""
 	}
-	claims := m.cardNarration(m.nextInputFor(r), r)
+	claims := m.cardNarration(m.nextInputFor(r))
 	if len(claims) == 0 {
 		return ""
 	}
-	// The text alone, with no citation mark: the board has no key that
-	// opens one, and a bracketed number nothing answers is a promise the
-	// row cannot keep. The card page prints the same sentence with its
-	// mark, where alt+<n> is live.
-	return claims[0].text
+	return claims[0]
 }
 
 // backlogView renders the full-width backlog: cards grouped by
@@ -444,17 +356,13 @@ func (m *Shell) backlogView(w, h int) string {
 	var b strings.Builder
 	line := func(str string) { b.WriteString(ansi.Truncate(str, w, "…") + "\n") }
 
-	sortLabel := "creation order"
-	if m.sortMode == SortSeverity {
-		sortLabel = "severity (todo)"
-	}
 	// "1 cards" was never plural-agreed (BACKLOG was renamed above; this
 	// count had the same live-drive report). plural() (reviewloop.go) is the
 	// package's existing singular/plural switch, reused here rather than
 	// hand-rolling a second one.
 	n := len(m.rows)
 	line(" " + s.PaneTitleActive.Render("BOARD") + "  " +
-		s.Faint.Render(strconv.Itoa(n)+" card"+plural(n)+"  ·  sort: "+sortLabel))
+		s.Faint.Render(strconv.Itoa(n)+" card"+plural(n)))
 	line("")
 
 	if scrolls {
@@ -519,7 +427,7 @@ func (m *Shell) cardPageView(w, h int) string {
 	if _, ok := m.selected(); !ok {
 		return m.backlogView(w, h)
 	}
-	order := m.displayOrder(m.sortMode)
+	order := m.displayOrder()
 	pos := 0
 	for i, idx := range order {
 		if idx == m.sel {
@@ -629,7 +537,6 @@ func (m *Shell) cardPageBindings() []binding {
 	out = append(out, []binding{
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread — it opens on the newest event", bar: true},
 		{key: "/", label: "compose", help: "focus the thread input — a message, or a leading verb/command", bar: true},
-		{key: "A", label: "autopilot", help: "open the autopilot switch — off/gates/full, and it starts the card"},
 	}...)
 	out = append(out, m.threadOutputsBinding())
 	for _, b := range m.boardBindings() {

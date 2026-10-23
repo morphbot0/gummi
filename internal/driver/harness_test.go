@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,56 +16,28 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-// harness wires a driver over an in-process fake agent and a throwaway
-// git repo — the driver equivalent of engine_test's newRepo. The fake's
-// per-stage script decides what each stage does; the driver's NDJSON goes
-// to buf so tests can assert the stream.
+// harness is one throwaway repository with a gummi workspace, and the
+// engine a `gummi run` process would build over it. reopen builds the
+// next process's engine on the same store, which is what a `resume` is.
 type harness struct {
 	t     *testing.T
-	store *state.Store
+	root  string
 	ws    state.Workspace
+	store *state.Store
 	wt    *worktree.Manager
-	pool  *worktree.Pool
-	// byName maps a configured named repo to its resolved root (nil for the
-	// single-repo harness); the multi-repo harness fills it.
-	byName map[string]string
-	fake   *agent.Fake
-	eng    *engine.Engine
-	buf    *bytes.Buffer
-	root   string
-
-	// noDraft switches off the fake agent's stand-in drafting, so a test can
-	// exercise the stage-produced-nothing failure the undrafted-sections
-	// gate exists to catch.
-	noDraft bool
-
-	mu    sync.Mutex
-	calls map[domain.Stage]int
+	fake  *sessionFake
+	eng   *engine.Engine
+	buf   *bytes.Buffer
 }
 
-// stageFn scripts one turn of a stage. n is how many times this stage has
-// been entered (0-based), so a review that changes then passes can return
-// different turns. opts.WorkDir is the worktree for autonomous stages, so
-// a stage can write files that the engine's checkpoint then commits.
-type stageFn func(h *harness, n int, opts agent.SessionOpts, msg string) []agent.Event
-
-func newHarness(t *testing.T, clientTools bool, script map[domain.Stage]stageFn) *harness {
+func newHarness(t *testing.T, fake *sessionFake) *harness {
 	t.Helper()
 	root := gitRepo(t)
-	return newHarnessRoots(t, clientTools, script, root, root)
-}
-
-// newHarnessRoots wires a harness over an explicit workspace root and repo
-// root, so a test can drive the nested layout (.gummi at ws, repo at a
-// nested subdirectory) end-to-end.
-func newHarnessRoots(t *testing.T, clientTools bool, script map[domain.Stage]stageFn, wsRoot, repoRoot string) *harness {
-	t.Helper()
-	ws, err := state.Init(wsRoot, repoRoot)
+	ws, err := state.Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,197 +46,60 @@ func newHarnessRoots(t *testing.T, clientTools bool, script map[domain.Stage]sta
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), wsRoot, repoRoot, store)
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	h := &harness{t: t, store: store, ws: ws, wt: wt, buf: &bytes.Buffer{}, root: repoRoot, calls: map[domain.Stage]int{}}
-	fake := agent.NewFake("")
-	// ReadOnlyEnforce so the harness can drive a research card's autonomous
-	// stages, which Engine.run refuses on a backend that cannot strip its
-	// own write tools.
-	fake.Caps = agent.Capabilities{
-		Resume: true, UsageEvents: true, Interrupt: true,
-		ClientTools: clientTools, ReadOnlyEnforce: true,
-	}
-	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
-		stage := h.scriptStage(opts)
-		if f, err := h.store.GetFeature(context.Background(), h.only()); err == nil {
-			h.draftRequiredSections(f)
-		}
-		fn := script[stage]
-		if fn == nil && stage == stageCritique {
-			// A script that tells its writer from its critique by
-			// opts.Role instead of by this key keeps working: fall back to
-			// the stage's own entry and let it branch.
-			if own := script[h.stageFromWorkDir(opts.WorkDir)]; own != nil {
-				fn = own
-			}
-		}
-		if fn == nil {
-			if stage == stageCritique {
-				// A drive that is not ABOUT the critique still has to get
-				// past it: every agent stage ends with one now, so an
-				// unscripted critique defaults to passing rather than to a
-				// verdictless message the loop would escalate.
-				return toolVerdict(opts.Model, "pass")
-			}
-			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: opts.Model}}, {Kind: agent.EventIdle}}
-		}
-		h.mu.Lock()
-		n := h.calls[stage]
-		h.calls[stage]++
-		h.mu.Unlock()
-		return fn(h, n, opts, msg)
-	}
-	h.fake = fake
-	h.eng = engine.New(engine.Config{
-		Agents: map[string]agent.Agent{"": fake, fake.Name(): fake},
-		Store:  store, Worktrees: wt, Workspace: ws,
-		Persist: true, Model: "test-model",
-	})
-	t.Cleanup(func() { h.eng.Close(); fake.Close() })
+	h := &harness{t: t, root: root, ws: ws, store: store, wt: wt, fake: fake, buf: &bytes.Buffer{}}
+	fake.h = h
+	h.reopen()
+	t.Cleanup(func() { fake.Close() })
 	return h
 }
 
-// newMultiRepoHarness wires a harness over a pool whose default repo is the
-// workspace root plus two nested named repos ("a", "b"), so a test can drive
-// a named-repo card end-to-end. The returned harness resolves cards through
-// the pool; byName maps each configured name to its repo root.
-func newMultiRepoHarness(t *testing.T, script map[domain.Stage]stageFn) *harness {
-	t.Helper()
-	wsRoot := gitRepo(t)
-	roots := map[string]string{}
-	for _, name := range []string{"a", "b"} {
-		r := filepath.Join(wsRoot, "git", name)
-		if err := os.MkdirAll(r, 0o750); err != nil {
-			t.Fatal(err)
-		}
-		git := func(args ...string) {
-			if out, err := exec.CommandContext(context.Background(), "git",
-				append([]string{"-C", r}, args...)...).CombinedOutput(); err != nil {
-				t.Fatalf("git %v: %v\n%s", args, err, out)
-			}
-		}
-		git("init", "-q", "-b", "main")
-		git("config", "user.name", "t")
-		git("config", "user.email", "t@e.invalid")
-		if err := os.WriteFile(filepath.Join(r, "README.md"), []byte("x\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		git("add", ".")
-		git("commit", "-q", "-m", "init")
-		roots[name] = r
+// reopen closes the running engine, if any, and builds a fresh one: the
+// process that ran is gone and the next one starts from the store.
+func (h *harness) reopen() {
+	if h.eng != nil {
+		h.eng.Close()
 	}
-	ws, err := state.Init(wsRoot, wsRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := state.OpenStore(ws.DBFile())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	var named []worktree.NamedRepo
-	for _, name := range []string{"a", "b"} {
-		named = append(named, worktree.NamedRepo{Name: name, Root: roots[name]})
-	}
-	pool, err := worktree.NewPool(context.Background(), ws.Root, ws.Root, named, store, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	h := &harness{t: t, store: store, ws: ws, pool: pool, byName: roots, buf: &bytes.Buffer{}, root: wsRoot, calls: map[domain.Stage]int{}}
-	fake := agent.NewFake("")
-	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true}
-	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
-		stage := h.scriptStage(opts)
-		if f, err := h.store.GetFeature(context.Background(), h.only()); err == nil {
-			h.draftRequiredSections(f)
-		}
-		fn := script[stage]
-		if fn == nil && stage == stageCritique {
-			// A script that tells its writer from its critique by
-			// opts.Role instead of by this key keeps working: fall back to
-			// the stage's own entry and let it branch.
-			if own := script[h.stageFromWorkDir(opts.WorkDir)]; own != nil {
-				fn = own
-			}
-		}
-		if fn == nil {
-			if stage == stageCritique {
-				// A drive that is not ABOUT the critique still has to get
-				// past it: every agent stage ends with one now, so an
-				// unscripted critique defaults to passing rather than to a
-				// verdictless message the loop would escalate.
-				return toolVerdict(opts.Model, "pass")
-			}
-			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: opts.Model}}, {Kind: agent.EventIdle}}
-		}
-		h.mu.Lock()
-		n := h.calls[stage]
-		h.calls[stage]++
-		h.mu.Unlock()
-		return fn(h, n, opts, msg)
-	}
-	h.fake = fake
 	h.eng = engine.New(engine.Config{
-		Agents: map[string]agent.Agent{"": fake, fake.Name(): fake},
-		Store:  store, Pool: pool, Workspace: ws,
+		Agents: map[string]agent.Agent{"": h.fake, h.fake.Name(): h.fake},
+		Store:  h.store, Worktrees: h.wt, Workspace: h.ws,
 		Persist: true, Model: "test-model",
 	})
-	t.Cleanup(func() { h.eng.Close(); fake.Close() })
-	return h
+	eng := h.eng
+	h.t.Cleanup(func() { eng.Close() })
 }
 
-// stageFromWorkDir recovers the running stage. The driver transitions the
-// store before it runs a stage, so the feature's current stored stage is
-// the stage whose session is now executing (the plan writer vs its
-// critique share the Plan stage — a script tells them apart by opts.Role).
-func (h *harness) stageFromWorkDir(_ string) domain.Stage {
-	f, err := h.store.GetFeature(context.Background(), h.only())
-	if err != nil {
-		return ""
-	}
-	return f.Stage
-}
-
-// only returns the single feature id in the store (tests drive one).
-func (h *harness) only() domain.FeatureID {
-	feats, err := h.store.ListFeatures(context.Background())
-	if err != nil || len(feats) == 0 {
-		return ""
-	}
-	return feats[0].ID
-}
-
-// driver builds a driver over this harness's engine with the given opts.
-// A fresh driver per invocation models a fresh CLI process.
 func (h *harness) driver(opts Options) *Driver {
-	if opts.Envelope == 0 {
-		opts.Envelope = 500
+	if opts.Timeout == 0 {
+		opts.Timeout = 30 * time.Second
 	}
-	if opts.StageTimeout == 0 {
-		opts.StageTimeout = 5 * time.Second
-	}
-	// A headless test drive is unattended by definition: there is nobody
-	// to answer a gate, so attended (the new default, and the right one
-	// for a person at a terminal) would park every one of these runs at
-	// its first gate. A test that is ABOUT the attended gate passes the
-	// mode explicitly, and an explicit value still wins — as does a mode
-	// persisted on the card, which is resolved separately on resume.
-	if opts.GateApproval == "" {
-		opts.GateApproval = GateAutopilot
-	}
-	return New(h.eng, h.store, h.ws, h.buf, opts)
+	d := New(h.eng, h.store, h.ws, h.buf, opts)
+	d.poll = 50 * time.Millisecond
+	return d
 }
 
-// events parses the NDJSON buffer into a slice of generic maps.
-func (h *harness) events() []map[string]any {
+// run is `gummi run`: mint, then start.
+func (h *harness) run(opts Options, prompt string) (Outcome, domain.Feature) {
 	h.t.Helper()
+	d := h.driver(opts)
+	ctx := context.Background()
+	f, err := d.Create(ctx, prompt)
+	if err != nil {
+		h.t.Fatalf("Create: %v", err)
+	}
+	out, err := d.Start(ctx, f, prompt)
+	if err != nil && out.Status != StatusError {
+		h.t.Fatalf("Start: %v", err)
+	}
+	return out, f
+}
+
+func (h *harness) events() []map[string]any {
 	var out []map[string]any
-	for _, line := range bytes.Split(bytes.TrimSpace(h.buf.Bytes()), []byte{'\n'}) {
+	for _, line := range bytes.Split(bytes.TrimSpace(h.buf.Bytes()), []byte("\n")) {
 		if len(line) == 0 {
 			continue
 		}
@@ -275,37 +112,41 @@ func (h *harness) events() []map[string]any {
 	return out
 }
 
-// eventKinds returns the ordered "event" discriminators in the stream.
 func (h *harness) eventKinds() []string {
 	var out []string
 	for _, e := range h.events() {
-		if s, ok := e["event"].(string); ok {
-			out = append(out, s)
+		out = append(out, e["event"].(string))
+	}
+	return out
+}
+
+// last returns the newest event of kind, or nil.
+func (h *harness) last(kind string) map[string]any {
+	evs := h.events()
+	for i := len(evs) - 1; i >= 0; i-- {
+		if evs[i]["event"] == kind {
+			return evs[i]
+		}
+	}
+	return nil
+}
+
+// runStates lists the states the stream's workflow events reported, in
+// order; crewStates the same under the crew events beside them.
+func (h *harness) runStates() []string { return h.statesOf("workflow") }
+
+func (h *harness) crewStates() []string { return h.statesOf("crew") }
+
+func (h *harness) statesOf(kind string) []string {
+	var out []string
+	for _, e := range h.events() {
+		if e["event"] == kind {
+			out = append(out, e["state"].(string))
 		}
 	}
 	return out
 }
 
-// has reports whether the stream carries an event of the given kind.
-func (h *harness) has(kind string) bool {
-	for _, k := range h.eventKinds() {
-		if k == kind {
-			return true
-		}
-	}
-	return false
-}
-
-// stageOf returns the current stored stage of the single feature.
-func (h *harness) stageOf(id domain.FeatureID) domain.Stage {
-	f, err := h.store.GetFeature(context.Background(), id)
-	if err != nil {
-		h.t.Fatalf("GetFeature %s: %v", id, err)
-	}
-	return f.Stage
-}
-
-// gitRepo builds a committed throwaway repo (mirrors engine_test.newRepo).
 func gitRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -331,177 +172,164 @@ func gitRepo(t *testing.T) string {
 	return root
 }
 
-// --- scripted turns --------------------------------------------------
+// --- the fake agent -----------------------------------------------------
 
-// msgIdle is a plain assistant turn: a message, a token of spend, idle.
-func msgIdle(model, text string) []agent.Event {
-	return []agent.Event{
-		{Kind: agent.EventMessage, Text: text},
-		{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: model}},
-		{Kind: agent.EventIdle},
-	}
+const wfSpec = "# Workflow test\n\n## Problem\n\nA file is missing.\n\n## Approach\n\nWrite it.\n\n" +
+	"## Done when\n\n```gummi-done-when\n- id: DW-1\n  says: out.txt exists\n  check: test -f out.txt\n```\n\n" +
+	"## Limits\n\nNothing else.\n\n## Notes\n\nnone\n"
+
+// wfRecipe is the recipe the session proposes: an implementer writes
+// out.txt, and a reviewer validates it.
+const wfRecipe = `name: make-file
+description: write the file and validate it
+steps:
+  - id: make
+    role: implementer
+    prompt: |
+      Write out.txt for the spec below.
+
+      {{spec}}
+  - id: validate
+    role: reviewer
+    prompt: |
+      Read {{run.diff}} against the spec. End with MET: DW-1 or UNMET: DW-1.
+
+      {{spec}}
+`
+
+var stepRe = regexp.MustCompile(`You are step (\S+) of workflow run`)
+
+// sessionFake answers a session and its workflow run's steps. The
+// session's turns are scripted by first: what the first turn does (reply,
+// ask, propose a run, spend); later session turns just acknowledge. A
+// step is told apart by its brief: make writes out.txt — asking the
+// person first when stepAsks is set — and validate says MET.
+type sessionFake struct {
+	*agent.Fake
+	h *harness
+
+	mu       sync.Mutex
+	first    string // "reply" | "ask" | "workflow" | "spend"
+	stepAsks bool
+	cardStep map[string]string
+	session  []string
+	steps    []string
 }
 
-// toolVerdict is an autonomous verdict turn via the submit_verdict client
-// tool (client-tool mode).
-func toolVerdict(model, verdict string) []agent.Event {
-	args, _ := json.Marshal(map[string]string{"verdict": verdict})
-	return []agent.Event{
-		{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "v-" + verdict, Name: "submit_verdict", Args: args}},
-		{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: model}},
-		{Kind: agent.EventIdle},
-	}
+func newSessionFake(first string) *sessionFake {
+	sf := &sessionFake{Fake: agent.NewFake(""), first: first, cardStep: map[string]string{}}
+	sf.Caps = agent.Capabilities{ClientTools: true, UsageEvents: true, Interrupt: true}
+	sf.Responder = sf.respond
+	return sf
 }
 
-// prosePass is a passing verdict via the VERDICT: convention (the path
-// backends without client tools take).
-func prosePass(model string) []agent.Event {
-	return msgIdle(model, "Reviewed.\nVERDICT: pass")
+func usage() agent.Event {
+	return agent.Event{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 2, Model: "m"}}
 }
 
-// convAsk is an interactive turn that ends with a gummi-ask fenced block
-// (convention path): the engine parses it into a pending question, and
-// the answer arrives as a fresh turn.
-func convAsk(model, question string, options ...string) []agent.Event {
-	opts := make([]map[string]string, 0, len(options))
-	for _, o := range options {
-		opts = append(opts, map[string]string{"label": o})
-	}
-	body, _ := json.Marshal(map[string]any{
-		"question": question, "options": opts, "allow_free_form": true,
-	})
-	return msgIdle(model, "Considering.\n```gummi-ask\n"+string(body)+"\n```")
+func toolCall(id, name string, args any) agent.Event {
+	raw, _ := json.Marshal(args)
+	return agent.Event{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: id, Name: name, Args: raw}}
 }
 
-// toolAsk is an ask_user turn through the client tool — the path a
-// backend with tools takes, and the one a real drive's questions come
-// through. It names the section its answer changes, which the tool
-// requires before it will put a question at all.
-func toolAsk(model, section, question string, options ...string) []agent.Event {
-	opts := make([]map[string]string, 0, len(options))
-	for _, o := range options {
-		opts = append(opts, map[string]string{"label": o})
-	}
-	args, _ := json.Marshal(map[string]any{
-		"question": question, "options": opts, "allow_free_form": true,
-		"changes_section": section,
-	})
-	return []agent.Event{
-		{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "ask-1", Name: "ask_user", Args: args}},
-		{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: model}},
-		{Kind: agent.EventIdle},
-	}
+func say(text string) []agent.Event {
+	return []agent.Event{usage(), {Kind: agent.EventMessage, Text: text}, {Kind: agent.EventIdle}}
 }
 
-// harnessRoot is the repo root the harness resolves card artifacts under:
-// the pool's root for a multi-repo harness, the manager's for a single-repo
-// one.
-func (h *harness) harnessRoot() string {
-	if h.pool != nil {
-		return h.pool.Root()
+func (sf *sessionFake) respond(opts agent.SessionOpts, msg string) []agent.Event {
+	sf.mu.Lock()
+	step := ""
+	if m := stepRe.FindStringSubmatch(msg); m != nil {
+		step = m[1][strings.LastIndex(m[1], "/")+1:]
+		sf.cardStep[opts.FeatureID] = step
+	} else if s, ok := sf.cardStep[opts.FeatureID]; ok {
+		step = s + "#"
 	}
-	if h.wt != nil {
-		return h.wt.Root()
+	if step != "" {
+		sf.steps = append(sf.steps, step+": "+firstLine(msg))
+		sf.mu.Unlock()
+		return sf.respondStep(opts, step, msg)
 	}
-	return h.root
-}
-
-// draftRequiredSections fills in the one section the running stage's gate
-// will ask for, simulating an agent that actually did its job. The blank
-// template leaves every section holding nothing but its `%% @gummi:` prompt,
-// which the undrafted-sections gate (correctly) refuses to advance — so a
-// fixture whose fake agent only emits chat would otherwise stall at its
-// first design gate. It writes only a section that is still undrafted, so a
-// stage that wrote its own content (or a discovered gummi-checks block)
-// keeps it. A test that wants the empty-artifact failure asserts it against
-// Advance directly rather than through this harness.
-func (h *harness) draftRequiredSections(f domain.Feature) {
-	if h.noDraft {
-		return
+	sf.session = append(sf.session, msg)
+	turn := len(sf.session)
+	sf.mu.Unlock()
+	if turn > 1 {
+		return say("ok: " + firstLine(msg))
 	}
-	var want []string
-	switch {
-	case f.Kind == domain.KindFeature && f.Stage == domain.StagePlan:
-		// the merged design stage owes what spec and plan each owed
-		want = []string{"Chosen approach", "Implementation notes"}
-	case f.Kind == domain.KindBug && f.Stage == domain.StagePlan:
-		want = []string{"Root cause"}
-	case f.Kind == domain.KindFeature && f.Stage == domain.StageVerify:
-		want = []string{"Verification plan"}
-	case f.Kind == domain.KindBug && f.Stage == domain.StageVerify:
-		want = []string{"Verification"}
-	case f.Kind == domain.KindResearch && f.Stage == domain.StagePlan:
-		// the shape stage's own stop condition: the question, its bounds,
-		// and the direction the survey then runs on
-		want = []string{"Questions", "Constraints", "Direction"}
-	case f.Kind == domain.KindResearch && f.Stage == domain.StageImplement:
-		// the survey's output, and what the done edge still asks for later —
-		// the artifact is durable, so writing it here satisfies both gates
-		want = []string{"Findings"}
-	default:
-		return
-	}
-	root := h.harnessRoot()
-	path := spec.LocateArtifact(
-		filepath.Join(root, f.ArtifactPath()),
-		filepath.Join(h.ws.DraftsDir(), spec.DraftFilename(&f)),
-		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
-	)
-	if path == "" {
-		return
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	content := string(raw)
-	for _, name := range spec.UndraftedSections(content, want) {
-		// append, never replace: the section may already hold % markers a
-		// test put there on purpose, and an agent drafting its section does
-		// not delete the reader's comments.
-		body, ok := spec.ViewSection(content, name)
-		if !ok {
-			return
+	switch sf.first {
+	case "spend":
+		return []agent.Event{
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 5000, Model: "m"}},
+			{Kind: agent.EventMessage, Text: "that was expensive"},
+			{Kind: agent.EventIdle},
 		}
-		next, _, err := spec.ReplaceSection(content, name, body+"drafted by the fake agent.\n\n")
-		if err != nil {
-			return
+	case "ask":
+		return []agent.Event{
+			usage(),
+			toolCall("a1", "ask_user", map[string]any{
+				"question": "Which format?",
+				"options":  []map[string]any{{"label": "json"}, {"label": "yaml"}},
+			}),
+			{Kind: agent.EventIdle},
 		}
-		content = next
+	case "workflow":
+		sess := sf.sessionCard()
+		ctx := context.Background()
+		if _, _, err := sf.h.eng.StartSessionSpec(ctx, sess, "Workflow test", "agent"); err != nil {
+			return say("spec_start failed: " + err.Error())
+		}
+		if _, err := sf.h.eng.WriteSessionSpec(ctx, sess, 1, wfSpec, "agent"); err != nil {
+			return say("spec write failed: " + err.Error())
+		}
+		return []agent.Event{
+			usage(),
+			toolCall("w1", "workflow_run", map[string]any{"recipe_yaml": wfRecipe}),
+			{Kind: agent.EventMessage, Text: "a workflow is on it"},
+			{Kind: agent.EventIdle},
+		}
 	}
-	if content != string(raw) {
-		_ = os.WriteFile(path, []byte(content), 0o600)
-	}
+	return say("done: " + firstLine(msg))
 }
 
-// stageCritique keys a script entry to a stage's critique pass rather
-// than to the stage's own writer. Review used to be a stage, so a script
-// said what the reviewer would answer by filing it under StageVerify; the
-// stage is gone, but the question it answered is not, so a script files
-// the critique's answer here instead. It is a test-local sentinel and
-// never reaches the store or the workflow.
-const stageCritique domain.Stage = "critique"
+// respondStep answers a step's turn: its brief, or (step ends in #) a
+// later turn on its card, such as the person's answer to its question.
+func (sf *sessionFake) respondStep(opts agent.SessionOpts, step, msg string) []agent.Event {
+	switch step {
+	case "make":
+		if sf.stepAsks {
+			return []agent.Event{
+				usage(),
+				toolCall("s1", "ask_user", map[string]any{
+					"question": "Plain text or markdown?",
+					"options":  []map[string]any{{"label": "plain"}, {"label": "markdown"}},
+				}),
+				{Kind: agent.EventIdle},
+			}
+		}
+		fallthrough
+	case "make#":
+		_ = os.WriteFile(filepath.Join(opts.WorkDir, "out.txt"), []byte("made by the run\n"), 0o600)
+		return say("Wrote it.\nDECISION: plain text")
+	case "validate":
+		return say("It is there.\nMET: DW-1")
+	}
+	return say("ok")
+}
 
-// scriptStage picks the script entry that answers this session.
-//
-// Normally that is the card's stored stage. The exception is a critique
-// pass: it runs as a reviewer-role session borrowing the stage it
-// critiques, so the card's stored stage cannot tell it apart from the
-// stage's own writer. A script answers the critique under stageCritique.
-//
-// Every critique routes here, the plan's included: with one design stage
-// there is no script that can tell a writer from its critique by stage
-// alone, so the sentinel is the only honest key. A script that branched
-// on opts.Role instead still works — it simply never sees the reviewer
-// session, and the default below answers it.
-func (h *harness) scriptStage(opts agent.SessionOpts) domain.Stage {
-	stage := h.stageFromWorkDir(opts.WorkDir)
-	if opts.Role != agent.RoleReviewer {
-		return stage
+// sessionCard is the run's session: the one freeform card that is no
+// session's child.
+func (sf *sessionFake) sessionCard() domain.Feature {
+	all, _ := sf.h.store.ListFeatures(context.Background())
+	for _, f := range all {
+		if f.IsFreeform() && !f.IsChild() {
+			return f
+		}
 	}
-	switch stage {
-	case domain.StageImplement, domain.StagePlan:
-		return stageCritique
-	}
-	return stage
+	sf.h.t.Error("no session card")
+	return domain.Feature{}
+}
+
+func firstLine(s string) string {
+	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
+	return s
 }

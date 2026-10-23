@@ -102,26 +102,22 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
   for (const theme of ['light', 'dark'] as const) {
     await L.theme_(theme);
 
-    // the board, with a design gate open on its spec
-    await L.open(b.gate);
+    // the board, with a session ready to land open
+    await L.open(b.ready);
     await L.rail();
     await L.snap('rail');
-    await L.open(b.gate);
-    await L.snap('gate-thread');
-    await L.tab('spec');
-    await L.snap('gate-spec');
+    await L.open(b.ready);
+    await L.snap('ready-thread');
 
-    // a failed verify: the decision, the diff with a pending comment, the checks
-    await L.open(b.failed);
-    await L.snap('failed-thread');
+    // a session with a comment on its diff: the diff, its spec, its stats
+    await L.open(b.commented);
+    await L.snap('commented-thread');
     await L.tab('diff');
-    await L.snap('failed-diff');
-    await L.tab('spec');
-    await L.snap('failed-spec');
+    await L.snap('commented-diff');
     await L.tab('pr');
-    await L.snap('failed-pr');
+    await L.snap('commented-pr');
     await L.tab('stats');
-    await L.snap('failed-stats');
+    await L.snap('commented-stats');
 
     // an agent's question
     await L.open(b.ask);
@@ -129,31 +125,22 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
 
     // a running card, streaming
     await L.open(b.running!);
-    await expect(page.getByTestId('live')).toBeVisible();
     await L.snap('running-thread');
 
-    // landed, backlog with a dependency, a bug, freeform, research, a goal, a stack
+    // landed, sessions, a stack
     await L.open(b.landed);
     await L.snap('landed-thread');
     await L.tab('stats');
     await L.snap('landed-stats');
-    await L.open(b.backlog[1]);
-    await L.snap('backlog-thread');
-    await L.open(b.bug);
-    await L.snap('bug-thread');
+    await L.open(b.sessions[1]);
+    await L.snap('session-thread');
     await L.open(b.freeform!);
     await L.snap('freeform-thread');
-    await L.open(b.research);
-    await L.snap('research-thread');
-    await L.tab('spec');
-    await L.snap('research-spec');
-    await L.open(b.goal);
-    await L.snap('goal-thread');
     await L.open(b.stacked[0]);
     await L.snap('stacked-thread');
 
     // the card's menu and one of its dialogs
-    await L.open(b.backlog[0]);
+    await L.open(b.sessions[0]);
     await page.getByTestId('card-actions').click();
     await expect(page.getByTestId('card-actions-menu')).toBeVisible();
     await L.snap('card-menu');
@@ -193,15 +180,7 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
 
     // the board's other surfaces
     await L.view('newcard', async () => { await L.rail(); await page.getByTestId('rail-new-menu').click(); await page.getByTestId('rail-new').click(); });
-    await L.view('goals', () => L.more('goals'));
-    await L.more('goals');
-    await page.getByTestId(`goal-row-${b.goal}`).click();
-    await expect(page.getByTestId('view-goal')).toBeVisible();
-    await L.snap('view-goal');
-    await page.keyboard.press('Escape');
     await L.view('stacks', () => L.more('stacks'));
-    await L.view('ingest', () => L.more('ingest'));
-    await L.view('bugs', () => L.more('bugs'));
     await L.view('doctor', () => L.more('doctor'));
     await L.view('fleet', async () => { await L.rail(); await page.getByTestId('rail-fleet').click(); });
   }
@@ -211,7 +190,7 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await L.theme_('light');
     for (const [w, hgt] of [[1280, 720], [1024, 768], [1440, 900]]) {
       await page.setViewportSize({ width: w, height: hgt });
-      for (const id of [b.failed, b.ask, b.goal]) {
+      for (const id of [b.commented, b.ask]) {
         await L.open(id);
         const thread = await page.getByTestId('thread').boundingBox();
         expect(thread!.height, `${id} at ${w}×${hgt}: the thread keeps room`).toBeGreaterThan(hgt * 0.3);
@@ -222,7 +201,7 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
   }
 
   // the connection drops: the pill says so and answers pause
-  await L.open(b.gate);
+  await L.open(b.ready);
   await server.stop();
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'reconnecting');
   for (const theme of ['light', 'dark'] as const) {

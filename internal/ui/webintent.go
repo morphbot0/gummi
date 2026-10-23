@@ -62,9 +62,6 @@ type webInput struct {
 	number  *int
 	profile string
 	repo    string
-	// mode is the autopilot dialog's answer; empty takes the one the
-	// dialog confirms.
-	mode string
 	// method is the landing method the request names; empty is squash.
 	method domain.LandMethod
 	// keepBranch: the request asks that the closing it makes leave the
@@ -81,13 +78,6 @@ type webInput struct {
 	// downstream — a goal that verified while an approval was being
 	// followed — is a person's to confirm, never the request's.
 	land bool
-	// autopilot: the request is about the autopilot switch itself, so the
-	// switch's dialog is its to answer even without a mode.
-	autopilot bool
-	// handoverAsked: the person already chose autopilot on a form that
-	// said what it does (the new-card form's "Create & autopilot"), so the
-	// switch's hand-over is not asked a second time.
-	handoverAsked bool
 }
 
 // webOutcome is how an intent ended, in the TUI's own words.
@@ -280,7 +270,7 @@ func (t *webIntent) noticed(m *Shell, before noticeMsg) {
 		t.out.restore = n.restore
 		return
 	}
-	if n.isErr && !n.aside {
+	if n.isErr {
 		t.out.refused = n.webText()
 	}
 }
@@ -493,7 +483,7 @@ func (m *Shell) finishIntent(t *webIntent) webOutcome {
 		}
 	}
 	t.waiting = nil
-	if t.resetComposer && m.chip(t.card) == nil {
+	if t.resetComposer {
 		m.threadInput.Reset()
 	}
 	select {

@@ -22,7 +22,9 @@ import { initThread, jumpToStage } from './thread.js?v=__ASSET_V__'
 import { initDecision } from './decision.js?v=__ASSET_V__'
 import { initComposer } from './composer.js?v=__ASSET_V__'
 import { initSession, newSession } from './session.js?v=__ASSET_V__'
-import { initPanel, setTab, togglePanel } from './panel.js?v=__ASSET_V__'
+import { initPanel, setTab, togglePanel, refreshTab } from './panel.js?v=__ASSET_V__'
+import { initWorkflow, setOpenSpec } from './workflow.js?v=__ASSET_V__'
+import { chooseSpec } from './spec.js?v=__ASSET_V__'
 import { initMobile } from './mobile.js?v=__ASSET_V__'
 import { initKeys } from './keys.js?v=__ASSET_V__'
 import { palette, keysHelp } from './palette.js?v=__ASSET_V__'
@@ -32,7 +34,6 @@ import { h } from './dom.js?v=__ASSET_V__'
 import {
   initSelection, loadBoard, select, refresh, refreshAll, loadLive, nextNeeding, nextRunning, step
 } from './selection.js?v=__ASSET_V__'
-import { initResume } from './resume.js?v=__ASSET_V__'
 import { registerWorker, openPush } from './push.js?v=__ASSET_V__'
 import './views/index.js?v=__ASSET_V__'
 
@@ -140,9 +141,11 @@ async function startBoard () {
   initComposer(ctx)
   initSession(ctx)
   initPanel(ctx)
+  initWorkflow(ctx)
+  // a run's report is written into its spec: its link shows that spec
+  setOpenSpec((n) => { chooseSpec(state.sel, n); setTab('spec'); refreshTab('spec') })
   initMobile()
   initSelection()
-  initResume({ loadBoard, select: ctx.select })
   initApprovals()
   registerWorker()
   initKeys({

@@ -44,38 +44,21 @@ func TestAFreeformCardIsOffTheGraph(t *testing.T) {
 	if got := StageOpen.SuperState(); got != SuperInProgress {
 		t.Errorf("StageOpen.SuperState() = %q, want %q", got, SuperInProgress)
 	}
-	// Dependencies are settled from the moment it is minted: there is no
-	// design stage in which taking one on could still change the work.
-	if !AtOrPastCoding(StageOpen) {
-		t.Error("a freeform card is not at-or-past coding; it is coding from its first turn")
-	}
 }
 
-// TestAFreeformCardLandsWithoutVerifying is the whole trade the kind
-// rests on, stated in one predicate: a card in the workflow lands on a
-// verified branch, a freeform card lands on a human's read of its diff.
+// TestAFreeformCardLandsWithoutVerifying: a session lands on a person's
+// read of its diff, with no verified branch to have earned first.
 func TestAFreeformCardLandsWithoutVerifying(t *testing.T) {
 	ff := freeformCard(t)
 	if err := ff.MayLand(); err != nil {
 		t.Errorf("a freeform card may not land: %v", err)
 	}
 
-	// Every other kind still has to earn it, at every stage short of a
-	// verified one — which is DESIGN §10 D3's floor, unmoved.
-	for _, st := range Stages {
-		f := Feature{ID: "FD-001", Num: 1, Title: "t", Slug: "t", Stage: st}
-		if st == StageVerify {
-			if err := f.MayLand(); !errors.Is(err, ErrNotVerified) {
-				t.Errorf("an unstamped card at %s: MayLand() = %v, want ErrNotVerified", st, err)
-			}
-			f.VerifiedAt = time.Now()
-			if err := f.MayLand(); err != nil {
-				t.Errorf("a verified card may not land: %v", err)
-			}
-			continue
-		}
-		if err := f.MayLand(); !errors.Is(err, ErrNotVerified) {
-			t.Errorf("a feature at %s: MayLand() = %v, want ErrNotVerified", st, err)
+	// A legacy card with no landing of its own still refuses.
+	for _, k := range []Kind{KindGoal, KindResearch} {
+		f := Feature{ID: FeatureID(k.prefix() + "-001"), Num: 1, Kind: k, Title: "t", Slug: "t", Stage: StageDone}
+		if err := f.MayLand(); err == nil {
+			t.Errorf("a legacy %s card may land", k)
 		}
 	}
 }
@@ -212,11 +195,11 @@ func TestOnlyASessionIsContinuedAsASpec(t *testing.T) {
 	if err := ff.Validate(); err != nil {
 		t.Errorf("a session continued as a spec does not validate: %v", err)
 	}
-	if err := ff.MayLandAfterAll(); !errors.Is(err, ErrContinued) || !strings.Contains(err.Error(), "FD-002") {
-		t.Errorf("MayLandAfterAll = %v, want ErrContinued naming FD-002", err)
+	if err := ff.MayLand(); !errors.Is(err, ErrContinued) || !strings.Contains(err.Error(), "FD-002") {
+		t.Errorf("MayLand = %v, want ErrContinued naming FD-002", err)
 	}
 	ff.ContinuedAs = ""
-	if err := ff.MayLandAfterAll(); err != nil {
+	if err := ff.MayLand(); err != nil {
 		t.Errorf("a plain hand-off may not land after all: %v", err)
 	}
 

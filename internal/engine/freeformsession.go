@@ -73,11 +73,6 @@ type FreeformSession struct {
 
 	mu   sync.Mutex
 	sess *Session
-	// briefing is true while gummi's own handoff-brief turn is in flight
-	// on this card (freeformhandoff.go) — the one flag both faces' busy
-	// word reads, since the card's own session is not the session running
-	// that turn.
-	briefing bool
 	// workDir is the card's worktree, known once a backend has spawned;
 	// Commands reads the project's command files from it.
 	workDir string
@@ -109,10 +104,7 @@ type FreeformSession struct {
 	// first, guarded by mu. They go to the agent together as the next
 	// turn once this one ends (drainQueue) — including a turn that ended
 	// because it was interrupted, which is how "stop, and do this
-	// instead" is said — and until then each can be taken back. A line
-	// sent while the handoff brief drafts waits the same way, and the
-	// brief's own goroutine sends it once the brief has landed (sendQueued),
-	// so it never interleaves with the brief turn.
+	// instead" is said — and until then each can be taken back.
 	queue []queuedTurn
 
 	// objective is the card's objective (objective.go), read from the
@@ -205,21 +197,6 @@ func (e *Engine) OpenFreeform(ctx context.Context, f domain.Feature) (*FreeformS
 	return ff, nil
 }
 
-// NoteClosedFreeform adds a line from gummi to a closed freeform card's
-// conversation — what became of its work, once that is known — so a reader
-// of the closed card sees it beneath the last turn. The row is updated
-// too, so the line is there after a restart.
-func (e *Engine) NoteClosedFreeform(id domain.FeatureID, text string) {
-	e.mu.Lock()
-	sess := e.freeformClosed[id]
-	e.mu.Unlock()
-	if sess == nil {
-		return
-	}
-	sess.appendSystem(text)
-	e.persistClosed(sess)
-}
-
 // FreeformHistory is the conversation of a freeform card whose session has
 // ended, for a reader that wants to show what was said on a closed card.
 // ok is false for a card with no ended session in this engine.
@@ -277,6 +254,12 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		ff.dropLock()
 		return err
 	}
+	// A workflow step spends from its session's pool: with that spent, no
+	// backend of it starts (stepBudget would be no cap at all).
+	if e.stepPoolSpent(ctx, f) {
+		ff.dropLock()
+		return errStepPoolSpent
+	}
 	// The worktree, ensured here: this is what "gets its worktree/branch"
 	// means, and it is the same locate() every stage goes through, so the
 	// branch is cut the same way. A freeform card comes back with no artifact
@@ -306,6 +289,8 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		startedAt:   time.Now(),
 	}
 	sess.setSpawnInfo(ag.Name(), rc.Model, ag.Capabilities().ClientTools)
+	// a session's spec tools resolve the spec per call (specTarget): it
+	// may keep several, so no one path is the session's
 	sess.setByokRate(ag.CreditRate(rc.Model))
 	if len(seed) > 0 {
 		sess.transcript = append(sess.transcript, seed...)
@@ -315,7 +300,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	// the card has left, so a long conversation's later backends are
 	// capped by what is actually still there rather than by what was left
 	// when it opened. This is the one floor a freeform card keeps.
-	budget := e.stageBudget(f, sess.rate())
+	budget := e.sessionBudget(f, sess.rate())
 	sess.setBudget(budget)
 	e.seedCardSpend(sess)
 
@@ -350,10 +335,8 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	var mcpPath string
 	var mcpTeardown func()
 	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
-		tools = stageTools(domain.StageOpen, flavorStage, nil)
-		if h := toolHint(domain.StageOpen, flavorStage); h != "" {
-			hints = append(hints, h)
-		}
+		tools = freeformTools()
+		hints = append(hints, freeformToolHint)
 		// gummi's own watch, for a backend with no Monitor of its own
 		var extra []agent.ToolDef
 		if !caps.NativeWatch {
@@ -377,15 +360,15 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			tools = append(tools, skill...)
 			hints = append(hints, skillStageHint)
 		}
-		// The card tools (delegate.go) only once the person has given the
-		// card a delegation budget: a session that is never shown them
-		// cannot decide to file a card for every change.
-		if f.Delegate.Enabled() {
-			extra = append(extra, delegateTools()...)
-			tools = append(tools, delegateTools()...)
-			hints = append(hints, freeformDelegateHint)
+		// A session's spec and workflow tools (DESIGN §25): every
+		// session has them; a run's own steps do not.
+		if !f.IsChild() {
+			own := append(sessionSpecTools(), workflowTools()...)
+			extra = append(extra, own...)
+			tools = append(tools, own...)
+			hints = append(hints, sessionSpecHint, sessionWorkflowHintFor(ag))
 		}
-		path, teardown, merr := e.startMCPEndpoint(ctx, f, flavorStage, extra...)
+		path, teardown, merr := e.startMCPEndpoint(ctx, f, extra...)
 		if merr != nil {
 			cancel()
 			return merr
@@ -410,6 +393,14 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// and backgrounded commands have somewhere to report back to.
 		Watch:      true,
 		ScratchDir: e.scratchFilesDirFor(ff.id),
+		// A workflow step writes its artifacts into its run's directory,
+		// outside the session's checkout: a backend with a write cage opens
+		// it (DESIGN §25.4).
+		WriteDirs: e.stepWriteDirs(ctx, f),
+		// A workflow step is never spawned ReadOnly, a reading role's
+		// neither: that is a research session's allowlist, which would
+		// keep a reviewer from running the tests. Its preamble tells it
+		// to change no files, and a run flags one that did (DESIGN §25.4).
 		// Image bytes a backend returns are kept in the workspace's
 		// attachment store, which the page already draws.
 		ImageSink: func(data []byte, name string) string {
@@ -454,13 +445,14 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	}
 	sess.setState(StateInteractive)
 	e.trackAgentPID(ff.id, agentSess)
+	e.flushEnvNotices(sess)
 
 	ff.mu.Lock()
 	ff.sess = sess
 	ff.mu.Unlock()
 
 	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.pumpFreeform(ff, sess) }()
+	go func() { defer e.wg.Done(); e.pumpFreeform(ff, sess, agentSess) }()
 	ff.armIdleTimer()
 	return nil
 }
@@ -537,7 +529,10 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 	sess := ff.sess
 	ff.mu.Unlock()
 	spent := sess != nil && sess.isExhausted()
-	if sess != nil && sess.Live() && !spent {
+	// a backend that failed (its process died, its run errored) is not
+	// one to hand the next turn to: a fresh one picks the conversation up
+	failed := sess != nil && sess.errValue() != nil
+	if sess != nil && sess.Live() && !spent && !failed {
 		return sess, nil
 	}
 	// An exhausted session is respawned rather than refused — but only once
@@ -551,7 +546,10 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 		if ferr != nil {
 			return nil, ferr
 		}
-		if ff.engine.stageBudget(f, sess.rate()) <= 0 {
+		if ff.engine.sessionBudget(f, sess.rate()) <= 0 {
+			if ff.engine.stepOf(ctx, f) != nil {
+				return nil, errStepPoolSpent
+			}
 			return nil, fmt.Errorf("%s has spent its budget of %s; raise it to carry on", ff.id, domain.FormatDollars(float64(f.Budget.Envelope)))
 		}
 	}
@@ -567,7 +565,7 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 		// the row carries it (restoreFreeformLocked).
 		resumeID = snap.AgentSessionID
 	}
-	if spent && sess.Live() {
+	if (spent || failed) && sess.Live() {
 		// A spent backend is still running — exhaustFreeform stops the turn,
 		// not the process — so it has to be stopped before its replacement
 		// exists. Otherwise its pump outlives the session it was started
@@ -613,13 +611,6 @@ func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
 // A turn sent while the agent is still on the last one is queued rather
 // than refused: the person said it, and the agent should hear it next.
 func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []AttachmentRef) error {
-	return ff.sendTurn(ctx, msg, images, false)
-}
-
-// sendTurn is SendTurn. queued marks the batch sendQueued delivers after the
-// handoff brief: it passes the brief's own flag, which it is the one thing
-// that clears, and so is never queued behind itself.
-func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []AttachmentRef, queued bool) error {
 	cmds := ff.Commands()
 	// the session's own commands that are not a turn for the agent are
 	// answered here, before a backend is woken for them
@@ -652,7 +643,7 @@ func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []At
 			return err
 		}
 	}
-	if sess.Busy() || (!queued && ff.busyBriefing()) {
+	if sess.Busy() {
 		ff.enqueue(ctx, msg, images)
 		return nil
 	}
@@ -662,8 +653,12 @@ func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []At
 	ff.armIdleTimer()
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
 	// the transcript keeps the line as typed; the agent hears what a
-	// "/name" in it stands for
+	// "/name" in it stands for — and, while a workflow run is changing the
+	// tree, that it must not touch files (DESIGN §25.8)
 	wire := expandProjectCommands(cmds, ff.WorkDir(), msg)
+	if note := ff.engine.workflowTurnNote(ctx, ff.id); note != "" {
+		wire = note + "\n\n" + wire
+	}
 	ff.mu.Lock()
 	compacts := ff.compacts
 	ff.mu.Unlock()
@@ -895,70 +890,16 @@ func (ff *FreeformSession) drainQueue(sess *Session) {
 	b, ok := ff.takeQueue(sess)
 	if !ok {
 		// nothing the person said is waiting: the objective, if one is
-		// running, decides whether gummi sends the next turn
+		// running, decides whether gummi sends the next turn — and a
+		// workflow step hands its turn to its run
 		ff.advanceObjective(sess)
+		ff.workflowStepTurnEnded(sess)
 		return
 	}
 	go func() {
 		// an error is the session's own and already on it (SendTurn)
 		_ = ff.SendTurn(b.ctx, b.text, b.images)
 	}()
-}
-
-// nextQueued takes the next batch of lines queued while the brief drafted,
-// or, once none is left, lowers the brief flag. Both happen in one locked
-// step: a line sent before the flag drops is queued behind the batch, and a
-// line sent after it finds the queue empty and goes direct, so no line
-// overtakes one said before it. It takes nothing while a question is open,
-// as takeQueue does; the lines wait for the turn that follows.
-func (ff *FreeformSession) nextQueued(sess *Session) (queuedBatch, bool) {
-	asking := sess.Snapshot().PendingAsk != nil
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	if asking || len(ff.queue) == 0 {
-		ff.briefing = false
-		return queuedBatch{}, false
-	}
-	q := ff.queue
-	ff.queue = nil
-	return joinQueue(q)
-}
-
-// sendQueued sends the lines queued while the brief drafted, in the
-// caller's goroutine on the caller's context, which the engine joins, and
-// lowers the brief flag once none is left. Once ctx is done the lines are
-// not sent, and the record says so instead, so they are not dropped without
-// a trace.
-func (ff *FreeformSession) sendQueued(ctx context.Context, sess *Session) {
-	for {
-		b, ok := ff.nextQueued(sess)
-		if !ok {
-			return
-		}
-		if ctx.Err() != nil {
-			ff.noteUnsent(b.text, "gummi closed first")
-			continue
-		}
-		// A refusal that comes before the line is recorded (the envelope is
-		// spent, a question is open, the image is unsupported) would drop
-		// it without a trace, so the record names it. A backend failure
-		// after the line is on the record is already on the session too;
-		// the note then says why the turn did not go.
-		if err := ff.sendTurn(WithActor(ctx, actorOf(b.ctx)), b.text, b.images, true); err != nil {
-			ff.noteUnsent(b.text, "it could not be sent ("+err.Error()+")")
-		}
-		if sess.Busy() {
-			// the batch's turn is in flight: the lines queued since wait
-			// for it, and the pump sends them when it ends. The flag drops
-			// first, so a turn that ends in this window is drained here
-			// rather than leaving its lines to wait for a turn never to come.
-			ff.setBriefing(false)
-			if !sess.Busy() {
-				ff.drainQueue(sess)
-			}
-			return
-		}
-	}
 }
 
 // Kickoff sends the card's brief as the session's first turn, and does
@@ -1137,14 +1078,12 @@ func (ff *FreeformSession) CardSpent() float64 {
 func (ff *FreeformSession) Snapshot() Snapshot {
 	ff.mu.Lock()
 	sess := ff.sess
-	briefing := ff.briefing
 	ff.mu.Unlock()
 	obj, auditing := ff.objectiveView()
 	if sess == nil {
-		return Snapshot{Briefing: briefing, Objective: obj, Auditing: auditing}
+		return Snapshot{Objective: obj, Auditing: auditing}
 	}
 	snap := sess.Snapshot()
-	snap.Briefing = briefing
 	snap.Objective, snap.Auditing = obj, auditing
 	snap.Queued = ff.Queued()
 	for _, w := range ff.Watches() {
@@ -1314,9 +1253,12 @@ func (ff *FreeformSession) onIdleTimeout() {
 // closes — pumpConsult's shape, parametrized by the specific *Session
 // this goroutine was started for, since ff.sess can move on to a
 // respawned one while this pump is still draining the old backend's
-// final events.
-func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session) {
-	events := sess.agent().Events()
+// final events. It is handed the backend it relays, ag, rather than
+// reading it off sess: the session's handle can be dropped (a restore's
+// shape, an idle-out) before this goroutine first runs, and a nil there
+// would take the whole process down.
+func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session, ag agent.Session) {
+	events := ag.Events()
 	for {
 		select {
 		case <-sess.done:
@@ -1324,12 +1266,21 @@ func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session) {
 		case ev, ok := <-events:
 			if !ok {
 				if !sess.finalizedState() {
+					// its bridged tool calls died with it: an answer must
+					// reach a fresh backend as a turn, not a dead waiter
+					sess.clearResolversWaiting()
 					sess.setError(errSessionDied)
 					ff.settleObjective(domain.ObjectiveFailed, "the backend died: "+errSessionDied.Error())
+					ff.workflowStepErrored(sess, errSessionDied)
 					e.send(Event{Feature: ff.id, Kind: EventError, Err: errSessionDied})
 					sess.stop()
 				}
 				return
+			}
+			// Process-backed adapters learn their durable conversation id
+			// from the first backend event, after NewSession has returned.
+			if id, ok := sess.agent().(agent.Identified); ok && id.SessionID() != "" {
+				sess.setAgentSessionID(id.SessionID())
 			}
 			e.handleFreeform(ff, sess, ev)
 		}
@@ -1382,6 +1333,11 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		if sess.overBudget() {
 			e.exhaustFreeform(ff, sess)
 		}
+		if sess.Feature.IsChild() {
+			// a step spends from its session's pool, which its siblings
+			// share: the pool is held across them all
+			e.checkRunPool(ff.id)
+		}
 	case agent.EventIdle:
 		// No commit here: a turn ending is not a reason to commit. The agent
 		// commits what it means to keep; the rest stays in the worktree.
@@ -1431,6 +1387,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		sess.setError(ev.Err)
 		if ev.Err != nil {
 			ff.settleObjective(domain.ObjectiveFailed, "the backend errored: "+ev.Err.Error())
+			ff.workflowStepErrored(sess, ev.Err)
 		}
 	case agent.EventBudgetExhausted:
 		// The BACKEND's own cap, not gummi's envelope (handleBoard's
@@ -1501,6 +1458,12 @@ func (e *Engine) restoreFreeformLocked(f domain.Feature, snap state.SessionSnaps
 	rc, backend := e.sessionRole(f)
 	sess := restoredFreeformSession(f, snap)
 	e.stampSpawnInfo(sess)
+	// a question still open in the card's log is still the question: the
+	// answer re-arms on a fresh backend (AnswerAs → ensureBackend), and a
+	// line typed meanwhile is refused as an answer waiting to be given
+	if ask := e.openAskFor(context.Background(), f.ID, domain.StageOpen); ask != nil {
+		sess.setPendingAsk(ask)
+	}
 	ff := &FreeformSession{
 		engine: e, id: f.ID, rc: rc, backend: backend, sess: sess,
 	}
@@ -1547,6 +1510,7 @@ func restoredFreeformSession(f domain.Feature, snap state.SessionSnapshot) *Sess
 			ToolStatus: ToolStatus(m.ToolStatus), ToolOutput: m.ToolOutput,
 			AnsweredBy: m.AnsweredBy,
 			Images:     engineImages(m.Images),
+			At:         m.At, By: m.By,
 		})
 	}
 	sess.activity = append(sess.activity, snap.Activity...)

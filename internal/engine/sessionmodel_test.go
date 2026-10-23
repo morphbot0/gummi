@@ -236,15 +236,14 @@ func TestAClosedSessionKeepsItsConversation(t *testing.T) {
 	if err := ff.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CloseFreeform(ctx, f.ID, "t"); err != nil {
+	if _, err := store.CloseCard(ctx, f.ID, "t"); err != nil {
 		t.Fatal(err)
 	}
 	if e1.Freeform(f.ID) != nil {
 		t.Fatal("a closed session is still open in the engine")
 	}
-	e1.NoteClosedFreeform(f.ID, "Continued as the spec FD-031.")
 	snap, ok := e1.FreeformHistory(f.ID)
-	if !ok || !strings.Contains(transcriptText(snap), "drop the leaked pty fd") || !strings.Contains(transcriptText(snap), "Continued as the spec FD-031.") {
+	if !ok || !strings.Contains(transcriptText(snap), "drop the leaked pty fd") {
 		t.Fatalf("the closed session's conversation is not readable (ok=%v):\n%s", ok, transcriptText(snap))
 	}
 	if err := e1.Close(); err != nil {
@@ -260,7 +259,7 @@ func TestAClosedSessionKeepsItsConversation(t *testing.T) {
 		t.Error("a closed session came back open after a restart")
 	}
 	snap, ok = e2.FreeformHistory(f.ID)
-	if !ok || !strings.Contains(transcriptText(snap), "Added pty.go.") || !strings.Contains(transcriptText(snap), "Continued as the spec FD-031.") {
+	if !ok || !strings.Contains(transcriptText(snap), "drop the leaked pty fd") || !strings.Contains(transcriptText(snap), "Added pty.go.") {
 		t.Errorf("the closed session's conversation did not survive a restart (ok=%v):\n%s", ok, transcriptText(snap))
 	}
 }

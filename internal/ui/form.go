@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -94,15 +93,7 @@ func fieldRow(s *theme.Styles, focused bool, label string) string {
 // user meets showed a bare "> 2400": no unit, and no sign that 0 means
 // anything but a rejected entry. A caption is drawn whatever the field
 // holds, which is the whole reason it is one and not a placeholder.
-//
-// The three creation dialogs share it rather than each writing their own,
-// which is how the feature form and the bug form drift. Research passes
-// the other hint: an RS card carries no default budget, so 0 is refused
-// there rather than meaning uncapped (rsForm.submit).
-const (
-	envelopeHintCapped   = "dollars · 0 = uncapped"
-	envelopeHintRequired = "dollars · required"
-)
+const envelopeHintCapped = "dollars · 0 = uncapped"
 
 // repoUnset is repoPicker.idx while no repository has been chosen. A
 // picker with a real choice to make starts here and can never return:
@@ -119,7 +110,7 @@ const repoUnsetLabel = "choose one"
 const repoUnchosenErr = "select a repository — a workspace with `repos:` has no default"
 
 // repoPicker is the repo-selector field shared by every managed-repo
-// creation dialog (feature, bug, research, ingest). It offers exactly one
+// creation dialog (a session, a stack card). It offers exactly one
 // of two things, never a mix:
 //
 //   - the configured `repos:` names, when there are any. Such a workspace
@@ -228,10 +219,6 @@ func (p *repoPicker) cycle(delta int) {
 	}
 	p.idx = ((p.idx+delta)%total + total) % total
 }
-
-// bugSeverityChoices are the severities the new-card dialog cycles
-// through for a bug; the first ("") means unset — triage classifies it.
-var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
 
 // selectName settles the picker on a configured name, for a dialog that
 // inherits the repository rather than asking for it — a card stacked on

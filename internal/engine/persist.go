@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
-	"strconv"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -66,19 +64,6 @@ func (e *Engine) persist(s *Session) {
 	e.saveLocked(s)
 }
 
-// persistClosed saves a closed freeform session's row, which persist will
-// not: the session has stopped, but its row is the closed card's record
-// and is never dropped, so a line added to it afterwards (what became of
-// the work) has to reach it.
-func (e *Engine) persistClosed(s *Session) {
-	if !e.cfg.Persist || e.cfg.Store == nil || !s.Feature.IsFreeform() {
-		return
-	}
-	e.persistMu.Lock()
-	defer e.persistMu.Unlock()
-	e.saveLocked(s)
-}
-
 // saveLocked writes a session's row. The caller holds persistMu and has
 // decided the session may write.
 func (e *Engine) saveLocked(s *Session) {
@@ -95,15 +80,6 @@ func (e *Engine) saveLocked(s *Session) {
 		SpendOut:     snap.Spend.OutputTokens,
 		SpendModel:   snap.Spend.Model,
 		Activity:     snap.Activity,
-		Verdict:      snap.Verdict,
-		// gummi's own ceiling on that verdict travels with it: a verdict
-		// saved without the floor that overruled it reads, on the next
-		// process, as the agent's unchallenged word. The kind rides too:
-		// it is what makes a restored promise floor re-checkable instead
-		// of a stale stamp only a fresh verify run could clear.
-		VerdictFloor:       snap.VerdictFloor,
-		VerdictFloorKind:   snap.VerdictFloorKind,
-		VerdictFloorReason: snap.VerdictFloorReason,
 		// And so does the budget stop. A session that ran out is saved as
 		// StateDone like any other finished one, so without this a new
 		// process cannot tell a stage that finished from a stage that was
@@ -125,183 +101,10 @@ func (e *Engine) saveLocked(s *Session) {
 			// the user-message row this stamp exists to keep out.
 			AnsweredBy: m.AnsweredBy,
 			Images:     stateImages(m.Images),
+			At:         m.At, By: m.By,
 		})
 	}
 	_ = e.cfg.Store.SaveSession(context.Background(), rec)
-	// A freeform card's events are NOT mirrored into the card-event log,
-	// and its row above is the whole of its durable record instead. The log
-	// is what a card's thread renders for a stage that is no longer live,
-	// and a freeform card's thread renders its session — so mirroring would
-	// draw the same conversation twice, once from each. Nothing else reads
-	// the log for such a card either: cardrun files events under the stage
-	// passes a freeform card never has (DESIGN §19.3).
-	if !s.Feature.IsFreeform() {
-		_ = e.mirrorEvents(s, snap)
-	}
-}
-
-// mirrorEvents appends this save's new card-event-log entries: the
-// generation's stage_enter (once, via dedupe), any transcript entries
-// that have settled since the last save, and — once the session reaches
-// StateDone — the stage_exit that closes the generation out and prunes
-// the stage's successful tool output. Best-effort, like persist itself:
-// a mirror failure must never break the live session.
-func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
-	// prefix discriminates this session generation's events from any
-	// other generation's on the same stage (a review bounce, a resumed
-	// card) so their dedupe keys never collide. It is the same key this
-	// generation's realized spend is filed under (Session.generation),
-	// so the log and the meter agree on what one run of a stage is.
-	prefix := s.generation()
-
-	var evs []state.CardEvent
-
-	stageEnterPayload, _ := json.Marshal(map[string]string{
-		"role": string(snap.Role), "model": snap.Model,
-		"flavor": flavorString(s.flavor()),
-	})
-	evs = append(evs, state.CardEvent{
-		Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
-		Kind: state.EventStageEnter, At: s.startedAt,
-		Payload: string(stageEnterPayload), Dedupe: prefix + ":stage_enter",
-	})
-
-	for i, m := range snap.Transcript {
-		// A transcript entry's ord is stable while its content is still
-		// growing (a streaming assistant reply, an unresolved tool call
-		// awaiting its result): mirroring it now would freeze the
-		// truncated in-progress text under a dedupe key that can never
-		// be overwritten. So an entry is mirrored only once it has
-		// settled — a later save picks up anything skipped here, once
-		// it has.
-		if m.Author == AuthorTool {
-			evs = append(evs, toolEvents(snap, m, prefix, i)...)
-			continue
-		}
-		if m.Streaming || m.Author == AuthorThinking || m.Author == AuthorTasks {
-			continue
-		}
-		// The echo of an answer the unattended loop took by itself:
-		// AnswerAs records the exchange in the transcript as a
-		// user-authored turn so a restored session reads as a
-		// conversation, but mirrored verbatim it lands here as a plain
-		// user message — and a user message is what the stretch
-		// derivation reads as a person taking the card back, closing the
-		// autopilot period the same second the machine answered its own
-		// question. The ask event beside it is the durable record of the
-		// exchange and already carries the true answerer, so the echo is
-		// not mirrored at all: the transcript keeps it, this log does
-		// not. Only the autopilot stamp is skipped — a person's answer
-		// still mirrors, and its echo closing a period is harmless (the
-		// ask row filed under the user's name already closed it) — and a
-		// plain typed send is never stamped in the first place.
-		if m.Author == AuthorUser && m.AnsweredBy == state.ActorAutopilot {
-			continue
-		}
-		payload, _ := json.Marshal(struct {
-			Author  string                `json:"author"`
-			Content string                `json:"content"`
-			By      string                `json:"by,omitempty"`
-			Images  []state.AttachmentRef `json:"images,omitempty"`
-		}{Author: string(m.Author), Content: m.Content, By: m.By, Images: stateImages(m.Images)})
-		evs = append(evs, state.CardEvent{
-			Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
-			Kind: state.EventMessage, At: eventTime(m.At), Payload: string(payload),
-			Dedupe: prefix + ":message:" + strconv.Itoa(i),
-		})
-	}
-
-	done := snap.State == StateDone
-	if done {
-		// ctx_peak/ctx_limit are the only facts written here that are not
-		// derivable from the log: the session row holding them is deleted
-		// as the stage completes, and nothing else ever saw them. Everything
-		// else a reader wants about this session — its turns, its tools, how
-		// long it ran — stays derived from the events above, so this payload
-		// never becomes a second source of truth for a fact that already has
-		// one (DESIGN §6.3).
-		peak := s.contextPeak()
-		payload, _ := json.Marshal(map[string]any{
-			"verdict": snap.Verdict, "credits": snap.Spend.Credits,
-			"ctx_peak": peak.Tokens, "ctx_limit": peak.Limit,
-		})
-		evs = append(evs, state.CardEvent{
-			Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
-			Kind: state.EventStageExit, At: time.Now(),
-			Payload: string(payload), Dedupe: prefix + ":stage_exit",
-		})
-	}
-
-	if err := e.cfg.Store.AppendEvents(context.Background(), evs); err != nil {
-		return err
-	}
-	if done {
-		return e.cfg.Store.PruneStageOutput(context.Background(), snap.Feature.ID, snap.Feature.Stage)
-	}
-	return nil
-}
-
-// toolEvents mirrors one AuthorTool transcript entry as the one or two
-// rows the durable log wants for it.
-//
-// A call gummi ran itself — a check, a budget nudge — knew its outcome
-// before it was ever recorded, so it is one row and that row carries
-// everything. A call an agent made is two: the call, written the moment
-// it happened, and its outcome, written when it arrives.
-//
-// The split is what makes the tool record exist at all. Waiting for an
-// outcome before recording anything means recording nothing on every
-// backend that does not report one — and three of gummi's six do not
-// (agent.EventToolResult's own doc says so). A call whose result never
-// comes now leaves a row saying it was called, which is the truth, in
-// place of the silence that used to read as "this card used no tools".
-//
-// Both dedupe keys are derived from the entry's index within this
-// generation, so a save that re-walks a transcript it has already
-// mirrored is a no-op, and a call that settles between two saves adds its
-// outcome without disturbing the call.
-func toolEvents(snap Snapshot, m Message, prefix string, i int) []state.CardEvent {
-	payload, _ := json.Marshal(state.ToolPayload{
-		Label: m.Content, Tool: m.Tool, Detail: m.Detail, Call: m.CallID, Parent: m.Parent,
-	})
-	call := state.CardEvent{
-		Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
-		Kind: state.EventTool, At: eventTime(m.At), Payload: string(payload),
-		Dedupe: prefix + ":tool:" + strconv.Itoa(i),
-	}
-	// gummi's own line: no call id to correlate on, and the outcome (if
-	// it has one) was known when it was appended. One row, as before.
-	if m.CallID == "" {
-		call.Status = string(m.ToolStatus)
-		call.Output = m.ToolOutput
-		return []state.CardEvent{call}
-	}
-	if m.ToolStatus == "" {
-		return []state.CardEvent{call}
-	}
-	var ms int64
-	if !m.DoneAt.IsZero() && !m.At.IsZero() {
-		ms = m.DoneAt.Sub(m.At).Milliseconds()
-	}
-	result, _ := json.Marshal(state.ToolPayload{Label: m.Content, Call: m.CallID, MS: ms})
-	return []state.CardEvent{call, {
-		Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
-		Kind: state.EventToolResult, Status: string(m.ToolStatus),
-		At: eventTime(m.DoneAt), Payload: string(result), Output: m.ToolOutput,
-		Dedupe: prefix + ":tool_result:" + strconv.Itoa(i),
-	}}
-}
-
-// eventTime prefers when the thing actually happened over when the
-// mirror got around to writing it down. A zero time means the entry
-// predates the stamp — a transcript restored from a previous process,
-// which carries its messages but not their clocks — and the write time
-// is then the closest honest answer available.
-func eventTime(at time.Time) time.Time {
-	if at.IsZero() {
-		return time.Now()
-	}
-	return at
 }
 
 // persistDelete removes a feature's persisted session.
@@ -314,11 +117,10 @@ func (e *Engine) persistDelete(id domain.FeatureID) {
 	_ = e.cfg.Store.DeleteSession(context.Background(), id)
 }
 
-// Restore reloads persisted sessions into the engine as paused,
-// transcript-carrying sessions the user can re-run or re-attach. It
-// must be called once, before the UI starts. Features whose stage no
-// longer matches the persisted session are skipped (the store is the
-// source of truth for the current stage).
+// Restore reloads persisted sessions into the engine as transcript-carrying
+// sessions with no backend, which their next turn brings up. It must be
+// called once, before the UI starts. Rows whose card has since moved on are
+// skipped (the store is the source of truth for the card's stage).
 func (e *Engine) Restore(ctx context.Context) error {
 	if !e.cfg.Persist || e.cfg.Store == nil {
 		return nil
@@ -338,127 +140,13 @@ func (e *Engine) Restore(ctx context.Context) error {
 		if err != nil || f.Stage != snap.Stage {
 			continue // stale session for a since-advanced feature
 		}
-		// A freeform card's row rebuilds its own session, not a stage one:
-		// it has no stage, so roleForStage below would skip it and the
-		// conversation — which for such a card is the whole context a
-		// person comes back to — would be lost on every restart.
-		if f.IsFreeform() {
+		// Only a session's row rebuilds a session: a legacy workflow card's
+		// stage session is never run again, so its row is left where it is.
+		// A session already open in this process is newer than its row, and
+		// replacing it would orphan its backend.
+		if _, open := e.freeform[f.ID]; f.IsFreeform() && !open {
 			e.restoreFreeformLocked(f, snap)
-			continue
 		}
-		role, ok := roleForStage(f)
-		if !ok {
-			continue
-		}
-		// The pass flavor is persisted on the session row, so a restored
-		// session keeps its identity (stage / critique / rebase) whatever
-		// stage it borrowed — a rebase pass on an implementer-owned stage
-		// must not be mistaken for the stage's own run. A legacy row
-		// predating the flavor column falls back to the role/stage
-		// inference the column replaced.
-		critique, rebase := parseFlavor(snap.Flavor)
-		if snap.Flavor == "" {
-			critique = f.Stage == domain.StagePlan && snap.Role == string(agent.RoleReviewer)
-			rebase = snap.Role == string(agent.RoleImplementer) && role != agent.RoleImplementer
-		}
-		if critique {
-			role = agent.RoleReviewer
-		}
-		if rebase {
-			role = agent.RoleImplementer
-			// a crash mid-session can strand the worktree mid-rebase; abort
-			// so it comes back clean (best-effort, like the live settle).
-			if wt, merr := e.mgr(ctx, &f); merr == nil {
-				_, _ = wt.AbortRebase(ctx, &f)
-			}
-		}
-		// A restored session must keep its original startedAt where one
-		// exists, or its already-mirrored transcript would re-mirror
-		// under a new generation prefix and duplicate. Legacy rows
-		// predating the column (empty or unparseable) fall back to now.
-		startedAt, serr := time.Parse(time.RFC3339Nano, snap.StartedAt)
-		if serr != nil {
-			startedAt = time.Now()
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		s := &Session{
-			Feature:     f,
-			Role:        role,
-			Interactive: restoredState(snap.State) == StateInteractive,
-			Critique:    critique,
-			Rebase:      rebase,
-			state:       restoredState(snap.State),
-			done:        make(chan struct{}),
-			ctx:         ctx,
-			cancel:      cancel,
-			startedAt:   startedAt,
-		}
-		for _, m := range snap.Transcript {
-			s.transcript = append(s.transcript, Message{
-				Author: Author(m.Author), Content: m.Content,
-				ToolStatus: ToolStatus(m.ToolStatus), ToolOutput: m.ToolOutput,
-				// the stamp comes back with the echo it rides on, so
-				// the mirror's skip holds across the restart instead
-				// of failing open on the first post-restore save.
-				AnsweredBy: m.AnsweredBy,
-				Images:     engineImages(m.Images),
-			})
-		}
-		s.activity = append(s.activity, snap.Activity...)
-		s.spend = usageFrom(snap)
-		if snap.Error != "" {
-			s.err = restoredErr(snap.Error)
-		}
-		s.verdict = snap.Verdict
-		// restored alongside the verdict it overrules, so the rehydrated
-		// session judges the stage the way the live one did — and can still
-		// say which check made it say so. The kind comes back with them: a
-		// promise floor restored without its kind could never be re-checked,
-		// and the stale stamp this floor exists to avoid would survive every
-		// restart.
-		s.verdictFloor = snap.VerdictFloor
-		s.verdictFloorKind = snap.VerdictFloorKind
-		s.verdictFloorReason = snap.VerdictFloorReason
-		// A restored promise floor must stay re-checkable across the restart
-		// it just survived, so arm it with where its branch and artifact live.
-		// Best-effort like the restore itself: a locate that fails (the
-		// worktree gone) leaves the paths empty, the read path keeps the
-		// stamp, and the landing gate's own re-read stays the last word.
-		if snap.VerdictFloorKind == FloorPromise {
-			if workDir, specPath, lerr := e.locate(ctx, f); lerr == nil {
-				s.cachePromiseFloorPaths(workDir, specPath)
-			}
-		}
-		// and the budget stop, so the restored session still knows it was
-		// cut off rather than finished
-		s.exhausted = snap.Exhausted
-		s.setAgentSessionID(snap.AgentSession)
-		e.stampSpawnInfo(s)
-		// An ask that was open when the process died is re-armed from its
-		// durable decision row (DESIGN §6.3's reopen path): the blocked
-		// tool call and its resolver died with the process, but the record
-		// of the question did not. Free-form only — the recorded options
-		// are never stored — so the answer is prose, riding a fresh turn.
-		if open := e.openAskFor(ctx, snap.Feature, snap.Stage); open != nil {
-			s.setPendingAsk(open)
-		}
-		// A resumable live session is being rehydrated (a paused interactive
-		// question, an autonomous run picked up again): stop the prior one,
-		// or its pump would outlive Restore and, unjoined by Close, leak.
-		// Mirrors the old.stop() both replace and RunWith do on overwrite.
-		if old := e.live[snap.Feature]; old != nil {
-			// ...unless it is still in flight in THIS process, where the
-			// live session is by definition newer than the row it was
-			// persisted into. Rehydrating over it would stop a working
-			// agent mid-turn and hand the driver a paused snapshot, which
-			// reads as "died mid-turn, re-dispatch" — the double-spawn a
-			// resume onto an in-flight stage must not do (DESIGN §4.2).
-			if st := old.State(); st == StateRunning {
-				continue
-			}
-			old.stop()
-		}
-		e.live[snap.Feature] = s
 	}
 	return nil
 }
@@ -489,25 +177,4 @@ func (e *Engine) openAskFor(ctx context.Context, id domain.FeatureID, stage doma
 		}
 	}
 	return nil
-}
-
-// restoredErr rebuilds a session error from its persisted text (the
-// original error type is not preserved; the message is what surfaces).
-type restoredErr string
-
-func (e restoredErr) Error() string { return string(e) }
-
-// restoredState maps a persisted state to the state a reloaded session
-// resumes in: a running session was interrupted by the restart,
-
-// so it comes back paused (resumable); done/paused/interactive persist.
-func restoredState(st string) SessionState {
-	switch SessionState(st) {
-	case StateDone:
-		return StateDone
-	case StateInteractive:
-		return StateInteractive
-	default:
-		return StatePaused
-	}
 }

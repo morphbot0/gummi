@@ -20,15 +20,15 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-func verified(tip string) *domain.Feature {
+func session() *domain.Feature {
 	return &domain.Feature{
-		ID: "FD-208", Title: "Rate-limit pairing", Slug: "rate-limit", BranchScheme: domain.BranchSchemeKind,
-		Stage: domain.StageVerify, VerifiedAt: time.Unix(1, 0), VerifiedRev: tip,
+		ID: "FF-208", Kind: domain.KindFreeform, Title: "Rate-limit pairing", Slug: "rate-limit", BranchScheme: domain.BranchSchemeKind,
+		Stage: domain.StageOpen,
 	}
 }
 
 func TestRefusalNamesEveryCardThatIsNotPublishable(t *testing.T) {
-	base := func() *domain.Feature { f := verified("x"); return f }
+	base := session
 	cases := []struct {
 		name string
 		mut  func(*Card)
@@ -37,9 +37,8 @@ func TestRefusalNamesEveryCardThatIsNotPublishable(t *testing.T) {
 		{"research", func(c *Card) { c.F.Kind = domain.KindResearch }, CodeNoBranch},
 		{"goal", func(c *Card) { c.F.Kind = domain.KindGoal }, CodeNoBranch},
 		{"main checkout", func(c *Card) { c.F.MainCheckout = true }, CodeNoBranch},
-		{"todo", func(c *Card) { c.F.Stage = domain.StageTodo }, CodeNoBranch},
+		{"legacy workflow card", func(c *Card) { c.F.Kind, c.F.Stage = domain.KindFeature, domain.StageVerify }, CodeNoBranch},
 		{"stacked", func(c *Card) { c.F.StackID = "S1" }, CodeStacked},
-		{"goal member", func(c *Card) { c.F.GoalID = "GL-1" }, CodeGoalMember},
 		{"landed", func(c *Card) { c.Landed = true }, CodeLanded},
 		{"continued", func(c *Card) { c.F.ContinuedAs = "FD-9" }, CodeContinued},
 		{"busy", func(c *Card) { c.Busy = true }, CodeBusy},
@@ -56,43 +55,24 @@ func TestRefusalNamesEveryCardThatIsNotPublishable(t *testing.T) {
 	if r := Refusal(Card{F: base()}); r != nil {
 		t.Fatalf("a verified card is refused: %v", r)
 	}
-	dropped := base()
-	dropped.GoalID, dropped.GoalDroppedAt = "GL-1", time.Unix(2, 0)
-	if r := Refusal(Card{F: dropped}); r != nil {
-		t.Fatalf("a card its goal dropped is refused: %v", r)
-	}
 }
 
 func TestTheFloorIsTheLandingFloor(t *testing.T) {
-	if Floor(verified("abc"), "abc", 0) != nil {
-		t.Fatal("verified at the tip should be ready")
+	if Floor(session(), 0) != nil {
+		t.Fatal("a session with no open comments should be ready")
 	}
-	if e := Floor(verified("abc"), "def", 0); e == nil || e.Code != CodeNotVerified {
-		t.Fatalf("a tip past the verified rev = %v, want not-verified", e)
+	if e := Floor(session(), 2); e == nil || e.Code != CodeUnresolved {
+		t.Fatalf("a session with open comments = %v, want unresolved", e)
 	}
-	// the reason reads as one sentence, whichever shape the landing rule
-	// words it in
-	mid := verified("abc")
-	mid.Stage, mid.VerifiedAt, mid.VerifiedRev = domain.StageImplement, time.Time{}, ""
-	for _, e := range []*Error{Floor(mid, "abc1234", 0), Floor(verified("abc"), "def", 0)} {
-		if e == nil || !strings.HasPrefix(e.Text, "the tip ") || strings.Contains(e.Text, ":  ") || strings.Contains(e.Text, ": (") || strings.Contains(e.Text, "not verified: not") {
-			t.Fatalf("the floor's reason reads %q", e)
-		}
-	}
-	ff := &domain.Feature{ID: "FF-1", Kind: domain.KindFreeform, Stage: domain.StageOpen}
-	if Floor(ff, "abc", 0) != nil {
-		t.Fatal("a freeform card with no open comments should be ready")
-	}
-	if e := Floor(ff, "abc", 2); e == nil || e.Code != CodeUnresolved {
-		t.Fatalf("a freeform card with open comments = %v, want unresolved", e)
-	}
-	handed := verified("abc")
+	handed := session()
 	handed.Stage, handed.HandedOffAt = domain.StageDone, time.Unix(3, 0)
-	if Floor(handed, "abc", 0) != nil {
-		t.Fatal("a handed-off card at its verified rev should be ready")
+	if Floor(handed, 0) != nil {
+		t.Fatal("a handed-off session should be ready")
 	}
-	if Floor(handed, "def", 0) == nil {
-		t.Fatal("a handed-off card past its verified rev must not be ready")
+	continued := session()
+	continued.ContinuedAs = "FD-9"
+	if e := Floor(continued, 0); e == nil || e.Code != CodeNotVerified {
+		t.Fatalf("a session continued as a spec = %v, want held", e)
 	}
 }
 
@@ -156,7 +136,7 @@ func TestRepoOfURL(t *testing.T) {
 // must not import it (DESIGN §22.7).
 func TestOnlyPersonFacingCodeImportsPublish(t *testing.T) {
 	root := filepath.Join("..", "..")
-	for _, pkg := range []string{"engine", "driver", "mcp", "goalpolicy", "schedule", "agent", "verify", "spec", "workflow", "state", "worktree"} {
+	for _, pkg := range []string{"engine", "driver", "mcp", "schedule", "agent", "verify", "spec", "state", "worktree"} {
 		p, err := build.ImportDir(filepath.Join(root, "internal", pkg), 0)
 		if err != nil {
 			t.Fatalf("%s: %v", pkg, err)
@@ -190,7 +170,7 @@ test -f "$GH_FAKE/fail-$1-$2" && { cat "$GH_FAKE/fail-$1-$2" >&2; exit 1; }
 case "$1 $2" in
 "auth status") exit 0 ;;
 "repo view") cat "$GH_FAKE/repo.json" ;;
-"pr list") test -f "$GH_FAKE/move" && { git update-ref refs/heads/feat/rate-limit "$(cat "$GH_FAKE/move")"; rm "$GH_FAKE/move"; }; cat "$GH_FAKE/list.json" 2>/dev/null || echo '[]' ;;
+"pr list") test -f "$GH_FAKE/move" && { git update-ref refs/heads/ff/rate-limit "$(cat "$GH_FAKE/move")"; rm "$GH_FAKE/move"; }; cat "$GH_FAKE/list.json" 2>/dev/null || echo '[]' ;;
 "pr view") cat "$GH_FAKE/view.json" ;;
 "pr create") test -f "$GH_FAKE/fail-create" && { echo "boom" >&2; exit 1; }; cat > "$GH_FAKE/body"; cat "$GH_FAKE/create-says" 2>/dev/null || echo "https://github.com/acme/widget/pull/512" ;;
 "pr edit") cat > "$GH_FAKE/edit-body" ;;
@@ -236,14 +216,14 @@ func newWorld(t *testing.T) *world {
 	// the person chose the parent for this fork's PRs
 	w.git("config", "remote.upstream.gh-resolved", "base")
 	w.git("config", "url."+w.bare+".insteadOf", "git@github.com:me/widget.git")
-	w.git("checkout", "-q", "-b", "feat/rate-limit")
+	w.git("checkout", "-q", "-b", "ff/rate-limit")
 	w.git("commit", "-q", "--allow-empty", "-m", "feat: limit")
 	w.git("checkout", "-q", "main")
 	RewriteAllowed = func(string) bool { return true }
 	t.Cleanup(func() { RewriteAllowed = func(string) bool { return false } })
-	w.f = verified(w.git("rev-parse", "feat/rate-limit"))
+	w.f = session()
 	w.env = Env{GH: gh}
-	w.repo = fakeRepo{dir: w.dir, target: worktree.PushTarget{Remote: "origin", Branch: "feat/rate-limit", How: "origin"}}
+	w.repo = fakeRepo{dir: w.dir, target: worktree.PushTarget{Remote: "origin", Branch: "ff/rate-limit", How: "origin"}}
 	return w
 }
 
@@ -280,7 +260,7 @@ func TestCreatePushesToTheForkAndOpensThePRUpstream(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if fx.HeadRepo != "me/widget" || fx.BaseRepo != "acme/widget" || fx.Push != PushNew || fx.HeadRef() != "me:feat/rate-limit" || fx.ReadyWhy != "" {
+	if fx.HeadRepo != "me/widget" || fx.BaseRepo != "acme/widget" || fx.Push != PushNew || fx.HeadRef() != "me:ff/rate-limit" || fx.ReadyWhy != "" {
 		t.Fatalf("facts = %+v", fx)
 	}
 	req := Request{Act: ActCreate, Title: "feat: limit", Body: "why\n", Fingerprint: fx.Fingerprint()}
@@ -291,14 +271,14 @@ func TestCreatePushesToTheForkAndOpensThePRUpstream(t *testing.T) {
 	if res.Pushed != fx.Tip || res.PR.Number != 512 || res.Draft || len(w.linked) != 1 || w.linked[0].HeadSHA != fx.Tip {
 		t.Fatalf("result = %+v linked %v", res, w.linked)
 	}
-	if got := w.run(w.dir, "git", "--git-dir", w.bare, "rev-parse", "feat/rate-limit"); got != fx.Tip {
+	if got := w.run(w.dir, "git", "--git-dir", w.bare, "rev-parse", "ff/rate-limit"); got != fx.Tip {
 		t.Fatalf("remote has %s, want %s", got, fx.Tip)
 	}
 	log, _ := os.ReadFile(filepath.Join(w.fake, "log"))
-	if !strings.Contains(string(log), "pr create --repo acme/widget --head me:feat/rate-limit --base main --title=feat: limit --body-file -") {
+	if !strings.Contains(string(log), "pr create --repo acme/widget --head me:ff/rate-limit --base main --title=feat: limit --body-file -") {
 		t.Fatalf("gh was called as:\n%s", log)
 	}
-	if up := w.git("config", "branch.feat/rate-limit.remote"); up != "origin" {
+	if up := w.git("config", "branch.ff/rate-limit.remote"); up != "origin" {
 		t.Fatalf("upstream = %q, want origin recorded after the first push", up)
 	}
 }
@@ -335,10 +315,10 @@ func TestARewriteOfAPushedBranchIsPushedWithAPinnedLease(t *testing.T) {
 	if _, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Fingerprint: fx.Fingerprint()}, w.link); e != nil {
 		t.Fatal(e)
 	}
-	w.git("checkout", "-q", "feat/rate-limit")
+	w.git("checkout", "-q", "ff/rate-limit")
 	w.git("commit", "-q", "--amend", "--allow-empty", "-m", "feat: limit, reworded")
 	w.git("checkout", "-q", "main")
-	w.f.VerifiedRev = w.git("rev-parse", "feat/rate-limit")
+	w.f.VerifiedRev = w.git("rev-parse", "ff/rate-limit")
 	fx, e := Resolve(ctx, w.env, w.repo, w.in())
 	if e != nil || fx.Push != PushLease {
 		t.Fatalf("after a rewrite: %+v %v, want a lease push", fx.Push, e)
@@ -348,7 +328,7 @@ func TestARewriteOfAPushedBranchIsPushedWithAPinnedLease(t *testing.T) {
 	}
 	// someone else pushes: the remote has commits the card lacks
 	other := w.run(w.dir, "git", "commit-tree", fx.Tip+"^{tree}", "-p", fx.Tip, "-m", "theirs")
-	w.run(w.dir, "git", "push", "-q", "-f", w.bare, other+":refs/heads/feat/rate-limit")
+	w.run(w.dir, "git", "push", "-q", "-f", w.bare, other+":refs/heads/ff/rate-limit")
 	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeRemoteAhead {
 		t.Fatalf("with the remote ahead: %v, want remote-ahead", e)
 	}
@@ -358,7 +338,7 @@ func TestAnOccupiedRemoteNameIsNeverOverwritten(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
 	unrelated := w.run(w.dir, "git", "commit-tree", "-m", "someone else's", w.git("rev-parse", "main^{tree}"))
-	w.run(w.dir, "git", "push", "-q", w.bare, unrelated+":refs/heads/feat/rate-limit")
+	w.run(w.dir, "git", "push", "-q", w.bare, unrelated+":refs/heads/ff/rate-limit")
 	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeNameTaken {
 		t.Fatalf("an unrelated branch of the same name: %v, want name-taken", e)
 	}
@@ -370,7 +350,7 @@ func TestAFetchedForeignBranchIsNeverForcedOver(t *testing.T) {
 	// someone else's branch of the same name, and this repository has
 	// fetched it: seeing a tip is not having pushed it
 	unrelated := w.run(w.dir, "git", "commit-tree", "-m", "someone else's", w.git("rev-parse", "main^{tree}"))
-	w.run(w.dir, "git", "push", "-q", w.bare, unrelated+":refs/heads/feat/rate-limit")
+	w.run(w.dir, "git", "push", "-q", w.bare, unrelated+":refs/heads/ff/rate-limit")
 	w.git("fetch", "-q", w.bare, "+refs/heads/*:refs/remotes/origin/*")
 	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeNameTaken {
 		t.Fatalf("a fetched foreign branch: %v, want name-taken", e)
@@ -414,28 +394,30 @@ func TestEveryHookAPushRunsIsShown(t *testing.T) {
 	}
 }
 
-func TestAnUnverifiedPushReturnsAReadyPRToDraftFirst(t *testing.T) {
+func TestAPushBelowTheFloorReturnsAReadyPRToDraftFirst(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
 	fx, _ := Resolve(ctx, w.env, w.repo, w.in())
 	if _, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Fingerprint: fx.Fingerprint()}, w.link); e != nil {
 		t.Fatal(e)
 	}
-	// the PR is ready at the verified tip; then the branch gains a commit
-	// no verify ran on
+	// the PR is ready at the tip; then the branch gains a commit and a
+	// review comment opens on the diff
 	w.f.PullRequest = domain.PullRequestRef{Repo: "acme/widget", Number: 7, URL: "https://github.com/acme/widget/pull/7", HeadSHA: fx.Tip}
-	w.write("view.json", `{"number":7,"url":"https://github.com/acme/widget/pull/7","state":"OPEN","isDraft":false,"headRefOid":"`+fx.Tip+`","headRefName":"feat/rate-limit","headRepositoryOwner":{"login":"me"}}`)
-	w.git("checkout", "-q", "feat/rate-limit")
+	w.write("view.json", `{"number":7,"url":"https://github.com/acme/widget/pull/7","state":"OPEN","isDraft":false,"headRefOid":"`+fx.Tip+`","headRefName":"ff/rate-limit","headRepositoryOwner":{"login":"me"}}`)
+	w.git("checkout", "-q", "ff/rate-limit")
 	w.git("commit", "-q", "--allow-empty", "-m", "more")
 	w.git("checkout", "-q", "main")
-	fx, e := Resolve(ctx, w.env, w.repo, w.in())
+	held := w.in()
+	held.OpenComments = 1
+	fx, e := Resolve(ctx, w.env, w.repo, held)
 	if e != nil || fx.ReadyWhy == "" {
 		t.Fatalf("facts = %+v %v", fx, e)
 	}
-	if _, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Fingerprint: fx.Fingerprint()}, w.link); e == nil || e.Code != CodeNotVerified {
+	if _, e := Do(ctx, w.env, w.repo, held, Request{Act: ActPush, Fingerprint: fx.Fingerprint()}, w.link); e == nil || e.Code != CodeNotVerified {
 		t.Fatalf("a plain push onto a ready PR: %v, want not-verified", e)
 	}
-	res, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Draft: true, Fingerprint: fx.Fingerprint()}, w.link)
+	res, e := Do(ctx, w.env, w.repo, held, Request{Act: ActPush, Draft: true, Fingerprint: fx.Fingerprint()}, w.link)
 	if e != nil || !res.ToDraft || res.Pushed != fx.Tip {
 		t.Fatalf("push and return to draft = %+v %v", res, e)
 	}
@@ -448,7 +430,7 @@ func TestAnUnverifiedPushReturnsAReadyPRToDraftFirst(t *testing.T) {
 	}
 
 	// a PR merged on GitHub refuses every act with what to do about it
-	w.write("view.json", `{"number":7,"url":"https://github.com/acme/widget/pull/7","state":"MERGED","isDraft":false,"headRefOid":"`+fx.Tip+`","headRefName":"feat/rate-limit","headRepositoryOwner":{"login":"me"}}`)
+	w.write("view.json", `{"number":7,"url":"https://github.com/acme/widget/pull/7","state":"MERGED","isDraft":false,"headRefOid":"`+fx.Tip+`","headRefName":"ff/rate-limit","headRepositoryOwner":{"login":"me"}}`)
 	fx, e = Resolve(ctx, w.env, w.repo, w.in())
 	if e != nil {
 		t.Fatal(e)
@@ -471,16 +453,16 @@ func TestAnActThatFailsPartWaySaysWhatAlreadyHappened(t *testing.T) {
 	}
 }
 
-func TestOpenSpecThreadsHoldReady(t *testing.T) {
+func TestOpenReviewCommentsHoldReady(t *testing.T) {
 	w := newWorld(t)
 	in := w.in()
-	in.OpenSpec = 1
+	in.OpenComments = 1
 	fx, e := Resolve(context.Background(), w.env, w.repo, in)
 	if e != nil || fx.ReadyWhy == "" {
-		t.Fatalf("with an open spec thread: ReadyWhy %q %v, want the floor to hold ready", fx.ReadyWhy, e)
+		t.Fatalf("with an open review comment: ReadyWhy %q %v, want the floor to hold ready", fx.ReadyWhy, e)
 	}
 	if p, _ := PlanFor(fx, Request{Act: ActCreate, Title: "t"}); !p.Draft {
-		t.Fatal("a card with an open spec thread opened a ready PR")
+		t.Fatal("a card with an open review comment opened a ready PR")
 	}
 }
 

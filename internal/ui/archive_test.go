@@ -39,13 +39,13 @@ func TestArchiveFoldsWhatSettledEarlier(t *testing.T) {
 	}
 	// folded: the two old ones are not in the order at all, which is what
 	// keeps the jump numbers contiguous
-	order := m.displayOrder(SortCreation)
+	order := m.displayOrder()
 	if len(order) != 2 {
 		t.Fatalf("folded order = %v, want the live card and today's", order)
 	}
 	// and opening it brings them back
 	m.toggleArchive()
-	if order := m.displayOrder(SortCreation); len(order) != 4 {
+	if order := m.displayOrder(); len(order) != 4 {
 		t.Fatalf("open order = %v, want every row", order)
 	}
 }
@@ -96,29 +96,6 @@ func TestUndatableCardStaysVisible(t *testing.T) {
 	m.rows = []featureRow{{F: domain.Feature{ID: "FD-009", Stage: domain.StageDone}}}
 	if m.archived(m.rows[0]) {
 		t.Fatal("a done card with no closing edge on record was folded away")
-	}
-}
-
-// A drop is the one ending with an answer still outstanding, so it gets a
-// group of its own — and folds with everything else once the window
-// passes, because letting it go is what doing nothing means.
-func TestDroppedCardGroupsUnderItsGoalThenFolds(t *testing.T) {
-	m := NewShell(theme.GummiDark(), "v0-test")
-	recent := settledRow("FD-007", time.Hour, false)
-	recent.F.GoalID = "GL-004"
-	recent.F.GoalDroppedAt = time.Now().Add(-time.Hour)
-	recent.F.LandedSHA = ""
-	old := settledRow("FD-008", 96*time.Hour, false)
-	old.F.GoalID = "GL-004"
-	old.F.GoalDroppedAt = time.Now().Add(-96 * time.Hour)
-	old.F.LandedSHA = ""
-	m.rows = []featureRow{recent, old}
-
-	if got := m.groupOf(m.rows[0], true); got != "DROPPED BY #4" {
-		t.Fatalf("group = %q, want DROPPED BY GL-004", got)
-	}
-	if got := m.groupOf(m.rows[1], true); got != groupArchived {
-		t.Fatalf("an old drop folds with everything else: %q", got)
 	}
 }
 

@@ -31,8 +31,8 @@ type webAnswer struct {
 	// keep: the dialog stays open (it moved to a second question the
 	// request already answered, and closes itself).
 	keep bool
-	// dismiss: the dialog is not the request's to answer (webInput.land,
-	// webInput.autopilot); it is closed unanswered.
+	// dismiss: the dialog is not the request's to answer (webInput.land);
+	// it is closed unanswered.
 	dismiss bool
 	// needs names the input the request did not carry; question is what
 	// the dialog asked; draft, on a landing, the message it holds; token,
@@ -119,8 +119,7 @@ func (d *confirmDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	return webAnswer{cmd: d.onConfirm()}
 }
 
-// The budget dialog takes the number; its resume follow-up (a parked
-// autopilot card, raised) is answered by confirm.
+// The budget dialog takes the number.
 func (d *envelopeDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	if in.number == nil {
 		return webAnswer{needs: webapi.ActionNeedsNumber, question: "set " + d.feature.Name() + "'s budget (dollars; 0 = uncapped)"}
@@ -138,49 +137,10 @@ func (d *envelopeDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	switch {
 	case done:
 		return webAnswer{cmd: cmd}
-	case d.askResume:
-		d.askResume = false
-		q := fmt.Sprintf("raised to %s — resume %s on autopilot?", domain.FormatDollars(float64(d.resumeTo)), d.feature.Name())
-		if in.takeConfirm(webConfirmToken("envelope-resume", d.feature.ID, q)) {
-			cmd = tea.Batch(cmd, d.resumeNotice())
-			return webAnswer{cmd: cmd}
-		}
-		// the budget is raised; whether to resume is the dialog's second
-		// question, and it is put to the person rather than taken as no
-		ask := confirmAsk("envelope-resume", d.feature.ID, q)
-		ask.cmd = cmd
-		return ask
 	case d.problem != "":
 		return webAnswer{refused: d.problem}
 	}
 	return webAnswer{cmd: cmd}
-}
-
-// The autopilot switch takes the mode the request names, or the one the
-// dialog's own confirm hands over (the other side of the switch).
-//
-// Handing a card to autopilot loosens control, so the menu's hand-over
-// asks first, as the TUI's overlay does: the question is the overlay's
-// own account of what autopilot will do with this card, and only a yes
-// to those words hands it over. Stopping autopilot tightens control and
-// goes at once. A card created on autopilot was already asked, on the
-// new-card form's own button (webInput.handoverAsked).
-func (d *autopilotDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
-	if in.mode == "" && !in.autopilot {
-		return webAnswer{dismiss: true}
-	}
-	mode := in.mode
-	if mode == "" {
-		mode = d.submitMode()
-	}
-	if !in.handoverAsked && mode == domain.GateAutopilot {
-		q := "Hand " + d.feature.Name() + " to autopilot?\n" +
-			strings.Join(autopilotBody(d.feature, d.plan, mode, d.base()), "\n")
-		if !in.takeConfirm(webConfirmToken(d.ID(), in.card, q)) {
-			return confirmAsk(d.ID(), in.card, q)
-		}
-	}
-	return webAnswer{cmd: d.onSubmit(mode)}
 }
 
 // The landing message: the request's own words, and nothing else. A
@@ -285,13 +245,6 @@ func (d *prLinkDialog) webAnswer(_ *Shell, in *webInput) webAnswer { //nolint:un
 	return webAnswer{cmd: cmd}
 }
 
-// Reversing one of a goal's decisions is picked from the list the goal's
-// page shows, with the lead's reasons beside each; the request is told to
-// go there.
-func (d *reverseDialog) webAnswer(_ *Shell, _ *webInput) webAnswer {
-	return webAnswer{needs: webapi.ActionNeedsDecision, question: "pick the decision to reverse on " + d.f.Name() + "'s page"}
-}
-
 // tooLong is the refusal for a value longer than the terminal's input
 // takes, or "" when it fits. A web request is never cut down to fit: a
 // landing message trimmed at its limit, or a budget losing a digit, is a
@@ -301,25 +254,4 @@ func tooLong(limit int, what, value string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s is too long — at most %d characters", what, limit)
-}
-
-// Running verify's checks is a confirm, and the question names every
-// command in full, one to a line, as the terminal's dialog shows them:
-// what runs in the worktree is read before it runs, never behind a bare
-// yes — and the yes is bound to those commands, so a list that changed
-// since the page showed it is asked again rather than run.
-func (d *verifyDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
-	if d.feature != in.card && in.card != "" {
-		return webAnswer{dismiss: true}
-	}
-	lines := make([]string, 0, len(d.checks)+1)
-	lines = append(lines, "run "+d.feature.Ref()+"'s verify checks in its worktree?")
-	for _, ch := range d.checks {
-		lines = append(lines, sanitize(ch.Name)+": "+sanitize(ch.Cmd))
-	}
-	q := strings.Join(lines, "\n")
-	if !in.takeConfirm(webConfirmToken(d.ID(), d.feature, q)) {
-		return confirmAsk(d.ID(), d.feature, q)
-	}
-	return webAnswer{cmd: d.onRun()}
 }

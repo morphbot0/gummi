@@ -61,6 +61,17 @@ spend. This is the single most important design decision for the cost goal:
 
 ## 3. The workflow
 
+> **Superseded by §24 (decision 27).** The workflow is retired. No card
+> is minted into it any more and nothing runs one: the only card anyone
+> makes is a session (§19, §24), which holds `StageOpen` until it is
+> closed. The graph, its stage contracts, its critique passes, its verify
+> gate, autopilot and the rerun edges are gone from the code
+> (`internal/workflow` is deleted). A crew's plan checks, per-node review
+> and rework, and its done-when checks (§24.5–§24.8) are what remains of
+> the floor, and they run only where a session calls a crew. A workflow
+> card left in an old database is read-only: shown, never run. What
+> follows is kept as the record of what the crew replaced.
+
 There is exactly one workflow, compiled into gummi — never configurable,
 and now literally one: the three graphs this document originally
 described (feature, bug, research) were the same four ideas wearing three
@@ -1179,6 +1190,13 @@ several widths, so visual regressions fail CI, not eyes. Demo GIFs via
 
 ### 6.3 The decision — one control for every human checkpoint
 
+> **Superseded in part by §24 (decision 27).** The design gates, verify
+> failures and autopilot this section names are retired with the
+> workflow. The one control and the durable decision record (decision
+> 18) stand: a session's `ask_user` question, an exhausted envelope, a
+> rebase conflict, and a crew's plan, widening and node questions the
+> planner passes on (§24.3, §24.7) are its decisions now.
+
 A card stops for a human in several unrelated-looking ways: a design gate
 opens, an agent calls `ask_user`, verify fails, a rebase conflicts, a
 stage exhausts its envelope, nothing is running and something must be
@@ -1552,6 +1570,10 @@ Decided in the design interview (2026-07-03):
    this decision still forbids absolutely: a card in the workflow
    reaching `done` without its critique and its verify, and any
    configuration that would let one.
+
+   *Reversed by decision 27 (§24).* Workflow cards are retired: the
+   floor moved into the crew, and whether to call one is the session's
+   choice.
 4. **Critique before every gate**: each stage ends with a fresh-context
    pass that tries to refute what it produced, and a *changes* verdict
    re-runs that stage in place — capped (default 2–3 rounds, and bounded
@@ -1561,6 +1583,9 @@ Decided in the design interview (2026-07-03):
    **plan critique**: critique→replan, capped at 2 rounds, then the human
    gate — catching design-level security/correctness flaws before
    implementation tokens are spent.
+
+   *Reversed by decision 27 (§24)*: a crew reviews every node it
+   writes; nothing else is critiqued unasked.
 5. **The design stage is gummi-native chat** over SDK sessions; raw
    copilot attach is an escape hatch only. **The surface is the card
    thread** (§6): opening a card at its design stage *is* opening the
@@ -1711,7 +1736,9 @@ Decided in the design interview (2026-07-03):
     write to it is withheld from the action list, the key handler, and
     the help overlay alike — watching is the only thing this board can
     honestly offer.
-14. **Third kind, `RS-NNN`** — own compiled-in graph and artifact under
+14. *Retired with research cards by decision 27 (§24): research is a
+    session's to do, or a crew of scouts and a scribe.*
+    **Third kind, `RS-NNN`** — own compiled-in graph and artifact under
     `.gummi/research/`, no branch or worktree, reusing Review/Verify
     verbatim as the quality floor.
 15. **Decomposition is wired into the RS `verify → done` gate** —
@@ -1720,7 +1747,11 @@ Decided in the design interview (2026-07-03):
     pass.
 16. **`investigate` as a borrowed pass on an existing FD/BG** is deferred
     to a follow-up.
-17. **Autopilot may redo its own work. It may never widen its own
+17. *Autopilot is retired with the workflow by decision 27 (§24). The
+    rule survives inside a crew: the planner may redo, rework, split and
+    drop nodes, and any widening of scope, budget or done-when goes to
+    the person (§24.7).*
+    **Autopilot may redo its own work. It may never widen its own
     reach.** A card can be pointed at a stop — *off*, *gates*, or *full*
     — and run itself from wherever it sits. Under *full* it may cross its
     own design gates, answer its own consequential questions, bounce a
@@ -1836,7 +1867,14 @@ Decided in the design interview (2026-07-03):
     the combined branch), the budget is a ceiling no agent raises, and a
     sandbox refusal is a refusal — the lead plans around it, never widens
     a card's reach.
-21. **A plan's promises are part of the quality floor**, decided after
+
+    *Retired by decision 27 (§24)*: goals are gone. No goal is minted or
+    run; a legacy goal row is read-only and never lands. Outcome-sized
+    work is a session with a spec and its crews.
+21. *Retired with the workflow by decision 27 (§24): there is no plan
+    stage or verify gate to hold a card to its promises; a crew is held
+    to its done-when checks instead.*
+    **A plan's promises are part of the quality floor**, decided after
     the lxd drives (2026-09-15). Until then the floor asked whether the
     stages *ran* — a plan exists, a critique read the diff, the checks
     exited zero — and never whether what the plan *promised* is in the
@@ -1866,7 +1904,12 @@ Decided in the design interview (2026-07-03):
     event, because a pass that never compiled three of the branch's
     files is a pass about the other files and the caller cannot
     otherwise tell.
-22. **gummi may take custody of a branch it did not cut**, decided
+22. *Amended by decision 27 (§24): no new card adopts a branch
+    (`--adopt` and `--pr` are gone), and nothing walks the graph. A
+    legacy adopted card keeps the custody rules below: gummi never
+    deletes, rebases or force-pushes its branch (`Feature.Adopted`,
+    `worktree.ErrAdoptedBranch`).*
+    **gummi may take custody of a branch it did not cut**, decided
     2026-09-22. Until then every branch on the board was one gummi
     created from a base it chose, and work that arrived any other way —
     a colleague's half-finished branch, a PR sitting under review — could
@@ -1993,6 +2036,54 @@ Decided in the design interview (2026-07-03):
     protocol the demo and the browser tests drive; it is not offered as
     an agent to run cards on.
 
+27. **Work starts as a session, and a crew is the session's to call**,
+    decided 2026-10-21 (§24). Every card becomes a session; a session may
+    grow a spec and call on a crew: a planner whose plan of nodes a
+    person approves, and specialist agents that carry it out, each
+    checked and reviewed, onto a branch of the crew's own. gummi offers
+    the process and no longer enforces it: the session agent calls a
+    crew like a tool, or a person asks for one. Workflow cards are
+    retired, with no crew template that reproduces them (*implemented*,
+    §24.12): nothing mints or runs one, and a legacy row is read-only.
+    This decision **reverses decision 3** (the graph and its floor),
+    **reverses decision 4** (critique before every gate becomes review
+    after every crew node), **retires decision 20** (goals) and with it
+    autopilot (decision 17), research (14–16), plan promises (21),
+    delegation (§19.10), new branch adoption (22), spec ingestion and
+    card dependencies (§11), and ends the verified-branch floor in
+    `Feature.MayLand`, leaving the one §19.1 named beside it: a person's
+    read of the diff.
+
+    What does not bend, inside a crew: the plan passes
+    `crewplan.Problems` before a person sees it; every writing node is
+    checked and reviewed; two nodes never write the same path at once,
+    and what a node owns is enforced when it lands; the person approves
+    the plan, or has pre-authorised crews up to an amount, and every
+    widening always (decision 17's "may redo, may never widen"); no agent
+    approves its own crew; a node's question
+    reaches the person whenever the frozen spec does not answer it; and
+    the session's envelope is a ceiling no agent raises — a crew that
+    reaches it pauses for the person's top-up (§24.7a). After a crew there is no
+    automatic review: the card says how many commits it is past its last
+    verification, and a person decides.
+
+28. **A crew becomes a workflow: a recipe of steps run in the
+    session's own tree**, decided 2026-10-22 (§25). A workflow is a
+    recipe file of steps, with `parallel` and `repeat` blocks, kept in
+    `.gummi/workflows/` beside the bundled `deliver`, `investigate` and
+    `fix-until-green`. Each step is a fresh-context agent working in the
+    session's worktree. There is no branch per step and nothing to land.
+    A run leaves its changes uncommitted, snapshotted at every step
+    boundary, and the session commits what it keeps. A session holds a
+    list of specs and runs one workflow at a time. A run is one block in
+    the thread, and a person may open any step and talk to its agent.
+    This **amends decision 27**. Inside a run, three rules stay fixed:
+    a person allows the run, money is a ceiling no agent raises, and a
+    question the run cannot settle reaches the person. Review, checks
+    and design become steps a recipe chooses. The crew branch, node
+    landing and the owns check (§24.3–24.6) are retired. Built
+    2026-10-22; §25.14 records where the build departed from §25.
+
 Still open:
 
 1. **Copilot SDK maturity** — verify the Go SDK exposes interrupt,
@@ -2017,6 +2108,12 @@ Still open:
    tolerate.
 
 ## 11. Spec ingestion — decomposing an existing spec into features
+
+> **Superseded by §24 (decision 27).** Ingestion is retired: there are no
+> feature cards to decompose a spec into, and the `ingest` verb is gone.
+> Work that starts from a document is a session that reads it, keeps a
+> spec of its own (§24.2) and, where the work divides, calls a crew whose
+> planner splits it into nodes (§24.4). The section is kept as history.
 
 gummi's unit is a Feature (FD): one PR-sized branch that flows through the
 fixed workflow. Today features are *born blank* — the creation form takes a
@@ -2118,6 +2215,12 @@ coverage map is where the agent justifies its cut.
 
 ### 11.4a First-class dependencies
 
+> **Retired by decision 27 (§24).** Card dependencies, the `deps` verb
+> and the dependency gate are gone with the workflow cards they ordered.
+> Ordering inside a piece of work is a crew node's `needs` (§24.4);
+> ordering of landings between branches is a stack (§18), which never
+> gates work. What follows is history.
+
 Shipped (FD-058–FD-062), superseding the prose-based `depends_on` this
 section originally described. A `feature_deps` store (`internal/state`) holds
 direct dependency edges between cards, independent of ingestion — added by
@@ -2165,6 +2268,12 @@ a stacked card (it remains the fallback for an unstacked one, so
   ingestion, for traceability audits against the original document.
 
 ## 12. Bugs — the second kind
+
+> **Superseded by §24 (decision 27).** Bug cards are retired, and so is
+> the `bugs` import verb. A bug is a session; a session's spec template
+> may carry a Reproduction section, and a crew may open with a scout
+> that reproduces it. A legacy `BG` card is read-only. The rest of this
+> section is history.
 
 > **Superseded in part.** This section was written when a bug ran its own
 > graph. It does not any more: the three workflows merged into one (§3),
@@ -2276,6 +2385,13 @@ the same fetched batch and materializes just that one bug.
   duplicate issues before the gate, if verbatim import proves too noisy.
 
 ## 13. Research — the third kind
+
+> **Superseded by §24 (decision 27).** Research cards, their scratch
+> tree, their deterministic verify and the decompose gate are retired. A
+> question is a session's to answer, or a crew of scouts and a scribe's;
+> new work a report proposes is started by a person as new sessions. A
+> legacy `RS` card is read-only and never runs. The rest of this section
+> is history.
 
 > **Superseded in part.** Like §12, this section was written when research
 > ran its own graph. It walks the one graph now (§3). The order also
@@ -2514,6 +2630,16 @@ small envelope, and it terminates in rows rather than a diff.
 
 ## 14. Non-interactive driver & skill distribution
 
+> **Superseded in part by §24 (decision 27).** The headless driver was
+> rebuilt on sessions: `gummi run "<prompt>"` mints a session,
+> pre-authorises its crew up to `--envelope`, sends the prompt and loops
+> until the session is idle with no crew open (`done`) or something needs
+> a person (`needs_you`); `gummi resume <id> [--answer TEXT | "<message>"]`
+> answers and drives on. The stage-shaped flags (`--gate-approval`,
+> `--until`, `--bounce`, `--approve`) and the dependency gate below are
+> gone. `docs/HEADLESS.md` is the current reference; §14.3 and §14.4 still
+> hold. What follows about stages and gates is history.
+
 The TUI assumes a human at the keyboard. A second driver runs the **same
 engine and the same quality floor** unattended, so a calling agent can ship a
 feature end to end — and gummi ships the skill that teaches that agent how.
@@ -2741,6 +2867,14 @@ changes" — the workflow wins, and the agent says so rather than silently
 complying or silently ignoring the repo.
 
 ## 17. Goals — the fourth kind
+
+> **Superseded by §24 (decision 27).** Goals are retired: no goal is
+> minted or run, and the goal engine, its ledger, substrates,
+> experiments, the notebook and programmes are deleted. A legacy `GL`
+> row is read-only and never lands. An outcome is a session with a spec;
+> its crews do the work, spending from the session's envelope (§24.7a). This section is kept as the record of what crews
+> borrowed from it — the done-when items, the held-budget rule, a planner
+> that answers its workers' questions.
 
 A goal (`GL-NNN`) is a card whose work is other cards. You describe an
 outcome and a budget, agree what "done" means, and walk away; gummi works
@@ -3609,6 +3743,13 @@ ceremony.
 
 ### 19.1 The two landing floors
 
+> **Superseded in part by §24 (decision 27).** There is one floor now:
+> with the workflow retired, every card that lands is a session and lands
+> on a person's read of its diff. `MayLand` no longer holds a verified
+> branch; an open crew, a stack below and unresolved diff comments hold
+> a landing (§24.10). What follows describes the two floors as they
+> stood.
+
 This is the part that changes a promise, so it is stated plainly rather
 than buried in the mechanism. Decision 3 said the workflow is invariant
 and nothing lands without a critique and a verify. That remains true of
@@ -3935,6 +4076,12 @@ stop an *unattended* loop from spinning, and here the person is the loop.
 
 ### 19.5 What a freeform card may not do
 
+> **Superseded in part by §24 (decision 27).** Adoption and goals are
+> retired for every card, so the first two refusals below no longer have
+> anything to refuse. The third is reversed: `run`/`resume` now drive
+> exactly a session and its crew (§14's note, `docs/HEADLESS.md`). The
+> main-checkout stack refusal stands.
+
 - **Adopt a branch.** An adopted card walks the whole graph, "because the
   alternative is the first hole in the quality floor" (decision 22). A
   freeform card walks nothing, so adopting with one would be that hole.
@@ -4012,6 +4159,13 @@ checks" is a number on a screen rather than a feeling; and a
 card's fourth cycle most of the diff against base is already read.
 
 ### 19.8 Sessions: the model is the session's own
+
+> **Superseded in part by §24 (decision 27).** A session keeps its spec
+> rather than handing itself off into a feature card: the "write a spec"
+> ending below is retired, and `spec_start` (§24.2) replaces it. A
+> session handed off that way before the change still names the card its
+> work continued as (`Feature.ContinuedAs`), which lands it. The rest —
+> the model as the session's own — holds.
 
 The web face calls a freeform card a **session**, and treats it as the
 default kind of work rather than the last row of the new-card form: one
@@ -4236,6 +4390,12 @@ launchd — there is no headless freeform driver for it to run yet
 Per-fire history beyond the row's one last outcome is a later need.
 
 ### 19.10 Delegation: a session that creates workflow cards
+
+> **Superseded by §24 (decision 27).** Delegation is retired and replaced
+> by crews: a session that wants pieces of its work done by other agents
+> calls `crew_start`, and the crew's nodes fork from and land back on a
+> branch of the crew's own (§24.3). There are no workflow cards left to
+> delegate to. What follows is history.
 
 A person may let a session hand pieces of its work to workflow cards
 (`domain.Delegation`, `engine/delegate.go`). The cards are a goal's cards
@@ -5458,6 +5618,18 @@ without the pack. That narrowing is why the old `skills.forward` was
 dropped (§4.1a); it is accepted here because the pack is gummi's own
 learning, not a convenience over the operator's discovery.
 
+*Amended for gummi's own skills (§25.14).* Beside the pack, delivery
+hands every session two skills gummi ships in its binary, `workflows`
+and `workflow-recipes` (`internal/skillpack/builtin/`). They teach
+gummi itself — when a workflow run pays, how to write the checks it is
+judged by, how to write a recipe — so they move with the code they
+describe, and no curator, session or person edits them in a workspace.
+They are written once per content under `.gummi/state/skillbuiltin/`
+(`skillpack.Builtin`), outside the pack's cache, which prunes, and reach
+the same three backends under the pack's names (`gummi-skills:<name>`,
+`gummi-<name>`). A pack skill may not take one of their names, and their
+use is not counted as the pack's.
+
 Every pass gets the pack: plan, implement, critique, verify, and
 freeform sessions. A conversation pins the revision it started with, so
 a curator run mid-conversation never changes what it sees. The pin
@@ -5740,3 +5912,1445 @@ not a spec's reviewer threads.
 - **Importing existing skills.** Skills an operator's own tools wrote
   into `~/.claude/skills` are the operator's discovery (§4.1a), not the
   pack. Bringing them in is a person's commit.
+
+## 24. Sessions and crews — work without a workflow
+
+> **Amended by §25 (decision 28).** Crews are replaced by workflows:
+> recipe files of steps that run in the session's own tree and leave
+> their changes uncommitted, a list of specs per session, and no crew
+> branch, node landing or owns check.
+
+*Decided 2026-10-21 (decision 27); built.* This section describes the
+code as it is. It supersedes the workflow (§3), the kinds' stage
+contracts (§12, §13), spec ingestion and card dependencies (§11), goals
+(§17), the "write a spec" hand-off (§19.8), delegation (§19.10),
+autopilot (decision 17) and branch adoption (decision 22); each of those
+sections carries a note saying so and is kept as history. Workflow
+cards are retired: nothing mints or runs one, and a legacy row in an old
+database is read-only (§24.11).
+
+Every unit of work starts as a **session** (§19.8). A session may grow a
+**spec**, and it may call on a **crew**: a planner that turns the spec
+into a plan of nodes, and specialist agents that carry them out, each
+checked and reviewed, landing on a branch of the crew's own. The session
+agent calls a crew like a tool, or a person asks for one. gummi offers
+the process; it no longer enforces it.
+
+```
+session ──talk──▶ spec (optional) ──crew_start──▶ plan ──you approve──▶ run ──▶ report
+   ▲                                                                              │
+   └──────────── the session carries on from the report, and may start another ───┘
+   lands on a person's read of its diff, as a session always has (§19.1)
+```
+
+### 24.1 Why
+
+The graph made every change pay for a design, a critique, an
+implementation, a second critique and a verify, whether the change needed
+them or not. Freeform cards (§19) were the admission that most work does
+not, and once sessions became the default (§19.8) the graph was the less
+common path with most of the code. The design survives in it because
+its ideas are right: a spec as the context carrier, a fresh-context
+reviewer, machine-checked "done", budgets a person sets.
+
+The market (surveyed 2026-10) lands in the same place. The products that
+work with coding agents at scale have a planner write a spec or task
+graph and check each step with an independent verifier (Augment Intent,
+Factory Missions, Cognition's managed Devins, and the spec-driven IDEs' task lists). The
+two widely read arguments, Anthropic's for multi-agent systems and
+Cognition's against them, now agree on the same rules:
+- one writer per area;
+- a clean-context reviewer;
+- artifacts between agents, not transcripts;
+- parallel work only where the work divides.
+
+None of them shows the fleet as a tree with cost and attention on it,
+makes each planned step a gate with checks of its own, or catches
+conflicting decisions between siblings before they merge. A crew does
+all three.
+
+So the floor moves from the card to the crew. A crew always plans,
+checks, reviews and verifies, and a person approves its plan and every
+widening of it. Whether to use a crew is the session's choice and the
+person's, not gummi's.
+
+### 24.2 The session's spec
+
+A session has at most one spec, and most never have one. A session about
+to call a crew needs one, because a crew is judged against its done-when
+items.
+
+| tool | does | origin |
+|---|---|---|
+| `spec_start(title)` | creates the spec from the template | new; replaces §19.8's "write a spec" hand-off |
+| `spec_view(section?)` | reads it | the stage tool, offered to sessions |
+| `spec_replace_section(section, body)` | writes one section | the stage tool, offered to sessions |
+| `spec_annotate(anchor, note)` | anchors a `%%` question to the line a snippet names | the stage tool, offered to sessions |
+| `spec_critique()` | a fresh-context reviewer tries to refute the spec; findings land as anchored threads | the plan critique (decision 4), **offered, never required**; *not built* (§24.13) |
+
+The first four are offered to every session (`engine/sessionspec.go`);
+the spec stays on the session rather than handing itself off into a
+feature card.
+
+**The template** merges what the three kinds' contracts asked for:
+Problem, Approach, **Done when** (the `gummi-done-when` block,
+`domain.DoneWhen` and `spec.ParseDoneWhen` unchanged), Limits (what is
+deliberately not done) and Notes, which carry the `%%` checklist. A bug
+is offered a Reproduction section and research a Question in place of
+Approach. They are prompts, not sections a gate demands: no gate reads
+a session's spec.
+
+**It lives with the workspace** (`Feature.SpecPath`,
+`.gummi/specs/<ID>-<slug>.md`), not on the branch, so it is never in the
+card's diff and never lands in the repository. Each write through the
+spec tools or the Spec tab is a numbered **revision**, snapshotted in the
+state store, which nothing keeps today. The person reads, edits and
+annotates it on the card's Spec tab, the way a diff is annotated (§6.1).
+Extending `resolve_annotation`, still a diff comment's only, to the
+spec's comments is deferred (§24.13).
+
+### 24.3 A crew, from the session's side
+
+| tool | does | returns |
+|---|---|---|
+| `crew_start(brief, budget)` | asks for a crew; the planner wakes and writes the plan | at once: the crew is proposed |
+| `crew_status()` | nodes, states, spend, open questions | text |
+| `crew_steer(note)` | a note to the planner, which wakes it | ack |
+| `crew_stop(reason)` | winds the crew down; what has landed stays | ack |
+| `crew_land()` | lands a finished crew's branch on the session's | the merge, or why not |
+
+The rules for using them:
+
+- **Always offered.** A crew is an ordinary option, so there is no
+  opt-in like delegation's. What holds the cost is the approval, the
+  budget, and the planner's own answer that a change is too small to
+  split.
+- **A spec first.** `crew_start` refuses a session whose spec has no
+  done-when item, and says so. The session agent writes the spec with
+  the person; it holds the context, so the planner does not write it.
+- **Asynchronous.** `crew_start` returns at once. A crew runs for tens
+  of minutes, and a tool call held open that long fights every
+  backend's idea of a turn and locks the person out of the session. The
+  report comes back as a turn gummi sends under an actor of its own
+  (`WithActor`), the way an objective's next turn does (§19.11). The
+  thread draws it as the crew's.
+- **No `crew_approve`.** The plan goes to the person as a decision, the
+  way every checkpoint does (decision 18). A person may pre-authorise
+  a session's crews up to an amount each, in the manner of
+  delegation's "this one and all that follow": a plan under it runs
+  without asking, and the session's own budget still caps how many.
+  Pre-authorisation covers the first plan only; a widening always goes
+  to the person. The agent never approves its own crew.
+- **Starting a crew freezes the spec.** The crew is judged against
+  that revision. An edit to the spec during a run is a steer to the
+  planner.
+- **One crew at a time per session**, so one branch has one writer.
+- **The session waits for its crew.** A session may not land while a
+  crew is open, as §19.10's parent waits for its cards. Closing a
+  session with a crew running asks the person first, then stops the
+  crew (`crew_stop`) and keeps what landed on the crew branch.
+- **Nothing resumes itself.** A quit parks a running crew: its nodes'
+  backends stop, and its pending planner wakes are kept in the store.
+  After a restart the crew shows as paused, and runs again only when a
+  person resumes it (decision 17).
+
+**Where the crew works.** A crew has a branch of its own, forked from the
+session's tip when the crew starts: `crew/<slug>/<n>`, and its nodes'
+`crew/<slug>/<n>.<node>`, where a node id is always `t<k>`. They are
+not nested under the session's `ff/…` ref, because git cannot hold both
+a ref and a directory of that name; and the slash after the slug keeps
+session `foo`'s crew 1 apart from session `foo-1`'s. `Feature.BranchName`
+stays the one constructor (crews and nodes are card rows, §24.6), and
+`Store.BranchTaken` and cleanup cover `crew/` refs. Nodes fork from the
+crew branch and land back on it, routed on the parent the way goal
+cards are (`Pool.ManagerFor`). The session keeps its own checkout and
+may keep working while the crew runs.
+
+**Landing a crew.** A finished or partial crew lands on the session's
+branch (`crew_land`, `Engine.CrewLand`) as one squash commit, refused while the session's tree holds uncommitted work, with a
+conflict going back to the session agent. A partial crew lands what it
+landed, and says so. After the squash gummi runs the done-when checks
+on the session's new tip, and that commit is what the verified mark
+(§24.8) is pinned to. Commits the session made during the run sit
+under it: the checks saw them, the crew's reviewers did not, and the
+report says so. Node branches go when their node lands; the crew branch
+goes when the crew lands, or with the session.
+
+**Budget.** A session and its crews spend from one pool: the session's
+envelope (§24.7a). A crew's budget is the person's approved estimate of
+what it will cost, and a node's envelope the planner's estimate of one
+node; neither is a fence. The planner and the reviews are the crew's own
+spend, and the session's turns are the session's, but all of it comes
+out of the same envelope.
+
+### 24.4 The crew document
+
+`.gummi/crews/<ID>-<slug>/<n>.md` (`Engine.CrewDocPath`). Its sections:
+
+- **Brief**: what the session asked for, and the spec revision frozen
+  for the crew.
+- **Done when**: copied from the spec when the crew starts.
+- **Plan**: a `gummi-crew` block.
+- **Limits**.
+- **Run log**: gummi appends each node's handoff.
+- **Report**: written when the crew ends.
+
+```yaml
+# gummi-crew
+lanes: 3
+budget: 1500            # credits, out of the session's envelope
+nodes:
+  - id: t2
+    role: contractor    # scout | contractor | implementer | tester | scribe
+    title: TurnLog type and store interface
+    brief: |
+      Define TurnLog and the store interface, with stubs.
+      Do not wire the engine.
+    needs: [t1]
+    owns: [internal/domain/turn.go, internal/state/turns.go]
+    serves: [DW-1]
+    checks: [go build ./..., go vet ./internal/state/]
+    tier: standard      # cheap | standard | strong — a profile slot
+    envelope: 220
+```
+
+A node row (`domain.CrewNode`) is a title, the items it serves, the
+nodes it `needs`, an envelope, and its `role`, `brief`, `owns`, `checks`
+and `tier`.
+
+**The roles are a fixed catalogue.** The planner sharpens a role with a
+brief and with skills from the pack (§23); it does not invent one. An
+invented role has no profile slot and no record to price it by.
+
+| role | does |
+|---|---|
+| scout | reads, reproduces and maps; writes nothing but its handoff |
+| contractor | writes, first and alone, the interfaces and stubs that parallel nodes build against |
+| implementer | builds inside what it owns |
+| tester | writes and extends tests |
+| scribe | writes docs and the try-it guide |
+
+**The reviewer is gummi's, never the planner's to place.** It runs after
+every writing node, and a plan cannot leave it out because a plan cannot
+name it. Integration was designed as a second such role; as built, a
+node whose landing conflicts is sent back to integrate the crew branch
+into its own and resolve the conflict, then lands again.
+
+**Profiles map roles to models.** `planner` falls back to `architect`;
+a node's tier is the slot `crew-<tier>`, falling back to `implementer`;
+reviews use `reviewer`.
+
+### 24.5 The plan checks
+
+A pure `crewplan.Problems(plan, items) []string`; the budget is the
+plan's own. A plan that fails is sent back to the planner
+before any person sees it.
+
+1. Node ids are unique, every `needs` names a node, and there is no
+   cycle.
+2. Every done-when item is served by at least one node.
+3. Every writing node (contractor, implementer, tester, scribe) owns at
+   least one path. It also has at least one check, or serves an item
+   that has one. A scout owns nothing.
+4. **Two nodes whose `owns` overlap are ordered:** one must reach the
+   other through `needs`. This is the one-writer rule. Overlap is a
+   conservative test on path prefixes, so a false positive costs only a
+   serialised pair.
+5. The nodes' envelopes and the planner's reserve fit the budget, and
+   no envelope is below what a node can finish in.
+6. Every role is in the catalogue, and every tier is in the profile.
+
+A plan of one implementer node is valid, and the planner is told to
+choose it whenever the work does not divide.
+
+### 24.6 A node
+
+```
+waiting ─▶ running ─▶ checking ─▶ reviewing ─▶ landed
+              ▲           │            │
+              └── rework ─┴────────────┘     (capped at 2, then stuck)
+           also: stuck · exhausted · dropped
+```
+
+- **A node is a short session that no person works.** It is stored as a
+  card row of its own kind, child of the crew and hidden from the board,
+  because everything it reuses takes a card: `Pool.ManagerFor`,
+  `SquashMerge`, `DelegateHeld`, `cardrun` and `BranchTaken`. It runs in
+  its own tree on its own branch, with its role's prompt, its brief, the
+  frozen spec and the handoffs of the nodes it needs. It never sees
+  another agent's transcript.
+- **Its sandbox is the session's.** A scout runs read-only wherever the
+  backend enforces it (`Capabilities().ReadOnlyEnforce`, as research
+  does), and the owns check at landing (below) holds for every node. A
+  tool call asking to act outside the sandbox parks for the person, as
+  under decision 17. Neither the planner nor a node can answer it.
+- **The handoff** ends every node in a fixed grammar, parsed the way
+  `FINDING:` lines are:
+  - `DONE:` what it did;
+  - `DECISION:` a choice it made that the brief did not make for it;
+  - `OPEN:` what it left.
+  `DECISION:` lines are how conflicting choices between siblings
+  surface before they merge.
+- **Checking** runs the node's `checks` in its tree.
+- **Reviewing** is a fresh-context reviewer on the profile's `reviewer`,
+  ending in `FINDING:` lines and one `VERDICT: pass|changes` line
+  (`engine/crewreview.go`). Findings rework the node in place.
+- **What it owns is enforced when it lands.** A diff that touches a path
+  outside `owns` is sent back as a finding. The one-writer rule is
+  something gummi checks, not something it asks for.
+- **Landing** squashes the node onto the crew branch in plan order
+  (`Pool.SquashMerge`). A conflict sends the node back to merge the crew
+  branch into its own and resolve it.
+- **Questions** (`ask_user`) go to the planner first, as a goal's lead
+  once took its cards' questions. It answers what the frozen spec
+  settles. What the spec does not settle goes to the person as a crew
+  decision. Unlike the goal's lead, which fell back to the recommended
+  option, a crew never answers for the person.
+  The planner's answers are drawn in the node's thread as its own.
+
+### 24.7 The conductor and the planner
+
+`crewpolicy.Decide(Input) []Action` is pure: the subset of the retired
+goal conductor a crew needs.
+`Engine.CrewTick` builds the snapshot and executes the actions. Each
+tick, in this order:
+
+1. Wind down when stopped: land what is ready, drop the rest.
+2. Pause when the session's pool is spent (§24.7a), and do nothing else.
+3. Land one node that has passed its checks and review.
+4. Put an exhausted node — a runaway — to the person.
+5. Send a stuck node to the planner up to twice, then to the person.
+6. Wake the planner on a pending reason: the start, a steer, a handoff
+   with `DECISION:` or `OPEN:` lines, a question it must answer, or the
+   person's answer to a widening.
+7. Start ready nodes up to the lanes.
+8. Warn the person, once, when the forecast is past what the pool has
+   left (§24.7a).
+9. When nothing is left, run the **final review** and write the report.
+   The final review is the done-when checks on the crew's tip, plus one
+   reviewer over the whole crew diff against the frozen spec.
+   With no crew diff to read (nothing landed) or a stop, no reviewer
+   runs: the report marks the judge items unjudged (`–`), never met, and
+   the crew is partial.
+
+Tranches, substrates, experiments and programmes were goal machinery,
+and were retired with goals.
+
+### 24.7a Money: one pool, estimates, and no work thrown away
+
+*For workflow runs (§25), which replaced crews, only **One pool**,
+**Pause, never drop** and **Only a person raises the money** below
+stand. A run estimates nothing: there is no forecast to warn ahead and no
+runaway, and a run goes on until the session's pool is spent, then
+pauses for a top-up (§25.7, §25.14).*
+
+Stopping an agent that is doing its job wastes what it has spent, so a
+crew is never stopped over money unless the person says so.
+
+- **One pool.** A crew spends from its session's envelope: the session's
+  own turns, the crew's planner and reviews, and every node's card are
+  taken off the same figure (`Engine.sessionPoolLeft`), and the session's
+  own meter counts its crews' spend (`sessionBudget`). The crew's budget
+  and a node's envelope are estimates. A session without an envelope has
+  no ceiling.
+- **Pause, never drop.** When the pool is spent the crew pauses
+  (`OutOfBudget`). Its nodes are not stopped: each finishes the turn it
+  is in, and nothing new is sent. A node whose turn ends then waits,
+  unreviewed, rather than failing its review for want of money. The
+  person is asked to top the session up by a suggested amount. Raising
+  the session's envelope — from that decision, the envelope dialog, or
+  `gummi resume --envelope` — carries the crew on from where it was: a
+  node waiting to be reviewed goes straight to review, and any other node
+  carries on in its own tree and conversation. Nothing starts over.
+- **Warn ahead.** Every tick reads a forecast
+  (`crewpolicy.ComputeForecast`): each unsettled node's estimate, scaled
+  by how far the landed nodes ran over theirs (never below 1), less what
+  it has spent, plus a reserve for the planner and the final review. When
+  that is past what the pool has left the person is asked, once, while
+  there is still money to finish what runs: top up, finish what is
+  running and start nothing new (the nodes not yet started are dropped —
+  they hold no work), or stop. Nothing pauses while the question stands.
+  A raise of the envelope lets it warn again.
+- **Runaways are behaviour, not budget.** A node's card is capped at
+  three times its estimate (`runawayFactor`). Past it the node is a
+  runaway, and the person decides: let it carry on for another three
+  estimates, or drop it. A node stuck past the planner goes to the person
+  the same way: one more round of rework, or drop it. The conductor drops
+  nothing on its own.
+- **A dropped node keeps its branch.** Its tree goes; its commits stay
+  on `crew/<slug>/<n>.<node>` until the crew lands or is declined.
+- **Only a person raises the money.** No agent tops a session up; the
+  planner may move estimates between nodes inside the crew's approved
+  estimate, and raising that estimate is a widening.
+
+**The planner** is a short turn on `planner`, in the crew tree, waking
+only on those events and acting only through its own tools:
+- `crew_doc(section?)` (reads the crew document),
+- `plan_write` (the first plan, or a revision),
+- `node_rework(node, note)`,
+- `node_drop(node, why)`,
+- `node_raise(node, to)`,
+- `answer(node, text)`,
+- `ask_person(node)` (the spec does not settle the question).
+Each turn is booked to the session.
+
+**Widening is mechanical.** gummi compares every revision with the
+approved plan. The revision is a decision for the person if it:
+- adds, removes or rewords a done-when item, or changes its check;
+- raises the crew's budget;
+- gives a node a path outside the union of the paths the person
+  approved.
+
+Everything else is applied and written to the run log: new nodes inside
+the approved paths and budget, splits, reorders, reworks and drops.
+This is decision 17's "may redo, may never widen", stated for crews. A
+person who answers "keep the scope" writes the gap into the crew's
+Limits instead.
+
+### 24.8 The report, and after it
+
+A crew ends **finished** when the final review passes, and **partial**
+when it is stopped or a node was dropped on the way. Either way
+the report reaches the session as one turn, and the same text goes into
+the crew document. It holds:
+- each done-when item, met or not, with its check's result;
+- the nodes' `DECISION:` lines, gathered;
+- what is left open;
+- the cost against the plan, and how much of it was rework.
+
+The spec's Notes take the decisions and the open items, so the next crew
+starts from the spec rather than the transcript.
+
+The session agent carries on from the report, the diff since the crew
+started and the spec. It answers questions, makes small fixes, lands the
+crew (`crew_land`) or starts another crew. A follow-up planner reads the
+previous crew's run log.
+
+**There is no automatic review after a crew.** The session may change
+its branch after a crew has verified it. The card's head says so:
+**"crew verified at `<sha>` · N commits since"**, where the sha is the
+landing commit whose checks passed (§24.3). A partial crew's mark says
+partial. One action re-runs the done-when checks on the tip and moves
+the mark there. Landing is still the person's
+read of the diff (§19.1). The crew's review and checks are evidence for
+that read, never a gate on it.
+
+### 24.9 The faces
+
+**The Crew tab.** It sits beside Thread, Spec and Diff on a session's
+page. It holds:
+- a budget strip: spent, then planned, then the session's envelope,
+  with the lanes, rework and the time elapsed;
+- the plan drawn as waves of nodes: role, title, check bars, spend,
+  time and state, with a rework badge, and an amber ring on the node
+  that waits on the person;
+- the crew branch with what has landed on it;
+- a strip saying when the planner last woke and why.
+
+Selecting a node opens its page beside the canvas: its question
+(recommended answer first), its brief, what it owns, its checks, its
+`DECISION:` lines, and tabs for its thread, its diff and its handoff.
+
+**In the thread.** The plan is a decision. It shows the nodes in waves
+with their owns and costs, the plan checks as ticks, the models each
+role gets, and three answers: run the crew, talk it over, keep it a
+session. A widening is a decision too, drawn as a diff of the plan. The
+run itself folds to one line per event.
+
+**On the board.** A session with a crew shows one square per node in its
+state's colour, and its attention lane counts the crew's open questions.
+
+**Read models.** As built, `internal/ui/webcrew.go` reads the crew
+record into what the page draws (`internal/web/assets/crew.js`), with
+its JSON shape set in `webapi` (`webapi/crew.go`) first. A pure
+`crewrun` fold shared with the TUI and reusing `cardrun` per node is
+deferred (§24.13).
+
+The TUI ticks crews (`ui/crewloop.go`) and answers their decisions in
+its picker; it has no Crew tab of its own yet. The canvas is the web
+face's own.
+
+### 24.10 What a person gives up
+
+- **The guarantee.** A card in the workflow could not land unverified,
+  and `MayLand` enforced it. Now a branch is as verified as the crews
+  that ran on it, and the verified mark says how current that is.
+  `MayLand` refuses only a card with no landing of its own; an open
+  crew, a stack below and unresolved diff comments hold a landing
+  (`cardops`).
+- **A fixed contract for outside drivers.** `gummi run`/`resume`, their
+  NDJSON and the `gummi skill` bundle described stages. They were
+  rebuilt on sessions and crews (`docs/HEADLESS.md`); the stage-shaped
+  flags and events are gone rather than deprecated.
+- **Adoption.** An adopted card had to walk the whole graph (D22). No
+  new card adopts a branch now. A legacy adopted card keeps its custody:
+  gummi never deletes, rebases or force-pushes its branch.
+
+### 24.11 What becomes of what is there
+
+| was | now |
+|---|---|
+| the graph and its rerun edges (§3, `internal/workflow`) | retired; a node's rework and the planner's revisions replace the reruns |
+| plan stage: explore, converge, plan | the session's conversation and its spec |
+| plan critique | `spec_critique`, offered; the planner's plan is checked by `crewplan.Problems` |
+| implement and its critique | a crew's nodes, each reviewed |
+| verify | each node's checks and the crew's final review |
+| feature, bug and research kinds | retired; spec template prompts and planner guidance; research is a session's, or a crew of scouts and a scribe |
+| research's decompose gate | retired; a report's open items go into the spec's Notes, and a person starts new sessions |
+| spec ingestion (§11) and card dependencies (§11.4a) | retired; a crew node's `needs` orders work inside a crew, and a stack (§18) orders landings |
+| goals (§17) | retired, with their ledger, substrates, experiments, notebook and programmes; `crewpolicy` keeps the held-budget rule |
+| delegation (§19.10) | replaced by crews |
+| autopilot (decision 17) | retired; inside a crew the planner may redo and never widen |
+| branch adoption (decision 22) | no new adoption; a legacy adopted card keeps its custody rules |
+| "write a spec" (§19.8) | `spec_start` |
+| objectives (§19.11), schedules and heartbeats (§19.9) | unchanged: they are already a session's |
+| stacks (§18) | unchanged |
+| `gatepolicy` | deleted; the two decisions left, a plan and a widening, are crew decisions (`Engine.CrewDecision`, `CrewAnswer`) |
+| `MayLand`'s two floors | the verified-branch floor is gone; a person's read of the diff (§19.1) stays |
+| `run` / `resume` | `run` mints a session from a prompt, pre-authorises its crew to `--envelope` and drives it until it is `done` or `needs_you`; `resume` answers or sends a turn and drives on (`docs/HEADLESS.md`) |
+| workflow, bug, research and goal rows in an old database | read-only: shown, never run, minted or copied |
+
+### 24.12 The order of retirement
+
+*Done.* Step 1 shipped, and the web face's Crew tab draws the plan as
+waves of nodes (step 2); the TUI has no Crew view yet (§24.13). Step 3 went further: rather
+than moving goals onto crews, goals were retired, and `run`/`resume`
+were rebuilt on sessions without keeping the old output. Step 4's
+evidence was not waited for: workflow cards stopped being minted, and
+`internal/workflow`, the stage contracts, autopilot, goals, delegation,
+adoption, research, ingestion, card dependencies and the verified-branch
+floor were deleted together, with legacy rows left read-only. The plan
+as written:
+
+1. **Crews in sessions.** Session specs, the crew tools, the document
+   and its checks, nodes, the conductor, the report, and a Crew tab
+   that is a list. Workflow cards are untouched.
+2. **The Crew tab's canvas.**
+3. **Goals and the headless driver move onto crews.** The separate goal
+   engine is removed. `run`/`resume` take their new shape, with the old
+   output kept for a deprecation period.
+4. **Evidence.** `cardrun` compares crews with workflow cards on cost and
+   rework, over real work.
+5. **Workflow cards stop being minted.** Those in flight finish on the
+   old engine. Then `internal/workflow`, the stage contracts, delegation
+   and the verified-branch floor are deleted, and §3, §12, §13, §17 and §19.10
+   are rewritten as history.
+
+### 24.13 Deferred
+
+- **A node that is a whole session**, with its own spec, escalated when
+  the planner judges a piece too large for one node. Goals need it in
+  step 3.
+- **A crew across repositories.** Goal trees already do this, and a crew
+  inherits it with goals.
+- **Two crews at once on one session**, which would need two integration
+  branches and a merge between them.
+- **Planner-invented roles.**
+- **`spec_critique`** (§24.2), and `resolve_annotation` on a spec's
+  comments.
+- **A shared `crewrun` read model** and a Crew view in the TUI (§24.9).
+- **An integrator role** separate from the node whose landing conflicts
+  (§24.4).
+
+## 25. Workflows — recipes a session runs in its own tree
+
+*Decided and built 2026-10-22 (decision 28).* This section replaces crews
+(§24.3–§24.9), the session's single spec (§24.2) and the Crew tab. Where
+it and §24 disagree, this section wins. §24 is kept as the history of
+how crews worked. Where the build settled something this section left
+open, or departed from it, §25.14 says so.
+
+A **workflow** is a recipe of steps, kept as a file. A session **runs**
+one workflow at a time, against one of the **specs** it holds.
+
+- Each step is a fresh-context agent.
+- The steps work **in the session's own worktree**: one after another,
+  or side by side inside a `parallel` block.
+- Nothing is branched and nothing is landed. A run leaves its changes in
+  the tree, uncommitted, and the session commits what it keeps.
+- gummi snapshots the tree at every step boundary. Each step therefore
+  has a diff of its own, a reviewer can read the run's diff, and a
+  person can put the tree back.
+- Review, checks and design are steps a recipe chooses. gummi does not
+  impose them.
+- A run is drawn as one block in the session's thread, and a person can
+  open any step there and talk to its agent.
+
+```
+session ──spec A──▶ allow ──▶ run 1 (deliver) ──▶ report · changes left in the tree
+   │                         the session (or a person) reads them and commits
+   ├──spec B──▶ allow ──▶ run 2 ──▶ …                         one run at a time
+   lands on a person's read of its diff, as a session always has (§19.1)
+```
+
+### 25.1 Why
+
+Crews were used, and three things about them were wrong:
+
+- **`crew_land` made a crew a thing beside the session**, with a branch
+  of its own to land. A workflow is how a session gets a piece of work
+  done, so its work belongs in the session's tree.
+- **One spec per session tied unrelated pieces of work together.**
+- **The crew was drawn off to the side**, on the Crew tab and in the
+  terminal's strip, rather than in the thread.
+
+Landing each reviewed step on the session's branch was considered and
+rejected. It needs git writes into a live agent's tree, which no backend
+can be confined from. It needs a pin on the reviewed commit, checks on
+the integrated result, and an integration tree per run. All of that
+exists only to support parallel writers, each reviewed before its work
+counts.
+
+This design gives that up: steps share one tree, review is a step, and
+a run ends with its changes in the tree for a person to read. Parallel
+writers and per-step isolation go, and with them all their machinery.
+
+### 25.2 Names
+
+| was (§24) | now |
+|---|---|
+| crew | a **workflow** (the recipe) and its **run** (one execution of it) |
+| node | **step** |
+| `crew_start(brief, budget)` | `workflow_run(recipe, spec, …)` |
+| `crew_status`, `crew_steer`, `crew_stop` | `workflow_status`, `workflow_steer`, `workflow_stop` |
+| `crew_land` | none |
+| crew branch, node branches | none |
+| the session's spec | the session's **specs** (§25.3) |
+| Crew tab, the TUI's `crewLines` | the run's block in the thread (§25.9) |
+| profile slot `crew-<tier>` | `step-<tier>`, falling back to `crew-<tier>`, then `implementer` |
+| `Engine.CrewHolds` | `Engine.RunHolds` |
+
+**Crews already in an old database** are stopped on upgrade, if any was
+open, and left unread. Their hidden node cards stay hidden.
+
+### 25.3 A session's specs
+
+A session holds a **list of specs, one per piece of work**. Most
+sessions have none.
+
+**Store.**
+- A `session_specs` table holds `(feature_id, n, title, path,
+  created_at)`, where `n` counts from 1 per session.
+- `spec_revisions` gains `spec_n`, so revisions are numbered per spec.
+- A new spec's file is `.gummi/specs/<ID>/<n>-<slug>.md`.
+- A session that already has a spec gets that file registered as spec 1,
+  at its old path, with its revisions.
+
+**Tools.**
+- `spec_start(title)` adds a spec and returns its number.
+- `spec_view(spec?, section?)` and `spec_replace_section(spec?, section,
+  body)` take the spec to act on.
+- `spec_annotate(spec?, anchor, note)` does the same.
+- `spec_list()` names every spec with its state.
+- The `spec` argument may be left out while a session has a single spec.
+  With more than one, leaving it out is refused, so no write lands in the
+  wrong spec.
+
+**Item ids.** Wherever two specs meet in one view, a done-when item is
+named by its spec as well, as in `S2/DW-1`.
+
+**A run freezes the revision it starts on.** An edit during the run is
+the next revision, and is offered to the run as a steer.
+
+**The report goes back into its spec.** It is written into a Report
+section, replacing the last one, and the thread carries the same text
+as a turn.
+
+**A spec's state comes from its runs:**
+
+| state | meaning |
+|---|---|
+| `draft` | never run |
+| `running` | a run on it is open |
+| `met` | its last run passed every item with a check, and left none unjudged |
+| `partial` | anything else |
+
+A spec may be run again.
+
+**The faces.** The Spec tab becomes **Specs**: a list of specs with each
+one's state, revision, runs and done-when count, and the selected spec
+beneath it. Editing and annotating work as they did. The TUI's spec view
+(alt+s) gains a list to switch between specs. `gummi spec` takes
+`--spec <n>`.
+
+### 25.4 Recipes
+
+A recipe is a YAML file. gummi looks under `.gummi/workflows/<name>.yaml`
+first, then in its bundled recipes (`internal/workflowrecipe/bundled/`),
+so a workspace may override a bundled recipe by name. The session agent
+may also hand a recipe over inline (`recipe_yaml`), drafted for the work
+in hand. The recipe is copied into the run when the run is proposed, and
+what the person allows is that copy.
+
+```yaml
+name: deliver
+description: Design, build and validate a spec's done-when items
+tier: standard            # default for every step
+inputs: {}                # name: hint, filled at workflow_run
+steps:
+  - id: design
+    role: contractor
+    prompt: |
+      Write the design for the spec below into {{artifacts.design}}.
+      Do not edit code.
+
+      {{spec}}
+    artifacts: { design: design.md }
+  - id: build
+    repeat:
+      max: 3
+      until: { verdict: APPROVED, in: review }
+      onMax: pause
+      steps:
+        - id: implement
+          role: implementer
+          prompt: |
+            Implement {{artifacts.design}} for the spec below. If
+            {{artifacts.review}} exists, address its findings first.
+
+            {{spec}}
+        - id: reviews
+          parallel:
+            join: allSettled
+            steps:
+              - { id: review-a, role: reviewer, tier: strong,   prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+              - { id: review-b, role: reviewer, tier: standard, prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+        - id: verdict
+          role: reviewer
+          prompt: |
+            Merge these reviews into {{artifacts.review}} as JSON:
+            {"verdict": "APPROVED" | "CHANGES", "findings": [...]}.
+            {{review-a.output}}
+            {{review-b.output}}
+          artifacts: { review: review.json }
+  - id: validate
+    role: reviewer
+    prompt: |
+      Read {{run.diff}} against the spec's done-when items. End with one
+      line per item: MET: DW-n or UNMET: DW-n <why>.
+
+      {{spec}}
+```
+
+**Fields.** A recipe has `name`, `description`, `tier`, `inputs` and
+`steps`, which run in order. Each entry of `steps` is exactly one of:
+
+- **a step**:
+  - `id` and `role`, required;
+  - `prompt`, required;
+  - `tier` and `artifacts` (name to file name), optional;
+  - `captureOutput`, optional and true by default.
+
+  A step has no `envelope`: a run estimates nothing and spends from the
+  session's budget (§25.7). A recipe from before that still names one
+  parses, and `Check` warns that it is ignored.
+- **`parallel`**: an `id`, `join` (`all`, `allSettled` or `any`) and
+  `steps`, which are plain steps.
+- **`repeat`**: an `id`, `max`, an `until` stop condition, `onMax`
+  (`abort`, `continue` or `pause`) and `steps`.
+
+**Roles.** `scout`, `planner`, `contractor`, `implementer`, `tester`,
+`scribe` and `reviewer`.
+- Each role has a prompt preamble, and `planner` has its profile slot.
+- `scout` and `reviewer` are **reading roles**: their preamble tells them
+  to change no files. They have the full shell any step has — a reviewer
+  runs the tests — so nothing enforces it; a reading step whose end
+  snapshot differs from its start is flagged in its row and the run's
+  report, as evidence, never a refusal.
+- Every other role writes.
+
+**Templates**, filled when a step starts:
+
+| template | is |
+|---|---|
+| `{{spec}}` | the frozen spec revision's text |
+| `{{inputs.<name>}}` | an input given at `workflow_run` |
+| `{{artifacts.<name>}}` | the absolute path of an artifact in the run's directory |
+| `{{previous.output}}` | the output of the step before |
+| `{{<id>.output}}` | that step's output; inside a `repeat`, its latest iteration |
+| `{{run.diff}}` | a file gummi writes before the step starts: the diff from the run's starting tree to now |
+
+Output is the step's final message. It is wrapped in delimiters naming
+its step, so text from one step cannot pose as instructions to the
+next.
+
+**The run's directory.** `.gummi/runs/<ID>/<n>/` holds the recipe copy,
+the artifacts, the diff files and each step's output. It is in the
+workspace, not the tree, so it is never in the session's diff. Every
+step may write it: a backend that cages its writes to the working
+directory has the run's directory opened beside it. A step that ends
+without writing an artifact it declared has it captured from its
+output — the last JSON object for a `.json` artifact, else the last
+fenced block — and the run's notes say gummi wrote it.
+
+**Stop conditions for `repeat`.** After each iteration, a `repeat` checks
+its `until`:
+
+| `until` | the loop ends when |
+|---|---|
+| `checks` | every done-when check of the frozen spec passes in the tree |
+| `{verdict: <word>, in: <artifact>}` | the artifact's JSON field `verdict` equals the word |
+| `{contains: <text>}` | the last step's output contains the text |
+
+At `max` without the condition, `onMax` decides:
+- `abort` ends the run as partial;
+- `continue` goes on to the next step;
+- `pause` asks the person whether to run one more iteration, continue,
+  or stop.
+
+A condition gummi **cannot judge** is never counted as not met: the
+artifact a verdict is read from was never written (nor captured), or a
+check ran no tests (§25.6). The run waits on the person, whatever
+`onMax` says — "the loop can't judge: `review` (`review.json`) was
+never written" — with the same answers: one more iteration (which does
+not count against `max`), continue, or stop.
+
+**Joins for `parallel`.** Each branch is a step of its own, in the same
+tree.
+
+| `join` | the block |
+|---|---|
+| `all` | fails as soon as one branch fails, and stops the others |
+| `allSettled` | waits for every branch, and fails only if all of them do |
+| `any` | settles when one branch succeeds, and stops the rest |
+
+**A step fails** in two cases:
+- its backend errors;
+- its output's last line is `FAILED: <why>`.
+
+A failed step outside a `parallel` ends the run as partial.
+
+**A planner step** may end its output with a fenced `gummi-workflow`
+block of steps. Those steps replace the run's remaining steps, once they
+pass `Check`, and go to the person as a revised plan to allow. A step
+that is already running is never rewritten.
+
+**`workflowrecipe`** is a pure package: `Parse`, `Check` and the bundled
+recipes. `Check` refuses a recipe that cannot run:
+- an id that is missing or duplicated;
+- an unknown role or tier;
+- a `{{…}}` that names no input, artifact or earlier step;
+- a `repeat` without a `max` or an `until`;
+- a `parallel` without a valid `join`;
+- an `until` naming an artifact no step in its body declares.
+
+`Check` **warns** when one `parallel` block holds more than one writing
+role, because those steps can overwrite each other's work, and when a
+step still names an `envelope`, which is ignored. It sets no floor:
+whether a recipe reviews, tests or designs is its own choice.
+
+**The bundled recipes:**
+- **`deliver`**, as above;
+- **`investigate`**: a scout, then a scribe writing a `report.md`
+  artifact, with the report as the run's output;
+- **`fix-until-green`**: one implementer in a `repeat` with
+  `until: checks`, `max: 5` and `onMax: pause`.
+
+### 25.5 Proposing and allowing a run
+
+`workflow_run(recipe | recipe_yaml, spec?, inputs?)` proposes a run. The
+call returns at once, saying the run is proposed.
+
+- It is refused when the recipe fails `Check`, when the spec does not
+  exist, or when a run is already queued behind an open one. The queue
+  is one deep.
+- The proposal goes to the person as a **decision in the thread**. It
+  shows:
+  - the recipe's step tree, with each step's role and tier;
+  - `Check`'s warnings;
+  - the spec and the revision it will freeze;
+  - every done-when check command the run will execute;
+  - the run's **baseline**, each checked item as it stands before the
+    run (below), or that the checks are still running;
+  - what is left in the session's pool, which the run spends from —
+    nothing is estimated;
+  - whether the tree holds uncommitted work.
+- The person has four answers:
+  - **Allow**;
+  - **Always allow**, which allows this run and every later run of the
+    session without asking; the session's budget is the only cap;
+  - **Deny**;
+  - typed **feedback**, delivered to the session agent as a turn, which
+    may propose again.
+- A run on a session whose runs are always allowed is allowed without
+  asking. No agent allows its own run.
+- A run allowed while another is open waits as **queued**. It starts
+  when the open run ends. Its spec revision is frozen when it starts,
+  not when it was allowed.
+- **A recipe the session wrote inline is the person's to keep.** From a
+  proposal on, the run's block offers **Save as recipe…**: a person names
+  it, and gummi writes the recipe as the session gave it to
+  `.gummi/workflows/<name>.yaml`, where any session may then run it by
+  name. The agent cannot: `.gummi/workflows/` is outside its write cage,
+  and no session tool, MCP call or headless path saves one (§25.9).
+- **The baseline.** A check that already passes before a run, or a `go
+  test -run` that matches no test, proves nothing about what the run did,
+  and its end result alone cannot tell. So gummi runs the spec's done-when
+  checks as the run's baseline: in the background when the run is
+  proposed (`workflow_run` still returns at once), and again before the
+  first step starts — allowed, always allowed or dequeued — when the tree
+  or the frozen revision has moved since. It records each checked item's
+  result (passes, fails, or ran no tests by `verify.RanNoTests`; an item
+  judged by a step has none) and the tree snapshot it ran at.
+  - An item that **already passes** or **ran no tests** is named on the
+    proposal ("DW-2 already passes before the run", "DW-3 ran no tests"),
+    and the session agent is told which and why in a turn under the
+    workflow's actor, so it can rewrite the check, withdraw the proposal
+    and propose again, or carry on.
+  - The report and the ended block read each checked item before and
+    after: "DW-1 failed → passed", "DW-2 passed → passed (already passed
+    before the run)".
+  - It is evidence, never a gate (decision 28): no proposal is refused
+    and no run is paused over what it finds. The first step waits only
+    for the checks to have run; checks that cannot run at all leave the
+    run without a baseline.
+
+### 25.6 The tree and its snapshots
+
+- **Steps run in the session's worktree.** A step is a hidden card row,
+  child of the session, carrying the run's number and the step's path:
+  `build/2/implement` for iteration 2 of `build`. Its agent's working
+  directory is the session's checkout. It has its own backend
+  conversation, model and spend.
+- **Nothing is committed by gummi.** A step's role preamble tells it not
+  to commit. One that commits anyway is not refused, and the report
+  names the commits.
+- **Snapshots.** At a run's start, and at each step's start and end,
+  gummi records the tree with `worktree.Snapshot`. It copies the index to
+  a temporary file and runs `git add -A` and `git write-tree` against
+  it, through `GIT_INDEX_FILE`. This touches neither the branch, the
+  real index nor the files. A snapshot is a tree hash stored on the
+  step or the run. Two diffs come from snapshots:
+  - a step's own diff runs from its start snapshot to its end snapshot;
+  - the run's diff runs from the run's start snapshot to a fresh one.
+- **Stop** interrupts the running steps at their next tool boundary,
+  marks the run stopped, and reverts nothing.
+- **Revert run** is a person's act, from the run's block or `gummi
+  workflow revert`. It lists every path that differs between the run's
+  start snapshot and now. Once the person confirms, each path is put
+  back to its start state (`git restore --source=<tree> --worktree`),
+  and a path the run created is deleted. This also undoes anything the
+  session changed during the run, and the list says so. Revert is
+  refused while a step is running.
+- **Run end.** When the last step settles, gummi runs the frozen spec's
+  done-when check commands in the tree (`verify`) and records each
+  result.
+  - An item without a check is judged by the last step's `MET: DW-n`
+    or `UNMET: DW-n` line, if it has one. Otherwise it is unjudged
+    (`–`).
+  - An item whose check passed but ran no tests — a `go test` with
+    `-run` whose output says "no tests to run" — is unjudged too, "the
+    check ran no tests", never ✓: it proves nothing.
+  - The results are the run's evidence: they are in its report and its
+    block, and they set its spec's state (§25.3).
+- **No validated mark.** The crew-verified mark (§24.8) has no
+  successor: gummi pins no tree as validated and the head carries no
+  mark, and there is no Re-check (§25.14).
+
+### 25.7 Conducting a run
+
+`workflowpolicy.Decide(Snapshot) []Action` is pure. `Engine.WorkflowTick`
+builds the snapshot, executes the actions, and is called from the faces'
+tick loops (`ui/workflowloop.go`) and the headless driver. In order:
+
+1. Wind down when stopped: interrupt running steps, then end the run.
+2. Pause when the session's pool is spent (§24.7a), and do nothing else.
+3. Settle a `parallel` whose join is decided, and a `repeat` whose
+   iteration has ended: check `until`, then iterate, end the loop, or
+   apply `onMax`.
+4. Start the next ready step or steps. These are the next sibling in
+   order, or every branch of a `parallel`.
+5. When nothing is left, run the end checks (§25.6), write the report
+   into the spec and the run's directory, and send it to the session as
+   a turn under the workflow's actor.
+
+**Money** is one pool, and nothing estimated against it:
+- the run binds to the session's envelope, and a step's backend may
+  spend what the pool has left;
+- nothing forecasts what a run will cost, and no step is a runaway; the
+  planner plans without regard to money;
+- a run goes on until the pool is spent, then pauses for a top-up and
+  never drops work;
+- only a person raises the money.
+
+**Questions.** A step's `ask_user` is a decision to the person, drawn
+under the step in the run's block. The step waits for the answer.
+
+**Steering.** `workflow_steer(note)` from the session agent, and an edit
+to the frozen spec, reach every running step as a turn. A step that has
+not started yet sees the note in its prompt.
+
+**Nothing resumes itself.** A quit parks a running run, keeping its state
+and stopping its steps. After a restart it shows as paused, and runs
+again only when a person resumes it.
+
+### 25.8 The session during a run
+
+- **One run open at a time.**
+- **The session agent keeps talking.** Every turn it takes during a run
+  begins with a note saying that a run is changing the tree and that it
+  must not touch files until the report arrives. Nothing enforces this.
+  A file it changes shows in the next step's snapshot as if the run had
+  changed it.
+- **The session cannot land while a run is open** (`Engine.RunHolds`, in
+  `cardops`).
+- **After the report**, the session agent reads it and the diff, then
+  commits on purpose, or the person does. gummi never commits for it.
+
+### 25.9 In the thread
+
+Each run is **one block in the session's thread**, updated in place.
+`threadfold` takes the session's runs as an input
+(`Options.Runs`, read from the store). It does not take an event per
+step action. The block is an item keyed `run:<n>`, carrying a revision
+counter so a face redraws only what changed. The web page and the TUI
+both draw it from that fold.
+
+The block holds:
+
+- **A head**: the recipe, the run's number, its spec, its spend, elapsed
+  time, and Pause, Resume and Stop.
+- **A strip** of the recipe's top-level entries, each in its state:
+  - a `repeat` shows its iteration, as in `build ↺ 2/3`;
+  - a `parallel` shows its branches joined by `∥`.
+- **A row per step that has run or is running**:
+  - its path, role, title or id, and spend;
+  - its live last action, or its end summary;
+  - a flag when a reading step changed files ("changed 2 files although
+    it only reads");
+  - **Open**.
+
+  A finished iteration of a `repeat` folds to one row with its verdict.
+  A step waiting on the person is ringed, and its question is drawn
+  under it with the recommended answer first. **Every step at work reads
+  as running and stands out**: in the TUI its glyph is the spinner and
+  its bar, name and line are lit; on the web page its row is tinted and
+  barred and its dot breathes. Side-by-side steps of a `parallel` are
+  each marked so.
+- **A footer**: the files the run has changed so far, uncommitted, and
+  **Revert run…**; for a recipe the session wrote inline, **Save as
+  recipe…** (the TUI's `s`), and once saved "saved as <name>" in its
+  place.
+
+While the run is proposed or queued, or open before its first step, the
+block carries its **baseline** (§25.5) under its head: "running the
+done-when checks before the run…", then a line per checked item, one
+that proves nothing marked amber. The proposal's card says the same.
+
+An ended run folds to:
+- its result per done-when item, a checked one with its baseline before
+  it ("DW-1 failed → passed");
+- the files it left changed;
+- the commits steps made, if any;
+- Revert run;
+- a link to its report.
+
+**Where a block stands.** Each run's block stands where the run was
+proposed, among the history, in both faces, and `threadfold` alone says
+where: `RunPlace` puts it before the first turn of the session's
+conversation written after its proposal that is no part of an activity
+row (a tool call, a thought, the task list), after every turn when nothing
+came since, and among the thread's settled items (`placeRuns`, by time)
+when it predates every turn shown. The terminal draws the whole
+conversation and places each block by `RunPlace`. The page's live block
+carries only the newest turns, so the server places the runs among them
+(`Conversation.Runs`, on `GET …/live` and the thread's own live block) and
+the page draws a run it does not place there among the settled items. No
+face places a run by a rule of its own, and none stacks runs at the
+bottom.
+
+**An ended run folds to one line** once it is no longer the latest news:
+its state's glyph (✓ done, ◐ partial, ■ stopped), and `deliver · run 2 ·
+spec 2 “Close the TUI's gaps” · met 5/5 · $2.92 · 14 files ▸` — the
+state's word after the run for partial and stopped, the checked items it
+met of those checked, its spend and the files it left changed. The run
+that ended most recently stays whole until the person says something to
+the session after it ended (a line of theirs, never a run's report or an
+objective's turn: `PersonSaid`) or another run is proposed; every older
+ended run is one line. `threadfold.FoldRuns` decides it (`Run.Folded`,
+`Mark`, `Line`; folding moves the block's `Rev`), so both faces fold the
+same runs. An open run (proposed, queued, running, paused) is always
+whole. Activating the line unfolds the whole block as above; activating
+the block's fold (▾ on the page, enter on its head in the terminal) folds
+it again. That unfolding is the face's own, kept per card and run until
+the person leaves the card. In the terminal enter on a whole ended run's
+head folds it, and its steps' line is a cursor stop of its own that enter
+unfolds.
+
+**Each spec lists its runs**, newest first: the run's glyph, number and
+recipe, its state, the checked items met, its spend and when it ended —
+on the web page's Specs tab under the spec's bar (`Spec.Runs`), and in the
+terminal's spec view under the list of specs. A row jumps to the run's
+block in the thread and unfolds it: the page's Jump (scroll and flash),
+the terminal's alt+w (a digit, 1–9, names the row).
+
+**A live strip stands above the composer while a run is open** (running
+or paused; never while it is proposed or queued, and gone once it ends),
+so a person talking to the session keeps the run in sight after its
+block has scrolled up the thread. The block stays where the run was
+proposed. The strip is `threadfold`'s too: `RunStrip`, folded with the
+block from the same run, steps and live sessions and carried on it
+(`Run.Live`), so its words move the block's revision. It says one of:
+
+- **running**: a live mark, `<recipe> · run <n>`, the recipe's top-level
+  entries as the block's strip has them (done `✓`, the current one lit, a
+  `repeat` as `↺ i/max`), the active step's id and its live last action
+  (side-by-side steps' ids joined by `∥`), the spend and the elapsed time;
+  **↑ Jump to run**, and **Open <step>** — **Open… ▾**, a pick of the live
+  steps, when several work side by side;
+- **a step asks** (amber): `<step> asks: <question>`, **Answer**, which
+  opens the step on its question, and Jump;
+- **the run's own decision** (amber): what it waits on, answered in the
+  pinned decision;
+- **paused on a spent pool** (grey): "paused · the session's $X is spent ·
+  top up to carry on", **Top up…** (the session's budget action, whose
+  raise carries the run on), and Jump;
+- **paused by a person** (grey), with **Resume**.
+
+Jump scrolls the thread to the run's block and flashes it. A narrow strip
+gives up the recipe's entries first, then the money and the time; the
+run's name, the step's action and Jump stay.
+
+- **On the web page** the strip is a row of the dock, directly above the
+  composer (a phone's too, compact), updated in place part by part on
+  every refetch. A pill at the top of the thread, "↑ <recipe> · run <n>
+  is above", shows while the open run's block is scrolled out of view
+  above (an `IntersectionObserver`), and jumps to it.
+- **In the TUI** it is one line on the composer, with an `alt+w jump`
+  hint. alt+w jumps: the thread scrolls the open run's block into view
+  with the cursor on its active step's row, enter opens it and esc gives
+  the keys back. The line takes its row from the body: on a short
+  terminal it is the first pinned row to go, before the head, an open
+  decision or the composer give up one of theirs.
+
+The proposal and a revised plan are decisions in the thread (§25.5).
+The **Crew tab**, `ui/webcrew.go`, `web/assets/crew.js` and the TUI's
+`crewLines` are removed.
+
+### 25.10 Opening a step
+
+**Open** shows the step beside the session's thread. On the web page it
+is a right-hand panel; in the TUI it is a pushed view with a crumb back,
+such as `Session › deliver run 2 › build ↺ 2 › implement`.
+
+- **Head**: the role, the model and tier, its spend, and its state.
+- **Transcript**: the step card's own thread, live.
+- **Diff**: the step's own diff, from its snapshots.
+- **Brief**: the prompt as filled in, and the artifacts it reads and
+  writes.
+
+A step has these three tabs in both faces, and no **Terminal**: it works
+in the session's tree, whose terminal (§20.5) is the session's own.
+
+**A person may talk to the step's agent.**
+- While the step runs, a message is a turn to it, and the step's output
+  is whatever it says last.
+- After the step has ended, a message resumes its conversation for a
+  follow-up. That can change the tree, which the run's diff then shows.
+  It does not re-run the steps that came after it.
+- Every message is a turn on the step's card, paid from the session's
+  pool.
+- The run's other steps see only what the step's output and artifacts
+  carry.
+
+### 25.11 The headless driver
+
+`gummi run` and `resume` drive workflows as they drove crews.
+- `gummi run` always allows the runs of the session it mints; the
+  envelope is their only cap.
+- A run proposal on a session not always allowed, a question, a run's
+  decision or a spent pool stops the driver with `needs_you` (or
+  `exhausted`).
+- NDJSON events are renamed from `crew_*` to `workflow_*`, and the
+  `crew_*` names are still emitted alongside for one release.
+
+### 25.12 What goes, and what stays
+
+**Goes:**
+- crews' branches;
+- node landing (`CrewLand`, `SquashMerge` for nodes);
+- the owns check and the one-writer rule;
+- the reviewer gummi placed after every writing node;
+- the conflict-integration path;
+- the planner's tool set;
+- `crewplan` and `crewpolicy`, replaced by `workflowrecipe` and
+  `workflowpolicy`;
+- the handoff grammar as a requirement. `DECISION:` and `OPEN:` lines
+  are still gathered into the report when a step writes them.
+
+**Stays:**
+- money as one pool (§24.7a), with nothing estimated against it;
+- a person's allowance of every run and every revised plan, or a
+  person's "always allow" for the session's runs, with no agent allowing
+  its own run;
+- questions reaching the person;
+- a session landing on a person's read of its diff.
+
+**Decision 27 is amended.** Its "what does not bend, inside a crew"
+becomes three rules for a run:
+- a person allows the run and every revision of its plan;
+- money is a ceiling no agent raises;
+- a question the run cannot settle reaches the person.
+
+Review, checks and design are what a recipe chooses, and the bundled
+`deliver` chooses all three.
+
+### 25.13 Deferred
+
+- **Waiting on a command** without spending model turns, as a step kind.
+  A wait on a PR is a person's publishing (§22), never a run's.
+- **Recipes kept outside the workspace**, per person.
+- **Isolated parallel writers**, as an option a recipe asks for: §24's
+  branches and owns check, kept in history.
+
+### 25.14 As built
+
+The build follows §25, with these differences.
+
+**Specs and proposals.**
+- **A proposal needs a spec.** `workflow_run` is refused while the
+  session has no spec, even for a recipe whose prompts never name
+  `{{spec}}`: the run is judged against a frozen spec revision, and
+  there is none to freeze.
+- **A spec judged only by agents is never met.** A run meets its spec
+  only when at least one done-when item has a check, every checked item
+  passes and no item is unjudged, so a spec whose items are all judged
+  by `MET:` lines stays `partial` after every run (§25.3, §25.6).
+- **The validated mark was dropped.** It was built — a run whose checked
+  items all passed pinned its end snapshot as the session's validated
+  tree; the head read "validated at tree `<hash>`" or "changed since
+  validation"; Re-check (`alt+v`, the web head's button) ran the checks
+  again and moved it — and then removed: it restated what the run's
+  results already say, while a person's read of the diff is the floor
+  (decision 27). A run's end checks and their per-item results stay, in
+  its report and its block, and a spec's `met` reads them
+  (`domain.ResultsMet`). The store's `validated_tree` column is left in
+  place, unread and unwritten.
+- **Every run decision has a words row**, as an `ask_user` question
+  does, named for what the words do: **Feedback** on a proposal, to the
+  session agent; **Talk it over** on a revised plan, to its planner;
+  **Another amount** on a paused budget, the credits to top up by. A
+  `repeat` at its max offers one more iteration, continue or stop; a
+  spent pool offers a top-up or a stop.
+- **An answer names the decision it answers.** A run raises one decision
+  after another, so `WorkflowAnswer` takes the decision's id, and an
+  answer to a decision the run has since replaced is refused, saying
+  what the run asks now. The board's picker, the web page (through it)
+  and the headless driver pass the id of the decision they read.
+- **In the headless driver a number is always an option**, on every
+  decision; another amount to top up by is spelt with its unit, `300cr`
+  or `$3`, and a bare number past the options is refused.
+
+**Recipes.**
+- **Ids are unique across the whole recipe**, not only among siblings,
+  so `{{<id>.output}}` always names one step.
+- **A `repeat` without `onMax` pauses** at its max.
+- **A step's `envelope` is ignored, with a warning.** A run estimates
+  nothing, so a recipe from before that names one still parses, and
+  `Check` warns on the proposal (and on a revised plan) that it is
+  ignored; the copy the run keeps drops it.
+- **A step's path names its `parallel` too**: a branch of `reviews` in
+  iteration 1 of `build` is `build/1/reviews/review-a`.
+
+**Money.**
+- **A run estimates nothing.** The proposal, the run's block, the step
+  view, `workflow_status`, the report and the driver's NDJSON say what a
+  run has spent, never what it might: there is no estimate, no forecast
+  warning and no runaway. A run binds to its session's envelope and goes
+  on until it is spent.
+- **"Always allow" carries no amount.** It is kept in the old
+  pre-authorisation's table (`crew_preauth`) as yes or no, and an amount
+  a person set before reads as yes. `gummi run` sets it for the session
+  it mints, so its driver stops on a proposal only for a session minted
+  elsewhere whose runs are not always allowed.
+- **A paused run's top-up is as much again as the envelope**, rounded up
+  to 50 credits and never below 100; the person may top up by another
+  amount, or stop the run. The decision no longer offers Continue, which
+  answered the forecast warning.
+- **The store keeps the old columns unread.** `workflow_runs.estimate`
+  and `warned`, and `workflow_steps.estimate` and `allowance`, stay in a
+  database from before, unwritten.
+- **The NDJSON follows.** `created` carries `always_allow` instead of
+  `preauth`; a `workflow` line carries `spent` instead of `estimate`; the
+  `crew` line beside it drops `budget`; `workflow_runaway` is gone.
+
+**Artifacts and checks.**
+- **Steps write the run's directory on every backend that cages
+  writes.** It lies outside the session's checkout, so on claude a
+  verdict step's `review.json` was refused and `until: {verdict: …}`
+  never held: the loop ran to its max. A step's backend is handed the
+  directory (`SessionOpts.WriteDirs`, made before it spawns): claude
+  takes it as `--add-dir`, opencode opens it to edit, write, read and
+  `external_directory` beside the scratch directory. copilot and the
+  headless backend cage nothing but their working directory, so they need
+  nothing.
+- **A missing artifact is captured from the step's output** when the
+  step ends done (`workflowrecipe.CaptureArtifact`), before the step
+  reads as done, so the loop is judged on it; one the output does not
+  hold stays unwritten, and the run's notes say which.
+- **A loop that cannot judge asks** (`RunDecideUnjudged`, the
+  driver's `workflow_unjudged`). The run starts nothing while it waits,
+  as at a loop's max; its block's folded iteration says "can't judge".
+- **A check that ran no tests is unjudged**, at a run's end and in
+  `until: checks` (where it makes the loop unable to
+  judge). Detection is deliberately narrow (`verify.RanNoTests`): a
+  passing `go test` naming `-run`, whose output says "no tests to run"
+  and shows no package or test that ran. Such an item keeps the spec
+  from `met`, and a run that would have been done ends partial: "a
+  done-when check ran no tests".
+- **Saving an inline recipe** (§25.5, §25.9), deferred at first, is a
+  person's act from the run's block: `Engine.WorkflowSaveRecipe`, reached
+  through `WebDocs.SaveRecipe` by the TUI's `s` (a one-line prompt) and
+  the page's `POST /api/cards/{id}/runs/{n}/save`. It writes the recipe as
+  the session proposed it (kept as `proposed.yaml` in the run's directory,
+  since a revised plan rewrites `recipe.yaml`), refuses a name that is no
+  recipe name (`workflowrecipe.CheckName`) or one a workspace or bundled
+  recipe has (`workflowrecipe.Taken`), and offers nothing on a run of a
+  named recipe or one that was denied. The name is kept on the run
+  (`workflow_runs.saved_as`), so the block says it was saved after a
+  restart and offers it no more. The suggested name is the recipe's own.
+- **A run's baseline is evidence, never a gate** (§25.5). It is kept on
+  the run (`workflow_runs.baseline`: the tree, the revision, each checked
+  item's result, and the items the session was told of, so a baseline run
+  again tells it only what is new). One taken at the proposal stands for
+  the first step while the tree and the revision have not moved; else the
+  checks run again in the tree the first step starts on, once — a tree
+  that moves meanwhile does not send them round again. A checked item's
+  end result carries its baseline (`ItemResult.Before`), which the report
+  and both faces read as before → after. A proposal whose baseline was
+  running when gummi stopped runs it again on the next tick. The driver's
+  NDJSON is unchanged.
+
+**Teaching the session agent.**
+- **gummi ships two skills of its own** (§23.2): `workflows` — do the
+  work yourself by default, and propose a run only when the person asks,
+  when fresh-context design, review and validation pay for themselves,
+  for a loop against failing checks or for a written investigation;
+  write the spec first and run every check, each of which must fail
+  before the run (a `go test` check greps its test's own `--- PASS:`
+  line); which recipe for what; what to do while a run is open; how to
+  read the report and commit — and `workflow-recipes`: the grammar, the
+  roles, the templates, the lines a step's output carries, loops and
+  joins, worked examples, with the bundled recipes as its references.
+  Every recipe and done-when block they show is parsed and checked in a
+  test (`TestEveryRecipeTheSkillsShowCanRun`), so they cannot drift from
+  the grammar.
+- **The session's hint carries the rules that matter most**, for a
+  backend that takes no skills: do it yourself by default, run the checks
+  red first, read the report and the diff and commit. Where the backend
+  takes skills it names the two (`sessionWorkflowHintFor`).
+- **`workflow_recipes` shows a recipe whole**: given a name, it answers
+  with that recipe's YAML as written, for the session to adapt into a
+  `recipe_yaml` of its own.
+
+**Running.**
+- **The live strip has two moods its design did not draw**: the run's
+  own decision (a revised plan, a loop at its max or one that cannot
+  judge) reads amber and points at the pinned decision, and a person's
+  pause reads grey with **Resume**. A stopping run's strip says it is
+  stopping. A step that asks is answered in the step's panel as well as
+  under its row: the panel carries its question (`StepFace.Question`),
+  which is where the strip's **Answer** goes.
+- **A reading step is never spawned read-only.** The backend's read-only
+  mode is a research session's allowlist (claude's is Read, Grep, Glob
+  and a few git commands), which kept a reviewer from running `go test`.
+  A scout or a reviewer gets the shell every step gets; its preamble
+  tells it to change no files. When its end snapshot differs from its
+  start, the paths are kept on the step (`RunStep.Changed`): its row says
+  "changed N files although it only reads" (a folded iteration says a
+  reading step in it did), and the report lists them under **Reading
+  steps that changed files**.
+- **A process conducts only the runs it holds.** A tick conducts a
+  session's run only while its process holds the session's card lock,
+  which it keeps while a run is open or queued, so two gummis never
+  conduct one run and a quit's parking never reaches a run another gummi
+  is conducting. The headless driver conducts its own session's run
+  alone.
+- **The person's Pause stops the steps' backends**, as a quit does.
+  Resume starts them again, each with a turn saying the run carries on.
+- **The envelope is a ceiling across a run's steps.** A step's own cap is
+  what the pool had left when its backend spawned, so every step's spend
+  re-checks the session's pool: once it is spent the run pauses at once
+  and every live step's backend stops, as a Pause does. On a spent pool a
+  step's cap is nothing, and no step backend spawns.
+- **A step is briefed only into a running run.** Its brief goes under the
+  run lock, once its backend is up, and only while the step is live and
+  the run running and not stopping; a stop, pause, drop or join that came
+  while the backend spawned leaves the step unbriefed, and a paused run
+  briefs it when it carries on. A message to a live step of a paused run
+  is refused until the run is resumed.
+- **A session is not closed under its run.** A hand-off is refused while
+  a run is open or queued, as it is while the session's agent is
+  mid-turn, so a run's report always reaches the session it was for; a
+  run still only proposed is withdrawn by the hand-off. Landing was
+  already held (§25.8).
+- **The run's tree is a person's to write only between its steps.** The
+  Tree tab refuses a write, and says why, while the open run has a step
+  under way or any step's agent is answering a follow-up; Revert run
+  waits on the same, and on the session's own agent mid-turn.
+- **A step's card stays open after its run ends**, so a person can go on
+  talking to the step's agent (§25.10). It stays hidden from the board.
+- **Revert run is offered from the faces only.** There is no
+  `gummi workflow revert`.
+- **Revert run stays offered after a revert.** The block's files are
+  what the run left changed, which a revert does not rewrite. A second
+  revert lists whatever differs from the run's start at that moment.
+- **A revert is of what its preview listed.** The preview names the
+  snapshot it was read from, and the confirm — on the page and in the
+  terminal — sends it back; a tree that has changed since is refused,
+  and the person reads the preview again.
+- **Ignored files on disk at a run's start are not the run's.** A run
+  lists them when it starts (`worktree.Ignored`, kept in its directory)
+  and every snapshot it takes keeps them out whatever `.gitignore` says
+  later: an edit of `.gitignore` under the run neither puts their
+  contents in its diff nor lets a revert delete them.
+- **A session's spec revisions with no spec file move to spec 0** on the
+  upgrade to workflows, which no spec is, so a spec started later begins
+  at revision 1. The upgrade reads the version inside its own
+  transaction, so two gummis opening an old database run it once.
+
+**In the thread.**
+- **A run item's `Rev` is a hash of what the block draws**, not a
+  counter, so two folds that draw the same block carry the same `Rev`.
+- **A step's row names the step by its id.** A recipe gives a step no
+  title.
+- **The terminal's spec view starts a spec too.** `+` prompts for a
+  title and starts the spec through `Engine.StartSessionSpec`, refused
+  where the web page's **+ New spec** is (`newSpecRefusal`: only an open
+  session takes one); `[` and `]` still switch between a session's specs.
+- **A step has no terminal, in either face, by design.** A person's
+  shell is the session's own — the step runs in the session's tree, not
+  one of its own, so there is nothing a step-level terminal would open
+  that the session's doesn't already.
+- **A step's transcript reads as the session's thread, in both faces.**
+  The terminal's step view is laid out by the thread's own regions
+  (`composeThread`, `cardPageChrome`): its tabs and crumb stand where the
+  card page's tabs and crumb do, its masthead where the card's does, its
+  question is pinned above the composer as the card's decision is, and
+  its composer is the thread's. Its conversation is drawn by the same
+  function as the session's (`conversationLines`; on the page, `talk`).
+- **A step's row reads its own session, not the store's last word.**
+  The stored state moves between running and asking only when the run is
+  ticked, so a step that had just asked, or had just been answered, read
+  as it was until the next tick (up to the ten-second poll). The fold now
+  takes a live step's state from its session (`threadfold.StepLive`): an
+  open question is asking, anything else running; a planner's revised
+  plan still waits on the person. An ended step a person is talking to
+  reads running ("a follow-up · …"), and the strip reads live steps as
+  their rows do.
+- **A tick that starts steps tells the faces at once.** The step rows are
+  written running by the tick, but the faces were told only once each
+  step's backend had come up, which on a real backend takes seconds; the
+  block showed the step before done and nothing at work meanwhile.
+- **Ended runs no longer pile up at the bottom of the page's thread.**
+  The page dropped every run from the settled items and drew runs only
+  inside the live conversation, before the first line a person typed
+  after each; runs from earlier stretches stacked at the start of the
+  live part, and a run with no typed line after it (answered through
+  decisions, its report gummi's turn) fell to the very bottom. Placement
+  is now `threadfold`'s alone (`RunPlace`, the settled items' `placeRuns`
+  and `Conversation.Runs`), read by both faces, and an ended run folds to
+  one line once it is no longer the latest news.
+- **A step's transcript follows its newest line**, as the thread does:
+  it opens at the end, follows while the reader is there, and stays put
+  while the reader has scrolled back (the terminal's BG-042 rule).

@@ -40,6 +40,13 @@ type SessionMessage struct {
 	// Images are the attachments a user turn carried, in order. Empty for
 	// every turn without one and for all legacy rows.
 	Images []AttachmentRef
+	// At is when the turn was written and By who typed a user turn (a
+	// person's actor, or gummi's own: a run's report, an objective). A
+	// thread places a workflow run among the turns, and folds an ended
+	// one once a person spoke after it, by these, so they survive a
+	// restart. Zero and empty on every legacy row.
+	At time.Time
+	By string
 }
 
 // encodeImages JSON-encodes a message's attachment refs for storage, "" for
@@ -175,9 +182,9 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO session_messages (feature_id, ord, author, content, tool_status, tool_output, answered_by, images)
-			VALUES (?,?,?,?,?,?,?,?)`,
-			string(snap.Feature), i, m.Author, m.Content, m.ToolStatus, m.ToolOutput, m.AnsweredBy, images); err != nil {
+			`INSERT INTO session_messages (feature_id, ord, author, content, tool_status, tool_output, answered_by, images, at, by_actor)
+			VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			string(snap.Feature), i, m.Author, m.Content, m.ToolStatus, m.ToolOutput, m.AnsweredBy, images, formatAt(m.At), m.By); err != nil {
 			return err
 		}
 	}
@@ -236,7 +243,7 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 
 func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]SessionMessage, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT author, content, tool_status, tool_output, answered_by, images
+		`SELECT author, content, tool_status, tool_output, answered_by, images, at, by_actor
 		FROM session_messages WHERE feature_id = ? ORDER BY ord`, string(id))
 	if err != nil {
 		return nil, err
@@ -245,9 +252,12 @@ func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]Sessio
 	var out []SessionMessage
 	for rows.Next() {
 		var m SessionMessage
-		var images string
-		if err := rows.Scan(&m.Author, &m.Content, &m.ToolStatus, &m.ToolOutput, &m.AnsweredBy, &images); err != nil {
+		var images, at string
+		if err := rows.Scan(&m.Author, &m.Content, &m.ToolStatus, &m.ToolOutput, &m.AnsweredBy, &images, &at, &m.By); err != nil {
 			return nil, err
+		}
+		if at != "" {
+			m.At, _ = time.Parse(timeFmt, at) // an unreadable stamp reads as none, as on a legacy row
 		}
 		if m.Images, err = decodeImages(images); err != nil {
 			return nil, err
@@ -255,4 +265,12 @@ func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]Sessio
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// formatAt is a turn's stamp as stored: "" for none.
+func formatAt(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(timeFmt)
 }

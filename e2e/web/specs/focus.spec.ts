@@ -7,7 +7,7 @@ import type { Page } from '@playwright/test';
 // closes it wherever focus is. Closing gives focus back to what opened it.
 
 let id: string;
-test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a waving helper'); } } });
+test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a waving helper'); } } });
 
 test.beforeEach(({}, info) => {
   test.skip(info.project.name !== 'desktop', 'keyboard focus is the desktop’s');
@@ -26,25 +26,25 @@ async function open(page: Page, server: { url: string }) {
 
 test('the landing dialog makes the page behind it inert and keeps Tab inside', async ({ pairedPage: page, server }) => {
   await open(page, server);
-  const land = page.getByTestId('decision-option-advance');
-  await land.click();
-  const dialog = page.getByTestId('landing-dialog');
+  await page.getByTestId('card-actions').click();
+  await page.getByTestId('action-merge').click();
+  const dialog = page.getByTestId('action-dialog');
   await expect(dialog).toBeVisible();
   await expect(page.getByTestId('app')).toHaveJSProperty('inert', true);
   // nothing behind it is reachable: every Tab lands inside the dialog
   for (let i = 0; i < 8; i++) {
     await page.keyboard.press('Tab');
-    expect(await inside(page, 'landing-dialog'), `Tab ${i + 1} stays in the dialog`).toBe(true);
+    expect(await inside(page, 'action-dialog'), `Tab ${i + 1} stays in the dialog`).toBe(true);
   }
   for (let i = 0; i < 3; i++) {
     await page.keyboard.press('Shift+Tab');
-    expect(await inside(page, 'landing-dialog')).toBe(true);
+    expect(await inside(page, 'action-dialog')).toBe(true);
   }
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(page.getByTestId('app')).toHaveJSProperty('inert', false);
-  // focus is back on the answer that opened it
-  await expect(page.getByTestId('decision-option-advance')).toBeFocused();
+  // focus is back on what opened it
+  await expect(page.getByTestId('card-actions')).toBeFocused();
 });
 
 test('a view that redraws keeps focus, and escape closes it from anywhere', async ({ pairedPage: page, server }) => {

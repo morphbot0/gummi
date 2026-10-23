@@ -1,6 +1,7 @@
 package threadfold
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/state"
@@ -23,5 +24,23 @@ func TestPublishLine(t *testing.T) {
 		if got := PublishLine(tc.p); got != tc.want {
 			t.Errorf("PublishLine(%+v) = %q, want %q", tc.p, got, tc.want)
 		}
+	}
+}
+
+// TestASessionsThreadSaysWhatWasPublished: a session runs in no stage
+// segment, and a person's publish of its branch is still a receipt in
+// its thread; a message outside a segment is the live transcript's, not
+// the fold's.
+func TestASessionsThreadSaysWhatWasPublished(t *testing.T) {
+	evs := []state.CardEvent{
+		{Seq: 1, Feature: "FF-001", Kind: state.EventMessage, Payload: `{"author":"agent","content":"done"}`},
+		{Seq: 2, Feature: "FF-001", Kind: state.EventPublish, Payload: `{"act":"create","number":12}`},
+	}
+	items := Items(evs, Options{})
+	if len(items) != 1 || items[0].T != ItemReceipt || items[0].Receipt == nil || items[0].Receipt.Kind != "publish" {
+		t.Fatalf("items = %+v, want the publish receipt alone", items)
+	}
+	if !strings.Contains(items[0].Receipt.Text, "opened PR #12") {
+		t.Errorf("receipt = %q", items[0].Receipt.Text)
 	}
 }

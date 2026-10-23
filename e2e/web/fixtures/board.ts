@@ -1,5 +1,4 @@
 import { expect, type APIRequestContext } from '@playwright/test';
-import { seedGoalAtPlan } from './goals';
 import { api, seedFreeform, type GummiServer } from './server';
 import type { Workspace } from './workspace';
 
@@ -10,14 +9,13 @@ import type { Workspace } from './workspace';
  * after, through the API (what has no CLI verb, or needs a live board).
  */
 export interface Board {
-  gate: string;
-  failed: string;
+  // a session whose work is committed, ready to land
+  ready: string;
+  // another, carrying a diff comment once seedLive has run
+  commented: string;
   ask: string;
   landed: string;
-  backlog: string[];
-  bug: string;
-  research: string;
-  goal: string;
+  sessions: string[];
   stacked: string[];
   // filled by seedLive
   freeform?: string;
@@ -25,42 +23,33 @@ export interface Board {
 }
 
 export async function seedBoard(ws: Workspace): Promise<Board> {
-  const gate = await ws.seedDesignGate('Add a wave helper');
-  const failed = await ws.seedVerifyFailed('Add a shout helper');
+  const ready = await ws.seedReady('Add a wave helper');
+  const commented = await ws.seedReady('Add a shout helper');
   const ask = (await ws.seedAsk('Pick where the greeting lives')).id;
   const landed = await ws.seedLanded('Add a farewell helper');
-  const backlog = await ws.seedBacklog(['Add a shrug helper', 'Add a nod helper']);
-  const bug = await ws.seedBug('Greet panics on an empty name', { severity: 'high' });
-  const research = await ws.seedResearch('Compare greeting libraries');
-  const goal = await seedGoalAtPlan(ws, 'Greet in two languages');
-  const bottom = await ws.seedVerified('Add a bow helper');
+  const sessions = await ws.seedSessions(['Add a shrug helper', 'Add a nod helper']);
+  const bottom = await ws.seedReady('Add a bow helper');
   await ws.gummiOK(['stack', 'new', bottom, '--name', 'greetings']);
-  await ws.gummiOK(['stack', 'add', 'greetings', gate]);
-  return { gate, failed, ask, landed, backlog, bug, research, goal, stacked: [bottom, gate] };
+  await ws.gummiOK(['stack', 'add', 'greetings', ready]);
+  return { ready, commented, ask, landed, sessions, stacked: [bottom, ready] };
 }
 
-/** The half that needs the running board: a freeform card, a running card, a diff comment, a dependency. */
+/** The half that needs the running board: a session, a running one, a diff comment. */
 export async function seedLive(request: APIRequestContext, server: GummiServer, b: Board, opts: { running?: boolean } = {}): Promise<Board> {
   const call = (method: string, path: string, body?: unknown) => api(request, server, method, path, body);
   b.freeform = await seedFreeform(request, server, 'Tidy the README');
 
-  // the second backlog card waits on the first
-  const deps = await call('POST', `/api/cards/${b.backlog[1]}/actions/deps`, { cards: [b.backlog[0]] });
-  expect(deps.status, deps.text).toBe(200);
-
-  // a comment on the failed card's first added line, pending with its next answer
-  const diff = (await call('GET', `/api/cards/${b.failed}/diff`)).json;
+  // a comment on the commented card's first added line
+  const diff = (await call('GET', `/api/cards/${b.commented}/diff`)).json;
   const line = diff.files.flatMap((f: any) => f.hunks.flatMap((hk: any) => hk.lines)).find((l: any) => l.t === '+');
-  const ann = await call('POST', `/api/cards/${b.failed}/diff/annotations`, { idx: line.idx, comment: 'Name the helper after what it returns.' });
+  const ann = await call('POST', `/api/cards/${b.commented}/diff/annotations`, { idx: line.idx, comment: 'Name the helper after what it returns.' });
   expect(ann.status, ann.text).toBe(200);
 
   if (opts.running !== false) {
-    // a card whose architect streams slowly (the workspace sets GUMMI_E2E_SLOW_SECONDS)
-    const c = (await call('POST', '/api/cards', { kind: 'feature', title: '[slow] Add a lazy helper' })).json;
-    let card = (await call('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-    card = (await call('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
-    await expect.poll(async () => (await call('GET', `/api/cards/${c.id}`)).json.status).toBe('running');
-    b.running = c.id;
+    // a session whose turn streams slowly (the workspace sets GUMMI_E2E_SLOW_SECONDS)
+    const id = await seedFreeform(request, server, '[slow] Add a lazy helper');
+    await expect.poll(async () => (await call('GET', `/api/cards/${id}`)).json.status).toBe('running');
+    b.running = id;
   }
   return b;
 }

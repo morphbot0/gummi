@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -221,235 +220,94 @@ var foreignBlockedKeys = map[string]bool{
 // diverge the way they used to when the handler answered a key the
 // table didn't advertise.
 func cardActionsFor(in nextInput, r featureRow) []cardAction {
-	work := domain.StageImplement
 	research := in.kind == domain.KindResearch
-	// A freeform card is not in the workflow (DESIGN §19), so every
-	// workflow-shaped row below is withheld from it: there is no stage to
-	// advance or send it back to, no artifact to open, no verification
-	// plan to run, and no gate for the gate-approval mode to govern. The
-	// same reason the research filter above withholds the branch verbs —
-	// "not shown" and "not available" must not diverge.
+	// A retired workflow card (anything but a session) is read-only: it
+	// keeps the verbs that read it and put it away, and none that would
+	// run it — "not shown" and "not available" must not diverge.
 	freeform := in.kind == domain.KindFreeform
 	doneStage := in.stage == domain.StageDone
-	// carries a branch: everything but a research card, once it has left
-	// the backlog. Under one worktree per card the tree exists from the
-	// first stage run, so the stage no longer discriminates beyond that.
-	needsWT := in.kind != domain.KindResearch && in.stage != domain.StageTodo
-
-	runLabel, runWhy := runLabelWhy(in)
-	pauseLabel, pauseWhy := pauseLabelWhy(in)
-	// on a card something else drives, enter can only watch — and can do
-	// so at any stage, since what it opens is that driver's run rather
-	// than one this board would start.
-	if r.watchOnly() {
-		runLabel = "watch"
-		runWhy = "follow the live agent stream — " + r.watchDriver() + " owns this run"
-	}
-
-	advanceLabel, advanceWhy := "next stage", "move the card to its next stage"
-	if in.stage == domain.StageVerify {
-		advanceWhy = "approve — " + landWhy(r.F.Offers(domain.LandMerge), "squash-merge the branch and land it on "+r.baseBranch(), "land the branch on "+r.baseBranch())
-	}
-	if research && doneStage {
-		// FD-081: a done RS card has nothing left to advance — g re-runs
-		// decompose instead (keymap.go).
-		advanceLabel, advanceWhy = "decompose", "on a done RS: re-run decompose"
-	}
-	gateLabel, gateWhy := gateLabelWhy(r.F.GateApproval, r.baseBranch())
+	// carries a branch: a session from its mint, a retired card only if
+	// its worktree is still here. A research card never had one.
+	needsWT := !research && (freeform || r.HasWorktree)
 
 	// A landing is offered only where one would go through: the floor
 	// every landing door reads (merge.go's landingRefusal, carried in as
 	// in.landRefused) and the one order a stack imposes (the card below
-	// lands first). A card at verify that never finished a verify pass
-	// lists no landing — the refusal would only tell the reader to run
-	// verify, which the menu offers beside it — while a failed verify's
-	// overrule stays: the floor lets "land anyway" through, so the menu's
-	// landing is that overrule. Each withheld entry still answers its key
-	// with the refusal's own sentence (boardVerb), and the decision says
-	// why nothing lands yet ("lands after …").
+	// lands first). Each withheld entry still answers its key with the
+	// refusal's own sentence (boardVerb), and the decision says why
+	// nothing lands yet ("lands after …").
 	landable := in.landRefused == "" && in.stackBlocker == ""
-	// "next stage" out of verify is that same landing (advanceStageAs),
-	// and into implement it is the approval an unmet dependency refuses
-	// (engine.Advance) — the decision leads with "waits on …" there.
-	advanceOffered := (!doneStage || research) && !freeform
-	switch {
-	case advanceLands(r.F, r.Landed) && !landable:
-		advanceOffered = false
-	case in.stage == domain.StagePlan && len(in.depBlockers) > 0 && in.kind != domain.KindGoal:
-		advanceOffered = false
-	case in.stage == domain.StagePlan && len(in.undrafted) > 0:
-		// the design's owed sections are still blank (an architect that
-		// never ran, or wrote nothing there): engine.Advance refuses the
-		// approval, and the decision offers the run that drafts them
-		advanceOffered = false
-	case in.agentAtWork():
-		// the stage's agent is still on it; g refuses the same
-		advanceOffered = false
-	}
 	// A closed card — done, or its branch already on its base — has no
-	// work left for the verbs that steer work: no dependency to wait on,
-	// no budget to spend (but a done research card's decompose re-run),
-	// no gate for autopilot to answer. Each one's key refuses the same way
-	// (closedRefusal).
+	// work left for the verbs that steer work. Each one's key refuses the
+	// same way (closedRefusal).
 	closed := in.closed()
 
-	bounceWhy := "send it back to " + string(work) + " for rework"
-	if in.stage == domain.StagePlan {
-		bounceWhy = "send it back for a fresh, human-triggered replan round"
-	}
-	if in.stage == domain.StageImplement {
-		bounceWhy = "send it back to " + string(domain.StagePlan) + " — the plan was wrong"
-	}
-
-	// the writespec row's why: one wording for both faces (webActions
-	// appends no row of its own), saying what the session's branch is
-	// where the session has one — a main-checkout session's work is loose
-	// in the checkout, and the branch it continues on is cut from that.
-	specWhy := "continue this work as a feature — the profile's architect plans it from this conversation and the branch, and it lands on a verified branch"
-	if r.F.MainCheckout {
-		specWhy = "continue this work as a feature — the profile's architect plans it from this conversation, on a branch cut from the checkout as it stands, and it lands on a verified branch"
+	// A session has no noun of its own (artifactNoun(KindFreeform) is
+	// empty), but it may still have a document to open: its own spec,
+	// the same predicate the tab bar and alt+s answer from
+	// (cardHasSessionSpec), so the three cannot disagree about whether
+	// this card has one.
+	sessionSpec := cardHasSessionSpec(r)
+	specLabel := artifactNoun(in.kind)
+	if sessionSpec {
+		specLabel = "spec"
 	}
 
 	specs := []actionSpec{
+		// on a card something else drives, enter can only watch
 		{
-			"run", "enter", runLabel, runWhy, false,
-			r.watchOnly() || autonomousStage(in.stage),
+			"run", "enter", "watch", "follow the live agent stream — " + r.watchDriver() + " owns this run", false,
+			r.watchOnly(),
 		},
-		// the gate must stay in lockstep with boardVerb's `p`, which pauses
-		// whenever a non-interactive session exists — including a finished
-		// one, which p parks. Only the wording varies: "pause the running
-		// agent" was a lie on a session that had already stopped.
-		// the two halves of boardVerb's p, split on exactly the test that
-		// handler makes. It pauses a non-interactive session — running,
-		// queued, or a finished one it parks — and otherwise opens the
-		// dependency picker. The split used to be "any session at all"
-		// versus "none", which put a pause row on a live design chat where
-		// p actually opens the picker: the list naming one act and the key
-		// performing another is the divergence foreignBlockedKeys exists
-		// to prevent, and it was reachable on any card with the architect
-		// attached.
-		{
-			"pause", "p", pauseLabel, pauseWhy, false,
-			in.sess != "" && in.sess != engine.StateInteractive,
-		},
-		// The same key on a freeform card mid-turn, which none of the
-		// session fields above can see: its session is interactive and not
-		// in e.live, so in.sess is empty for it and the deps row below
-		// would otherwise be what p offers while a turn is running.
+		// a turn in flight is what p stops
 		{
 			"pause", "p", "stop this turn", "stop it mid-turn — whatever it has written stays in the worktree, uncommitted", false,
 			in.freeformBusy,
 		},
-		// Never on a freeform card: a dependency holds a card back from
-		// its stages, and a session has none — it starts on create and
-		// moves when a person types, so the picker would set a wait
-		// nothing ever reads.
-		{
-			"deps", "p", "dependencies", "open the dependency picker for this card", false,
-			(in.sess == "" || in.sess == engine.StateInteractive) && !in.freeformBusy && !closed && in.kind != domain.KindFreeform,
-		},
-		// The same picker while a stage session exists, where p pauses: a
-		// card at its design gate still holds its finished session, and
-		// the gate is exactly where a plan finds out what the card has to
-		// wait for. Keyless, so p keeps its one meaning there; the list
-		// (and the menu built from it) is the way in.
-		{
-			"deps", "", "dependencies", "open the dependency picker for this card", false,
-			in.sess != "" && in.sess != engine.StateInteractive && !in.freeformBusy && !closed && in.kind != domain.KindFreeform,
-		},
 		{
 			// the label is the interface, so it takes the card's own noun
-			// for its document the way the why-line beneath it always has
-			// — a bug card offering to open a "spec" named the document by
-			// a word appearing nowhere else on its page. The id stays
-			// "spec": that is what the Shell switches on, not what a
+			// for its document — "spec" for a session that has one. The id
+			// stays "spec": that is what the Shell switches on, not what a
 			// reader sees.
-			"spec", "s", artifactNoun(in.kind), "read or comment on the " + artifactNoun(in.kind) + " (tab toggles commenting)", false,
-			!freeform,
+			"spec", "s", specLabel, "read the " + specLabel, false,
+			!freeform || sessionSpec,
 		},
 		{
 			"diff", "d", "diff", "read or comment on the diff (tab toggles commenting)", false,
 			needsWT,
 		},
 		{
-			"advance", "g", advanceLabel, advanceWhy, false,
-			advanceOffered,
-		},
-		{
-			// the label is "send back", not "bounce": the decision block
-			// (decision.go) already says "send it back" for this exact act,
-			// and §5 of the round 2 UX drive settled on that one name
-			// everywhere — keymap.go's b key agrees. The id stays "bounce":
-			// that is what the Shell switches on, not what a reader sees.
-			"bounce", "b", "send back", bounceWhy, false,
-			in.stage == domain.StageVerify ||
-				in.stage == domain.StageImplement ||
-				(in.stage == domain.StagePlan && in.escalated),
-		},
-		{
-			// only where there is code to check and the check can still
-			// matter (verifyRefusal, which v answers with)
-			"verify", "v", "verify", "run verify checks", false,
-			(research || needsWT) && !freeform && verifyRefusal(r) == nil,
-		},
-		{
-			// a session runs on the agent and model its person picked, not
-			// on a profile role (DESIGN §19.8), so its menu switches the
-			// model instead of the profile — the card-profile picker below
-			// never appears for one. Keyless like the other setting
-			// changes; the picker asks the agent what models it provides,
-			// which is IO, so it is fetched off the loop (sessionmodel.go).
+			// a session runs on the agent and model its person picked
+			// (DESIGN §19.8). Keyless like the other setting changes; the
+			// picker asks the agent what models it provides, which is IO,
+			// so it is fetched off the loop (sessionmodel.go).
 			"model", "", "model", "switch the agent and model this session runs on — from its next turn, with the conversation so far", false,
 			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
 		},
 		{
 			// the id and the dialog it opens (envelope.go) both keep the old
 			// name internally; the label and why are the only parts a reader
-			// sees, so those are what §5 renames to "budget".
+			// sees.
 			"envelope", "u", "budget", "set the card's budget (dollars; 0 = uncapped)", false,
-			envelopeRefusal(r) == nil,
+			freeform && envelopeRefusal(r) == nil,
 		},
-		// no accelerator, for the same reason duplicate has none: this is a
-		// rare, deliberate setting change, not something to fat-finger from
-		// the board. The mode is a property of the card, not of its stage
-		// or kind — but a closed card has no gate left for it to govern.
+		// no accelerator: `ask` is a word you type on the composer. On a
+		// session every line already reaches the agent that can answer
+		// AND act, so a second, read-only channel beside it would be a
+		// worse version of what the composer already does.
 		{
-			"gate", "", gateLabel, gateWhy, false,
-			!freeform && !closed,
-		},
-		// no accelerator: `ask` is a word you type on the composer, the
-		// same way `park`'s own accelerator collision is avoided (see
-		// verbKeys' doc comment) — this entry exists so the inventory
-		// still advertises it for someone who never learns the verb.
-		// Always valid, on every card in every state, including one
-		// Live() reports false for and a foreign-driven one — asking is
-		// exactly the one thing that never needs a live session or a
-		// lock to do.
-		{
-			// Withheld from a freeform card, and it is the one withholding
-			// here that is not about the workflow: every line typed on such
-			// a card already reaches the session that can answer AND act,
-			// so a second, read-only channel beside it would be a worse
-			// version of what the composer already does.
 			"ask", "", "ask", "ask the card's agent a question — read-only, never steers", false,
 			!freeform,
 		},
-		// the inbox is global, but it is also the recommended action for a
-		// card that stopped on budget — nextActions returns exactly one
-		// entry there, keyed `i`. Without a spec to land on, that
-		// recommendation (and its "top up or park from there" why) was
-		// dropped and the card said nothing about why it had stalled.
 		{
 			"inbox", "i", "inbox", "open the needs-you inbox", false,
 			in.attn != "",
 		},
 		// no accelerator: u is the budget DIALOG on the board, and this
-		// is the one-keystroke top-up-and-resume the inbox reaches with
-		// its own u — the same engine.TopUp, offered at the stop instead
-		// of behind a pointer to another tab. Only a card actually stopped
-		// on its budget has anything to top up.
+		// is the one-keystroke top-up the inbox reaches with its own u,
+		// offered at the stop instead of behind a pointer to another tab.
 		{
-			"topup", "", "top up", "raise the budget and pick the stage back up", false,
+			"topup", "", "top up", "raise the budget so the session can carry on", false,
 			in.attn == attnBudget,
 		},
 		{
@@ -460,44 +318,27 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"rebase", "r", "rebase", "rebase branch onto " + r.baseBranch() + " (conflicts go to an agent)", false,
 			needsWT && !r.F.MainCheckout && rebaseRefusal(r) == nil,
 		},
-		// The third ending, offered only at verify like merge: hand-off
-		// CLOSES the card. There is nothing to close before the work is finished —
-		// an unfinished card that nobody wants is a `D`, not an ending.
 		{
-			// Offered at verify, and on a freeform card at any time: the
-			// rule is "there is nothing to close before the work is
-			// finished", and on a freeform card only the person can say
-			// when that is — there is no verify to have passed.
+			// Only the person can say when a card's work is finished, and
+			// saying so IS the ending (DESIGN §19). Never while a turn, or
+			// a workflow run, is writing the branch it keeps
+			// (Engine.RunHoldsClose). A main-checkout session has no
+			// worktree row to require: the work it keeps is loose in the
+			// checkout, and that is what the confirm names.
 			"handoff", "h", "hand off", handOffHelp, false,
-			// never while a freeform turn is writing the branch it keeps.
-			// A main-checkout session has no worktree row to require: the
-			// work it keeps is loose in the checkout, and that is what the
-			// confirm names.
-			((needsWT && r.HasWorktree) || (freeform && in.mainCheckout)) &&
-				!r.Landed && (in.stage == domain.StageVerify || freeform) && !in.freeformBusy && !closed,
+			((needsWT && r.HasWorktree) || in.mainCheckout) &&
+				!r.Landed && !in.freeformBusy && r.OpenRun == nil && !closed,
 		},
 		{
-			// offered where a landing may happen (merge.go's
-			// landingRefusal): at verify, on a freeform card, and after
-			// a hand-off — never before the branch has been verified, and
 			// never on a card linked to a pull request, which lands there
 			// (prepareMerge refuses it with the two ways that do)
 			"merge", "m", "merge", mergeHelp(r.F.Kind, r.baseBranch(), r.F.Offers(domain.LandMerge)), false,
-			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy && (in.stage == domain.StageVerify || freeform || r.F.HandedOff()) &&
+			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy && (!doneStage || r.F.HandedOff()) &&
 				landable && r.F.PullRequest.Empty(),
 		},
 		{
 			"squash", "z", "squash", "collapse the branch to one commit in place (review & approve the drafted message)", false,
 			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy,
-		},
-		{
-			// a freeform card's third ending: its work continues as a
-			// feature card, planned from the conversation and the branch it
-			// leaves behind. One inventory for both faces — the web menu
-			// lists this row, not a second one of its own.
-			"writespec", "w", "write a spec", specWhy, false,
-			// an agent's home is no repository a feature's branch could be cut in
-			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly() && !r.F.Home,
 		},
 		{
 			// keyless like the other setting changes: it defines a
@@ -518,15 +359,6 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"clean", "c", "clean up", r.cleanHelp(), true,
 			needsWT && r.cleanable(),
 		},
-		// no accelerator, same reasoning as duplicate/gate below: the
-		// board's lowercase letters are nearly exhausted, and linking is a
-		// rare, deliberate action the list and command menu reach without
-		// spending one. Only offered before a PR exists, on a card that
-		// could otherwise merge locally (m already refuses once linked).
-		{
-			"prlink", "", "link PR…", "link this card to a GitHub pull request", false,
-			needsWT && r.HasWorktree && !r.Landed && r.F.PullRequest.Empty() && !freeform,
-		},
 		// unlinking destroys one row (PullRequestRef), not any diff
 		// annotations already pulled from it — so it is not danger:true;
 		// the confirm names what changes instead.
@@ -534,9 +366,9 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"prunlink", "", "unlink PR", "clear the linked PR — the card becomes locally landable again", false,
 			!r.F.PullRequest.Empty(),
 		},
-		// publishing (DESIGN §22): keyless like prlink, offered only where
-		// gh is signed in and the card is one publish.Refusal lets through
-		// on what the row already knows; the confirm reads the rest
+		// publishing (DESIGN §22): keyless, offered only where gh is
+		// signed in and the card is one publish.Refusal lets through on
+		// what the row already knows; the confirm reads the rest
 		{
 			"prcreate", "", "open pull request…", "push the branch and open its pull request on GitHub — you confirm where it goes first", false,
 			publishable(in, r) && r.F.PullRequest.Empty(),
@@ -546,17 +378,16 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			publishable(in, r),
 		},
 		{
-			"prready", "", "mark PR ready…", "mark the linked draft PR ready for review — only at a verified tip", false,
+			"prready", "", "mark PR ready…", "mark the linked draft PR ready for review", false,
 			publishable(in, r) && !r.F.PullRequest.Empty(),
 		},
 		{
 			"prdraft", "", "PR back to draft…", "turn the linked PR back into a draft", false,
 			publishable(in, r) && !r.F.PullRequest.Empty(),
 		},
-		// prpull is the point of the card: it rises out of the fold via
-		// nextActions' ranking (see nextsteps.go) in the states where
-		// pulling the review is the move, without spending a letter that
-		// has to be right forever.
+		// prpull rises out of the fold via nextActions' ranking (see
+		// nextsteps.go) in the states where pulling the review is the
+		// move, without spending a letter that has to be right forever.
 		{
 			"prpull", "", "pull PR review", "read the PR's review comments back onto the diff", false,
 			!r.F.PullRequest.Empty() && needsWT,
@@ -564,33 +395,23 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// read from GitHub by gummi, with the person's own gh: a session is
 		// never lent the credential to look for itself
 		{
-			"prchecks", "", "send failing checks", prChecksDetail(in.stage), false,
-			!r.F.PullRequest.Empty() && needsWT &&
-				(freeform || in.stage == domain.StageImplement || in.stage == domain.StageVerify),
+			"prchecks", "", "send failing checks", prChecksDetail(), false,
+			!r.F.PullRequest.Empty() && needsWT && freeform,
 		},
 		// no accelerator: y is "yes" in the confirm this very action raises,
 		// so binding it here made one letter mean two things one keystroke
 		// apart. The list and the command menu are how you reach it now.
 		{
-			"duplicate", "", "duplicate", "duplicate as a fresh card in todo (this card stays)", false,
-			true,
+			"duplicate", "", "duplicate", "duplicate as a fresh session (this card stays)", false,
+			freeform,
 		},
 		// Offered only once the card has ended, which is the whole point
 		// of it: before then, work that is not this card's opens a new
-		// card through the composer, and rework on this one is a bounce.
-		// Afterwards neither is reachable, and this is the only door left.
-		// Keyless for the same reason duplicate is — the board's lowercase
-		// letters are spent, and the closing block puts the row on screen
-		// at exactly the moment it is wanted.
-		// Only on a dropped card, which is the only card that has one.
+		// card through the composer. Afterwards this is the only door
+		// left. Keyless for the same reason duplicate is.
 		{
-			"adopt", "", "adopt it",
-			"take it back onto the board with its work kept — it is yours now", false,
-			r.F.GoalDropped(),
-		},
-		{
-			"newbug", "", "open a bug from this",
-			"a fresh bug card carrying this card's spec, branch and thread", false,
+			"newbug", "", "start a follow-up session",
+			"a fresh session carrying this card's spec, branch and thread", false,
 			(doneStage || r.Landed) && in.kind != domain.KindGoal,
 		},
 		{
@@ -698,28 +519,6 @@ func closedRefusal(r featureRow, what string) *noticeMsg {
 	return &noticeMsg{text: r.F.Name() + " " + how + " — " + what, isErr: true, id: r.F.ID}
 }
 
-// verifyRefusal says why the checks cannot usefully run on r, or nil when
-// they can: from implement, when there is work to check, until the card
-// closes. A freeform card answers for itself (runChecks), and a plan-stage
-// card has nothing built yet — the checks would only measure the branch
-// it forked from, which the approval baseline already did.
-func verifyRefusal(r featureRow) *noticeMsg {
-	if r.F.IsFreeform() {
-		return nil
-	}
-	if n := closedRefusal(r, "there is nothing left to verify"); n != nil {
-		return n
-	}
-	switch r.F.Stage {
-	case domain.StageImplement, domain.StageVerify:
-		return nil
-	}
-	return &noticeMsg{
-		text:  r.F.Name() + " is at " + string(r.F.Stage) + " — nothing has been built to verify yet; the checks run from " + string(domain.StageImplement) + " on",
-		isErr: true, id: r.F.ID,
-	}
-}
-
 // envelopeRefusal is closedRefusal for the budget: a closed card spends
 // nothing more, except a done research card, whose g re-runs decompose.
 func envelopeRefusal(r featureRow) *noticeMsg {
@@ -737,58 +536,6 @@ func rebaseRefusal(r featureRow) *noticeMsg {
 		return nil
 	}
 	return closedRefusal(r, "there is nothing left to rebase")
-}
-
-// runLabelWhy derives the enter action's label and fallback why — the
-// same chat/run/watch adaptation boardBindings() makes for the status bar
-// (shell.go), plus the hasAsk nuance nextsteps.go's StateRunning branch
-// carries. The fallback is only seen when nextActions(in) has nothing for
-// this state (a busy-without-ask run, or a finished autonomous
-// stage with no live session) — everywhere else cardActionsFor's why
-// override wins.
-func runLabelWhy(in nextInput) (label, why string) {
-	switch {
-	case in.hasAsk:
-		return "answer the agent", "it asked a question and is blocked on your reply"
-	case in.sess == engine.StateRunning:
-		return "watch", "watch the running agent (scrollable transcript)"
-	default:
-		return "run", "re-run " + string(in.stage) + " (starts a fresh session)"
-	}
-}
-
-// pauseLabelWhy words the p action for the session state it will act on.
-// boardVerb pauses any non-interactive session, so this row appears for
-// running, paused and finished sessions alike — and describing
-// all three as "pause the running agent" was wrong for three of them.
-func pauseLabelWhy(in nextInput) (label, why string) {
-	switch in.sess {
-	case engine.StateRunning:
-		return "pause", "stop the running agent mid-turn, freeing its slot"
-	default:
-		// paused or finished: p parks it so the loop stops offering it
-		return "park", "park the settled session so it stops asking"
-	}
-}
-
-// gateLabelWhy words the gate-approval toggle for the card's current
-// mode, the same "name what pressing it does" adaptation runLabelWhy and
-// pauseLabelWhy already give run/pause. mode is r.F.GateApproval as
-// stored, and empty reads as attended like everywhere else, so the label
-// names the one move available from where the card actually is. base is
-// the branch this card lands on (r.baseBranch()) — the "it never lands
-// on main" guarantee has to say the checkout's real trunk, not assert
-// "main" (REVIEW-ux-drive-2026-09-10-round2.md §3.4).
-//
-// The autopilot-on label used to be "take back the gates" — a phrase
-// nothing on screen defines. §5 of the round 2 UX drive asked for what
-// it actually does instead: you stop autopilot, and every gate goes back
-// to waiting on you.
-func gateLabelWhy(mode string, base string) (label, why string) {
-	if mode == domain.GateAutopilot {
-		return "stop autopilot", "stop at every gate again — you decide each crossing (tightens control)"
-	}
-	return "hand to autopilot", "let this card run to a verified branch unattended (loosens control — it never lands on " + base + ")"
 }
 
 // markerWidth is the width of the per-row cursor marker ("▸ " / "  ");
@@ -1053,5 +800,5 @@ func publishable(in nextInput, r featureRow) bool {
 	if !in.publish || !r.HasWorktree || r.Landed || r.watchOnly() {
 		return false
 	}
-	return publish.Refusal(publish.Card{F: &r.F, Busy: in.busy || in.freeformBusy}) == nil
+	return publish.Refusal(publish.Card{F: &r.F, Busy: in.freeformBusy}) == nil
 }

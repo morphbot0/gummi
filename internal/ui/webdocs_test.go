@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/pr"
@@ -528,14 +526,10 @@ func TestReviewInputOnADoneCardIsRefused(t *testing.T) {
 	handed := domain.Feature{ID: "FD-006", Num: 6, Title: "handed", Slug: "handed", Stage: domain.StageDone}
 	m.rows = []featureRow{{F: landed}, {F: handed}}
 	for _, id := range []string{"FD-005", "FD-006"} {
-		for name, send := range map[string]func(string, string, string) (tea.Cmd, error){
-			"spec": m.WebRequestSpecChanges, "diff": m.WebRequestDiffChanges,
-		} {
-			_, err := send(id, "Simon", "")
-			we, ok := IsWebError(err)
-			if !ok || we.Code != WebConflict || !strings.Contains(we.Text, "no stage left") {
-				t.Errorf("%s changes on %s = %v, want a conflict saying there is no stage left", name, id, err)
-			}
+		_, err := m.WebRequestDiffChanges(id)
+		we, ok := IsWebError(err)
+		if !ok || we.Code != WebConflict || !strings.Contains(we.Text, "no session left") {
+			t.Errorf("diff changes on %s = %v, want a conflict saying there is no session left", id, err)
 		}
 	}
 }

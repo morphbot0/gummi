@@ -103,7 +103,7 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: locating own executable: %w", err)
 	}
-	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, append(slices.Clone(opts.ExtraReadAllows), opts.SkillDirs...), opts.ReadOnly, opts.ScratchDir, opts.Permission)
+	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, append(slices.Clone(opts.ExtraReadAllows), opts.SkillDirs...), opts.ReadOnly, append([]string{opts.ScratchDir}, opts.WriteDirs...), opts.Permission)
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
 	}

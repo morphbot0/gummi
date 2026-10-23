@@ -87,6 +87,7 @@ const ICONS = {
   filter: '<path d="M4 7h16M7 12h10M10 17h4"/>',
   settings: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  step: '<circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><path d="M7 12h10M13 8l4 4-4 4"/>',
   home: '<path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/>',
   chevron: '<path d="M7 10l5 5 5-5"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>',

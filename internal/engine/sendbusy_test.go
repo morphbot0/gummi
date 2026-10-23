@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // A line typed while the agent is mid-turn, or while it is blocked on an
@@ -34,40 +33,11 @@ func TestSendRefusesWithoutFailingTheRun(t *testing.T) {
 		return n
 	}
 
-	t.Run("the backend refuses the turn", func(t *testing.T) {
-		ctx := context.Background()
-		f := feature(1, "Dark mode", domain.StagePlan)
-		ag := agent.NewFake("ack")
-		e := newEngine(t, ag)
-		s, err := e.Attach(ctx, f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// the backend is the authority on whether it can take a turn;
-		// every real adapter refuses a second one mid-stream.
-		ag.SendErr = agent.ErrBusy
-
-		const line = "also keep it simple"
-		err = e.Send(ctx, f.ID, line)
-		if !errors.Is(err, agent.ErrBusy) {
-			t.Fatalf("a refused turn returned %v, want ErrBusy", err)
-		}
-		if n := echoes(s, line); n != 0 {
-			t.Fatalf("a refused line is echoed %d time(s) in the transcript as if it had been delivered", n)
-		}
-		if s.Snapshot().Err != nil {
-			t.Fatalf("a refused line failed the run: %v", s.Snapshot().Err)
-		}
-	})
-
 	t.Run("blocked on a question", func(t *testing.T) {
 		ctx := context.Background()
-		f := feature(2, "Dark mode", domain.StagePlan)
+		f := freeformCard(2, "Dark mode")
 		e := newEngine(t, agent.NewFake("ack"))
-		s, err := e.Attach(ctx, f)
-		if err != nil {
-			t.Fatal(err)
-		}
+		s := attach(t, e, f)
 		args := json.RawMessage(`{"changes_section":"Problem","question":"Which?","options":[{"label":"a"},{"label":"b"}]}`)
 		e.handleClientTool(s, &agent.ToolCall{ID: "c1", Name: askToolName, Args: args})
 		if s.Snapshot().PendingAsk == nil {
@@ -81,7 +51,7 @@ func TestSendRefusesWithoutFailingTheRun(t *testing.T) {
 			t.Fatal("precondition: the session should not report busy while an ask is pending")
 		}
 		const line = "yes, and cover rm too"
-		err = e.Send(ctx, f.ID, line)
+		err := e.Freeform(f.ID).Send(ctx, line)
 		if !errors.Is(err, agent.ErrBusy) {
 			t.Fatalf("Send with a pending ask returned %v, want ErrBusy", err)
 		}

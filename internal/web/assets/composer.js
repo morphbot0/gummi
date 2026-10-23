@@ -316,11 +316,7 @@ function renderSays () {
   // so it keeps the command's own wording even before the server has
   // classified it
   if (d && (!state.draft.trim() || (!c && !state.draft.trim().startsWith('/')) || c?.route === 'answer')) {
-    // words the board reads before they go with an answer (a line at a
-    // stop: the reading is put to the person first) are said as the
-    // server says them — "send it back with your words" would promise a
-    // send-back enter does not make
-    says.textContent = c?.read && state.draft.trim() && !(d.multi && state.picked?.length) ? c.says : enterSays(d)
+    says.textContent = enterSays(d)
     // the button names the answer enter gives, so the line beside it need
     // not say it a second time (it stays for a screen reader)
     const names = says.textContent === enterSays(d) && says.textContent !== NONE
@@ -434,7 +430,7 @@ async function submit ({ asLine = false, confirm = '' } = {}) {
     clearSent(text, body.attachments)
     setNote('')
     if (r?.card && state.sel === id) set({ card: r.card })
-    const where = { steer: 'Steered the agent', consult: 'Asked a consult session', freeform: 'Sent to the session', goalnote: 'Noted on the goal', verb: 'Ran the command', answer: 'Answered', read: 'Sent — the board reads it to place it' }[r?.route]
+    const where = { steer: 'Steered the agent', consult: 'Asked a consult session', freeform: 'Sent to the session', verb: 'Ran the command', answer: 'Answered', read: 'Sent — the board reads it to place it' }[r?.route]
     if (where) toast(where)
     ctxRef.refresh?.(id)
   } catch (err) {

@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -19,19 +18,17 @@ import (
 // Every stop now gets its own hint, and (kind/repo/buttons already did
 // this) every one of them names the row it is on.
 func TestCardFormHintNamesEachStop(t *testing.T) {
-	d := newCardForm(domain.CardType{Kind: domain.KindBug}, nil, nil, true, "", nil, 2400, nil)
+	d := newCardForm(nil, nil, true, "", 2400, nil)
 	d.expanded = true
 
 	cases := []struct {
 		stop int
 		name string
 	}{
-		{cardStopKind, "kind"},
 		{cardStopText, ""}, // text's own hint names itself via alt+g wording; not a bare row name
 		{cardStopEnvelope, "dollar"},
 		{cardStopProfile, "profile"},
-		{cardStopSeverity, "severity"},
-		{cardStopAfter, "filter"},
+		{cardStopWhere, "where"},
 		{cardStopButtons, "buttons"},
 	}
 	seen := map[string]bool{}
@@ -78,7 +75,7 @@ func TestCardFormOptionLabelMarksFocusWithoutColor(t *testing.T) {
 // description made that prompt a lie — the next keystrokes edited the
 // card's text, below the panel that had just opened.
 func TestOptionsOpenWhereTheTypingGoes(t *testing.T) {
-	d := newCardForm(domain.CardType{Kind: domain.KindGoal}, nil, nil, true, "", nil, 2000, nil)
+	d := newCardForm(nil, nil, true, "", 2000, nil)
 	d.setFocus(cardStopText)
 	d.HandleKey(tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt})
 	if !d.expanded {

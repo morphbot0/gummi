@@ -1,7 +1,8 @@
 // Package config loads .gummi/config.yaml — the repo-controlled gummi
-// settings. Since M5 this is only the permission mode: the verify-stage
-// check commands live in each feature's spec as a gummi-checks block
-// (auto-discovered at approval), not in static config.
+// settings: the permission and sandbox modes, the managed repositories,
+// environment probes, instructions, hooks, co-authors and the skill
+// curator. A workflow run's checks live in its spec's done-when items, not
+// here.
 package config
 
 import (
@@ -61,25 +62,6 @@ type Config struct {
 	// tags in a verification plan; gummi probes each entry's Probe command
 	// at Verify kickoff and in `gummi doctor`.
 	Env map[string]EnvPrereq `yaml:"env"`
-	// Substrates names the external environments work here is proved on —
-	// a test cluster, a device farm, a staging account: scarce, slow,
-	// stateful and shared, which an env prerequisite is not. A substrate
-	// can be provisioned and reset as well as probed, it expires, and only
-	// one job holds it at a time. Its name is citable from a verification
-	// plan exactly as an env prerequisite's is ([env: <name>]).
-	//
-	// Like env probes these are operator config from outside every
-	// worktree, and that ownership is the point: the commands that decide
-	// whether work is proven must not be editable by the work.
-	Substrates map[string]Substrate `yaml:"substrates"`
-	// Experiments names the orchestrated live runs that prove work on a
-	// substrate: deploy what was built, wait for it to settle, probe it,
-	// collect what a reader will want to see. A goal's done-when item names
-	// one as its means of proof (`experiment:`), beside `check:` and
-	// `judge:`. Operator config for the same reason substrates are — and
-	// here it is the whole point: a goal may change the rig it is tested
-	// on, and must not thereby change what counts as passing.
-	Experiments map[string]Experiment `yaml:"experiments"`
 	// Instructions is a list of extra instruction-file paths that are
 	// appended to the workspace environment card, in user-then-workspace
 	// order. Every entry must be an absolute path; Load rejects relative or
@@ -90,9 +72,9 @@ type Config struct {
 	// skills would load and its skills would silently stop arriving.
 	// Sessions now see what each backend discovers itself (DESIGN §4.1a).
 	RemovedSkills any `yaml:"skills"`
-	// Checks supplies workspace-wide default verification checks. When
-	// Checks.Default is non-empty, check discovery bypasses the scribe and
-	// writes the configured list straight into the artifact.
+	// Checks supplied workspace-wide default checks to a workflow card's
+	// check discovery. Nothing reads it since workflow cards were retired;
+	// it is still parsed so an existing config loads.
 	Checks ChecksConfig `yaml:"checks"`
 	// Hooks are the scripts run on board events (the notification surface
 	// beside GUMMI_NOTIFY's bell/desktop). Each entry runs on every event,
@@ -223,177 +205,6 @@ type EnvPrereq struct {
 	Describe string `yaml:"describe"`
 }
 
-// Substrate is one operator-configured external environment.
-type Substrate struct {
-	// Describe is a short human-readable description.
-	Describe string `yaml:"describe"`
-	// Probe decides whether the substrate is ready to take a job. It runs
-	// via `sh -c` in the workspace root and is classified as an env probe
-	// is: clean exit 0 READY, clean non-zero ABSENT, anything else BROKEN.
-	Probe string `yaml:"probe"`
-	// Provision brings the substrate up from nothing. Optional: without it
-	// an absent substrate can only be waited for.
-	Provision string `yaml:"provision"`
-	// Reset returns a provisioned substrate to its known state — the
-	// snapshot a job expects to start from. Optional.
-	Reset string `yaml:"reset"`
-	// TTL is how long a provisioned substrate lives (a Go duration, e.g.
-	// "24h"). Empty means it does not expire. gummi never starts a job
-	// that cannot finish before the substrate expires.
-	TTL string `yaml:"ttl"`
-	// Timeout bounds one provision or reset (a Go duration). Empty means
-	// DefaultSubstrateOpTimeout.
-	Timeout string `yaml:"timeout"`
-}
-
-// DefaultSubstrateOpTimeout bounds a provision or reset whose substrate
-// names no timeout. Bringing machines up is slow by nature — cloud-init
-// alone runs a quarter of an hour — so the default is generous and the
-// ceiling is what stops a hung command holding the lease for ever.
-const DefaultSubstrateOpTimeout = 45 * time.Minute
-
-// MaxSubstrateOpTimeout is the ceiling for a configured substrate timeout.
-const MaxSubstrateOpTimeout = 6 * time.Hour
-
-// OpTimeout resolves the substrate's provision/reset bound.
-func (s Substrate) OpTimeout() time.Duration {
-	if d, err := time.ParseDuration(s.Timeout); err == nil && d > 0 {
-		return d
-	}
-	return DefaultSubstrateOpTimeout
-}
-
-// Lifetime resolves the substrate's TTL; zero means it does not expire.
-func (s Substrate) Lifetime() time.Duration {
-	d, _ := time.ParseDuration(s.TTL)
-	return d
-}
-
-// Experiment is one operator-configured live run. Every command runs via
-// `sh -c` in the workspace root with the run's environment: GUMMI_EVIDENCE
-// (a directory to write into), GUMMI_TREE_<REPO> and GUMMI_HEAD_<REPO> for
-// each input, GUMMI_SUBSTRATE, GUMMI_EXPERIMENT, GUMMI_RUN, GUMMI_PURPOSE
-// and GUMMI_ATTEMPT. A command that exits 75 (EX_TEMPFAIL) is saying the
-// run could not be judged, whatever phase it is in.
-type Experiment struct {
-	Describe string `yaml:"describe"`
-	// Substrate is the substrate the run needs, exclusively, for as long
-	// as it takes.
-	Substrate string `yaml:"substrate"`
-	// Inputs names the repositories whose state the run is about. The
-	// evidence a run leaves is evidence about exactly these heads, and is
-	// stale the moment one of them moves. Empty means every repository the
-	// goal has a tree in.
-	Inputs []string `yaml:"inputs"`
-	// Control proves the rig against its own reference, on a freshly reset
-	// substrate, before anything of the goal's is deployed. A rig that
-	// cannot pass it is not a judge, and says nothing about the work.
-	Control string `yaml:"control"`
-	// Deploy puts the inputs onto the substrate.
-	Deploy string `yaml:"deploy"`
-	// Settle waits until the deployed system is worth probing.
-	Settle string `yaml:"settle"`
-	// Run is the experiment itself. It may write one JSON object per line
-	// to $GUMMI_EVIDENCE/results.ndjson — {"id","ok","detail"} — so that a
-	// done-when item can be about some of its assertions and a reader can
-	// see which moved.
-	Run string `yaml:"run"`
-	// Collect gathers what a reviewer will want — dumps, tables, traces —
-	// into $GUMMI_EVIDENCE. It runs after every attempt, pass or fail.
-	Collect string `yaml:"collect"`
-	// Timeout bounds each phase (a Go duration). Empty means
-	// DefaultExperimentPhaseTimeout.
-	Timeout string `yaml:"timeout"`
-}
-
-// DefaultExperimentPhaseTimeout bounds a phase whose experiment names none.
-const DefaultExperimentPhaseTimeout = 30 * time.Minute
-
-// PhaseTimeout resolves the experiment's per-phase bound.
-func (x Experiment) PhaseTimeout() time.Duration {
-	if d, err := time.ParseDuration(x.Timeout); err == nil && d > 0 {
-		return d
-	}
-	return DefaultExperimentPhaseTimeout
-}
-
-// Phases lists the experiment's configured phases in the order they run.
-func (x Experiment) Phases() [][2]string {
-	var out [][2]string
-	for _, p := range [][2]string{{"deploy", x.Deploy}, {"settle", x.Settle}, {"run", x.Run}} {
-		if strings.TrimSpace(p[1]) != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// Longest is the longest one attempt can take: every phase at its bound.
-// It is what a substrate's remaining lifetime is measured against.
-func (x Experiment) Longest() time.Duration {
-	n := len(x.Phases()) + 1 // and the reset before it
-	if strings.TrimSpace(x.Control) != "" {
-		n++
-	}
-	if strings.TrimSpace(x.Collect) != "" {
-		n++
-	}
-	return time.Duration(n) * x.PhaseTimeout()
-}
-
-func validateExperiments(path string, c Config) error {
-	for name, x := range c.Experiments {
-		if err := validateEnvName(path, "experiments", name); err != nil {
-			return err
-		}
-		if strings.TrimSpace(x.Run) == "" {
-			return fmt.Errorf("%s: experiments: %q has no run command", path, name)
-		}
-		if strings.TrimSpace(x.Substrate) == "" {
-			return fmt.Errorf("%s: experiments: %q names no substrate", path, name)
-		}
-		if x.Timeout != "" {
-			d, err := time.ParseDuration(x.Timeout)
-			if err != nil || d <= 0 {
-				return fmt.Errorf("%s: experiments: %q has an invalid timeout %q", path, name, x.Timeout)
-			}
-			if d > MaxSubstrateOpTimeout {
-				return fmt.Errorf("%s: experiments: %q timeout %s exceeds maximum %s", path, name, d, MaxSubstrateOpTimeout)
-			}
-		}
-	}
-	return nil
-}
-
-func validateSubstrates(path string, c Config) error {
-	for name, sub := range c.Substrates {
-		if err := validateEnvName(path, "substrates", name); err != nil {
-			return err
-		}
-		if _, dup := c.Env[name]; dup {
-			return fmt.Errorf("%s: substrates: %q is also an env prerequisite; a name cited as [env: %s] must mean one thing", path, name, name)
-		}
-		if strings.TrimSpace(sub.Probe) == "" {
-			return fmt.Errorf("%s: substrates: %q has an empty probe", path, name)
-		}
-		if sub.TTL != "" {
-			if d, err := time.ParseDuration(sub.TTL); err != nil || d <= 0 {
-				return fmt.Errorf("%s: substrates: %q has an invalid ttl %q", path, name, sub.TTL)
-			}
-		}
-		if sub.Timeout != "" {
-			d, err := time.ParseDuration(sub.Timeout)
-			if err != nil || d <= 0 {
-				return fmt.Errorf("%s: substrates: %q has an invalid timeout %q", path, name, sub.Timeout)
-			}
-			if d > MaxSubstrateOpTimeout {
-				return fmt.Errorf("%s: substrates: %q timeout %s exceeds maximum %s", path, name, d, MaxSubstrateOpTimeout)
-			}
-		}
-	}
-	return nil
-}
-
 // validateEnvName holds a name that may appear inside an [env: <name>] tag
 // to what that tag can carry.
 func validateEnvName(path, section, name string) error {
@@ -407,17 +218,11 @@ func validateEnvName(path, section, name string) error {
 }
 
 // EnvProbes is every name a verification plan may cite with [env: <name>]
-// and the command that probes it: the env prerequisites, and each
-// substrate under its own name. A substrate is an environment
-// prerequisite that can also be brought up; to a plan asking "is it
-// there" they are the same question.
+// and the command that probes it: the env prerequisites.
 func (c Config) EnvProbes() map[string]EnvPrereq {
-	out := make(map[string]EnvPrereq, len(c.Env)+len(c.Substrates))
+	out := make(map[string]EnvPrereq, len(c.Env))
 	for k, v := range c.Env {
 		out[k] = v
-	}
-	for k, v := range c.Substrates {
-		out[k] = EnvPrereq{Probe: v.Probe, Describe: v.Describe}
 	}
 	return out
 }
@@ -463,12 +268,6 @@ func Load(path string) (Config, error) {
 		if strings.TrimSpace(p.Probe) == "" {
 			return Config{}, fmt.Errorf("%s: env: %q has an empty probe", path, name)
 		}
-	}
-	if err := validateSubstrates(path, c); err != nil {
-		return Config{}, err
-	}
-	if err := validateExperiments(path, c); err != nil {
-		return Config{}, err
 	}
 	for i, inst := range c.Instructions {
 		if inst == "" {
@@ -649,41 +448,6 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 	for k, v := range ws.Env {
 		merged.Env[k] = v
 		sources["env."+k] = workspacePath
-	}
-
-	// Substrates layer as env does: a machine an operator can reach from
-	// every workspace may live in the user file, and a workspace entry of
-	// the same name replaces it whole.
-	merged.Substrates = make(map[string]Substrate, len(user.Substrates)+len(ws.Substrates))
-	for k, v := range user.Substrates {
-		merged.Substrates[k] = v
-		sources["substrates."+k] = userPath
-	}
-	for k, v := range ws.Substrates {
-		merged.Substrates[k] = v
-		sources["substrates."+k] = workspacePath
-	}
-	for name := range merged.Substrates {
-		if _, dup := merged.Env[name]; dup {
-			return Config{}, nil, fmt.Errorf("substrates: %q is also an env prerequisite (%s); a name cited as [env: %s] must mean one thing", name, sources["env."+name], name)
-		}
-	}
-
-	merged.Experiments = make(map[string]Experiment, len(user.Experiments)+len(ws.Experiments))
-	for k, v := range user.Experiments {
-		merged.Experiments[k] = v
-		sources["experiments."+k] = userPath
-	}
-	for k, v := range ws.Experiments {
-		merged.Experiments[k] = v
-		sources["experiments."+k] = workspacePath
-	}
-	// Checked on the merged view, not per file: an experiment in the
-	// workspace file may well run on a substrate the user file describes.
-	for name, x := range merged.Experiments {
-		if _, ok := merged.Substrates[x.Substrate]; !ok {
-			return Config{}, nil, fmt.Errorf("experiments: %q runs on substrate %q, which is not configured", name, x.Substrate)
-		}
 	}
 
 	merged.Instructions = make([]string, 0, len(user.Instructions)+len(ws.Instructions))
@@ -947,7 +711,7 @@ permissions: allow-all
 # is never managed (in this layout it is just the parent of the checkouts).
 # The creation dialogs make you pick before they will create a card, the
 # board's o key retargets a card that has no worktree yet, and
-# run/bugs new/ingest take --repo <name>.
+# run takes --repo <name>.
 # repos:
 #   lxd: git/lxd
 #   incus: git/incus

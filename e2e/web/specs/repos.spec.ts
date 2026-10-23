@@ -11,16 +11,14 @@ import type { Page } from '@playwright/test';
 test.use({
   seed: {
     run: async (ws) => {
-      await ws.seedBacklog(['Add a shrug helper']);
+      await ws.seedSessions(['Add a shrug helper']);
       const lxd = path.join(ws.repo, 'git', 'lxd');
       await fs.promises.mkdir(lxd, { recursive: true });
       const git = (...args: string[]) => execFileSync('git', ['-C', lxd, '-c', 'user.name=E2E Tester', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', ...args], { stdio: 'ignore' });
       git('init', '-q', '-b', 'main');
       git('commit', '-q', '--allow-empty', '-m', 'init: lxd');
       await fs.promises.appendFile(path.join(ws.repo, '.gummi', 'config.yaml'), 'repos:\n  lxd: git/lxd\n');
-      const doc = path.join(ws.root, 'tmp', 'lxd-backlog.md');
-      await fs.promises.writeFile(doc, '# Backlog\n\n## Rate limit the login\n\nDo rate limit the login.\n');
-      await ws.gummiOK(['ingest', '--yes', '--repo', 'lxd', doc]);
+      await ws.seedSessions(['Rate limit the login'], { repo: 'lxd' });
     },
   },
 });

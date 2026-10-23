@@ -90,7 +90,7 @@ func TestFoldedReceiptOmitsZeroTurns(t *testing.T) {
 // answer and the line to type on; what yields is the crumb, the composer's
 // blank row, and the body.
 func TestThreadNarrowDecisionGolden(t *testing.T) {
-	m := reviewGateWorkspace(t)
+	m := askWorkspace(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 36, Height: 9})
 	m = model.(*Shell)
 	golden.RequireEqual(t, []byte(m.View().Content))
@@ -101,19 +101,21 @@ func TestThreadNarrowDecisionGolden(t *testing.T) {
 // control whose question you cannot read is not one you can answer, and
 // the design's own rule for this width is that the question never yields.
 func TestNarrowKeepsTheQuestionWhole(t *testing.T) {
-	m := reviewGateWorkspace(t)
-	model, _ := m.Update(tea.WindowSizeMsg{Width: 36, Height: 9})
-	m = model.(*Shell)
+	m := populatedShell(36, 9)
+	m.rows[1] = freeformRow(42, "dark mode", true)
+	m.sel = 1
+	m.inbox.add(m.rows[1].F.ID, attnBudget, budgetAttentionText(domain.StageOpen, false))
+	m.openCard()
 	view := ansi.Strip(m.View().Content)
 	// the question wraps onto its own rows rather than being cut short, so
 	// it is checked in the pieces the wrap leaves — the point is that none
 	// of it was dropped, not which column it broke at
-	for _, part := range []string{"implement is ready for your", "decision."} {
+	for _, part := range []string{"This card has spent its"} {
 		if !strings.Contains(view, part) {
 			t.Errorf("the question lost %q at 36 columns:\n%s", part, view)
 		}
 	}
-	if strings.Contains(view, "ready for y…") {
+	if strings.Contains(view, "spent i…") {
 		t.Errorf("the question was truncated rather than wrapped:\n%s", view)
 	}
 	// the crumb yields so the card's identity can stay. Matched on the
@@ -124,7 +126,7 @@ func TestNarrowKeepsTheQuestionWhole(t *testing.T) {
 	if strings.Contains(view, "1 of 1") {
 		t.Errorf("the crumb held its row on a nine-row terminal:\n%s", view)
 	}
-	if !strings.Contains(view, "FD-001") {
+	if !strings.Contains(view, "FF-042") {
 		t.Errorf("the card's own identity is missing at 36×9:\n%s", view)
 	}
 }
@@ -192,7 +194,7 @@ func TestCardPageChromeYieldsInOrder(t *testing.T) {
 // it had just yielded at. Chrome must shed monotonically: once a height
 // drops the strip, every shorter height must keep it dropped.
 func TestStageStripDoesNotReturnBelowWhereItYielded(t *testing.T) {
-	m := reviewGateWorkspace(t)
+	m := askWorkspace(t)
 	dropped := -1
 	for h := 20; h >= 8; h-- {
 		model, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: h})

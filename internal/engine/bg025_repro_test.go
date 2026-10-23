@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/domain"
 )
 
 // TestHeadlessGenerationsMintCollidingMCPCallIDs: each headless `gummi
@@ -15,7 +14,7 @@ import (
 // generation's already-answered "mcp-1" row and is silently deduped away.
 func TestHeadlessGenerationsMintCollidingMCPCallIDs(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	f := feature(1, "Dark mode", domain.StagePlan)
+	f := freeformCard(1, "Dark mode")
 	_ = wt
 	ctx := context.Background()
 	if err := store.CreateFeature(ctx, &f); err != nil {
@@ -26,11 +25,8 @@ func TestHeadlessGenerationsMintCollidingMCPCallIDs(t *testing.T) {
 	// constructs), asks one question over the MCP bridge path, and gets
 	// answered — mirroring the first `resume`/`--answer` round trip.
 	e1 := New(Config{Agents: singleAgent(agent.NewFake("hi")), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
-	s1, err := e1.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e1, EventIdle) // kickoff turn
+	s1 := attach(t, e1, f)
+	waitTurn(t, e1) // kickoff turn
 	go e1.DispatchClientTool(ctx, s1, "ask_user", askArgs(t, Ask{ChangesSection: "Problem", Question: "Persist where?", Options: []AskOption{{Label: "per-device"}}}))
 	waitFor(t, e1, EventQuestion)
 	if err := e1.Answer(ctx, f.ID, "per-device"); err != nil {
@@ -43,11 +39,8 @@ func TestHeadlessGenerationsMintCollidingMCPCallIDs(t *testing.T) {
 	// mcpSeq starts back at zero, so its first ask mints "mcp-1" again.
 	e2 := New(Config{Agents: singleAgent(agent.NewFake("hi")), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
 	defer e2.Close()
-	s2, err := e2.Attach(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e2, EventIdle) // kickoff turn
+	s2 := attach(t, e2, f)
+	waitTurn(t, e2) // kickoff turn
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go e2.DispatchClientTool(ctx2, s2, "ask_user", askArgs(t, Ask{ChangesSection: "Problem", Question: "Second question?", Options: []AskOption{{Label: "yes"}}}))

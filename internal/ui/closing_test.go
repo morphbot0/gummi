@@ -10,7 +10,7 @@ import (
 )
 
 // A finished card used to say nothing at all: stageActions returned early
-// for it and narrationStop refused it, so the one surface holding the
+// for it, so the one surface holding the
 // commit, the branch's fate and the cost showed none of them. These tests
 // pin the three halves of the fix — the answer set, the paragraph, and
 // the decision that carries both.
@@ -43,11 +43,6 @@ func TestClosedCardOffersAnswersForItsEnding(t *testing.T) {
 			[]string{"merge", "newbug"},
 		},
 		{
-			"dropped by its goal",
-			nextInput{stage: domain.StageDone, ending: domain.EndingDropped, droppedBy: "GL-004"},
-			[]string{"adopt", "newbug"},
-		},
-		{
 			// a goal's follow-up is not a bug card: its work is other cards.
 			"a goal",
 			nextInput{stage: domain.StageDone, kind: domain.KindGoal, ending: domain.EndingLanded},
@@ -77,7 +72,7 @@ func TestClosingParagraphNamesTheCommitAndTheCost(t *testing.T) {
 		spend:   2.03,
 		endedAt: time.Date(2026, 9, 16, 13, 2, 0, 0, time.UTC),
 	}
-	got := plainClaims(closingClaims(in))
+	got := plainClaims(closingSentences(in))
 	for _, want := range []string{"Landed on main", "9f2c1ab4d5e6", "gone"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("closing paragraph %q is missing %q", got, want)
@@ -85,38 +80,17 @@ func TestClosingParagraphNamesTheCommitAndTheCost(t *testing.T) {
 	}
 
 	in.hasWorktree = true
-	if !strings.Contains(plainClaims(closingClaims(in)), "clean up removes both") {
+	if !strings.Contains(plainClaims(closingSentences(in)), "clean up removes both") {
 		t.Fatal("a landed card still holding a worktree must say so — that is the cleanup ask")
-	}
-
-	in.corrective = 2
-	if got := plainClaims(closingClaims(in)); !strings.Contains(got, "2 rounds redone") {
-		t.Fatalf("rework is the number worth reading beside the total: %q", got)
 	}
 }
 
 func TestClosingParagraphNamesTheOtherTwoEndings(t *testing.T) {
 	handed := nextInput{stage: domain.StageDone, ending: domain.EndingHandedOff, branch: "gummi/FD-042-x", base: "main"}
-	if got := plainClaims(closingClaims(handed)); !strings.Contains(got, "gummi/FD-042-x is yours") ||
+	if got := plainClaims(closingSentences(handed)); !strings.Contains(got, "gummi/FD-042-x is yours") ||
 		!strings.Contains(got, "still available") {
 		// landing a handed-off card has always been legal and was never offered
 		t.Fatalf("hand-off paragraph = %q", got)
-	}
-	dropped := nextInput{stage: domain.StageDone, ending: domain.EndingDropped, droppedBy: "GL-004", branch: "gummi/FD-109-y"}
-	if got := plainClaims(closingClaims(dropped)); !strings.Contains(got, "Dropped by GL-004") {
-		t.Fatalf("a drop names the goal that made it: %q", got)
-	}
-}
-
-// The cost half of invariant 4, stated where the closing block can break
-// it: a finished card's paragraph is a pure function of its own record.
-func TestClosingParagraphIsFree(t *testing.T) {
-	in := nextInput{stage: domain.StageDone, ending: domain.EndingLanded, spend: 1}
-	if approveShaped(in) {
-		t.Fatal("a closed card must never be worth a model turn")
-	}
-	if !narrationStop(in) {
-		t.Fatal("a closed card has one thing to say and must be allowed to say it")
 	}
 }
 
@@ -160,10 +134,6 @@ func TestClosedCardRaisesItsOwnDecision(t *testing.T) {
 }
 
 // plainClaims flattens a paragraph to one string for assertion.
-func plainClaims(cs []claim) string {
-	var parts []string
-	for _, c := range cs {
-		parts = append(parts, c.text)
-	}
-	return strings.Join(parts, " ")
+func plainClaims(cs []string) string {
+	return strings.Join(cs, " ")
 }

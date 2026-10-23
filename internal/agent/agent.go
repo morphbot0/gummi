@@ -30,14 +30,11 @@ const (
 	// with instead of borrowing whatever role the card's last stage
 	// session happened to run under.
 	RoleConsult Role = "consult"
-	// RoleLead runs a goal (domain.KindGoal): an event-driven orchestrator
-	// that wakes on what happened to the goal's cards, reads the goal doc,
-	// and acts through goal tools — creating, dropping, raising and sending
-	// back cards, answering their questions, recording decisions for
-	// review. It is not a stage role either (a goal's implement stage is
-	// conducted, not written), and a profile need not declare it: an
-	// undeclared lead falls back to the architect's backend and model.
-	RoleLead Role = "lead"
+	// RolePlanner is a workflow's planner step (DESIGN §25.4), which may
+	// revise the run's remaining steps. It is
+	// not a stage role, and a profile need not declare it: an undeclared
+	// planner falls back to the architect's backend and model.
+	RolePlanner Role = "planner"
 	// RoleAuditor judges a freeform session's turn against its objective
 	// (domain.Objective): a tool-less one-shot that answers CONTINUE, MET
 	// or STUCK. Not a stage role, and a profile need not declare it: an
@@ -169,6 +166,13 @@ type SessionOpts struct {
 	// Adapters with a path cage let the session read and write it;
 	// adapters without one ignore it.
 	ScratchDir string
+	// WriteDirs are further directories outside WorkDir the session must
+	// be able to write: a workflow step's run directory, where the
+	// artifacts its brief names are kept. Adapters with a path cage open
+	// each to every file tool, as they do ScratchDir (claude --add-dir,
+	// opencode's edit and write rules); adapters confined to their working
+	// directory alone (WriteCageCwd) cage nothing, so they ignore it.
+	WriteDirs []string
 	// ImageSink stores image bytes a backend produced and returns the
 	// markdown that shows them (empty when it could not). Nil means the
 	// session has nowhere to keep them, and an image block is dropped.

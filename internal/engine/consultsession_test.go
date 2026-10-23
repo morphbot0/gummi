@@ -34,7 +34,7 @@ func waitConsultIdle(t *testing.T, c *ConsultSession) {
 func TestOpenConsultIdempotent(t *testing.T) {
 	r := recordingAgent()
 	e := newEngine(t, r)
-	f := feature(1, "dark mode", domain.StageImplement)
+	f := freeformCard(1, "dark mode")
 
 	c1, err := e.OpenConsult(context.Background(), f)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestConsultToolScopedToBoundCard(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 
-	f := feature(7, "consult me", domain.StageImplement)
+	f := freeformCard(7, "consult me")
 	createFeature(t, store, f)
 
 	c, err := e.OpenConsult(ctx, f)
@@ -126,7 +126,7 @@ func TestConsultMCPToolsWiring(t *testing.T) {
 	r := &recorder{Fake: agent.NewFake("ok")}
 	r.Caps = agent.Capabilities{MCPTools: true, UsageEvents: true, Interrupt: true}
 	e := newEngine(t, r)
-	f := feature(3, "mcp consult", domain.StageImplement)
+	f := freeformCard(3, "mcp consult")
 
 	c, err := e.OpenConsult(context.Background(), f)
 	if err != nil {
@@ -155,7 +155,7 @@ func TestConsultMCPToolsWiring(t *testing.T) {
 func TestConsultMCPEndpointServesReadOnlyThree(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	ctx := context.Background()
-	f := feature(9, "endpoint check", domain.StageImplement)
+	f := freeformCard(9, "endpoint check")
 	createFeature(t, e.cfg.Store, f)
 
 	path, teardown, err := e.startConsultMCPEndpoint(ctx, f.ID)
@@ -231,7 +231,7 @@ func TestConsultSpendPersistedCapExempt(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 
-	f := feature(3, "envelope test", domain.StageImplement)
+	f := freeformCard(3, "envelope test")
 	f.Budget.Envelope = 5 // a tiny envelope the same spend would blow through as a stage
 	createFeature(t, store, f)
 
@@ -257,57 +257,8 @@ func TestConsultSpendPersistedCapExempt(t *testing.T) {
 	// nothing about this ever raised a budget gate: no session exists in
 	// e.live for this card (a consult session is never installed there),
 	// so there is nothing for the envelope gate to have fired against.
-	if e.Get(f.ID) != nil {
-		t.Errorf("a consult turn installed a session into e.live: %+v", e.Get(f.ID).Snapshot())
-	}
-}
-
-// TestConsultSeedsFromFinishedStageSession: the very first OpenConsult
-// call for a card carries over a finished autonomous stage's transcript
-// — the "best conversation available" the Chosen approach names — into
-// the fresh consult backend, in a genuinely separate session (the stage
-// session's own agent is untouched).
-func TestConsultSeedsFromFinishedStageSession(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "implemented the thing"},
-			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1}},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-	ctx := context.Background()
-
-	f := feature(9, "seeded", domain.StageImplement)
-	createFeature(t, store, f)
-	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, f.ID, StateDone)
-
-	stageTranscript := e.Get(f.ID).Snapshot().Transcript
-	if len(stageTranscript) == 0 {
-		t.Fatal("finished stage session carries no transcript to seed from")
-	}
-
-	c, err := e.OpenConsult(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seeded := c.Snapshot().Transcript
-	if len(seeded) < len(stageTranscript) {
-		t.Fatalf("consult transcript = %+v, want at least the stage's own %+v", seeded, stageTranscript)
-	}
-	if seeded[0].Content != stageTranscript[0].Content {
-		t.Errorf("consult did not carry the stage session's transcript over: %+v", seeded[:1])
-	}
-	// the stage session itself is untouched — a genuinely separate
-	// backend, not a reused handle.
-	if e.Get(f.ID).Snapshot().Role == agent.RoleConsult {
-		t.Error("OpenConsult mutated the stage session's own role")
+	if liveSession(e, f.ID) != nil {
+		t.Errorf("a consult turn installed a session into e.live: %+v", liveSession(e, f.ID).Snapshot())
 	}
 }
 
@@ -319,7 +270,7 @@ func TestConsultIdleTimeoutRespawnsWithCarryOver(t *testing.T) {
 	ag := agent.NewFake("first reply")
 	e := newEngine(t, ag)
 	e.consultIdleTimeout = 10 * time.Millisecond
-	f := feature(4, "idle out", domain.StageImplement)
+	f := freeformCard(4, "idle out")
 	ctx := context.Background()
 
 	c, err := e.OpenConsult(ctx, f)
@@ -372,7 +323,7 @@ func TestEngineCloseStopsConsultSessions(t *testing.T) {
 	ag := agent.NewFake("hi")
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	f := feature(5, "closing time", domain.StageImplement)
+	f := freeformCard(5, "closing time")
 
 	c, err := e.OpenConsult(context.Background(), f)
 	if err != nil {
@@ -395,34 +346,6 @@ func TestEngineCloseStopsConsultSessions(t *testing.T) {
 	}
 }
 
-// TestSessionLivePausedReportsFalse: Pause stops the backend but leaves
-// agentSess non-nil (stop() closes it, never nils the field) — Live()
-// has to read State(), not just the handle, to report false here.
-func TestSessionLivePausedReportsFalse(t *testing.T) {
-	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
-		return []agent.Event{{Kind: agent.EventToolCall, Tool: "noop"}}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-	f := feature(11, "pause me", domain.StageImplement)
-	withWorktree(t, wt, f)
-
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, f.ID, StateRunning)
-	if !e.Get(f.ID).Live() {
-		t.Fatal("a running, attached session must report Live() == true")
-	}
-	if err := e.Pause(context.Background(), f.ID); err != nil {
-		t.Fatal(err)
-	}
-	if e.Get(f.ID).Live() {
-		t.Error("a paused session reports Live() == true")
-	}
-}
-
 // TestSessionLiveNilAndZeroValueReportFalse covers the nil-receiver
 // case (sessionFor returning nil) and a freshly zero-valued Session
 // (never attached — the "restored after a restart" shape, minus the
@@ -435,67 +358,6 @@ func TestSessionLiveNilAndZeroValueReportFalse(t *testing.T) {
 	restored := &Session{state: StateInteractive} // no agentSess: exactly Attach's "restored, no agent" shape
 	if restored.Live() {
 		t.Error("a restored session with no agent handle reports Live() == true")
-	}
-}
-
-// TestConsultSeedStampsTheProducingRole: the seeded turns must carry the
-// role that actually produced them. The seed is a good design — a
-// finished stage's conversation is the best context a consult session can
-// open with — but without a stamp every borrowed turn rendered under the
-// consult role, so the implementer's own words reappeared further down
-// the same card page as something the consult agent had said, under the
-// consult model's name. Message.Role is what a renderer reads to label
-// them; the stage session it came from is left untouched.
-func TestConsultSeedStampsTheProducingRole(t *testing.T) {
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		return []agent.Event{
-			{Kind: agent.EventMessage, Text: "implemented the thing"},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-	ctx := context.Background()
-
-	f := feature(9, "seeded roles", domain.StageImplement)
-	createFeature(t, store, f)
-	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, f.ID, StateDone)
-
-	stage := e.Get(f.ID).Snapshot()
-	if stage.Role != agent.RoleImplementer {
-		t.Fatalf("stage session role = %q, want %q", stage.Role, agent.RoleImplementer)
-	}
-	for _, m := range stage.Transcript {
-		if m.Role != "" {
-			t.Fatalf("a stage session's own transcript should carry no Role stamp: %+v", m)
-		}
-	}
-
-	c, err := e.OpenConsult(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seeded := c.Snapshot().Transcript
-	if len(seeded) < len(stage.Transcript) {
-		t.Fatalf("consult transcript = %+v, want at least the stage's own", seeded)
-	}
-	for i := range stage.Transcript {
-		if seeded[i].Role != agent.RoleImplementer {
-			t.Errorf("seeded message %d Role = %q, want %q (%+v)", i, seeded[i].Role, agent.RoleImplementer, seeded[i])
-		}
-	}
-
-	// stamping copies: the stage session's own transcript must not have
-	// been relabelled in place under the role that borrowed it.
-	for _, m := range e.Get(f.ID).Snapshot().Transcript {
-		if m.Role != "" {
-			t.Errorf("stamping the seed mutated the stage session's transcript: %+v", m)
-		}
 	}
 }
 
@@ -518,7 +380,7 @@ func TestSessionTakesImagesChecksTheConsultPath(t *testing.T) {
 		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 		t.Cleanup(func() { e.Close() })
 
-		f := feature(7, "why does the sync flake", domain.StageTodo)
+		f := freeformCard(7, "why does the sync flake")
 		createFeature(t, store, f)
 
 		// idle, nothing opened yet: the consult a first send would spawn,
@@ -575,7 +437,7 @@ func TestConsultReadOnlyWhereTheBackendCanEnforceIt(t *testing.T) {
 			var got []agent.SessionOpts
 			ag := &agent.Fake{Caps: tc.caps, OnNewSession: func(o agent.SessionOpts) { got = append(got, o) }}
 			e := newEngine(t, ag)
-			f := feature(1, "dark mode", domain.StageImplement)
+			f := freeformCard(1, "dark mode")
 
 			c, err := e.OpenConsult(context.Background(), f)
 			if err != nil {
