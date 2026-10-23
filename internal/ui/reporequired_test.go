@@ -122,6 +122,26 @@ func TestCardFormRefusesUnchosenRepo(t *testing.T) {
 	}
 }
 
+// TestAnAgentNeedsNoRepositoryChosen: an agent is in no repository, so a
+// workspace of named repositories, which has no default, still makes one
+// without a repository being picked.
+func TestAnAgentNeedsNoRepositoryChosen(t *testing.T) {
+	var got formResult
+	var created bool
+	f := newCardForm(nil, []string{"a", "b"}, false, "", 0, func(res formResult) tea.Cmd {
+		got, created = res, true
+		return nil
+	})
+	f.home, f.mainCheckout = true, true
+	f.SetText("watch the nightly CI")
+	if done, _ := f.submit(); !done || !created {
+		t.Fatalf("an agent was refused for want of a repository: done=%v err=%q", done, f.errText)
+	}
+	if got.Repo != "" || !got.Home {
+		t.Errorf("created Repo=%q Home=%v, want an agent in no repository", got.Repo, got.Home)
+	}
+}
+
 // TestCardFormRepoRowNeverEatsTyping: on the repo row, digits and arrows
 // choose; any other printable key falls through to the text, so a person
 // who starts describing the card never cycles anything by accident. The

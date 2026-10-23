@@ -250,7 +250,8 @@ func (d *cardForm) Text() string { return d.text.Value() }
 // asksRepo reports whether the dialog has a repository to ask for: only
 // in a workspace with more than one.
 func (d *cardForm) asksRepo() bool {
-	return d.repo.multi()
+	// an agent is in no repository, so a workspace of several asks none
+	return d.repo.multi() && !d.home
 }
 
 // stops is the live focus ring, in tab order.
