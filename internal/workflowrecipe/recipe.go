@@ -53,13 +53,14 @@ type rawEntry struct {
 
 // rawDispatch is a dispatch step's session (DESIGN §26.4).
 type rawDispatch struct {
-	Repo       string `yaml:"repo"`
-	Title      string `yaml:"title,omitempty"`
-	Spec       string `yaml:"spec,omitempty"`
-	Prompt     string `yaml:"prompt,omitempty"`
-	Recipe     string `yaml:"recipe,omitempty"`
-	RecipeYAML string `yaml:"recipeYAML,omitempty"`
-	Envelope   int    `yaml:"envelope"`
+	Repo       string   `yaml:"repo"`
+	Repos      []string `yaml:"repos,omitempty"`
+	Title      string   `yaml:"title,omitempty"`
+	Spec       string   `yaml:"spec,omitempty"`
+	Prompt     string   `yaml:"prompt,omitempty"`
+	Recipe     string   `yaml:"recipe,omitempty"`
+	RecipeYAML string   `yaml:"recipeYAML,omitempty"`
+	Envelope   int      `yaml:"envelope"`
 }
 
 type rawParallel struct {
@@ -229,7 +230,7 @@ func entry(re rawEntry) (domain.Entry, error) {
 	var d *domain.Dispatch
 	if rd := re.Dispatch; rd != nil {
 		d = &domain.Dispatch{
-			Repo: strings.TrimSpace(rd.Repo), Title: strings.TrimSpace(rd.Title),
+			Repo: strings.TrimSpace(rd.Repo), Repos: trimAll(rd.Repos), Title: strings.TrimSpace(rd.Title),
 			Spec: rd.Spec, Prompt: rd.Prompt,
 			Recipe: strings.TrimSpace(rd.Recipe), RecipeYAML: rd.RecipeYAML,
 			Envelope: rd.Envelope,
@@ -281,7 +282,7 @@ func rawStep(s domain.Step) rawEntry {
 	}
 	if d := s.Dispatch; d != nil {
 		re.Dispatch = &rawDispatch{
-			Repo: d.Repo, Title: d.Title, Spec: d.Spec, Prompt: d.Prompt,
+			Repo: d.Repo, Repos: d.Repos, Title: d.Title, Spec: d.Spec, Prompt: d.Prompt,
 			Recipe: d.Recipe, RecipeYAML: d.RecipeYAML, Envelope: d.Envelope,
 		}
 	}
@@ -371,7 +372,11 @@ func Summarize(r domain.Recipe) Summary {
 			if d.Recipe != "" {
 				with = d.Recipe
 			}
-			s.Repos = append(s.Repos, fmt.Sprintf("%s · envelope %s · %s", d.Repo, domain.FormatDollars(float64(d.Envelope)), with))
+			target := d.Repo
+			if len(d.Repos) > 0 {
+				target += " + " + strings.Join(d.Repos, ", ")
+			}
+			s.Repos = append(s.Repos, fmt.Sprintf("%s · envelope %s · %s", target, domain.FormatDollars(float64(d.Envelope)), with))
 			// the frozen recipe runs its commands in that repository
 			if child, err := Parse([]byte(d.RecipeYAML)); err == nil && d.RecipeYAML != "" {
 				for _, c := range Steps(child) {
@@ -383,4 +388,12 @@ func Summarize(r domain.Recipe) Summary {
 		}
 	}
 	return s
+}
+
+func trimAll(in []string) []string {
+	var out []string
+	for _, s := range in {
+		out = append(out, strings.TrimSpace(s))
+	}
+	return out
 }

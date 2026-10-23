@@ -273,15 +273,11 @@ func (m *Manager) worktreesDir() string {
 	return filepath.Join(m.wsRoot, ".gummi", "worktrees")
 }
 
-// cardTreePath validates the feature and derives its absolute checkout
-// path under base, refusing anything that would escape base. This is the
-// single chokepoint every operation goes through — both the card's branch
-// worktree (.gummi/worktrees) and its scratch tree (.gummi/scratch).
-func (m *Manager) cardTreePath(base string, f *domain.Feature) (string, error) {
-	return m.cardTreePathNamed(base, f, string(f.ID))
-}
-
-// cardTreePathNamed is cardTreePath for a tree whose directory is not
+// cardTreePathNamed validates the feature and derives its absolute checkout
+// path under base, refusing anything that would escape base; it is the
+// single chokepoint every operation goes through — the card's branch
+// worktree (.gummi/worktrees) and its scratch tree (.gummi/scratch) alike.
+// It serves a tree whose directory is not
 // simply the card's id. A goal has one tree per repository it touches
 // (goal.go), and only the one in its home repo is named after the card;
 // the rest carry the repo as a suffix. The escape check is the same one,
@@ -319,7 +315,11 @@ func (m *Manager) cardTreePathNamed(base string, f *domain.Feature, name string)
 // featurePaths derives the feature's absolute branch-worktree path and
 // branch name through cardTreePath's chokepoint.
 func (m *Manager) featurePaths(f *domain.Feature) (wtPath, branch string, err error) {
-	wtPath, err = m.cardTreePath(m.worktreesDir(), f)
+	name := string(f.ID)
+	if f.TreeRepo != "" {
+		name += "@" + f.TreeRepo
+	}
+	wtPath, err = m.cardTreePathNamed(m.worktreesDir(), f, name)
 	if err != nil {
 		return "", "", err
 	}
@@ -499,7 +499,7 @@ func (m *Manager) createAt(ctx context.Context, f *domain.Feature, start string)
 	// a still-recorded SHA from a prior incarnation is tolerated (the row is
 	// never overwritten — stamped once), matching Remove/DeleteBranch, which
 	// clear it; only a genuine write error rolls the creation back.
-	if err := m.forkStore.SetForkPoint(ctx, f.ID, recorded); err != nil && !errors.Is(err, state.ErrForkPointStamped) {
+	if err := m.forkStore.SetForkPoint(ctx, forkKey(f), recorded); err != nil && !errors.Is(err, state.ErrForkPointStamped) {
 		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil {
 			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
 		}
@@ -599,7 +599,7 @@ func (m *Manager) Attach(ctx context.Context, f *domain.Feature) (string, error)
 		_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
 		return "", fmt.Errorf("untracking .gummi in adopted worktree: %w", err)
 	}
-	if err := m.forkStore.SetForkPoint(ctx, f.ID, forkPoint); err != nil && !errors.Is(err, state.ErrForkPointStamped) {
+	if err := m.forkStore.SetForkPoint(ctx, forkKey(f), forkPoint); err != nil && !errors.Is(err, state.ErrForkPointStamped) {
 		_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
 		return "", fmt.Errorf("recording fork point for %s: %w", f.ID, err)
 	}
@@ -659,7 +659,7 @@ func (m *Manager) BehindBase(ctx context.Context, f *domain.Feature) int {
 // string if none is stamped yet (a worktree that predates drift
 // detection, or one that never had a worktree at all).
 func (m *Manager) ForkPoint(ctx context.Context, f *domain.Feature) (string, error) {
-	return m.forkStore.ForkPoint(ctx, f.ID)
+	return m.forkStore.ForkPoint(ctx, forkKey(f))
 }
 
 // Recreate rebuilds a feature's worktree directory after it vanished out
@@ -731,7 +731,7 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 	// The worktree is gone, so its recorded fork is meaningless. Clear it so
 	// a recreate re-anchors to main's then-current head instead of keeping a
 	// stale SHA that would trip the drift guard forever.
-	return m.forkStore.ClearForkPoint(ctx, f.ID)
+	return m.forkStore.ClearForkPoint(ctx, forkKey(f))
 }
 
 // removedButAdmin finishes a removal git got halfway through: the
@@ -926,7 +926,7 @@ func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force boo
 	// The branch is gone; a later Create makes a fresh branch from main's
 	// current head, so the recorded fork no longer describes it — clear it to
 	// let that recreate re-anchor without tripping the drift guard.
-	return m.forkStore.ClearForkPoint(ctx, f.ID)
+	return m.forkStore.ClearForkPoint(ctx, forkKey(f))
 }
 
 // DeleteLandedBranch removes the feature's branch after its work landed
@@ -1096,7 +1096,7 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	// pre-drift-detection worktree; an empty result here means the store
 	// still could not persist one (no feature row) and we fall through to
 	// the pre-existing ancestry/squash logic rather than block on it.
-	recorded, err := m.forkStore.ForkPoint(ctx, f.ID)
+	recorded, err := m.forkStore.ForkPoint(ctx, forkKey(f))
 	if err != nil {
 		return false, err
 	}
@@ -1127,7 +1127,7 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 // independently carries the identical diff by some other route" (a
 // sibling card, a cherry-pick, a hand-applied identical fix).
 func (m *Manager) squashLanded(ctx context.Context, f *domain.Feature) (bool, error) {
-	sha, err := m.forkStore.LandedSHA(ctx, f.ID)
+	sha, err := m.forkStore.LandedSHA(ctx, forkKey(f))
 	if err != nil {
 		return false, err
 	}
@@ -1178,7 +1178,7 @@ func (m *Manager) Spent(ctx context.Context, f *domain.Feature) (bool, error) {
 	if landed {
 		return true, nil
 	}
-	if sha, err := m.forkStore.LandedSHA(ctx, f.ID); err != nil {
+	if sha, err := m.forkStore.LandedSHA(ctx, forkKey(f)); err != nil {
 		return false, err
 	} else if sha != "" {
 		return true, nil
@@ -1520,7 +1520,7 @@ func (m *Manager) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
 	if !rebased {
 		return m.AssertNoForkDrift(ctx, f)
 	}
-	if err := m.forkStore.ReanchorForkPoint(ctx, f.ID, mainHead); err != nil {
+	if err := m.forkStore.ReanchorForkPoint(ctx, forkKey(f), mainHead); err != nil {
 		return err
 	}
 	return nil
@@ -1606,7 +1606,7 @@ func (m *Manager) RebasedOnBase(ctx context.Context, f *domain.Feature) (bool, e
 	// moved card carrying the commits it forked over. Its recorded fork
 	// point then is not behind the base's tip, and only a replay onto the
 	// base, from that fork point, gives the card back its own commits.
-	fork, ferr := m.forkStore.ForkPoint(ctx, f.ID)
+	fork, ferr := m.forkStore.ForkPoint(ctx, forkKey(f))
 	if ferr != nil || fork == "" {
 		return true, nil //nolint:nilerr // no fork point to judge by: the ancestry answer stands
 	}
@@ -1806,7 +1806,7 @@ func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, m
 	// function returns — that's the gap BG-036 fell through: a discarded
 	// return value left Landed with no lineage to check and only a
 	// content-equality guess to fall back on.
-	if err := m.forkStore.SetLandedSHA(ctx, f.ID, sha); err != nil {
+	if err := m.forkStore.SetLandedSHA(ctx, forkKey(f), sha); err != nil {
 		return "", fmt.Errorf("recording landed commit for %s: %w", f.ID, err)
 	}
 	if m.mergeHook != nil {
@@ -1940,7 +1940,7 @@ func (e *ForkDriftError) DiffNote() string {
 // (created before drift detection existed) is lazily anchored to
 // merge-base(main, branch) as it reads now, with a one-line note.
 func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) error {
-	recorded, err := m.forkStore.ForkPoint(ctx, f.ID)
+	recorded, err := m.forkStore.ForkPoint(ctx, forkKey(f))
 	if err != nil {
 		return err
 	}
@@ -1952,7 +1952,7 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 		if err != nil {
 			return err
 		}
-		if err := m.forkStore.SetForkPoint(ctx, f.ID, recorded); err != nil {
+		if err := m.forkStore.SetForkPoint(ctx, forkKey(f), recorded); err != nil {
 			// A concurrent create or backfill (or a store row that cannot hold
 			// a fork point — no feature row — under the stamped-once guard)
 			// means we cannot persist our anchor. Adopt whatever the store has
@@ -1962,7 +1962,7 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 			if !errors.Is(err, state.ErrForkPointStamped) {
 				return err
 			}
-			if cur, rerr := m.forkStore.ForkPoint(ctx, f.ID); rerr == nil && cur != "" {
+			if cur, rerr := m.forkStore.ForkPoint(ctx, forkKey(f)); rerr == nil && cur != "" {
 				recorded = cur
 			}
 		} else {
@@ -1995,7 +1995,7 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 // offered; the rebase, deciding what to replay), so asking never stamps a
 // fork as a by-product.
 func (m *Manager) Drift(ctx context.Context, f *domain.Feature) (*ForkDriftError, error) {
-	recorded, err := m.forkStore.ForkPoint(ctx, f.ID)
+	recorded, err := m.forkStore.ForkPoint(ctx, forkKey(f))
 	if err != nil || recorded == "" {
 		return nil, err
 	}
@@ -2148,7 +2148,7 @@ func (m *Manager) stoodOn(ctx context.Context, branch, sha string) bool {
 // main has not rewound past the fork reuses the merge-base SquashMerge
 // already computed instead of spawning a second git invocation.
 func (m *Manager) assertNoForkDriftAgainstBase(ctx context.Context, f *domain.Feature, base string) error {
-	recorded, err := m.forkStore.ForkPoint(ctx, f.ID)
+	recorded, err := m.forkStore.ForkPoint(ctx, forkKey(f))
 	if err != nil {
 		return err
 	}
@@ -2547,3 +2547,13 @@ func nothingToLand(msg string) error { return nothingToLandError(msg) }
 func (e nothingToLandError) Error() string { return string(e) }
 
 func (e nothingToLandError) Is(target error) bool { return target == ErrNothingToLand }
+
+// forkKey is the key a tree's fork point and landed commit are stored
+// under: the card id, or "<id>@<repo>" for a repository attached to it.
+func forkKey(f *domain.Feature) domain.FeatureID { return f.TreeKey() }
+
+// HasBranch reports whether the repository has a local branch of that name.
+func (m *Manager) HasBranch(ctx context.Context, name string) bool {
+	ok, err := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil && ok
+}

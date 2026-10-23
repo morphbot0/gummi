@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 	"golang.org/x/term"
 )
 
@@ -126,6 +127,9 @@ func runPublish(fl cliFlags, act publish.Act, args []string) error {
 	anns, err := store.ListDiffAnnotations(ctx, f.ID)
 	if err != nil {
 		return err
+	}
+	if act == publish.ActCreate && fl.fs.Lookup("all-repos") != nil && fl.Bool("all-repos") {
+		return runPublishSpan(ctx, fl, pool, store, f, req, anns)
 	}
 	in := publish.InputFor(ctx, mgr, &f, false, anns)
 	in.BaseRepo = str("repo")
@@ -309,4 +313,129 @@ func printResult(w io.Writer, fx publish.Facts, res publish.Result) {
 	case publish.ActDraft:
 		fmt.Fprintf(w, "✓ %s is a draft again\n", res.PR.URL)
 	}
+}
+
+// runPublishSpan is `gummi pr create --all-repos`: one push and one PR for
+// each repository of a session that spans several (DESIGN §27.7), the
+// bodies naming one another. Like every publish it is confirmed on the
+// facts read: one fingerprint per repository.
+func runPublishSpan(ctx context.Context, fl cliFlags, pool *worktree.Pool, store *state.Store, f domain.Feature, req publish.Request, anns []domain.DiffAnnotation) error {
+	atts, err := store.ListAttachments(ctx, f.ID)
+	if err != nil {
+		return err
+	}
+	if len(atts) == 0 {
+		return fmt.Errorf("%s spans no other repository: drop --all-repos", f.Name())
+	}
+	env := publish.Env{GH: pr.GHBinary()}
+	var ones []publish.One
+	add := func(repo, label string, view domain.Feature, link publish.Link) error {
+		mgr, err := pool.ManagerFor(ctx, &view)
+		if err != nil {
+			return err
+		}
+		var mine []domain.DiffAnnotation
+		for _, a := range anns {
+			if a.Repo == view.TreeRepo {
+				mine = append(mine, a)
+			}
+		}
+		in := publish.InputFor(ctx, mgr, &view, false, mine)
+		in.BaseRepo = ""
+		r := req
+		if strings.TrimSpace(r.Title) == "" {
+			r.Title = f.Title
+		}
+		ones = append(ones, publish.One{Repo: repo, Label: label, Branch: view.BranchName(), Tree: mgr, In: in, Req: r, Link: link})
+		return nil
+	}
+	own := f.Repo
+	if own == "" {
+		own = "workspace"
+	}
+	if err := add("", own, f, func(ctx context.Context, ref domain.PullRequestRef) error {
+		return store.SetPullRequest(ctx, f.ID, ref)
+	}); err != nil {
+		return err
+	}
+	for _, a := range atts {
+		if a.Landed() {
+			continue
+		}
+		view := f.AttachedView(a)
+		// a PR opened for an attached repository is shown, not linked: the
+		// card's one link is its own repository's
+		if err := add(a.Repo, a.Repo, view, func(context.Context, domain.PullRequestRef) error { return nil }); err != nil {
+			return err
+		}
+	}
+	planned := publish.PlanAll(ctx, env, ones)
+	var run []publish.One
+	var sums []string
+	for _, pl := range planned {
+		name := pl.Repo
+		if name == "" {
+			name = "(own)"
+		}
+		if pl.Err != nil {
+			fmt.Printf("  %-12s refused: %s\n", name, pl.Err.Error())
+			continue
+		}
+		fmt.Printf("  %-12s %s  [facts %s]\n", name, pl.Plan.Summary, pl.Fingerprint)
+		for i := range ones {
+			if ones[i].Repo == pl.Repo {
+				ones[i].Req.Fingerprint = pl.Fingerprint
+				run = append(run, ones[i])
+				sums = append(sums, pl.Repo+"="+pl.Fingerprint)
+			}
+		}
+	}
+	if len(run) == 0 {
+		return fmt.Errorf("nothing to publish in any repository")
+	}
+	if yes := fl.String("yes"); yes != "" {
+		given := map[string]string{}
+		for _, kv := range strings.Split(yes, ",") {
+			k, v, _ := strings.Cut(kv, "=")
+			given[k] = v
+		}
+		for i := range run {
+			if given[run[i].Repo] != run[i].Req.Fingerprint {
+				return publishError{&publish.Error{Code: publish.CodeFactsChanged, Text: "the facts of " + run[i].Label + " are not the ones --yes names", Fix: "read them again"}}
+			}
+		}
+	} else if stdinIsTerminal() {
+		fmt.Print("\nPush and open a pull request in each of these? [y/N] ")
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+			return fmt.Errorf("not confirmed; nothing was published")
+		}
+	} else {
+		return publishError{&publish.Error{
+			Code: publish.CodeConfirmationNeeded, Text: "there is no terminal to confirm at",
+			Fix: "read the facts above and run again with --yes=" + strings.Join(sums, ","),
+		}}
+	}
+	var failed []string
+	for _, o := range publish.DoAll(ctx, env, run) {
+		name := o.Repo
+		if name == "" {
+			name = "(own)"
+		}
+		if o.Result.Pushed != "" || o.Result.PR.URL != "" {
+			_ = store.AppendPublish(ctx, f.ID, f.Stage, state.PublishPayload{
+				Act: string(o.Result.Act), Pushed: o.Result.Pushed, Repo: o.Result.Repo, Number: o.Result.PR.Number, URL: o.Result.PR.URL,
+			}, time.Now())
+		}
+		if o.Err != nil {
+			fmt.Printf("✗ %s: %s\n", name, o.Err.Error())
+			failed = append(failed, name)
+			continue
+		}
+		fmt.Printf("✓ %s: opened %s\n", name, o.Result.PR.URL)
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("publishing failed in: %s", strings.Join(failed, ", "))
+	}
+	return nil
 }

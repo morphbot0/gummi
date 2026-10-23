@@ -236,7 +236,9 @@ steps:
 - `dispatch` is for an agent only. `repo` is a literal name, `envelope`
   comes out of the agent's own. With a `recipe` give a `spec` (its spec
   1) and the run starts at once; without one give a `prompt`, the
-  opening turn.
+  opening turn. `repos: [lib]` beside `repo` names more repositories of
+  the pool that the minted session attaches (literals, no paths or
+  duplicates).
 - Neither has a role, tier or prompt of its own. A dispatched recipe may
   not dispatch.
 

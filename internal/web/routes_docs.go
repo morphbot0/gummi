@@ -66,6 +66,12 @@ func (s *Server) docs(w http.ResponseWriter, r *http.Request) (*ui.WebDocs, bool
 		if n, err := strconv.Atoi(r.URL.Query().Get("spec")); err == nil {
 			d.UseSpec(n)
 		}
+		if repo := r.URL.Query().Get("repo"); repo != "" {
+			if err := d.UseRepo(r.Context(), repo); err != nil {
+				writeDocsError(w, err, r.PathValue("id"))
+				return nil, false
+			}
+		}
 	}
 	return d, ok
 }

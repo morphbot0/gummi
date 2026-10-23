@@ -99,6 +99,13 @@ func (m *Shell) prepareMerge(f domain.Feature) tea.Cmd {
 	if why := m.landingRefusal(f); why != "" {
 		return func() tea.Msg { return mergeReadyMsg{f: f, err: errors.New(why)} }
 	}
+	return m.mergeChecks(f)
+}
+
+// mergeChecks is prepareMerge past the refusal read off the board's rows:
+// the checks that ask git. f is the card, or its view of an attached
+// repository (domain.Feature.AttachedView), which lands on its own.
+func (m *Shell) mergeChecks(f domain.Feature) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		// A card lands either via its linked PR or locally, never both.
@@ -192,7 +199,8 @@ func (m *Shell) landFeature(f domain.Feature, message string, method domain.Land
 		} else if landed {
 			return noticeMsg{text: f.Name() + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge, isErr: true}
 		}
-		if _, err := m.wt.Land(ctx, &f, message, method); err != nil {
+		landedSHA, err := m.wt.Land(ctx, &f, message, method)
+		if err != nil {
 			var ce *worktree.MergeConflictError
 			if errors.As(err, &ce) {
 				// ce carries git-derived file names; sanitize like every
@@ -226,6 +234,11 @@ func (m *Shell) landFeature(f domain.Feature, message string, method domain.Land
 			if err := m.store.ClearHandedOffAt(ctx, f.ID); err != nil {
 				return noticeMsg{text: sanitize(f.Name() + " " + landedAs(method, base) + ", but clearing its hand-off mark failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
+		}
+		// A session that spans repositories lands one at a time, and closes
+		// with the last that has commits (DESIGN §27).
+		if left, handled := m.afterRepoLanding(ctx, f, base, method, actor, landedSHA); handled {
+			return left
 		}
 		// a handed-off card is already closed (done): landing it after all
 		// retracts the hand-off above and leaves it where it stands

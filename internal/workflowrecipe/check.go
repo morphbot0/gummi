@@ -263,6 +263,18 @@ func (c *checker) agentless(s domain.Step, name, previous string) {
 	case strings.ContainsAny(d.Repo, "/\\"):
 		c.problem("step %s: repo %q must be a configured repository name, not a path", name, d.Repo)
 	}
+	seen := map[string]bool{d.Repo: true}
+	for _, r := range d.Repos {
+		switch {
+		case strings.Contains(r, "{{"):
+			c.problem("step %s: a dispatch's repos are literals the person allows, never templates", name)
+		case !domain.RepoNameOK(r):
+			c.problem("step %s: repos entry %q must be a configured repository name, not a path", name, r)
+		case seen[r]:
+			c.problem("step %s: repos entry %q is named twice, or is the dispatch's own repo", name, r)
+		}
+		seen[r] = true
+	}
 	if d.Envelope <= 0 {
 		c.problem("step %s: a dispatch gives its session an envelope above zero, carved from the agent's", name)
 	}

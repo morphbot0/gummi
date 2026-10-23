@@ -436,7 +436,7 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	in := webInput{
 		actor: state.PersonActor(person), message: req.Message, number: req.Number,
 		profile: req.Profile, repo: req.Repo, confirm: req.Confirm,
-		land:   action == "merge" || action == "squash",
+		land:   action == "merge" || action == "squash" || strings.HasPrefix(action, landRepoID),
 		method: method, keepBranch: req.KeepBranch,
 	}
 	if action == "repo" {
@@ -452,7 +452,7 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 		return nil, err
 	}
 	wait := webWait
-	if (action == "merge" || action == "squash" || action == "advance") && strings.TrimSpace(req.Message) == "" {
+	if (action == "merge" || action == "squash" || action == "advance" || strings.HasPrefix(action, landRepoID)) && strings.TrimSpace(req.Message) == "" {
 		wait = webWaitDraft
 	}
 	var answered string
@@ -598,6 +598,20 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: engine.ErrSessionBusy.Error()}
 		}
 		return m.switchSessionModel(r.F.ID, req.Backend, strings.TrimSpace(req.Model)), nil
+	case repoAttachID, repoDetachID:
+		if m.engine == nil {
+			return nil, webErr(WebUnavailable, "%s", m.noAgent(""))
+		}
+		if req.Repo == "" {
+			return nil, refuse(WebBadRequest, "choose a repository")
+		}
+		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() && id == repoDetachID {
+			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; detach once this turn ends"}
+		}
+		if id == repoAttachID {
+			return m.attachRepoCmd(r.F.ID, req.Repo, msg), nil
+		}
+		return m.detachRepoCmd(r.F.ID, req.Repo), nil
 	case "objective":
 		if msg == "" {
 			return nil, refuse(WebBadRequest, "say what done looks like, or pause, resume, stop or clear")

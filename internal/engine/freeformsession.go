@@ -79,6 +79,10 @@ type FreeformSession struct {
 	// compacts is the spawned backend's Capabilities.Compact: whether
 	// Commands offers /compact.
 	compacts bool
+	// dirsStale is set when a repository was attached or detached: the
+	// running backend was started without it, so the next turn starts a
+	// fresh one (guarded by mu).
+	dirsStale bool
 	// agentCommands is the last list of slash commands a backend said it
 	// answers itself (agent.Commander), kept across a respawn of the same
 	// backend, which knows none until its first turn.
@@ -364,6 +368,10 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// session has them; a run's own steps do not.
 		if !f.IsChild() {
 			own := append(sessionSpecTools(), workflowTools()...)
+			if !f.Home && !f.MainCheckout && e.pool != nil {
+				own = append(own, repoTools()...)
+				hints = append(hints, sessionRepoHint)
+			}
 			extra = append(extra, own...)
 			tools = append(tools, own...)
 			hints = append(hints, sessionSpecHint, sessionWorkflowHintFor(ag))
@@ -404,7 +412,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// A workflow step writes its artifacts into its run's directory,
 		// outside the session's checkout: a backend with a write cage opens
 		// it (DESIGN §25.4).
-		WriteDirs: e.stepWriteDirs(ctx, f),
+		WriteDirs: append(e.stepWriteDirs(ctx, f), e.attachedWriteDirs(ctx, f)...),
 		// A workflow step is never spawned ReadOnly, a reading role's
 		// neither: that is a research session's allowlist, which would
 		// keep a reviewer from running the tests. Its preamble tells it
@@ -512,6 +520,9 @@ func (e *Engine) freeformHints(ctx context.Context, f domain.Feature, workDir st
 	// conversation that idled out between "request changes" and the fix
 	// would lose the request entirely.
 	hints = append(hints, e.diffReviewHints(ctx, f.ID, ag.Capabilities().ClientTools)...)
+	if h := e.attachHintFor(ctx, f); h != "" {
+		hints = append(hints, h)
+	}
 	return hints
 }
 
@@ -535,12 +546,14 @@ func (e *Engine) feature(ctx context.Context, id domain.FeatureID) (domain.Featu
 func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) {
 	ff.mu.Lock()
 	sess := ff.sess
+	stale := ff.dirsStale
+	ff.dirsStale = false
 	ff.mu.Unlock()
 	spent := sess != nil && sess.isExhausted()
 	// a backend that failed (its process died, its run errored) is not
 	// one to hand the next turn to: a fresh one picks the conversation up
 	failed := sess != nil && sess.errValue() != nil
-	if sess != nil && sess.Live() && !spent && !failed {
+	if sess != nil && sess.Live() && !spent && !failed && !stale {
 		return sess, nil
 	}
 	// An exhausted session is respawned rather than refused — but only once
@@ -572,6 +585,14 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 		// can pick its own up is asked to. It survives a restart because
 		// the row carries it (restoreFreeformLocked).
 		resumeID = snap.AgentSessionID
+	}
+	if stale && sess != nil && sess.Live() {
+		// repositories were attached or detached since this backend
+		// started: it opens the directories it was given at its start, so
+		// a new one is started with the new set, picking its conversation
+		// up where the old one left it
+		sess.setState(StateDone)
+		sess.stop()
 	}
 	if (spent || failed) && sess.Live() {
 		// A spent backend is still running — exhaustFreeform stops the turn,

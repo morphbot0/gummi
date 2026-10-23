@@ -222,6 +222,9 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		m.threadInput.CursorEnd()
 		return nil
 	}
+	if id == repoAttachID || id == repoDetachID || strings.HasPrefix(id, landRepoID) {
+		return m.repoAction(id)
+	}
 	switch id {
 	case "q":
 		return m.quitCmd()
@@ -284,6 +287,9 @@ func (m *Shell) confirmDuplicate() tea.Cmd {
 func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 	if a.key != "" {
 		return m.boardVerb(a.key)
+	}
+	if a.id == repoAttachID || a.id == repoDetachID || strings.HasPrefix(a.id, landRepoID) {
+		return m.repoAction(a.id)
 	}
 	switch a.id {
 	case expandID:

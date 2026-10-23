@@ -794,11 +794,10 @@ func (e *Engine) startRunLocked(ctx context.Context, run *domain.Run) error {
 	if err != nil {
 		return err
 	}
-	ignored, err := e.recordRunIgnored(ctx, run.Session, run.N, dir)
-	if err != nil {
+	if err := e.recordRunIgnored(ctx, run.Session, run.N); err != nil {
 		return fmt.Errorf("listing the tree's ignored files: %w", err)
 	}
-	tree, err := worktree.Snapshot(ctx, dir, ignored...)
+	tree, err := e.snapshotRun(ctx, run.Session, run.N)
 	if err != nil {
 		return fmt.Errorf("snapshotting the tree: %w", err)
 	}
@@ -2008,7 +2007,8 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	endTree := ""
 	if err != nil {
 		treeErr = err
-	} else if endTree, err = worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...); err != nil {
+	} else if endTree, err = e.snapshotRun(ctx, session, n); err != nil {
+		// every tree the run spans: the primary and each attachment's
 		treeErr, endTree = err, ""
 	}
 	if treeErr != nil && end == domain.RunDone {
@@ -2034,7 +2034,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	}
 	var paths []string
 	if endTree != "" {
-		_, paths, _ = worktree.DiffTrees(ctx, dir, run.StartTree, endTree)
+		_, paths, _ = e.diffTrees(ctx, session, run.StartTree, endTree)
 	}
 	var commits []string
 	if run.StartHead != "" && dir != "" {

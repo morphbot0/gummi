@@ -24,7 +24,6 @@ import (
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/workflowpolicy"
 	"github.com/morphis/gummi/internal/workflowrecipe"
-	"github.com/morphis/gummi/internal/worktree"
 )
 
 // planTriesCap is how many times a planner's gummi-workflow block that
@@ -664,11 +663,7 @@ func (e *Engine) flagReaderChanges(ctx context.Context, st *domain.RunStep) {
 	if !st.Role.Reads() || st.StartTree == "" || st.EndTree == "" || st.StartTree == st.EndTree {
 		return
 	}
-	dir, err := e.sessionTree(ctx, st.Session)
-	if err != nil {
-		return
-	}
-	_, paths, err := worktree.DiffTrees(ctx, dir, st.StartTree, st.EndTree)
+	_, paths, err := e.diffTrees(ctx, st.Session, st.StartTree, st.EndTree)
 	if err != nil || len(paths) == 0 {
 		return
 	}
@@ -685,7 +680,7 @@ func (e *Engine) flagReaderChanges(ctx context.Context, st *domain.RunStep) {
 		if end == "" {
 			end = st.EndTree
 		}
-		if _, ps, err := e.diffTreesCached(ctx, dir, o.StartTree, end, o.EndTree != ""); err == nil {
+		if _, ps, err := e.diffTrees(ctx, st.Session, o.StartTree, end); err == nil {
 			for _, p := range ps {
 				theirs[p] = true
 			}

@@ -36,6 +36,11 @@ type CreateCardRequest struct {
 	// /api/attachments) to link into the session's opening turn, stored
 	// by reference.
 	Attachments []string `json:"attachments,omitempty"`
+	// Attach names repositories of the pool to attach to the new session
+	// beside its own (DESIGN §27): its branch is cut in each. Refused with
+	// MainCheckout or Home, and for a name that is the session's own, not
+	// in the pool, or given twice.
+	Attach []string `json:"attach,omitempty"`
 }
 
 // Form is GET /api/form: the choices the new-card form offers.

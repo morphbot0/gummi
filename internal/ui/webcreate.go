@@ -135,6 +135,21 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 		}
 		d.mainCheckout = true
 	}
+	if len(req.Attach) > 0 {
+		if req.Home || req.MainCheckout {
+			return "a session in the main checkout, or an agent, has no branch to attach repositories beside"
+		}
+		seen := map[string]bool{req.Repo: true}
+		for _, n := range req.Attach {
+			switch {
+			case !slices.Contains(m.repoNames, n):
+				return "repository " + strconv.Quote(n) + " is not in the workspace's pool"
+			case seen[n]:
+				return "repository " + strconv.Quote(n) + " is named twice, or is the session's own"
+			}
+			seen[n] = true
+		}
+	}
 	text := strings.TrimSpace(req.Title)
 	var body []string
 	if s := strings.TrimSpace(req.Description); s != "" {
@@ -241,6 +256,13 @@ func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, p
 			return webapi.Card{}, e
 		}
 		return webapi.Card{}, refuse(WebConflict, "the card was not created")
+	}
+	if len(req.Attach) > 0 && b.shell.engine != nil {
+		for _, n := range req.Attach {
+			if _, err := b.shell.engine.AttachRepo(ctx, out.created, n, ""); err != nil {
+				return webapi.Card{}, refuse(WebConflict, "the session "+string(out.created)+" was created, but attaching "+n+" failed: "+err.Error())
+			}
+		}
 	}
 	return b.Card(ctx, string(out.created))
 }

@@ -45,7 +45,7 @@ func runMerge(fl cliFlags, args []string) error {
 			return cardops.Outcome{}, err
 		}
 		defer release()
-		out, err := d.Merge(ctx, f.ID, message, method)
+		out, err := d.MergeRepo(ctx, f.ID, fl.String("repo"), message, method)
 		return closeOut(ctx, d, store, pool, f.ID, fl.Bool("keep-branch"), out, err)
 	})
 }
@@ -167,7 +167,7 @@ func closeOut(ctx context.Context, d *cardops.Ops, store *state.Store, pool *wor
 		return out, err
 	}
 	f, ferr := store.GetFeature(ctx, id)
-	if ferr != nil || !pool.GoesWithClose(ctx, &f) {
+	if ferr != nil || f.Stage != domain.StageDone || !pool.GoesWithClose(ctx, &f) {
 		return out, err
 	}
 	_, _ = d.Clean(ctx, id)

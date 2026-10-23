@@ -153,13 +153,12 @@ func (e *Engine) runBaseline(ctx context.Context, session domain.FeatureID, n in
 	if err == nil {
 		// the tree as the run reads it: once it has started, without the
 		// ignored paths it listed then; before, without those on disk now
-		keep := e.runKeepOut(session, n)
-		if run.StartTree == "" {
-			keep, err = worktree.Ignored(ctx, dir)
-		}
-		if err == nil {
-			b.Tree, err = worktree.Snapshot(ctx, dir, keep...)
-		}
+		b.Tree, err = e.snapshotTreesWith(ctx, session, func(t runTree) ([]string, error) {
+			if run.StartTree == "" {
+				return worktree.Ignored(ctx, t.Dir)
+			}
+			return e.runKeepOutFor(session, n, t.Repo), nil
+		})
 	}
 	if err == nil {
 		for _, r := range itemResults(items, doneWhenChecks(ctx, dir, items), "") {

@@ -155,7 +155,10 @@ func (s Step) Kind() string {
 // becomes the session's spec 1 and the recipe's run starts on it at once;
 // without one the filled Prompt is the session's opening turn.
 type Dispatch struct {
-	Repo   string
+	Repo string
+	// Repos are further repositories of the pool attached to the minted
+	// session beside Repo (DESIGN §27), literals like Repo.
+	Repos  []string
 	Title  string
 	Spec   string
 	Prompt string

@@ -19,7 +19,7 @@ const watchSpec = "# Watch\n\n## Problem\n\nWatch upstream.\n"
 // childRecipe is the workspace recipe a dispatch in these tests names.
 const childRecipe = "name: childwork\ntier: standard\nsteps:\n  - { id: work, role: implementer, prompt: \"do {{spec}}\" }\n"
 
-// watchEngine is an engine over a pool with one named repository, target,
+// watchEngine is an engine over a pool with two named repositories, target and lib,
 // and an agent card with a spec, an envelope and an open session.
 func watchEngine(t *testing.T, wf *wfFake, envelope int) (*Engine, *state.Store, domain.Feature, *FreeformSession) {
 	t.Helper()
@@ -44,6 +44,11 @@ func watchEngine(t *testing.T, wf *wfFake, envelope int) (*Engine, *state.Store,
 		t.Fatal(err)
 	}
 	init(target)
+	lib := filepath.Join(wsRoot, "git", "lib")
+	if err := os.MkdirAll(lib, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	init(lib)
 	ws, err := state.Init(wsRoot, wsRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +59,7 @@ func watchEngine(t *testing.T, wf *wfFake, envelope int) (*Engine, *state.Store,
 	}
 	t.Cleanup(func() { store.Close() })
 	pool, err := worktree.NewPool(context.Background(), ws.Root, wsRoot,
-		[]worktree.NamedRepo{{Name: "target", Root: target}}, store, false)
+		[]worktree.NamedRepo{{Name: "target", Root: target}, {Name: "lib", Root: lib}}, store, false)
 	if err != nil {
 		t.Fatal(err)
 	}

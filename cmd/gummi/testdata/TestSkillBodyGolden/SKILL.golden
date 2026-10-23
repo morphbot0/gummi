@@ -57,6 +57,7 @@ gummi merge <id|ref> -m <message|->
     --keep-branch         keep the card's worktree and branch after it closes (default: both are removed, except a branch that is the only copy of its work)
     -m, --message string  landing commit message (required for a squash; - reads from stdin)
     --no-squash           land as a merge commit keeping the branch's commits (default: one squash commit); -m is optional and git's merge message is used without it
+    --repo string         land this attached repository of a session that spans several (default: the session's own); the card closes once every repository with commits has landed
 
 gummi squash <id|ref> -m <message|->
     --force               proceed even if the linked PR has open review threads

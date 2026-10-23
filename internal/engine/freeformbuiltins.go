@@ -60,6 +60,16 @@ var (
 			"/objective pause|resume|stop|clear; alone, where it stands",
 		builtin: true,
 	}
+	attachCommand = ProjectCommand{
+		Name:        "attach",
+		Description: "attach another repository of the workspace to this session: /attach <repo> [base] — its branch is cut there too, in a worktree beside this one",
+		builtin:     true,
+	}
+	detachCommand = ProjectCommand{
+		Name:        "detach",
+		Description: "take an attached repository off this session: /detach <repo> — refused while its branch holds commits that have not landed or its tree has changes",
+		builtin:     true,
+	}
 	helpCommand = ProjectCommand{
 		Name:        "help",
 		Description: "list the commands this session takes — sends nothing",
@@ -68,7 +78,7 @@ var (
 )
 
 // sessionCommands is every built-in, in the order a menu offers them.
-var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, objectiveCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
+var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, objectiveCommand, attachCommand, detachCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
 
 // builtinFor is the built-in msg names, when cmds resolve it to one rather
 // than to a project file, and the arguments after it.
@@ -111,6 +121,8 @@ func (ff *FreeformSession) runBuiltin(ctx context.Context, c ProjectCommand, arg
 	switch c.Name {
 	case objectiveCommand.Name:
 		return true, ff.runObjectiveCommand(ctx, args)
+	case attachCommand.Name, detachCommand.Name:
+		return true, ff.runRepoCommand(ctx, c.Name, args)
 	case clearCommand.Name:
 		return true, ff.Clear()
 	case retryCommand.Name:
@@ -439,4 +451,37 @@ func objectiveReport(o *domain.Objective, auditing bool) string {
 		s += "\nAuditing the last turn now."
 	}
 	return s
+}
+
+// runRepoCommand is /attach and /detach: the person's way, from either
+// face's composer, to the engine's AttachRepo and DetachRepo. The answer
+// is a line in the thread; a refusal is the error the composer shows.
+func (ff *FreeformSession) runRepoCommand(ctx context.Context, name, args string) error {
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		return fmt.Errorf("/%s takes the name of a repository", name)
+	}
+	var line string
+	if name == attachCommand.Name {
+		base := ""
+		if len(fields) > 1 {
+			base = fields[1]
+		}
+		att, err := ff.engine.AttachRepo(ctx, ff.id, fields[0], base)
+		if err != nil {
+			return err
+		}
+		line = "attached " + att.Repo
+	} else {
+		if err := ff.engine.DetachRepo(ctx, ff.id, fields[0]); err != nil {
+			return err
+		}
+		line = "detached " + fields[0]
+	}
+	if sess := ff.Session(); sess != nil {
+		sess.appendToolDone("gummi /"+name, true, line+". The agent opens it at its next turn.")
+		ff.engine.persist(sess)
+	}
+	ff.engine.send(Event{Feature: ff.id, Kind: EventUpdated})
+	return nil
 }

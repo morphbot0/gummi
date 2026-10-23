@@ -45,6 +45,12 @@ type mergedEvent struct {
 	Branch string `json:"branch"`
 	Commit string `json:"commit"`
 	Method string `json:"method"`
+	// Repo names the attached repository that landed; absent for the
+	// card's own. Remaining lists the repositories of a card that spans
+	// several still holding work to land — the card is open while it is
+	// not empty.
+	Repo      string   `json:"repo,omitempty"`
+	Remaining []string `json:"remaining,omitempty"`
 }
 
 // committedEvent reports a successful `gummi commit`: the card's own

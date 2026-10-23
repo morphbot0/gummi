@@ -39,7 +39,16 @@ func (e *Engine) freezeDispatches(r *domain.Recipe) (bool, error) {
 	var err error
 	eachStep(r.Steps, func(s *domain.Step) {
 		d := s.Dispatch
-		if d == nil || d.Recipe == "" || err != nil {
+		if d == nil || err != nil {
+			return
+		}
+		// every repository a dispatch names must be one of the pool, now and
+		// not only when the run reaches it (the pool can change by then too,
+		// so dispatchStep asks again)
+		if err = e.checkDispatchRepos(s.ID, d); err != nil {
+			return
+		}
+		if d.Recipe == "" {
 			return
 		}
 		f, lerr := workflowrecipe.Load(d.Recipe, e.pool.Root())
@@ -56,6 +65,24 @@ func (e *Engine) freezeDispatches(r *domain.Recipe) (bool, error) {
 		}
 	})
 	return changed, err
+}
+
+// checkDispatchRepos refuses a dispatch naming a repository outside the
+// workspace's pool, an ambiguous folder name included.
+func (e *Engine) checkDispatchRepos(step string, d *domain.Dispatch) error {
+	if e.pool == nil {
+		return nil
+	}
+	for _, name := range append([]string{d.Repo}, d.Repos...) {
+		if name == "" || e.pool.Known(name) {
+			continue
+		}
+		if cerr := e.pool.ClashError(name); cerr != nil {
+			return fmt.Errorf("step %s: %w", step, cerr)
+		}
+		return fmt.Errorf("step %s: dispatch repository %q is not in the workspace's pool", step, name)
+	}
+	return nil
 }
 
 // dispatchesOf lists the dispatches a recipe makes.

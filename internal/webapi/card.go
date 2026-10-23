@@ -29,6 +29,9 @@ type Card struct {
 	// resolved the way its next turn will resolve them; nil on a card in
 	// the workflow, whose stages take theirs from its profile.
 	Session *SessionModel `json:"session,omitempty"`
+	// Repos are the repositories a session spans (DESIGN §27), its own
+	// first; absent for a card with nothing attached.
+	Repos []CardRepo `json:"repos,omitempty"`
 	// Files is where the page may open the card's worktree files from;
 	// nil while the card has no worktree on this machine.
 	Files *Files `json:"files,omitempty"`
@@ -417,5 +420,22 @@ type ActionRequest struct {
 // options is never independent.
 var DecisionIndependentActions = []string{
 	"profile", "envelope", "repo", "prlink", "prunlink", "prpull",
-	"duplicate", "delete", "clean", "model", "commit",
+	"duplicate", "delete", "clean", "model", "commit", "repo-attach", "repo-detach",
+}
+
+// CardRepo is one repository of a session that spans several: where its
+// branch is, whether it holds work, and whether it has landed. Repo is the
+// pool name an attach and a land are asked by ("" names the session's own
+// repository when it is the workspace default); Label is what to show.
+type CardRepo struct {
+	Repo    string `json:"repo"`
+	Label   string `json:"label"`
+	Primary bool   `json:"primary,omitempty"`
+	Branch  string `json:"branch"`
+	Base    string `json:"base,omitempty"`
+	// Ahead is whether the branch holds commits past its base, Dirty
+	// whether its tree holds changes, Landed whether it has landed.
+	Ahead  bool `json:"ahead,omitempty"`
+	Dirty  bool `json:"dirty,omitempty"`
+	Landed bool `json:"landed,omitempty"`
 }

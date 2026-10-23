@@ -19,7 +19,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/rmtree"
 	"github.com/morphis/gummi/internal/workflowrecipe"
-	"github.com/morphis/gummi/internal/worktree"
 )
 
 const (
@@ -115,11 +114,7 @@ func (e *Engine) runCommandStep(ctx context.Context, run *domain.Run, inst *doma
 
 // endTreeOf is the run's tree as it is now.
 func (e *Engine) endTreeOf(ctx context.Context, run *domain.Run) string {
-	dir, err := e.sessionTree(ctx, run.Session)
-	if err != nil {
-		return ""
-	}
-	tree, _ := worktree.Snapshot(ctx, dir, e.runKeepOut(run.Session, run.N)...)
+	tree, _ := e.snapshotRun(ctx, run.Session, run.N)
 	return tree
 }
 

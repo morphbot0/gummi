@@ -101,6 +101,7 @@ export async function newSession (opts) {
 function pickedOnly (d) {
   const out = {}
   for (const k of ['repo', 'base', 'backend', 'model']) if (d[k]) out[k] = d[k]
+  if (d.attach?.length) out.attach = d.attach
   if (d.envelope != null) out.envelope = d.envelope
   if (d.mainCheckout) out.mainCheckout = true
   if (d.home) out.home = true
@@ -129,7 +130,11 @@ export async function startSession (text, atts = []) {
   else {
     if (d.repo) req.repo = d.repo
     if (d.mainCheckout) req.mainCheckout = true
-    else if (d.base) req.base = d.base
+    else {
+      if (d.base) req.base = d.base
+      const others = (d.attach || []).filter(n => n !== d.repo)
+      if (others.length) req.attach = others
+    }
   }
   if (atts.length) req.attachments = atts
   const c = await post('/api/cards', req)
@@ -259,6 +264,21 @@ function render () {
         testid: 'draft-base', 'aria-label': 'Branch the session forks from',
         onchange: (e) => set({ sessionDraft: { ...state.sessionDraft, base: e.target.value } })
       }, h('option', { value: '', selected: !d.base }, 'the default branch'), branches.map(b => h('option', { value: b, selected: b === d.base }, b)))))
+    // repositories to attach beside the session's own: the same branch is
+    // cut in each (DESIGN §27)
+    const others = (form?.repos || []).filter(r => r !== d.repo)
+    if (others.length) {
+      row.append(h('span', { class: 'dsel', role: 'group', 'aria-label': 'Also attach repositories', testid: 'draft-attach' },
+        h('span', { class: 'lbl' }, 'also'),
+        ...others.map(r => h('button', {
+          type: 'button', class: ['dbtn', (d.attach || []).includes(r) && 'on'], testid: `draft-attach-${r}`, 'aria-pressed': String((d.attach || []).includes(r)),
+          title: `Attach ${r}: the session’s branch is cut there too`,
+          onclick: () => {
+            const cur = state.sessionDraft.attach || []
+            set({ sessionDraft: { ...state.sessionDraft, attach: cur.includes(r) ? cur.filter(x => x !== r) : [...cur, r] } })
+          }
+        }, r))))
+    }
     row.append(h('span', { class: 'dnote-s' }, 'new worktree'))
   }
   const bud = h('button', {

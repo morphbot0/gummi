@@ -8,6 +8,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -55,6 +56,9 @@ func (e *Engine) dispatchStep(ctx context.Context, run *domain.Run, agent domain
 		return fail("a dispatch's envelope comes out of the agent's own: give the agent an envelope first")
 	case d.Recipe != "" && strings.TrimSpace(d.RecipeYAML) == "":
 		return fail(fmt.Sprintf("its recipe %s was never frozen into the run; propose it again", d.Recipe))
+	}
+	if err := e.checkDispatchRepos(inst.Path, &d); err != nil {
+		return fail(err.Error())
 	}
 	title, err := workflowrecipe.FillPlain(d.Title, vars)
 	if err != nil {
@@ -117,6 +121,13 @@ func (e *Engine) dispatchStep(ctx context.Context, run *domain.Run, agent domain
 		unlock()
 		if err != nil {
 			return err
+		}
+	}
+	// the session spans the repositories the person allowed; one an earlier
+	// start already attached is kept
+	for _, r := range d.Repos {
+		if _, err := e.AttachRepo(ctx, child.ID, r, ""); err != nil && !errors.Is(err, errAlreadyAttached) {
+			return fail(fmt.Sprintf("attaching %s to the session %s: %v", r, child.ID, err))
 		}
 	}
 

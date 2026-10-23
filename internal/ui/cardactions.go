@@ -420,6 +420,8 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 	}
 
+	specs = append(specs, repoActions(in, r)...)
+
 	// seed ordering and why text from the ranked suggestions: first
 	// occurrence of a key wins, so the recommendation (steps[0]) always
 	// out-ranks a same-keyed entry appended later in the same call.

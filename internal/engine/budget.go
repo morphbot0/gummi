@@ -110,6 +110,9 @@ func CompileDiffComments(anns []domain.DiffAnnotation, resolveTool bool) string 
 			continue
 		}
 		loc := a.File
+		if a.Repo != "" {
+			loc = a.Repo + ":" + loc
+		}
 		if a.Excerpt != "" {
 			loc += " — " + a.Excerpt
 		}

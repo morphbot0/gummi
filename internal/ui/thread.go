@@ -707,6 +707,11 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	}
 	room := max(inner-idWidth-badgeWidth, 0)
 	strip := stageStrip(s, f, inner)
+	if len(r.Repos) > 1 {
+		if extra := s.Faint.Render(" · spans " + repoSummary(r.Repos)); ansi.StringWidth(strip+extra) <= inner {
+			strip += extra
+		}
+	}
 	return []string{id + " " + ansi.Truncate(title, room, "…") + badges(), strip}
 }
 

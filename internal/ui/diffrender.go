@@ -23,6 +23,9 @@ func (m *Shell) diffViewRender(w, h int) string {
 	}
 	var b strings.Builder
 	head := s.Title.Render(string(dv.f.ID)) + " " + s.Base.Render("· diff")
+	if dv.f.TreeRepo != "" {
+		head += " " + s.Base.Render("· "+dv.f.TreeRepo+" (] next repository · L land it)")
+	}
 	if open := dv.openCount(); open > 0 {
 		head += " " + s.Warning.Render(fmt.Sprintf("✎ %d open", open))
 	}

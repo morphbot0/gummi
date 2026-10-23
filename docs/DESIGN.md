@@ -2097,6 +2097,18 @@ Decided in the design interview (2026-07-03):
     never enable one) and **§25.13** (a command step is no longer
     deferred). Decision 28's three rules are unchanged.
 
+30. **A session may span repositories**, decided 2026-10-23 (§27), built
+    (§27.11). A session keeps its primary repository and may attach
+    others from the workspace's pool: the card's branch name is cut in
+    each, in a worktree of its own beside the primary one. The agent
+    attaches freely (`repo_attach`), as may the person, and nothing
+    lands without a person; each repository lands on its own, and the
+    card closes when every repository with commits has. This **amends
+    §19** (a session's repository), **§22** (a PR per repository),
+    **§25.6** (snapshots span the trees), **§26.4** (`repos`) and
+    **§18** (stacks refuse attachments). Decision 28's three rules are
+    unchanged.
+
 Still open:
 
 1. **Copilot SDK maturity** — verify the Go SDK exposes interrupt,
@@ -3570,6 +3582,8 @@ What that needs is small, and additive:
 
 ## 18. Stacks — slicing one piece of work into several landings
 
+> *Amended by §27 (decision 30): a card with attached repositories cannot join a stack, and a stacked card cannot attach one. A stack chains the branches of one repository.*
+
 A **stack** is an ordered chain of cards in one repository whose branches
 fork from one another: the card at the bottom forks from its own base, and
 every card above it forks from the branch of the card below. It exists for
@@ -3740,6 +3754,8 @@ apart regardless of their labels. Research cards are exempt from the whole
 question: they never cut a branch.
 
 ## 19. Freeform cards — a coding agent that happens to be a card
+
+> *Amended by §27 (decision 30): a session's repository (`Feature.Repo`) is its primary one; it may have attached repositories beside it, each with the same branch name in a worktree of its own.*
 
 Every other kind is work gummi conducts through a workflow. A **freeform
 card** (`FF-NNN`, `KindFreeform`) is the one that is not conducted at all:
@@ -5068,6 +5084,8 @@ it, per §20.1: neither face decides who may rewrite.
   locked.
 
 ## 22. Publishing — pushing a card's branch and opening its PR
+
+> *Amended by §27.7 (decision 30): a session that spans repositories publishes one branch and one PR per repository, each PR's body naming the others.*
 
 gummi's job used to end at a verified branch, and the last step — push
 it, open the PR, keep the PR current — was a command it printed. That
@@ -6851,6 +6869,8 @@ call returns at once, saying the run is proposed.
 
 ### 25.6 The tree and its snapshots
 
+> *Amended by §27.6 (decision 30): a run's snapshots, step diffs, reader-change flag and Revert run span the session's own tree and every attached repository's.*
+
 - **Steps run in the session's worktree.** A step is a hidden card row,
   child of the session, carrying the run's number and the step's path:
   `build/2/implement` for iteration 2 of `build`. Its agent's working
@@ -7566,6 +7586,8 @@ schedule; a step that polls a command inside an open run stays deferred
 
 ### 26.4 The `dispatch` step: a session in a named repository
 
+> *Amended by §27.8 (decision 30): a dispatch may also name `repos: [...]`, literals checked like `repo`, which the minted session attaches; every dispatch repository is checked against the pool when a run or schedule is proposed.*
+
 ```yaml
 - id: bump
   dispatch:
@@ -7700,3 +7722,193 @@ What was built follows §26. Where it chose, or departs:
   overwrites its status with `no-change` after.
 - Nothing limits how many disabled run schedules an agent may propose.
 
+## 27. Sessions across repositories
+
+*Decided 2026-10-23 (decision 30); built — §27.11 says where the build
+departs.* This section amends §19 (a session's repository), §22 (a PR
+per repository), §25.6 (snapshots span the trees), §26.4 (a dispatch's
+`repos`) and §18 (stacks refuse attachments). Where it and those
+sections disagree, this section wins.
+
+### 27.1 Why
+
+Work often spans repositories: a library change and its consumer. A
+session had exactly one repository, one branch and one worktree, so the
+only way across was a dispatch, which mints a second session with a
+context of its own. The only cross-repository machinery gummi ever had
+was the retired goal (§17.2a): a branch in each repository its cards
+touched, landed once per repository, with no atomicity across them —
+git has no merge that spans repositories.
+
+Rejected: **linked sessions**, one per repository, which splits the
+context the work needs in one head; and a **fully multi-repository
+session** with no primary, which breaks every path that reads
+`Feature.Repo`. Chosen: one session, a primary repository, and
+attachments.
+
+### 27.2 The model
+
+- A session keeps its **primary repository** (`Feature.Repo`): every
+  single-repository path is unchanged, and a card with no attachment
+  behaves exactly as before.
+- It may have **attached repositories**, rows of the `attachments` table
+  (`state/attachments.go`): card, repository name, base, created-at and
+  the landed state per repository. A repository is a name in the pool
+  (`repos:` plus discovered checkouts), never a path.
+- Each attachment is the card's **same branch name** in that repository,
+  in a worktree `.gummi/worktrees/<ID>@<repo>` beside the primary one.
+  The seam is `Feature.TreeRepo` (never stored): `domain.Feature.
+  AttachedView(a)` is the card as the attached repository's manager sees
+  it, and `worktree.Manager.featurePaths` names the tree `<ID>@<repo>` for
+  it. Everything else in `internal/worktree` — `Create`, `Remove`,
+  `Dirty`, `Land`, `Diff`, `BranchAhead` — works on the view unchanged.
+  Fork points and landed commits, which the store keeps per card id, are
+  kept per tree under `<ID>@<repo>` (`Feature.TreeKey`, routed to the
+  `attachments` row).
+- The branch forks from the repository's default base, or the base given
+  at attach (a local branch of that repository).
+
+### 27.3 Attaching and detaching
+
+`Engine.AttachRepo(card, repo, base)` and `DetachRepo(card, repo)`
+(`engine/attach.go`), under the card's lock.
+
+Attach is refused for an agent (its home has no repository), a card that
+is not a session, a main-checkout card, a closed card, a stacked card, an
+empty name, a path, an unknown or ambiguous name, the primary repository
+(compared by root, so an alias cannot slip through), and one already
+attached. The branch is cut first and the row stored second; a failed
+insert removes what was cut.
+
+Detach is refused while the attachment's branch has commits past its base
+that have not landed, or its tree has changes, and while a workflow run is
+open; it then removes the worktree and the branch. A landed attachment
+may be detached. The primary is never detached.
+
+### 27.4 What the agent sees
+
+The session's start adds every attached worktree to
+`SessionOpts.WriteDirs` (claude `--add-dir`, opencode config) and a hint
+naming each repository, path, branch and base. A workflow step's card
+gets the same, through its session. An attach or detach made while the
+backend runs takes effect at its next start: the next turn restarts it
+(`FreeformSession.dirsStale`), replaying the conversation. A backend with
+no directory cage option still gets the hint and works the path with its
+shell.
+
+Every non-child session of a repository has three tools
+(`engine/repotools.go`): `repo_list`, `repo_attach(repo, base?)`,
+`repo_detach(repo)`. The agent attaches **freely, with no decision**:
+cutting a branch is cheap, and nothing lands without the person. An
+agent (a home) has none.
+
+### 27.5 Landing repository by repository
+
+`cardops.Ops.MergeRepo(id, repo, …)` (`Merge` is `MergeRepo` with the
+primary) lands one repository under the checks every landing crosses:
+open diff comments (of the card, whichever repository), an open workflow
+run (`Engine.RunHolds`), `MayLand`. `gummi merge --repo <name>` takes it.
+
+There is **no atomicity** across repositories. The card closes
+(`StageDone`) only when the primary and every attachment that has commits
+have landed: an attachment with no commits is skipped, one with
+uncommitted changes holds the card open. The `merged` event names the
+`repo` and lists the `remaining` ones. `Clean` takes a closed card's
+attached worktrees away, and the branch of each that landed or is empty.
+
+### 27.6 Runs span the trees
+
+A run's `StartTree`/`EndTree` columns keep their shape: a bare hash for a
+session that spans nothing, and for one that does, the primary's hash and
+one `<repo>=<hash>` line per attached tree (`domain.EncodeTrees`). The
+snapshots, the step and run diffs (an attached repository's patch under a
+`# repo: <name>` line, its paths as `<repo>:<path>`), the reader-change
+flag and Revert run walk every tree (`engine/workflowtree.go`). The ignored
+files a run records are per tree (`ignored@<repo>`). A tree attached
+under a run has no start snapshot and is left alone by Revert run: a run
+never deletes what it cannot prove it made. Done-when checks still run in
+the primary tree; a recipe reaches an attachment by the path the step's
+hint names.
+
+### 27.7 Publishing
+
+A person publishes each repository: `publish.PlanAll` resolves and plans
+every tree that has commits, `publish.DoAll` pushes and opens one PR per
+repository, each body carrying `Related changes in other repositories:`
+with the others' branches and, once opened, their PR URLs; once the last is
+open the earlier ones are edited to name it. Publishing stays a person's
+act: no agent, run, schedule or MCP tool reaches it. A stacked card
+stays refused. The CLI's way in is `gummi pr create <card> --all-repos`,
+which prints each repository's plan and takes one confirm (or `--yes`
+with a `repo=fingerprint` pair for each).
+
+### 27.8 Stacks and dispatch
+
+A card with attachments cannot join a stack, and a stacked card cannot
+attach (`state.ErrStackAttachments`). A dispatch step may name `repos:
+[…]` beside `repo`; they are literals, checked like `repo` (no template,
+no path, no duplicate), and the minted session attaches them. Every
+dispatch repository is checked against the pool when a run or schedule is
+proposed (`freezeDispatches`), and again when the step runs.
+
+### 27.9 What does not bend
+
+Decision 28's three rules hold. A person still allows every run; money is
+still one pool, the session's envelope; and a question the run cannot
+settle reaches the person. An open run holds every repository's landing
+and every detach. The agent attaches freely because attaching grants it
+nothing it could not do with a branch: nothing is pushed, published or
+landed without a person.
+
+### 27.10 Deferred
+
+- A stacked card with attachments.
+- Atomic landing across repositories.
+- Handing off, squashing and committing per repository from the verbs
+  (`gummi squash`/`commit` act on the primary; the agent commits an
+  attachment itself with `git -C`).
+- Publishing from the terminal board's and the web page's own dialogs per
+  repository (the CLI's `--all-repos` is the face of §27.7 so far; the
+  engine's `publish.PlanAll`/`DoAll` are what a dialog would call).
+- `gummi squash` and `commit` take no `--repo`; `gummi status --json` does
+  not list a card's repositories yet.
+- Choosing attached repositories in the terminal's new-session form
+  (`/attach` and the card menu do it afterwards; the web page's draft
+  has an "also" toggle for each).
+
+### 27.11 As built
+
+What was built follows §27. Where it chose, or departs:
+
+- **The faces.** Both read one inventory: the card's menu gains `attach
+  repository…`, `detach repository…` and `land <repo>` (`ui/repos.go`),
+  the terminal's thread head lists the repositories with the landed ones
+  marked, and its diff view switches repository with `[`/`]` and lands the
+  one shown with `L`. The web page adds a repository tab strip to the Diff
+  tab (`GET …/diff?repo=<name>`), a "Repositories" mark in the card's head,
+  and an "also" toggle on a new session (`attach` in `POST /api/cards`).
+  `/attach <repo> [base]` and `/detach <repo>` are the composer's commands
+  in both. The shapes are in `internal/webapi` with a golden
+  (`TestSpanningSessionShapes`).
+- **Diff comments belong to a repository.** `diff_annotations.repo` is
+  empty for the session's own; a comment is listed and located on the diff
+  it was written on, and every repository's open comments hold every
+  repository's landing.
+
+- The tree-set encoding rides in the existing snapshot columns: no
+  migration, and rows from before read as the primary alone.
+- Fork points and landed commits for an attached tree live in the
+  `attachments` row, reached through the same store methods by a
+  `<card>@<repo>` key.
+- `repo_list` names ambiguous folder names it will not attach.
+- A dispatch whose attach fails fails its step with the attach sentence;
+  the minted session stays.
+- An attachment whose repository the pool no longer names holds the card
+  open until it lands, its repository comes back, or a person detaches it:
+  gummi cannot read it, so nothing says it holds no unlanded work.
+- A repository name with `=` or whitespace is refused (`RepoNameOK`): the
+  run's tree set is stored as `repo=tree` lines.
+- Attaching or detaching restarts an idle backend with the new set of
+  directories, resuming its own conversation where the backend can.
+- A run's done-when checks run in the primary tree only; a check that
+  needs an attached repository names its path.
