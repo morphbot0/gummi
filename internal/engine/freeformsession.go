@@ -452,7 +452,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	ff.mu.Unlock()
 
 	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.pumpFreeform(ff, sess) }()
+	go func() { defer e.wg.Done(); e.pumpFreeform(ff, sess, agentSess) }()
 	ff.armIdleTimer()
 	return nil
 }
@@ -1253,9 +1253,12 @@ func (ff *FreeformSession) onIdleTimeout() {
 // closes — pumpConsult's shape, parametrized by the specific *Session
 // this goroutine was started for, since ff.sess can move on to a
 // respawned one while this pump is still draining the old backend's
-// final events.
-func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session) {
-	events := sess.agent().Events()
+// final events. It is handed the backend it relays, ag, rather than
+// reading it off sess: the session's handle can be dropped (a restore's
+// shape, an idle-out) before this goroutine first runs, and a nil there
+// would take the whole process down.
+func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session, ag agent.Session) {
+	events := ag.Events()
 	for {
 		select {
 		case <-sess.done:

@@ -247,7 +247,7 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 	c.mu.Unlock()
 
 	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.pumpConsult(c, sess) }()
+	go func() { defer e.wg.Done(); e.pumpConsult(c, sess, agentSess) }()
 	c.armIdleTimer()
 	return nil
 }
@@ -483,9 +483,11 @@ func (c *ConsultSession) onIdleTimeout() {
 // handleConsult and exits when that backend stops or its event channel
 // closes — pumpBoard's shape, parametrized by the specific *Session this
 // goroutine was started for, since c.sess can move on to a respawned one
-// while this pump is still draining the old backend's final events.
-func (e *Engine) pumpConsult(c *ConsultSession, sess *Session) {
-	events := sess.agent().Events()
+// while this pump is still draining the old backend's final events. Like
+// pumpFreeform it is handed the backend it relays, ag, which the session's
+// handle may no longer hold by the time this goroutine first runs.
+func (e *Engine) pumpConsult(c *ConsultSession, sess *Session, ag agent.Session) {
+	events := ag.Events()
 	for {
 		select {
 		case <-sess.done:
