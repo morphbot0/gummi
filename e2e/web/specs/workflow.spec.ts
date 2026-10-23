@@ -289,6 +289,25 @@ test('the Specs tab switches between a session’s specs', async ({ pairedPage: 
   expect(list.specs.map((s: any) => s.title)).toEqual(['Two pieces of work', 'Import CSV', 'Export JSON']);
 });
 
+// A spec's Propose a run asks the session for a run on it (DESIGN
+// §25.5): the thread keeps the /workflow line the page sent, and the agent
+// hears what it stands for — to bring the spec up to date and propose the
+// run, not to do the work.
+test('a spec’s Propose a run asks the session for a run on it', async ({ pairedPage: page, server, api, workspace }) => {
+  test.setTimeout(90_000);
+  await openSession(page, server, api, 'Ask for a run');
+  await showTab(page, 'spec');
+  await page.getByTestId('spec-start-session').click();
+  await expect(page.getByTestId('specs-item-1')).toBeVisible();
+  await page.getByTestId('spec-propose-run').click();
+  await expect(page.getByText('Asked the session to propose a run on spec 1')).toBeVisible();
+  await backToThread(page);
+  const thread = page.getByTestId('thread');
+  await expect(thread).toContainText('/workflow on spec 1', { timeout: 30_000 });
+  await expect.poll(() => workspace.agentLog(), { timeout: 30_000 })
+    .toContain('The person asks for a workflow run: \\"on spec 1\\". Do not do the work yourself in this turn.');
+});
+
 // A step opened beside the thread reads as the thread does (DESIGN
 // §25.10): its transcript is spaced as the session's conversation is,
 // opens on its newest line and follows what the step says while the reader

@@ -31,6 +31,10 @@ const (
 	triageRequestMax = 6000
 	// triageHere is the answer for work the session does itself.
 	triageHere = "here"
+	// triageSystemHint is the one-shot's whole instruction beside its
+	// prompt.
+	triageSystemHint = "You triage a request made to a coding agent. Do not modify any file and do not run anything: " +
+		"answer from what you are given."
 )
 
 // wantsTriage reports whether msg, about to go to the session as a turn,
@@ -98,16 +102,13 @@ func (ff *FreeformSession) triage(ctx context.Context, sess *Session, msg string
 	ctx, cancel := context.WithTimeout(ctx, triageTimeout)
 	defer cancel()
 	ts, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:    workDir,
-		Role:       agent.RoleTriage,
-		Model:      trc.Model,
-		Permission: e.cfg.Permission,
-		ReadOnly:   ConsultConfined(ag.Capabilities()),
-		SystemHints: []string{
-			"You triage a request made to a coding agent. Do not modify any file and do not run anything: " +
-				"answer from what you are given.",
-		},
-		FeatureID: string(ff.id),
+		WorkDir:     workDir,
+		Role:        agent.RoleTriage,
+		Model:       trc.Model,
+		Permission:  e.cfg.Permission,
+		ReadOnly:    ConsultConfined(ag.Capabilities()),
+		SystemHints: []string{triageSystemHint},
+		FeatureID:   string(ff.id),
 		// No Tools and no MCP endpoint: its product is the one line.
 	})
 	if err != nil {

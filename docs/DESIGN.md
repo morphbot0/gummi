@@ -6887,7 +6887,10 @@ call returns at once, saying the run is proposed.
     and the person as a line on the thread; `here`, an unknown name, a
     failure or a timeout send the request as it was. Its cost goes on
     the card. `triage: off` in `config.yaml` turns it off
-    (`engine/triage.go`).
+    (`engine/triage.go`). `make triage-eval` scores the prompt on a real
+    model against the labelled requests in
+    `engine/testdata/triage-eval.yaml`; add a case there when triage
+    misreads a request.
   - **The hint.** The session's workflow hint asks for the decision
     before the first edit of each new piece of work, and names the
     shapes of work each bundled recipe is for.

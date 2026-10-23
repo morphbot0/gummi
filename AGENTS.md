@@ -158,6 +158,7 @@ make test           # go test ./...
 make lint           # go vet + golangci-lint (v2 config in .golangci.yml)
 make ci             # build + test + lint — run this before considering work done
 make golden-update  # regenerate UI snapshot goldens (see below)
+make triage-eval    # score triage's prompt on real claude (spends money; never in ci)
 ```
 
 Scoped iteration while developing:

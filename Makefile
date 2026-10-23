@@ -1,7 +1,7 @@
 GOBIN := $(shell go env GOPATH)/bin
 export PATH := $(PATH):$(GOBIN)
 
-.PHONY: build test lint golden-update vet ci clean demo e2e web-e2e record-demo
+.PHONY: build test lint golden-update vet ci clean demo e2e web-e2e record-demo triage-eval
 
 build:
 	go build -o bin/gummi ./cmd/gummi
@@ -25,6 +25,13 @@ golden-update:
 	go test ./internal/webapi/... -update
 
 ci: build test lint
+
+# Score triage's prompt on a real model against the labelled requests in
+# internal/engine/testdata/triage-eval.yaml. Spends real money on the
+# signed-in claude CLI; GUMMI_TRIAGE_EVAL_MODEL (default haiku) and
+# GUMMI_TRIAGE_EVAL_MIN (default 0.8) tune it. Never part of ci.
+triage-eval:
+	go test -tags triageeval ./internal/engine/ -run '^TestTriageEval$$' -count=1 -v
 
 # Create a throwaway demo repo with gummi initialized.
 demo: build
