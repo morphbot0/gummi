@@ -132,6 +132,11 @@ type Config struct {
 	// Curator is the skill curator's configuration (DESIGN §23.4); nil
 	// means no curator runs. The pack itself is delivered either way.
 	Curator *config.Curator
+	// Triage reads a session's first request, before its agent hears it,
+	// for whether it is work for a workflow recipe (triage.go). Off in a
+	// zero Config; cmd/gummi switches it on unless config.yaml says
+	// `triage: off`.
+	Triage bool
 }
 
 // Engine orchestrates all live sessions and the autonomous runs.

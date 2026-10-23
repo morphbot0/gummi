@@ -1,6 +1,6 @@
 ---
 name: workflows
-description: "Use when deciding whether to run a gummi workflow or do the work yourself, before writing a spec's done-when checks, and when proposing, steering, stopping or reading the report of a run."
+description: "Use at the start of a request for a feature across packages, a risky refactor, a written investigation or failing checks to fix; when the person sends /workflow or triage names a recipe; before writing done-when checks; and to propose, steer, stop or read a gummi workflow run."
 scope: general
 source: gummi
 ---
@@ -12,21 +12,27 @@ session's own tree against one of its specs. It costs more than doing the
 work yourself, and it buys fresh eyes: a design, independent reviewers,
 checks run at the end. Use it when that is worth paying for.
 
-## Do it yourself, unless
+## Decide before your first edit
 
-Do the work yourself by default. Propose a run only on a clear signal:
+Decide at the start of each new piece of work whether to do it here or
+to propose a run. A run proposed once you have done most of the work
+buys nothing, so this is a question for the first turn, not for later.
 
-- the person asks for one;
-- the work is big enough that fresh-context design, review and
-  validation pay for themselves — a feature across several packages,
-  a risky refactor, work with tests and docs to write;
-- it is a loop against checks that already exist and fail
-  (`fix-until-green`);
-- the person wants a written report of an investigation
-  (`investigate`).
+Propose a run when:
 
-Do not propose one for a small fix, a question, a change the person is
-still shaping with you, or work you have mostly done already. When you
+- the person asks for one — in words, or by sending `/workflow`
+  (from the composer or a spec's **Propose a run**);
+- gummi's triage named a recipe ahead of the request — follow it unless
+  the request or what you find says otherwise, and say why not;
+- it is a feature or change across several packages, a risky refactor,
+  or work with tests and docs to write (`deliver`);
+- the person wants a question answered in a written report
+  (`investigate`);
+- checks already exist and fail, and the fix needs no design
+  (`fix-until-green`).
+
+Do it here for a question, a small or local change, a fix whose cause
+you know, or a change the person is still shaping with you. When you
 propose, say in one sentence why a run beats doing it here, and which
 recipe.
 

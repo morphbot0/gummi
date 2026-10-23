@@ -1034,11 +1034,13 @@ func (m *Shell) isProjectCommand(r featureRow, text string) bool {
 	if m.engine == nil || parseInput(text).Kind != verbMenu {
 		return false
 	}
-	ff := m.engine.Freeform(r.F.ID)
-	if ff == nil {
-		return false
+	// a session not open yet still answers its own commands (/workflow
+	// from a spec's "Propose a run", say): sending opens it
+	cmds := engine.SessionCommands()
+	if ff := m.engine.Freeform(r.F.ID); ff != nil {
+		cmds = ff.Commands()
 	}
-	_, _, ok := engine.FindProjectCommand(ff.Commands(), text)
+	_, _, ok := engine.FindProjectCommand(cmds, text)
 	return ok
 }
 

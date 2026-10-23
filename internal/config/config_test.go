@@ -651,3 +651,37 @@ func TestNameIsWorkspaceOnly(t *testing.T) {
 		t.Fatal("a name in the user config was accepted")
 	}
 }
+
+// TestTriageIsOnUnlessOff: triage reads a session's first request unless
+// a config says off, the workspace's word over the user's, and a value
+// that is neither is refused.
+func TestTriageIsOnUnlessOff(t *testing.T) {
+	dir := t.TempDir()
+	userPath := filepath.Join(dir, "user.yaml")
+	wsPath := filepath.Join(dir, "ws.yaml")
+	if err := os.WriteFile(userPath, []byte("triage: off\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	merged, sources, err := LoadLayered(userPath, filepath.Join(dir, "absent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.TriageOn() || sources["triage"] != userPath {
+		t.Errorf("triage on %v from %q, want off from %q", merged.TriageOn(), sources["triage"], userPath)
+	}
+	if err := os.WriteFile(wsPath, []byte("triage: on\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if merged, _, _ = LoadLayered(userPath, wsPath); !merged.TriageOn() {
+		t.Error("the workspace's triage: on did not win over the user's off")
+	}
+	if !(Config{}).TriageOn() {
+		t.Error("triage is off by default")
+	}
+	if err := os.WriteFile(wsPath, []byte("triage: sometimes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(wsPath); err == nil || !strings.Contains(err.Error(), "triage must be") {
+		t.Errorf("Load(triage: sometimes) = %v", err)
+	}
+}

@@ -676,6 +676,7 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 		ff.enqueue(ctx, msg, images)
 		return nil
 	}
+	triage := ff.wantsTriage(ctx, sess, cmds, msg)
 	sess.appendUserImages(msg, actorOf(ctx), images)
 	ff.engine.persist(sess)
 	sess.setBusy(true)
@@ -716,26 +717,63 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 		ff.compacting = true
 		ff.mu.Unlock()
 		sendErr = a.Send(ctx, prompt)
+	} else if b, args, ok := builtinFor(cmds, msg); ok && len(images) == 0 && b.Name == workflowCommand.Name {
+		// the person asks for a run: the agent is told what that means,
+		// behind the open run's note when there is one
+		prompt := workflowAskPrompt(args)
+		if note := ff.engine.workflowTurnNote(ctx, ff.id); note != "" {
+			prompt = note + "\n\n" + prompt
+		}
+		sendErr = a.Send(ctx, prompt)
+	} else if triage {
+		// the conversation's first request is read by triage before the
+		// agent hears it (triage.go). That is a one-shot's wait, so the
+		// turn goes on from here, already busy and recorded, and a failure
+		// to send it arrives as a turn's own failures do.
+		go func() {
+			ctx := context.WithoutCancel(ctx)
+			w := wire
+			if note := ff.triage(ctx, sess, msg); note != "" {
+				w = note + "\n\n" + w
+			}
+			_ = ff.settleSend(ctx, sess, msg, images, ff.sendPlain(ctx, sess, a, cmds, msg, w, images))
+		}()
+		return nil
 	} else {
-		// a turn the person sent asks, once, whether the pack skills the
-		// session used held up (skillstage.go); the transcript keeps the
-		// line as typed. Not on a line the backend runs itself: the note
-		// would reach the command as its arguments.
-		var asked []string
-		if !isBackendCommandLine(cmds, msg) {
-			var note string
-			note, asked = ff.engine.takeSkillAsk(ff.id, sess.Snapshot().AgentName)
-			wire = withSkillAsk(wire, note)
-		}
-		if len(images) > 0 {
-			sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: wire, Images: ff.engine.turnImages(images)})
-		} else {
-			sendErr = a.Send(ctx, wire)
-		}
-		if sendErr != nil {
-			ff.engine.requeueSkillAsk(ff.id, asked)
-		}
+		sendErr = ff.sendPlain(ctx, sess, a, cmds, msg, wire, images)
 	}
+	return ff.settleSend(ctx, sess, msg, images, sendErr)
+}
+
+// sendPlain sends a turn the person (or gummi) wrote as wire, images and
+// all.
+func (ff *FreeformSession) sendPlain(ctx context.Context, sess *Session, a agent.Session, cmds []ProjectCommand, msg, wire string, images []AttachmentRef) error {
+	// a turn the person sent asks, once, whether the pack skills the
+	// session used held up (skillstage.go); the transcript keeps the
+	// line as typed. Not on a line the backend runs itself: the note
+	// would reach the command as its arguments.
+	var asked []string
+	if !isBackendCommandLine(cmds, msg) {
+		var note string
+		note, asked = ff.engine.takeSkillAsk(ff.id, sess.Snapshot().AgentName)
+		wire = withSkillAsk(wire, note)
+	}
+	var sendErr error
+	if len(images) > 0 {
+		sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: wire, Images: ff.engine.turnImages(images)})
+	} else {
+		sendErr = a.Send(ctx, wire)
+	}
+	if sendErr != nil {
+		ff.engine.requeueSkillAsk(ff.id, asked)
+	}
+	return sendErr
+}
+
+// settleSend is what a turn's send left: nothing on success; a refusal
+// undone, and a busy backend's turn queued; any other failure set on the
+// session.
+func (ff *FreeformSession) settleSend(ctx context.Context, sess *Session, msg string, images []AttachmentRef, sendErr error) error {
 	if sendErr != nil {
 		if errors.Is(sendErr, agent.ErrBusy) || errors.Is(sendErr, agent.ErrImagesUnsupported) {
 			// Same undo Engine.SendTurn gives a live steer: a refusal that
