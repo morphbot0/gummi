@@ -801,7 +801,7 @@ export function proposalEl (p) {
     h('div', { class: 'hint' }, 'Changes stay uncommitted in the tree · a snapshot at every step'))
 }
 
-// stepTable is a proposal's step tree: each step with its role, tier, the
+// stepTable is a proposal's step tree: each step with its role, the
 // model it runs on and its prompt's gist; a repeat with its bound and its
 // condition; a parallel with its join.
 function stepTable (steps, label, testid) {
