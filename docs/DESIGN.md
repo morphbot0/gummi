@@ -2084,6 +2084,19 @@ Decided in the design interview (2026-07-03):
     landing and the owns check (§24.3–24.6) are retired. Built
     2026-10-22; §25.14 records where the build departed from §25.
 
+29. **An agent may watch on a schedule and dispatch sessions**, decided
+    2026-10-23 (§26), not built. A schedule may start a run on an agent,
+    and a recipe may hold a `run:` step — a command, no model, whose
+    declared `quietExit` ends the run with nothing but the schedule's
+    `no-change` — and a `dispatch` step that mints a session in a
+    repository the recipe names literally, with an envelope carved from
+    the agent's. An agent may propose such a schedule; the person's one
+    allowance covers the recipe and every recipe its dispatches name,
+    and enables it. This **amends §19.3d** (an agent may run a workflow
+    and dispatch sessions), **§19.9** (an agent may propose a schedule,
+    never enable one) and **§25.13** (a command step is no longer
+    deferred). Decision 28's three rules are unchanged.
+
 Still open:
 
 1. **Copilot SDK maturity** — verify the Go SDK exposes interrupt,
@@ -3999,6 +4012,11 @@ the workspace's skill pack, never these files.
 
 ### 19.3d Agents — a session with a home of its own
 
+> **Amended by §26 (decision 29).** An agent may run a workflow in its
+> home, and a run's `dispatch` step may mint a session in a repository
+> the allowed recipe names. "Delegation is refused" and the deferred
+> "letting an agent file cards" below are history where §26 applies.
+
 A session may also be minted into **a home of its own** (`Feature.Home`):
 the third "runs in" answer, after a worktree and the main checkout. Such a
 card is an **agent**. It is in no repository of the person's. Its working
@@ -4310,6 +4328,12 @@ backend that emits `EventPermission` and takes the ruling by request id
 now exists (opencode's server), so the dock's work is its own card.
 
 ### 19.9 Schedules and heartbeats
+
+> **Amended by §26 (decision 29).** A third kind, `run`, starts a run on
+> an agent instead of sending a turn, and an agent may *propose* a
+> schedule (`schedule_propose`). Only the person's answer enables it;
+> "an agent cannot schedule itself" below still holds for enabling,
+> editing and raising one.
 
 Freeform sessions only move when a person types. Two time-driven
 primitives, sharing one cron engine, put them on a clock:
@@ -7164,7 +7188,9 @@ Review, checks and design are what a recipe chooses, and the bundled
 ### 25.13 Deferred
 
 - **Waiting on a command** without spending model turns, as a step kind
-  (Kiro's `watch` node).
+  (Kiro's `watch` node). *A single command step, `run:`, is decided in
+  §26.3; a step that polls a command inside an open run stays deferred,
+  since long waits belong to a schedule.*
 - **Narrowing a step's tools**, per step: a step has every tool its
   role's session has, and a reading role is told, not caged, to change
   no files.
@@ -7448,3 +7474,166 @@ The build follows §25, with these differences.
   `gummi resume` answers it by resuming.
 - **Revert run puts the index back.** It restored the files only, so a
   file the run had staged came back with the next commit.
+
+## 26. Watches — an agent on a schedule that dispatches sessions
+
+*Decided 2026-10-23 (decision 29); not built.* This section amends §19.3d
+(an agent may run a workflow and dispatch sessions), §19.9 (an agent may
+propose a schedule, and a schedule may start a run) and §25.13 (a command
+step is no longer deferred). Where it and those sections disagree, this
+section wins.
+
+A person wants an agent to watch something — an upstream repository's
+releases, say — and, when it changes, to have work done in one of their
+repositories. Before this section none of it connected: an agent could
+not run a workflow, could not file a session and could not schedule
+itself, and every fire of a schedule or a heartbeat was a model turn. An
+hourly heartbeat that runs `curl` spent a turn every hour to learn that
+nothing had changed, and still could not start the work.
+
+A **watch** is not a new kind of thing. It is a schedule on an agent
+that starts a run of a recipe whose first step is a command. The command
+decides, with no model, whether there is anything to do. Only when there
+is does a model run, and the run's `dispatch` step mints a session in a
+repository the person allowed, with work of its own.
+
+```
+schedule ──fire──▶ run on the agent ──▶ run: gate ──quiet exit──▶ ends; row reads no-change
+                                           │ exit 0
+                                           ▼
+                                     dispatch ──▶ new session in repo X, its own run
+                                                        │
+                       the agent reads its status, sends it turns ◀─┘
+                       lands on a person's read of its diff, as a session always has
+```
+
+### 26.1 Why
+
+- **The check is free.** A command answers "has anything changed" as
+  well as a model does, for nothing. A model is spent only on a change.
+- **The agent writes the automation, not each step of it.** The person
+  describes the job once; the agent turns it into a schedule and a
+  recipe and proposes them. Afterwards the agent may read how its fires
+  ran (`cardrun`) and propose a cheaper recipe — a model step that
+  always says "no change" made a command, a step's tier lowered. Each
+  change is a new proposal.
+- **No new concept.** The cron engine, the claim before a fire, the
+  coalescing of missed fires and the envelope as the brake are §19.9's.
+  The steps, their snapshots and the run's report are §25's.
+
+### 26.2 A schedule that starts a run
+
+A third schedule kind, `run`, beside `mint` and `heartbeat`: on its
+cadence, start a run of the schedule's frozen recipe against one of the
+agent's specs, on the agent's own card. It sends no turn.
+
+- The run is on the agent. `WorkflowPropose`'s refusal of a home is
+  lifted: the home is already a git repository (§19.3d), so the run's
+  snapshots and diffs work there unchanged.
+- A fire while the agent's previous run is still open, or the agent is
+  mid-turn, is `skipped-busy`, as a heartbeat's is.
+- An agent whose envelope is spent pauses the schedule
+  (`paused-exhausted`), as a heartbeat's target does.
+
+### 26.3 The `run:` step: a command gate
+
+A step may be a command instead of an agent:
+
+```yaml
+- id: check
+  run: ./check-release.sh        # runs in the run's tree, no model
+  quietExit: 1                   # "nothing to do"
+```
+
+- It has no role, no tier and no prompt. It spends nothing.
+- **Exit 0** continues. The command's standard output is the step's
+  output, so a later step reads it as `{{check.output}}`.
+- **The exit the recipe declares** as `quietExit` ends the run quietly.
+  A plain `test`, `grep -q` or `diff -q` is a gate as it stands.
+- **Any other exit** fails the step, as a `FAILED:` line does (§25.4).
+  A broken command is never mistaken for "nothing to do".
+- gummi keeps no state for the gate. A command that needs to remember
+  the last tag it saw keeps it in a file in the agent's home.
+
+**A quiet run leaves almost nothing behind.** The schedule's row records
+`no-change` as its last status and the time as its last run. There is no
+run row, no thread item and no notification. The schedules view (TUI
+`L`, the web page, `gummi schedule list`) shows when it last checked.
+
+A `run:` step is one check, not a wait. Waiting for days belongs to the
+schedule; a step that polls a command inside an open run stays deferred
+(§25.13).
+
+### 26.4 The `dispatch` step: a session in a named repository
+
+```yaml
+- id: bump
+  dispatch:
+    repo: myrepo                 # literal; never a template
+    title: "Bump foo to {{check.output}}"
+    envelope: 5
+    spec: |                      # becomes the new session's spec 1
+      Upstream foo released {{check.output}}. Bump the dependency.
+    recipe: fix-until-green      # frozen into the proposal
+```
+
+- It mints a freeform session in `repo`, through `cardmint`, with an
+  envelope of its own.
+- With a `recipe`, the new session holds the filled `spec` as its spec 1,
+  and the run starts on it at once. Without a recipe, `dispatch` takes a
+  `prompt` instead of a `spec`, and the filled prompt is the session's
+  opening turn.
+- **Only the repositories the recipe names.** `repo` is a literal, and
+  `Check` refuses a template there. The proposal shows every target,
+  and allowing it allows exactly those. A new repository is a new
+  proposal.
+- **The child's envelope comes out of the agent's.** An open child holds
+  the larger of its envelope and its spend; a closed one, its spend: the
+  rule delegation used (§19.10). A dispatch the agent's pool cannot
+  cover pauses the run for the person's top-up (§24.7a), never mints
+  below its envelope.
+- **The agent drives its children.** When a child's run ends, its report
+  goes to the child and a line to the agent. The agent has
+  `session_status` and `session_send`, which answer only for sessions it
+  dispatched. A child's `ask_user` reaches the person, never the agent.
+- A dispatched session is a session like any other. It lands on a
+  person's read of its diff; nothing about its parent changes that.
+
+### 26.5 The agent proposes; a person allows once
+
+An agent may propose a schedule: `schedule_propose(cron, recipe_yaml,
+spec)`. The proposal is a decision in the agent's thread, and it shows
+the cadence, the recipe's step tree, every recipe a `dispatch` names,
+and every repository it targets.
+
+- **One allowance covers the chain.** The recipe, and every recipe its
+  `dispatch` steps name, are copied into the proposal. Allowing it
+  allows every run the schedule starts and every run a dispatch starts.
+  A change to any of them is a new proposal.
+- **Allowing is enabling.** The schedule is stored as §19.9 stores any:
+  disabled, and enabled only by the person's answer. An agent never
+  enables, edits or raises one. A person's edit to the row forces it off
+  again, as for any schedule.
+- A person may still create the same schedule by hand, from the
+  schedules view, with an agent as its target.
+
+### 26.6 What does not bend
+
+Decision 28's three rules hold, and nothing here relaxes them:
+
+- **A person allows every run** — here, by allowing a standing schedule
+  and the recipes it carries, once, the way "always allow" allows a
+  session's runs.
+- **Money is a ceiling no agent raises.** One pool, the agent's
+  envelope; a child's envelope is carved from it; a spent pool pauses.
+- **A question the run cannot settle reaches the person**, from the
+  agent's run or from any child's.
+
+An agent still never lands, publishes, enables a schedule or raises an
+envelope.
+
+### 26.7 Deferred
+
+- A per-fire history for a schedule, beyond its row's last outcome.
+- A dispatch target chosen at fire time from a list the person allowed.
+- A step that polls a command inside an open run (§25.13).
