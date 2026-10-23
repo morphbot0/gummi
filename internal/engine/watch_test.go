@@ -252,13 +252,13 @@ func TestARunScheduleStartsARunOnItsAgent(t *testing.T) {
 }
 
 // dispatchRecipe is a gate and a dispatch of the childwork recipe into target.
+// dispatchRecipe's envelope is in credits, written as the dollars a
+// recipe takes.
 func dispatchRecipe(envelope int) string {
 	return "name: watch\ntier: cheap\nsteps:\n  - { id: check, run: \"echo v2\" }\n" +
-		"  - id: bump\n    dispatch:\n      repo: target\n      title: \"Bump to {{check.output}}\"\n      envelope: " + itoa(envelope) + "\n" +
+		"  - id: bump\n    dispatch:\n      repo: target\n      title: \"Bump to {{check.output}}\"\n      envelope: " + domain.DollarsInput(envelope) + "\n" +
 		"      recipe: childwork\n      spec: |\n        Bump to {{check.output}}.\n"
 }
-
-func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
 // A dispatch mints a session in its named repo with its envelope, records
 // it, writes the spec and starts the frozen recipe's run already allowed.

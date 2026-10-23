@@ -233,8 +233,8 @@ steps:
   recipe's first step only) ends the run with no trace; any other exit
   fails the step. A `{{…}}` in a command is one quoted shell word, never
   put it inside quotes. It is one check, never a wait.
-- `dispatch` is for an agent only. `repo` is a literal name, `envelope`
-  comes out of the agent's own. With a `recipe` give a `spec` (its spec
+- `dispatch` is for an agent only. `repo` is a literal name; `envelope`
+  is dollars, out of the agent's own. With a `recipe` give a `spec` (its spec
   1) and the run starts at once; without one give a `prompt`, the
   opening turn. `repos: [lib]` beside `repo` names more repositories of
   the pool that the minted session attaches (literals, no paths or

@@ -84,7 +84,7 @@ func TestCommandAndDispatchSteps(t *testing.T) {
 		if g.Run != "./check.sh" || g.QuietExit == nil || *g.QuietExit != 1 || !g.Agentless() || g.Kind() != "run" {
 			t.Errorf("gate = %+v", g)
 		}
-		if d.Dispatch == nil || d.Dispatch.Repo != "myrepo" || d.Dispatch.Envelope != 5 || d.Dispatch.Recipe != "fix-until-green" ||
+		if d.Dispatch == nil || d.Dispatch.Repo != "myrepo" || d.Dispatch.Envelope != 500 || d.Dispatch.Recipe != "fix-until-green" ||
 			d.Dispatch.Spec != "Bump to {{check.output}}.\n" || d.Kind() != "dispatch" {
 			t.Errorf("dispatch = %+v", d)
 		}
@@ -136,5 +136,32 @@ func TestAQuotedTemplateInACommandIsRefused(t *testing.T) {
 		if got := templateQuoted(cmd); got != bad {
 			t.Errorf("templateQuoted(%q) = %v", cmd, got)
 		}
+	}
+}
+
+// TestADispatchEnvelopeIsInDollars: a recipe writes a dispatch's envelope
+// the way a person types any budget, in dollars, and it is held in credits;
+// a figure finer than a cent is refused, and it writes back as dollars.
+func TestADispatchEnvelopeIsInDollars(t *testing.T) {
+	for in, want := range map[string]int{"5": 500, "2.50": 250, "0.3": 30} {
+		r, err := Parse([]byte(dispatchWith("      {repo: r, title: t, envelope: " + in + ", prompt: p}\n")))
+		if err != nil {
+			t.Fatalf("envelope %s: %v", in, err)
+		}
+		d := Steps(r)[0].Dispatch
+		if d == nil || d.Envelope != want {
+			t.Fatalf("envelope %s = %+v, want %d credits", in, d, want)
+		}
+		out, err := Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		back, err := Parse(out)
+		if err != nil || Steps(back)[0].Dispatch.Envelope != want {
+			t.Fatalf("envelope %s did not round-trip:\n%s", in, out)
+		}
+	}
+	if _, err := Parse([]byte(dispatchWith("      {repo: r, title: t, envelope: 0.001, prompt: p}\n"))); err == nil || !strings.Contains(err.Error(), "finer than a cent") {
+		t.Errorf("a sub-cent envelope parsed: %v", err)
 	}
 }

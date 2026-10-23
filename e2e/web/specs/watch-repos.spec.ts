@@ -105,7 +105,7 @@ test('a session attaches a repository, reads its diff per repository, and keeps 
 test('an agent proposes a watch, the person enables it, and a fire dispatches a session', async ({ pairedPage: page, server, api, workspace }, info) => {
   test.skip(info.project.name !== 'desktop', 'one drive is enough');
   test.setTimeout(240_000);
-  const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Watch upstream', home: true, envelope: 50 });
+  const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Watch upstream', home: true, envelope: 2000 });
   expect(made.json?.id ?? made.json?.card?.id, JSON.stringify(made.json)).toBeTruthy();
   const agent = String(made.json?.id ?? made.json?.card?.id);
   await page.goto(`${server.url}/#${agent}`);
@@ -123,7 +123,7 @@ test('an agent proposes a watch, the person enables it, and a fire dispatches a 
     '      repo: lxd',
     '      title: Bump for upstream',
     '      prompt: Upstream moved; bump it.',
-    '      envelope: 5',
+    '      envelope: 1',
     '',
   ].join('\n');
   const propose = { name: 'upstream watch', preset: '@daily', recipe_yaml: recipe, spec: 1 };
@@ -155,6 +155,10 @@ test('an agent proposes a watch, the person enables it, and a fire dispatches a 
   // a fire with nothing to do: no-change, and no run on the agent
   await runNow(page);
   await expect(page.getByTestId('schedule-upstream-watch-status')).toContainText('checked, nothing to do', { timeout: 60_000 });
+  // the fire's own "run 1 started" gives way to what the gate recorded
+  await expect(page.getByTestId('schedule-upstream-watch-result')).toHaveCount(0, { timeout: 15_000 });
+  // the recipe's envelope is in dollars, as every budget a person types
+  await expect(page.getByTestId('schedule-upstream-watch')).toContainText('envelope $1.00');
   const runs = (await api('GET', `/api/cards/${agent}/live`)).json;
   await shot(page, info, 'watch-no-change');
 

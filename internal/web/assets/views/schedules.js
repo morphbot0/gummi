@@ -286,7 +286,7 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
           results.set(sc.id, { status: 'ok', enabled: true, text: `enabled — next fire ${when(armed.nextRun) || 'soon'}` })
         } else if (what === 'run') {
           const fire = await act(`/api/schedules/${encodeURIComponent(sc.id)}/run`, 'POST', {})
-          results.set(sc.id, { status: fire.status, text: fireText(fire) })
+          results.set(sc.id, { status: fire.status, text: fireText(fire), fired: { status: fire.status, detail: fire.detail || '' } })
         } else {
           await act(`/api/schedules/${encodeURIComponent(sc.id)}`, 'DELETE')
           results.delete(sc.id)
@@ -319,6 +319,10 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
   // an "enabled" line outlives nothing that turned the row off since —
   // here, on another device, or by an edit
   if (results.get(sc.id)?.enabled && !sc.enabled) results.delete(sc.id)
+  // a fire's line outlives nothing the row recorded since: a run schedule
+  // records "started" at the fire and "nothing to do" once its gate says so
+  const fired = results.get(sc.id)?.fired
+  if (fired && sc.lastStatus && (sc.lastStatus !== fired.status || (sc.lastDetail || '') !== fired.detail)) results.delete(sc.id)
   const res = results.get(sc.id)
   if (res) {
     row.append(h('div', { class: ['sch-result', statusClass(res.status)], testid: `schedule-${sc.id}-result` }, res.text))

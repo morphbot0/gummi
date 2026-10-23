@@ -412,7 +412,7 @@ func TestADispatchAttachesItsRepos(t *testing.T) {
 	e, store, f, _ := watchEngine(t, wf, 2000)
 	ctx := context.Background()
 	recipe := "name: watch\ntier: cheap\nsteps:\n  - { id: check, run: \"echo v2\" }\n" +
-		"  - id: bump\n    dispatch:\n      repo: target\n      repos: [lib]\n      title: \"Bump\"\n      envelope: 30\n" +
+		"  - id: bump\n    dispatch:\n      repo: target\n      repos: [lib]\n      title: \"Bump\"\n      envelope: 0.30\n" +
 		"      recipe: childwork\n      spec: |\n        Bump.\n"
 	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe, Spec: 1})
 	tickRuns(t, e, f.ID, run.N, "ended", ended)

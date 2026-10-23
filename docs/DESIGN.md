@@ -7593,14 +7593,15 @@ schedule; a step that polls a command inside an open run stays deferred
   dispatch:
     repo: myrepo                 # literal; never a template
     title: "Bump foo to {{check.output}}"
-    envelope: 5
+    envelope: 5                  # dollars, as every budget a person types
     spec: |                      # becomes the new session's spec 1
       Upstream foo released {{check.output}}. Bump the dependency.
     recipe: fix-until-green      # frozen into the proposal
 ```
 
 - It mints a freeform session in `repo`, through `cardmint`, with an
-  envelope of its own.
+  envelope of its own, written in dollars (`5`, `2.50`) and stored in
+  credits like every envelope.
 - With a `recipe`, the new session holds the filled `spec` as its spec 1,
   and the run starts on it at once. Without a recipe, `dispatch` takes a
   `prompt` instead of a `spec`, and the filled prompt is the session's

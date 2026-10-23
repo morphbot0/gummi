@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -60,7 +61,32 @@ type rawDispatch struct {
 	Prompt     string   `yaml:"prompt,omitempty"`
 	Recipe     string   `yaml:"recipe,omitempty"`
 	RecipeYAML string   `yaml:"recipeYAML,omitempty"`
-	Envelope   int      `yaml:"envelope"`
+	Envelope   dollars  `yaml:"envelope"`
+}
+
+// dollars is a budget a recipe writes the way a person types one —
+// envelope: 5 or 2.50, in US dollars, as every face and flag takes it —
+// held in credits, the unit every envelope is stored in.
+type dollars int
+
+func (d *dollars) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.ScalarNode {
+		return fmt.Errorf("line %d: an envelope is a dollar amount, like 5 or 2.50", n.Line)
+	}
+	c, err := domain.ParseDollars(n.Value)
+	if err != nil {
+		return fmt.Errorf("line %d: envelope: %w", n.Line, err)
+	}
+	*d = dollars(c)
+	return nil
+}
+
+func (d dollars) MarshalYAML() (any, error) {
+	v, err := strconv.ParseFloat(domain.DollarsInput(int(d)), 64)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 type rawParallel struct {
@@ -233,7 +259,7 @@ func entry(re rawEntry) (domain.Entry, error) {
 			Repo: strings.TrimSpace(rd.Repo), Repos: trimAll(rd.Repos), Title: strings.TrimSpace(rd.Title),
 			Spec: rd.Spec, Prompt: rd.Prompt,
 			Recipe: strings.TrimSpace(rd.Recipe), RecipeYAML: rd.RecipeYAML,
-			Envelope: rd.Envelope,
+			Envelope: int(rd.Envelope),
 		}
 	}
 	return domain.Entry{Step: &domain.Step{
@@ -283,7 +309,7 @@ func rawStep(s domain.Step) rawEntry {
 	if d := s.Dispatch; d != nil {
 		re.Dispatch = &rawDispatch{
 			Repo: d.Repo, Repos: d.Repos, Title: d.Title, Spec: d.Spec, Prompt: d.Prompt,
-			Recipe: d.Recipe, RecipeYAML: d.RecipeYAML, Envelope: d.Envelope,
+			Recipe: d.Recipe, RecipeYAML: d.RecipeYAML, Envelope: dollars(d.Envelope),
 		}
 	}
 	return re
