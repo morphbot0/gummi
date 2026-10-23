@@ -373,9 +373,13 @@ type RunProposal struct {
 	Description string `json:"description,omitempty"`
 	Spec        int    `json:"spec"`
 	SpecTitle   string `json:"specTitle,omitempty"`
-	// SpecRev is the revision the run would freeze if it started now.
+	// SpecRev is the revision of the spec the run is judged against,
+	// frozen when it was proposed.
 	SpecRev  int            `json:"specRev,omitempty"`
-	Steps    []ProposalStep `json:"steps"`
+	Steps []ProposalStep `json:"steps"`
+	// Replaces is, on a revised plan, the run's remaining steps the plan
+	// would replace: what would not run.
+	Replaces []ProposalStep `json:"replaces,omitempty"`
 	Warnings []string       `json:"warnings,omitempty"`
 	// Checks are the done-when check commands the run will execute.
 	Checks []ProposalCheck `json:"checks,omitempty"`

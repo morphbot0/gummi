@@ -113,6 +113,8 @@ func workflowOptionDetail(o string) string {
 		return "the run stops; its changes stay in the tree"
 	case engine.WorkflowTopUp:
 		return "raises the session's envelope; a paused run carries on"
+	case engine.WorkflowResumeRun:
+		return "the run carries on where it was; its steps pick their work up"
 	}
 	return ""
 }
@@ -130,6 +132,8 @@ func workflowDecisionWord(d *domain.RunDecision) string {
 		return "loop can't judge"
 	case domain.RunDecideBudget:
 		return "run budget"
+	case domain.RunDecideResume:
+		return "run parked"
 	}
 	return "run asks"
 }
@@ -172,6 +176,37 @@ func firstParagraph(text string) string {
 	return strings.TrimSpace(text)
 }
 
+// proposalTreeRow is one entry of a proposal's step tree: a repeat with
+// its bound and condition, a parallel with its join, or a step with its
+// role, tier, the model it runs on and its prompt's gist.
+func proposalTreeRow(s *theme.Styles, st engine.ProposalStep, fit func(string) string) string {
+	indent := strings.Repeat("  ", st.Depth)
+	switch st.Kind {
+	case "repeat":
+		l := indent + st.ID + fmt.Sprintf(" ↺ ≤%d", st.Max)
+		if st.Until != "" {
+			l += s.Faint.Render(" until " + sanitize(st.Until))
+		}
+		if st.OnMax != "" {
+			l += s.Faint.Render(", else " + string(st.OnMax))
+		}
+		return fit("  " + s.Base.Render(l))
+	case "parallel":
+		l := indent + st.ID + " ∥"
+		if st.Join != "" {
+			l += s.Faint.Render(" join " + string(st.Join))
+		}
+		return fit("  " + s.Base.Render(l))
+	}
+	row := "  " + s.Base.Render(padTo(indent+st.ID, 16)) + " " +
+		roleStyle(s, st.Role).Render(padTo(string(st.Role), 12)) + " " +
+		s.Faint.Render(padTo(sanitize(st.Model), 28))
+	if st.Prompt != "" {
+		row += " " + s.Faint.Render(sanitize(st.Prompt))
+	}
+	return fit(row)
+}
+
 // proposalLines is a run's proposal as the picker draws it above its
 // answers (DESIGN §25.5): the recipe and its spec, what the session's pool
 // has left and whether the tree holds uncommitted work, Check's warnings,
@@ -193,7 +228,7 @@ func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
 	if p.SpecTitle != "" {
 		spec += " " + strconv.Quote(sanitize(p.SpecTitle))
 	}
-	out = append(out, fit(s.Subtle.Render(spec)+s.Faint.Render(fmt.Sprintf(" · freezes revision %d when it starts", p.SpecRev))))
+	out = append(out, fit(s.Subtle.Render(spec)+s.Faint.Render(fmt.Sprintf(" · revision %d, frozen now", p.SpecRev))))
 	money := "the session has no envelope; the run spends from it"
 	if p.Bounded {
 		money = domain.FormatDollars(math.Max(0, p.PoolLeft)) + " left in the session; the run spends from it"
@@ -210,33 +245,15 @@ func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
 	if len(p.Warnings) == 0 && p.Kind == domain.RunDecideProposal {
 		out = append(out, fit(s.Success.Render("✓ the recipe passes its checks")))
 	}
-	for _, st := range p.Steps {
-		indent := strings.Repeat("  ", st.Depth)
-		switch st.Kind {
-		case "repeat":
-			l := indent + st.ID + fmt.Sprintf(" ↺ ≤%d", st.Max)
-			if st.Until != "" {
-				l += s.Faint.Render(" until " + sanitize(st.Until))
-			}
-			if st.OnMax != "" {
-				l += s.Faint.Render(", else " + string(st.OnMax))
-			}
-			out = append(out, fit("  "+s.Base.Render(l)))
-		case "parallel":
-			l := indent + st.ID + " ∥"
-			if st.Join != "" {
-				l += s.Faint.Render(" join " + string(st.Join))
-			}
-			out = append(out, fit("  "+s.Base.Render(l)))
-		default:
-			row := "  " + s.Base.Render(padTo(indent+st.ID, 16)) + " " +
-				roleStyle(s, st.Role).Render(padTo(string(st.Role), 12)) + " " +
-				s.Faint.Render(padTo(st.Model, 28))
-			if st.Prompt != "" {
-				row += " " + s.Faint.Render(sanitize(st.Prompt))
-			}
-			out = append(out, fit(row))
+	drawTree := func(steps []engine.ProposalStep) {
+		for _, st := range steps {
+			out = append(out, proposalTreeRow(s, st, fit))
 		}
+	}
+	drawTree(p.Steps)
+	if len(p.Replaces) > 0 {
+		out = append(out, fit(s.Subtle.Render("what it replaces, which would not run")))
+		drawTree(p.Replaces)
 	}
 	if len(p.Checks) > 0 {
 		out = append(out, fit(s.Subtle.Render("checks it will run in the tree")))

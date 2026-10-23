@@ -9,7 +9,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/workflowrecipe"
-	"github.com/morphis/gummi/internal/worktree"
 )
 
 // What the faces read of a run beyond the store (DESIGN §25.9, §25.10):
@@ -78,7 +77,8 @@ func (e *Engine) RunFiles(ctx context.Context, run domain.Run, steps []domain.Ru
 	if err != nil {
 		return nil
 	}
-	_, paths, err := worktree.DiffTrees(ctx, dir, run.StartTree, newest)
+	// both trees are snapshots, settled: their diff is read from git once
+	_, paths, err := e.diffTreesCached(ctx, dir, run.StartTree, newest, true)
 	if err != nil {
 		return nil
 	}

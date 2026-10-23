@@ -51,7 +51,7 @@ func sessionDir(t *testing.T, e *Engine, session domain.FeatureID) string {
 // passes before the run proves nothing about it. The proposal's baseline
 // says so, the session hears which item and why, and nothing is refused,
 // held or paused for it: the run is allowed and runs to its end, whose
-// report reads the item passed → passed.
+// report reads the item passed before the run, still passes.
 func TestABaselineThatAlreadyPassesIsToldAndShown(t *testing.T) {
 	wf := newWFFake()
 	e, _, f, _ := wfEngine(t, wf)
@@ -93,7 +93,7 @@ func TestABaselineThatAlreadyPassesIsToldAndShown(t *testing.T) {
 	if end.State != domain.RunDone || end.Results[0].Before != domain.ItemMet {
 		t.Fatalf("ended %s (%s) %+v", end.State, end.Reason, end.Results)
 	}
-	if !strings.Contains(end.Report, "DW-1 out.txt exists (check): passed → passed (already passed before the run)") {
+	if !strings.Contains(end.Report, "DW-1 out.txt exists (check): passed before the run, still passes") {
 		t.Fatalf("the report:\n%s", end.Report)
 	}
 	// told once: the start found the tree as the proposal did
@@ -109,7 +109,7 @@ func TestABaselineThatAlreadyPassesIsToldAndShown(t *testing.T) {
 }
 
 // TestABaselineReadsBeforeAndAfter: an item whose check fails before the
-// run and passes after it reads failed → passed in the report, and the
+// run and passes after it reads failed before the run, now passes in the report, and the
 // session hears nothing of a baseline that found nothing wrong.
 func TestABaselineReadsBeforeAndAfter(t *testing.T) {
 	wf := newWFFake()
@@ -123,7 +123,7 @@ func TestABaselineReadsBeforeAndAfter(t *testing.T) {
 	if end.State != domain.RunDone || end.Results[0].Before != domain.ItemUnmet || end.Results[0].Verdict != domain.ItemMet {
 		t.Fatalf("ended %s (%s) %+v", end.State, end.Reason, end.Results)
 	}
-	if !strings.Contains(end.Report, "✓ DW-1 out.txt exists (check): failed → passed") {
+	if !strings.Contains(end.Report, "✓ DW-1 out.txt exists (check): failed before the run, now passes") {
 		t.Fatalf("the report:\n%s", end.Report)
 	}
 	if end.Results[1].Before != "" {
@@ -167,7 +167,7 @@ func TestAChangedTreeRerunsTheBaseline(t *testing.T) {
 	if at == nil || !at.Started || at.Tree == first.Baseline.Tree || at.Results[0].Verdict != domain.ItemMet {
 		t.Fatalf("the first step started on baseline %+v (the proposal's was %+v)", at, first.Baseline)
 	}
-	if end.State != domain.RunDone || !strings.Contains(end.Report, "passed → passed") {
+	if end.State != domain.RunDone || !strings.Contains(end.Report, "passed before the run, still passes") {
 		t.Fatalf("ended %s (%s):\n%s", end.State, end.Reason, end.Report)
 	}
 	waitUntil(t, "the session heard of DW-1", func() bool {

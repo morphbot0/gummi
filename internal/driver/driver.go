@@ -177,6 +177,13 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	ask := ff.Snapshot().PendingAsk
 	run, decision := d.eng.WorkflowDecision(ctx, id)
 	step, stepAsk := d.stepAsk(ctx, id)
+	// a run parked when its process went asks to be resumed: that question
+	// is the one a person running `resume` answers by running it, so it is
+	// no question waiting on an --answer
+	parked := decision != nil && decision.Kind == domain.RunDecideResume
+	if parked {
+		decision = nil
+	}
 	waiting := ask != nil || decision != nil || stepAsk != nil
 	open, _ := d.store.OpenRun(ctx, id)
 	// an answer with nothing to answer is refused before anything moves:
@@ -190,7 +197,11 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	}
 	// one paused because the money ran out waits for a raise instead, and
 	// one with a decision open waits for its answer
-	if open != nil && open.State == domain.RunPaused && !open.OutOfBudget && open.Pending == nil {
+	if parked {
+		if err := d.eng.WorkflowAnswer(ctx, id, run.N, run.Pending.ID, engine.WorkflowResumeRun); err != nil {
+			return d.fail(ctx, string(id), err)
+		}
+	} else if open != nil && open.State == domain.RunPaused && !open.OutOfBudget && open.Pending == nil {
 		if err := d.eng.WorkflowResume(ctx, id); err != nil {
 			return d.fail(ctx, string(id), err)
 		}

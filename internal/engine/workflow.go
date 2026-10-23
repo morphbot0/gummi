@@ -32,6 +32,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/workflowpolicy"
 	"github.com/morphis/gummi/internal/workflowrecipe"
 	"github.com/morphis/gummi/internal/worktree"
@@ -61,6 +62,8 @@ const (
 	WorkflowStopRun  = "Stop the run"
 	// a budget decision's, beside WorkflowStopRun
 	WorkflowTopUp = "Top up the session"
+	// a parked run's, beside WorkflowStopRun
+	WorkflowResumeRun = "Resume the run"
 )
 
 // workflowRuntime is what this process knows about runs beyond the store:
@@ -78,13 +81,83 @@ type workflowRuntime struct {
 	// run it conducts: kept while the session has a run open or queued,
 	// so no other gummi conducts the same run meanwhile
 	held map[domain.FeatureID]func()
+	// conducted marks each run ("session/n") this process started or
+	// resumed: a running run it did not was running under another gummi,
+	// gone now, and is parked rather than ticked as if its steps still ran
+	conducted map[string]bool
+	// stamps is when each artifact a live step declares was last written
+	// as the step started, by step key and file: one left as it was is
+	// captured from the step's output, not read as the step's own
+	stamps map[string]map[string]time.Time
+	// diffs caches the diff between two settled snapshots: a run's or a
+	// step's that has ended never changes, and reading it runs git
+	diffs map[string]cachedDiff
 }
 
 func newWorkflowRuntime() *workflowRuntime {
 	return &workflowRuntime{
 		boot: time.Now(), busy: map[string]bool{},
 		locks: map[domain.FeatureID]*sync.Mutex{}, planTries: map[string]int{},
-		held: map[domain.FeatureID]func(){},
+		held: map[domain.FeatureID]func(){}, conducted: map[string]bool{},
+		stamps: map[string]map[string]time.Time{}, diffs: map[string]cachedDiff{},
+	}
+}
+
+func runKey(session domain.FeatureID, n int) string { return fmt.Sprintf("%s/%d", session, n) }
+
+// conduct marks run n of session as this process's to conduct.
+func (rt *workflowRuntime) conduct(session domain.FeatureID, n int) {
+	rt.mu.Lock()
+	rt.conducted[runKey(session, n)] = true
+	rt.mu.Unlock()
+}
+
+// conducts reports whether this process started or resumed run n.
+func (rt *workflowRuntime) conducts(session domain.FeatureID, n int) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.conducted[runKey(session, n)]
+}
+
+// RunPhase is what gummi itself is doing on run n, between its steps:
+// "baseline" while it runs the done-when checks before the first step,
+// "until" while it judges a repeat's condition, "ending" while it runs the
+// end checks and writes the report; "" otherwise. A face says it, and
+// offers no pause, stop or revert while the run is ending.
+func (e *Engine) RunPhase(session domain.FeatureID, n int) string {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.busy[fmt.Sprintf("end/%s/%d", session, n)] {
+		return "ending"
+	}
+	prefix := fmt.Sprintf("until/%s/%d/", session, n)
+	for k := range rt.busy {
+		if strings.HasPrefix(k, prefix) {
+			return "until"
+		}
+	}
+	if rt.busy[baselineKey(session, n)] {
+		return "baseline"
+	}
+	return ""
+}
+
+// clockStart starts run's clock, unless it runs already.
+func (e *Engine) clockStart(run *domain.Run) {
+	if run.ResumedAt.IsZero() {
+		run.ResumedAt = e.now()
+	}
+}
+
+// clockStop adds the time since run's clock started to what it has
+// worked, and stops it: the run pauses, parks or ends.
+func (e *Engine) clockStop(run *domain.Run) {
+	if !run.ResumedAt.IsZero() {
+		if d := e.now().Sub(run.ResumedAt); d > 0 {
+			run.Active += d
+		}
+		run.ResumedAt = time.Time{}
 	}
 }
 
@@ -415,17 +488,29 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	if err != nil {
 		return nil, err
 	}
+	open := false
 	for _, r := range live {
 		switch r.State {
 		case domain.RunProposed:
 			return nil, fmt.Errorf("run %d is still waiting on the person: one proposal at a time", r.N)
 		case domain.RunQueued:
 			return nil, fmt.Errorf("run %d is already queued behind the open run: the queue is one deep", r.N)
+		case domain.RunRunning, domain.RunPaused:
+			open = true
 		}
+	}
+	// the spec is frozen as the person reads it: the run is judged against
+	// the revision its proposal showed, whenever it starts
+	rev, err := e.freezeSpec(ctx, sess, n)
+	if err != nil {
+		return nil, err
 	}
 	run := &domain.Run{
 		Session: session, RecipeName: name, Recipe: recipe, RecipeYAML: text, Inputs: req.Inputs,
-		Spec: n, State: domain.RunProposed, CreatedAt: e.now(),
+		Spec: n, SpecRev: rev, State: domain.RunProposed, CreatedAt: e.now(),
+	}
+	if _, items := e.frozenSpec(ctx, run); true {
+		warnings = append(warnings, proposalWarnings(recipe, items)...)
 	}
 	if err := st.CreateRun(ctx, run); err != nil {
 		return nil, err
@@ -453,9 +538,14 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		return nil, err
 	}
 	// the run's baseline: the spec's checks in the tree as it is, while the
-	// proposal waits on the person; the call returns at once
-	if _, err := e.askBaselineLocked(ctx, run); err != nil {
-		return nil, err
+	// proposal waits on the person; the call returns at once. Not while
+	// another run's steps write the tree: its checks would read their work
+	// half done, and its files land in their diffs. It is taken when the
+	// run starts instead.
+	if !open {
+		if _, err := e.askBaselineLocked(ctx, run); err != nil {
+			return nil, err
+		}
 	}
 	e.runNote(session, fmt.Sprintf("run %d (%s) proposed on spec %d", run.N, recipeLabel(run), n))
 	e.send(Event{Feature: session, Stage: domain.StageOpen, Kind: EventQuestion})
@@ -529,27 +619,21 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 	if sp, ok, err := e.cfg.Store.SessionSpec(ctx, sess.ID, run.Spec); err == nil && ok {
 		title = " " + strconv.Quote(sp.Title)
 	}
-	rev := 0
-	if revs, _ := e.cfg.Store.SpecRevisions(ctx, sess.ID, run.Spec); len(revs) > 0 {
-		rev = revs[0].Rev
-	}
-	fmt.Fprintf(&b, "Run the %s workflow on spec S%d%s? It freezes the spec's revision when it starts (now revision %d).\n\nSteps:\n",
-		recipeLabel(run), run.Spec, title, rev)
+	fmt.Fprintf(&b, "Run the %s workflow on spec S%d%s? It is judged against revision %d of the spec, frozen now: "+
+		"a later edit reaches the run as a note.\n\nSteps:\n", recipeLabel(run), run.Spec, title, run.SpecRev)
 	e.writeRecipeTree(&b, sess.Profile, run.Recipe.Steps, "")
 	if len(warnings) > 0 {
 		b.WriteString("\nWarnings:\n- " + strings.Join(warnings, "\n- ") + "\n")
 	}
-	if text, ok := e.SessionSpec(sess, run.Spec); ok {
-		if items, _, err := spec.ParseDoneWhen(text); err == nil {
-			var checks []string
-			for _, it := range items {
-				if strings.TrimSpace(it.Check) != "" {
-					checks = append(checks, it.ID+": "+it.Check)
-				}
+	if _, items := e.frozenSpec(ctx, run); len(items) > 0 {
+		var checks []string
+		for _, it := range items {
+			if strings.TrimSpace(it.Check) != "" {
+				checks = append(checks, it.ID+": "+it.Check)
 			}
-			if len(checks) > 0 {
-				b.WriteString("\nDone-when checks it will run in the tree:\n- " + strings.Join(checks, "\n- ") + "\n")
-			}
+		}
+		if len(checks) > 0 {
+			b.WriteString("\nDone-when checks it will run in the tree:\n- " + strings.Join(checks, "\n- ") + "\n")
 		}
 	}
 	if left, bounded := e.sessionPoolLeft(ctx, sess); bounded {
@@ -625,26 +709,65 @@ func (e *Engine) allowRunLocked(ctx context.Context, run *domain.Run, why string
 	return nil
 }
 
-// startRunLocked starts a run: it freezes the spec's latest revision and
-// snapshots the tree. The tick starts its steps.
+// freezeSpec is the revision of spec n a run is judged against: its latest,
+// recorded first when the file has moved past it.
+func (e *Engine) freezeSpec(ctx context.Context, sess domain.Feature, n int) (int, error) {
+	st := e.cfg.Store
+	text, ok := e.SessionSpec(sess, n)
+	if !ok {
+		return 0, fmt.Errorf("spec %d is gone", n)
+	}
+	if revs, _ := st.SpecRevisions(ctx, sess.ID, n); len(revs) > 0 {
+		if last, ok, _ := st.SpecRevision(ctx, sess.ID, n, revs[0].Rev); ok && last.Content == text {
+			return last.Rev, nil
+		}
+	}
+	return e.recordSpecRevision(ctx, sess.ID, n, text, state.ActorWorkflow)
+}
+
+// proposalWarnings are what gummi itself sees wrong with running recipe on
+// the done-when items: a loop whose until is the checks on a spec with
+// none, which could never judge itself done; and checks on a recipe with
+// no step that writes code, which cannot change what they find.
+func proposalWarnings(recipe domain.Recipe, items []domain.DoneWhen) []string {
+	var out []string
+	checks := hasChecks(items)
+	var loops func(es []domain.Entry) bool
+	loops = func(es []domain.Entry) bool {
+		for _, en := range es {
+			if en.Repeat != nil && (en.Repeat.Until.Kind() == domain.UntilChecks || loops(en.Repeat.Steps)) {
+				return true
+			}
+		}
+		return false
+	}
+	if !checks && loops(recipe.Steps) {
+		out = append(out, "a loop runs until the done-when checks pass, but the spec has no checks: it cannot judge itself done, and asks you after every iteration")
+	}
+	writes := false
+	for _, s := range workflowrecipe.Steps(recipe) {
+		if s.Role == domain.RoleImplementer || s.Role == domain.RoleTester {
+			writes = true
+		}
+	}
+	if checks && !writes {
+		out = append(out, "no step of this recipe writes code (no implementer or tester): a checked item that fails now fails at the end too, and the run ends partial")
+	}
+	return out
+}
+
+// startRunLocked starts a run: its spec revision (frozen when it was
+// proposed, or now for a run from before), a snapshot of the tree and of
+// the index, and its clock. The tick starts its steps.
 func (e *Engine) startRunLocked(ctx context.Context, run *domain.Run) error {
 	st := e.cfg.Store
 	sess, err := st.GetFeature(ctx, run.Session)
 	if err != nil {
 		return err
 	}
-	text, ok := e.SessionSpec(sess, run.Spec)
-	if !ok {
-		return fmt.Errorf("spec %d is gone", run.Spec)
-	}
-	rev := 0
-	if revs, _ := st.SpecRevisions(ctx, run.Session, run.Spec); len(revs) > 0 {
-		if last, ok, _ := st.SpecRevision(ctx, run.Session, run.Spec, revs[0].Rev); ok && last.Content == text {
-			rev = last.Rev
-		}
-	}
+	rev := run.SpecRev
 	if rev == 0 {
-		if rev, err = e.recordSpecRevision(ctx, run.Session, run.Spec, text, state.ActorWorkflow); err != nil {
+		if rev, err = e.freezeSpec(ctx, sess, run.Spec); err != nil {
 			return err
 		}
 	}
@@ -661,8 +784,12 @@ func (e *Engine) startRunLocked(ctx context.Context, run *domain.Run) error {
 		return fmt.Errorf("snapshotting the tree: %w", err)
 	}
 	head, _ := objectiveGit(ctx, dir, "rev-parse", "HEAD")
-	run.SpecRev, run.StartTree, run.StartHead = rev, tree, head
+	index, _ := worktree.IndexTree(ctx, dir)
+	run.SpecRev, run.StartTree, run.StartHead, run.StartIndex = rev, tree, head, index
 	run.State, run.StartedAt, run.Pending, run.Reason = domain.RunRunning, e.now(), nil, ""
+	run.Active, run.ResumedAt = 0, time.Time{}
+	e.clockStart(run)
+	e.wfRT().conduct(run.Session, run.N)
 	return st.UpdateRun(ctx, run)
 }
 
@@ -692,9 +819,15 @@ func (e *Engine) WorkflowDecision(ctx context.Context, session domain.FeatureID)
 	if err != nil {
 		return nil, nil
 	}
+	// the open run's question first: a proposal behind it waits, while a
+	// run paused on its budget or its loop holds the tree
 	for i := len(runs) - 1; i >= 0; i-- {
-		r := runs[i]
-		if r.Pending != nil && (r.State == domain.RunProposed || r.State.Open()) {
+		if r := runs[i]; r.Pending != nil && r.State.Open() {
+			return &r, r.Pending
+		}
+	}
+	for i := len(runs) - 1; i >= 0; i-- {
+		if r := runs[i]; r.Pending != nil && r.State == domain.RunProposed {
 			return &r, r.Pending
 		}
 	}
@@ -823,7 +956,7 @@ func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n i
 		case WorkflowStopRun:
 			run.OnMax[d.Step] = string(workflowpolicy.OnMaxStop)
 		default:
-			return nil, notAnOption(d)
+			return e.chatAboutDecision(ctx, session, n, d, answer), nil
 		}
 		e.runNote(session, fmt.Sprintf("run %d: %s at %s", n, strings.ToLower(answer), d.Step))
 	case domain.RunDecideBudget:
@@ -834,11 +967,23 @@ func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n i
 			amount := d.Amount
 			if answer != WorkflowTopUp {
 				if amount, err = parseCredits(answer); err != nil {
-					return nil, notAnOption(d)
+					return e.chatAboutDecision(ctx, session, n, d, answer), nil
 				}
 			}
-			e.runNote(session, fmt.Sprintf("run %d: the person topped the session up by %d", n, amount))
+			e.runNote(session, fmt.Sprintf("run %d: the person topped the session up by %s", n, domain.FormatDollars(float64(amount))))
 			after = func() error { return e.topUpForRun(ctx, session, amount) }
+		}
+	case domain.RunDecideResume:
+		switch answer {
+		case WorkflowResumeRun, "Resume":
+			if err := e.resumeLocked(ctx, run); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		case WorkflowStopRun:
+			run.Stopping, run.Reason = true, "stopped by the person after gummi came back"
+		default:
+			return e.chatAboutDecision(ctx, session, n, d, answer), nil
 		}
 	}
 	if err := st.UpdateRun(ctx, run); err != nil {
@@ -847,24 +992,32 @@ func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n i
 	return after, nil
 }
 
-func notAnOption(d domain.RunDecision) error {
-	return fmt.Errorf("answer with one of: %s", strings.Join(d.Options, "; "))
+// chatAboutDecision is a person's own words to a run's question that are
+// none of its answers: they go to the session agent as a turn, and the
+// question stays open for the person to answer once they have talked it
+// over. Nothing of the run is written.
+func (e *Engine) chatAboutDecision(ctx context.Context, session domain.FeatureID, n int, d domain.RunDecision, words string) func() error {
+	msg := fmt.Sprintf("The person, while workflow run %d waits on them (%s), says: %s\n\n"+
+		"The run's question stays open, and only the person answers it: talk it over, but do not answer it for them.",
+		n, firstLine(d.Question), words)
+	return func() error { return e.sendSessionTurn(ctx, session, msg) }
 }
 
-// parseCredits reads an amount: credits as a number, "300cr" or "300
-// credits", or dollars as $N.NN.
+// parseCredits reads an amount: credits as "300cr" or "300 credits", or
+// dollars as "$3", "3.50" or a bare number — what every face shows money
+// in.
 func parseCredits(s string) (int, error) {
 	s = strings.TrimSpace(s)
+	dollars := true
 	for _, unit := range []string{"credits", "cr"} {
 		if t, ok := strings.CutSuffix(s, unit); ok {
-			s = strings.TrimSpace(t)
+			s, dollars = strings.TrimSpace(t), false
 			break
 		}
 	}
-	dollars := strings.HasPrefix(s, "$")
 	v, err := strconv.ParseFloat(strings.TrimPrefix(s, "$"), 64)
 	if err != nil || v <= 0 {
-		return 0, fmt.Errorf("%q is not an amount: give credits, or dollars as $N.NN", s)
+		return 0, fmt.Errorf("%q is not an amount: give dollars as $N.NN, or credits as 300cr", s)
 	}
 	if dollars {
 		v /= domain.CreditsToDollars
@@ -946,6 +1099,8 @@ func (e *Engine) workflowEnvelopeRaised(ctx context.Context, session domain.Feat
 		}
 		if left, bounded := e.sessionPoolLeft(ctx, sess); !bounded || left > 0 {
 			run.OutOfBudget, run.State, run.Reason = false, domain.RunRunning, ""
+			e.clockStart(run)
+			e.wfRT().conduct(session, run.N)
 			e.carryOnRun(ctx, run)
 			e.runNote(session, fmt.Sprintf("run %d: the session was topped up, and the run carries on", run.N))
 		}
@@ -987,6 +1142,7 @@ func (e *Engine) WorkflowPause(ctx context.Context, session domain.FeatureID) er
 
 func (e *Engine) parkRunLocked(ctx context.Context, run *domain.Run, why string) error {
 	run.State, run.Reason = domain.RunPaused, why
+	e.clockStop(run)
 	if err := e.cfg.Store.UpdateRun(ctx, run); err != nil {
 		return err
 	}
@@ -1005,6 +1161,12 @@ func (e *Engine) WorkflowResume(ctx context.Context, session domain.FeatureID) e
 	if err != nil {
 		return err
 	}
+	return e.resumeLocked(ctx, run)
+}
+
+// resumeLocked runs a paused run again; the caller holds the run lock.
+func (e *Engine) resumeLocked(ctx context.Context, run *domain.Run) error {
+	session := run.Session
 	if run.State != domain.RunPaused {
 		return fmt.Errorf("run %d is %s, not paused", run.N, run.State)
 	}
@@ -1021,7 +1183,12 @@ func (e *Engine) WorkflowResume(ctx context.Context, session domain.FeatureID) e
 			run.Pending = nil
 		}
 	}
+	if run.Pending != nil && run.Pending.Kind == domain.RunDecideResume {
+		run.Pending = nil
+	}
 	run.State, run.Reason = domain.RunRunning, ""
+	e.clockStart(run)
+	e.wfRT().conduct(session, run.N)
 	if err := e.cfg.Store.UpdateRun(ctx, run); err != nil {
 		return err
 	}
@@ -1078,6 +1245,58 @@ func (e *Engine) WorkflowStop(ctx context.Context, session domain.FeatureID, rea
 	return nil
 }
 
+// WorkflowWithdraw withdraws run n of session while it is still proposed
+// or queued: a person taking back a run they allowed, before it starts.
+func (e *Engine) WorkflowWithdraw(ctx context.Context, session domain.FeatureID, n int, reason string) error {
+	if e.cfg.Store == nil {
+		return errors.New("workflows need the store")
+	}
+	unlock := e.lockRuns(session)
+	defer unlock()
+	r, err := e.cfg.Store.Run(ctx, session, n)
+	if err != nil {
+		return err
+	}
+	if r == nil || (r.State != domain.RunProposed && r.State != domain.RunQueued) {
+		return fmt.Errorf("run %d is not waiting to start: only a proposed or queued run is withdrawn", n)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "by the person"
+	}
+	r.State, r.Pending, r.Reason = domain.RunDenied, nil, "withdrawn "+reason
+	if err := e.cfg.Store.UpdateRun(ctx, r); err != nil {
+		return err
+	}
+	e.runNote(session, fmt.Sprintf("run %d withdrawn %s", n, reason))
+	e.workflowEvent(session)
+	return nil
+}
+
+// WorkflowAlwaysAllows reports whether a person always allows session's
+// runs, so its proposals start without asking.
+func (e *Engine) WorkflowAlwaysAllows(ctx context.Context, session domain.FeatureID) bool {
+	if e.cfg.Store == nil {
+		return false
+	}
+	always, _ := e.cfg.Store.WorkflowAlwaysAllow(ctx, session)
+	return always
+}
+
+// WorkflowAskAgain takes back a person's always-allow on session: its next
+// proposal asks again.
+func (e *Engine) WorkflowAskAgain(ctx context.Context, session domain.FeatureID) error {
+	if e.cfg.Store == nil {
+		return errors.New("workflows need the store")
+	}
+	if err := e.cfg.Store.SetWorkflowAlwaysAllow(ctx, session, false); err != nil {
+		return err
+	}
+	e.runNote(session, "the person asks to allow each run again")
+	e.workflowEvent(session)
+	return nil
+}
+
 // WorkflowSteer sends a note to the session's open run: every running step
 // gets it as a turn, and a step not yet started sees it in its prompt.
 func (e *Engine) WorkflowSteer(ctx context.Context, session domain.FeatureID, note, by string) error {
@@ -1130,8 +1349,16 @@ func (e *Engine) workflowSpecEdited(ctx context.Context, f domain.Feature, n, re
 	if !ok {
 		return
 	}
-	_ = e.steerLocked(ctx, run, fmt.Sprintf("an edit of the spec (S%d revision %d; the run froze revision %d). "+
-		"The spec now reads:\n\n%s", n, rev, run.SpecRev, text))
+	// the edited spec goes into the run's directory, and the steer points
+	// at it: every live step gets the steer as a turn and every later
+	// step's brief carries it, so the whole spec in it would be copied
+	// into each of them again on every edit
+	path, err := e.writeRunFile(f.ID, run.N, fmt.Sprintf("spec-revision-%d.md", rev), text)
+	if err != nil {
+		return
+	}
+	_ = e.steerLocked(ctx, run, fmt.Sprintf("an edit of the spec (S%d revision %d; the run is judged against revision %d). "+
+		"Read it at %s", n, rev, run.SpecRev, path))
 }
 
 // --- the tick --------------------------------------------------------------
@@ -1159,6 +1386,7 @@ func (e *Engine) WorkflowTick(ctx context.Context) (WorkflowTickResult, error) {
 		return res, err
 	}
 	seen := map[domain.FeatureID]bool{}
+	var errs []error
 	for _, r := range runs {
 		e.rebaseline(ctx, r)
 		if seen[r.Session] {
@@ -1168,7 +1396,9 @@ func (e *Engine) WorkflowTick(ctx context.Context) (WorkflowTickResult, error) {
 		acts, err := e.tickHeld(ctx, r.Session)
 		res.Actions = append(res.Actions, acts...)
 		if err != nil {
-			return res, err
+			// one session's run in trouble is no reason the others stand
+			// still: each is ticked, and every error is said
+			errs = append(errs, fmt.Errorf("%s: %w", r.Session, err))
 		}
 	}
 	// a hold on a session whose runs have all ended goes
@@ -1184,7 +1414,7 @@ func (e *Engine) WorkflowTick(ctx context.Context) (WorkflowTickResult, error) {
 	for _, s := range gone {
 		e.letGoRuns(s)
 	}
-	return res, nil
+	return res, errors.Join(errs...)
 }
 
 // WorkflowTickSession advances session's live run alone: the headless
@@ -1244,6 +1474,12 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 		if err != nil || q == nil {
 			return nil, err
 		}
+		if e.freeformBusy(session) {
+			// the session is mid-turn — reading the run before's report,
+			// committing what it keeps — in the tree the queued run would
+			// write: it starts once that turn ends
+			return nil, nil
+		}
 		if err := e.startRunLocked(ctx, q); err != nil {
 			return nil, err
 		}
@@ -1252,11 +1488,23 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 		run = q
 	}
 	rt := e.wfRT()
-	// a run this process did not start or resume was running when gummi
-	// quit: it stays parked until a person resumes it (§25.7)
-	if run.State == domain.RunRunning && run.UpdatedAt.Before(rt.boot) && !run.Stopping {
+	// a run this process did not start or resume was running under a gummi
+	// that is gone — this one before a restart, or another that let the card
+	// go: its steps have no backend now. It stays parked until a person
+	// resumes it (§25.7), and asks them to.
+	if run.State == domain.RunRunning && !rt.conducts(session, run.N) && !run.Stopping {
 		if err := e.parkRunLocked(ctx, run, "parked: gummi stopped while it ran"); err != nil {
 			return acts, err
+		}
+		if e.raiseRunDecision(run, domain.RunDecision{
+			Kind: domain.RunDecideResume,
+			Question: fmt.Sprintf("Run %d was running when gummi stopped, and is parked: its steps' work so far is in the tree. "+
+				"Resume it, or stop it?", run.N),
+			Options: []string{WorkflowResumeRun, WorkflowStopRun},
+		}) {
+			if err := st.UpdateRun(ctx, run); err != nil {
+				return acts, err
+			}
 		}
 		return append(acts, "park"), nil
 	}
@@ -1386,10 +1634,26 @@ func (e *Engine) raisePlanDecision(run *domain.Run, steps []domain.RunStep) bool
 		if err != nil {
 			continue
 		}
-		_, _, warnings := workflowrecipe.CheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
+		started := startedEntries(run.Recipe, steps)
+		_, _, warnings := workflowrecipe.CheckReplacement(run.Recipe, started, entries)
 		var b strings.Builder
 		fmt.Fprintf(&b, "Run %d: step %s (planner) revised the plan. Its steps replace the run's remaining ones:\n\n", run.N, s.Path)
-		e.writeRecipeTree(&b, e.sessionProfile(run.Session), entries, "")
+		profile := e.sessionProfile(run.Session)
+		e.writeRecipeTree(&b, profile, entries, "")
+		if started < len(run.Recipe.Steps) {
+			b.WriteString("\nWhat they replace, which would not run:\n")
+			e.writeRecipeTree(&b, profile, run.Recipe.Steps[started:], "")
+		} else {
+			b.WriteString("\nThey replace nothing: every step of the plan has run, and they would run after it.\n")
+		}
+		if _, items := e.frozenSpec(context.Background(), run); hasChecks(items) {
+			fmt.Fprintf(&b, "\nThe run is still judged against spec S%d revision %d's done-when checks:\n", run.Spec, run.SpecRev)
+			for _, it := range items {
+				if strings.TrimSpace(it.Check) != "" {
+					fmt.Fprintf(&b, "- %s: %s\n", it.ID, it.Check)
+				}
+			}
+		}
 		b.WriteString("\nAllow the revised plan?")
 		if e.raiseRunDecision(run, domain.RunDecision{
 			Kind: domain.RunDecidePlan, Step: s.Path, Question: b.String(),
@@ -1537,11 +1801,14 @@ func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID
 		_, items := e.frozenSpec(ctx, run)
 		checks := doneWhenChecks(ctx, dir, items)
 		if len(checks) == 0 {
-			return domain.UntilJudgement{Met: true, Detail: "the spec has no done-when checks"}
+			// nothing to judge by is not done: the person decides
+			return domain.UntilJudgement{Unjudged: true, Detail: "the loop can't judge: the spec has no done-when checks"}
 		}
-		var failed, empty []string
+		var failed, empty, undecided []string
 		for id, c := range checks {
 			switch {
+			case c.Status == verify.StatusTimeout || c.Status == verify.StatusNotRun:
+				undecided = append(undecided, id)
 			case !c.OK:
 				failed = append(failed, id)
 			case c.RanNoTests:
@@ -1550,9 +1817,13 @@ func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID
 		}
 		sort.Strings(failed)
 		sort.Strings(empty)
+		sort.Strings(undecided)
 		switch {
 		case len(failed) > 0:
 			return domain.UntilJudgement{Detail: "failing: " + strings.Join(failed, ", ")}
+		case len(undecided) > 0:
+			// a check that timed out or never ran decided nothing
+			return domain.UntilJudgement{Unjudged: true, Detail: "the loop can't judge: the check of " + strings.Join(undecided, ", ") + " did not finish"}
 		case len(empty) > 0:
 			// a check that ran no tests proves nothing either way
 			return domain.UntilJudgement{Unjudged: true, Detail: "the loop can't judge: the check of " + strings.Join(empty, ", ") + " ran no tests"}
@@ -1640,13 +1911,19 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	if err != nil || run == nil || !run.State.Open() {
 		return
 	}
+	// a tree gummi cannot read (an unreadable file, a checkout gone) still
+	// ends the run: left open, it would hold the session's landing and be
+	// tried again on every tick, and nothing would tell the person
+	var treeErr error
 	dir, err := e.sessionTree(ctx, session)
+	endTree := ""
 	if err != nil {
-		return
+		treeErr = err
+	} else if endTree, err = worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...); err != nil {
+		treeErr, endTree = err, ""
 	}
-	endTree, err := worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...)
-	if err != nil {
-		return
+	if treeErr != nil && end == domain.RunDone {
+		end, why = domain.RunPartial, "gummi could not read the tree at the end: "+treeErr.Error()
 	}
 	_, items := e.frozenSpec(ctx, run)
 	steps, _ := st.RunSteps(ctx, session, n)
@@ -1666,14 +1943,21 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	case end == domain.RunStopped && why == "" || end == domain.RunStopped && why == "stopped":
 		why = run.Reason
 	}
-	_, paths, _ := worktree.DiffTrees(ctx, dir, run.StartTree, endTree)
+	var paths []string
+	if endTree != "" {
+		_, paths, _ = worktree.DiffTrees(ctx, dir, run.StartTree, endTree)
+	}
 	var commits []string
-	if run.StartHead != "" {
+	if run.StartHead != "" && dir != "" {
 		if out, err := objectiveGit(ctx, dir, "log", "--format=%h %s", run.StartHead+"..HEAD"); err == nil && out != "" {
 			commits = strings.Split(out, "\n")
 		}
 	}
 	report := runReport(run, end, why, items, results, steps, paths, commits)
+	if treeErr != nil {
+		report += "\n\ngummi could not read the session's tree at the end (" + treeErr.Error() + "): the files the run changed are not listed, " +
+			"and Revert run cannot put them back."
+	}
 
 	unlock := e.lockRuns(session)
 	cur, err := st.Run(ctx, session, n)
@@ -1682,6 +1966,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 		return
 	}
 	cur.State, cur.Reason, cur.EndedAt = end, why, e.now()
+	e.clockStop(cur)
 	cur.EndTree, cur.Results, cur.Report, cur.Commits = endTree, results, report, commits
 	cur.Stopping, cur.Pending, cur.OutOfBudget = false, nil, false
 	err = st.UpdateRun(ctx, cur)
@@ -1953,24 +2238,13 @@ func (e *Engine) sessionRunsSpent(ctx context.Context, session domain.FeatureID)
 	if e.cfg.Store == nil {
 		return 0
 	}
-	runs, err := e.cfg.Store.SessionRuns(ctx, session)
+	spends, err := e.cfg.Store.SessionStepSpends(ctx, session)
 	if err != nil {
 		return 0
 	}
 	t := 0.0
-	for _, r := range runs {
-		steps, err := e.cfg.Store.RunSteps(ctx, session, r.N)
-		if err != nil {
-			continue
-		}
-		for _, s := range steps {
-			if s.Card == "" {
-				continue
-			}
-			if f, err := e.cfg.Store.GetFeature(ctx, s.Card); err == nil {
-				t += f.Spend.CreditEquivalent()
-			}
-		}
+	for _, sp := range spends {
+		t += sp.CreditEquivalent()
 	}
 	return t
 }
@@ -2045,7 +2319,7 @@ func (e *Engine) checkRunPool(card domain.FeatureID) {
 		if err != nil {
 			return
 		}
-		why := fmt.Sprintf("the session's budget is spent (the run has spent %.0f)", workflowpolicy.Spent(in))
+		why := fmt.Sprintf("the session's budget is spent (the run has spent %s)", domain.FormatDollars(workflowpolicy.Spent(in)))
 		_ = e.pauseForBudgetLocked(ctx, run, why)
 	})
 }
@@ -2055,6 +2329,7 @@ func (e *Engine) checkRunPool(card domain.FeatureID) {
 // its work kept in the tree. The caller holds the run lock.
 func (e *Engine) pauseForBudgetLocked(ctx context.Context, run *domain.Run, why string) error {
 	run.State, run.OutOfBudget, run.Reason = domain.RunPaused, true, why
+	e.clockStop(run)
 	e.raiseRunDecision(run, e.budgetDecision(ctx, run))
 	if err := e.cfg.Store.UpdateRun(ctx, run); err != nil {
 		return err

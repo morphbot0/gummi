@@ -368,6 +368,15 @@ type Run struct {
 	// StartHead is the session's HEAD when the run started: the commits
 	// made while it ran are the ones after it, which its report names.
 	StartHead string
+	// StartIndex is the session's index when the run started, as a tree:
+	// Revert run puts the index entries of the paths it puts back as they
+	// were then. Empty on a run from before, or a checkout with no index.
+	StartIndex string
+	// Active is how long the run has worked, its pauses left out, up to
+	// ResumedAt: when it last started or resumed running, zero while it is
+	// not running. A face counts a running run's to now.
+	Active    time.Duration
+	ResumedAt time.Time
 	// Commits are the commits made in the session's tree while the run ran
 	// ("<short sha> <subject>", oldest last), recorded when it ended: gummi
 	// commits nothing, so these are a step's or the session's own.
@@ -438,6 +447,10 @@ const (
 	// RunDecideBudget: the session's pool is spent and the run paused.
 	// Amount is the top-up suggested.
 	RunDecideBudget RunDecisionKind = "budget"
+	// RunDecideResume: gummi stopped while the run ran, and it was parked
+	// when gummi came back. A parked run never resumes itself (§25.7): the
+	// person resumes it or stops it.
+	RunDecideResume RunDecisionKind = "resume"
 )
 
 // RunDecision is a run's one open question to its person. A step's own

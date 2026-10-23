@@ -739,3 +739,42 @@ func TestAFreeformTurnInFlightIsNotCalledIdle(t *testing.T) {
 		t.Errorf("answers = %+v, want the one that stops the turn", acts)
 	}
 }
+
+// TestTheAgentsQuestionComesBeforeARunsDecision: a session agent that asks
+// while its run's proposal is open waits inside ask_user; its question is
+// the pinned decision, and a line typed answers it, never the run's — the
+// proposal keeps until the agent has its answer.
+func TestTheAgentsQuestionComesBeforeARunsDecision(t *testing.T) {
+	m, eng := sessionWorkspace(t, askingFake())
+	waitAsk(t, eng)
+	i := -1
+	for k, r := range m.rows {
+		if r.F.ID == sessionID {
+			i = k
+		}
+	}
+	if i < 0 {
+		t.Fatal("precondition: the session's row")
+	}
+	m.rows[i].DecidingRun = &domain.Run{Session: sessionID, N: 1, State: domain.RunProposed, Pending: &domain.RunDecision{
+		ID: "run:x:1:0", Kind: domain.RunDecideProposal, Question: "Run the deliver workflow?",
+		Options: []string{engine.WorkflowAllow, engine.WorkflowDeny},
+	}}
+	d := m.openDecision(m.rows[i])
+	if d == nil || d.kind != decisionAsk {
+		t.Fatalf("the pinned decision is %+v, want the agent's question", d)
+	}
+	cmd := m.answerAskWith(m.rows[i], "the first one")
+	if cmd == nil {
+		t.Fatal("the line went nowhere")
+	}
+	_ = cmd()
+	deadline := time.After(testWaitTimeout)
+	for eng.Freeform(sessionID).Snapshot().PendingAsk != nil {
+		select {
+		case <-deadline:
+			t.Fatal("the typed line did not answer the agent's question")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}

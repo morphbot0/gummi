@@ -587,13 +587,22 @@ func (m *Shell) webProposal(ctx context.Context, f domain.Feature) *webapi.RunPr
 		Baseline: webBaseline(p.Baseline),
 	}
 	for _, s := range p.Steps {
-		out.Steps = append(out.Steps, webapi.ProposalStep{
-			ID: s.ID, Depth: s.Depth, Kind: s.Kind, Role: string(s.Role), Slot: s.Slot, Model: threadfold.Sanitize(s.Model),
-			Prompt: threadfold.Sanitize(s.Prompt), Max: s.Max, Until: s.Until, OnMax: string(s.OnMax), Join: string(s.Join),
-		})
+		out.Steps = append(out.Steps, webProposalStep(s))
+	}
+	for _, s := range p.Replaces {
+		out.Replaces = append(out.Replaces, webProposalStep(s))
 	}
 	for _, c := range p.Checks {
 		out.Checks = append(out.Checks, webapi.ProposalCheck{Item: c.Item, Says: threadfold.Sanitize(c.Says), Cmd: threadfold.Sanitize(c.Cmd)})
 	}
 	return out
+}
+
+// webProposalStep is one entry of a proposal's step tree as the page reads
+// it.
+func webProposalStep(s engine.ProposalStep) webapi.ProposalStep {
+	return webapi.ProposalStep{
+		ID: s.ID, Depth: s.Depth, Kind: s.Kind, Role: string(s.Role), Slot: s.Slot, Model: threadfold.Sanitize(s.Model),
+		Prompt: threadfold.Sanitize(s.Prompt), Max: s.Max, Until: s.Until, OnMax: string(s.OnMax), Join: string(s.Join),
+	}
 }

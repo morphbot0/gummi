@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
@@ -144,7 +145,44 @@ func (e *Engine) StepDiff(ctx context.Context, st domain.RunStep) (string, []str
 			return "", nil, err
 		}
 	}
-	return worktree.DiffTrees(ctx, dir, st.StartTree, end)
+	return e.diffTreesCached(ctx, dir, st.StartTree, end, st.EndTree != "")
+}
+
+// diffTreesCached is DiffTrees, kept for two snapshots that are settled
+// (keep): a tree hash names its content, so their diff never changes, and
+// a face that reads it again on every refresh need not run git each time.
+func (e *Engine) diffTreesCached(ctx context.Context, dir, a, b string, keep bool) (string, []string, error) {
+	if !keep {
+		return worktree.DiffTrees(ctx, dir, a, b)
+	}
+	key := a + ".." + b
+	rt := e.wfRT()
+	rt.mu.Lock()
+	hit, ok := rt.diffs[key]
+	rt.mu.Unlock()
+	if ok {
+		return hit.patch, hit.paths, nil
+	}
+	patch, paths, err := worktree.DiffTrees(ctx, dir, a, b)
+	if err != nil {
+		return "", nil, err
+	}
+	rt.mu.Lock()
+	if len(rt.diffs) >= maxCachedDiffs {
+		clear(rt.diffs)
+	}
+	rt.diffs[key] = cachedDiff{patch: patch, paths: paths}
+	rt.mu.Unlock()
+	return patch, paths, nil
+}
+
+// maxCachedDiffs bounds diffTreesCached's memory: past it, the cache starts
+// again.
+const maxCachedDiffs = 64
+
+type cachedDiff struct {
+	patch string
+	paths []string
 }
 
 // RunDiff is a run's diff, from its starting tree to a fresh snapshot of
@@ -180,7 +218,13 @@ func (e *Engine) frozenSpec(ctx context.Context, run *domain.Run) (string, []dom
 	return rev.Content, items
 }
 
-// doneWhenChecks runs each item's check command in dir, keyed by item.
+// doneWhenCheckTimeout bounds each done-when check: one that hangs (a test
+// in watch mode, a server that never exits) would otherwise hold the run's
+// baseline, its loop or its end for good, and no stop could free it.
+const doneWhenCheckTimeout = 15 * time.Minute
+
+// doneWhenChecks runs each item's check command in dir, keyed by item, each
+// bounded by doneWhenCheckTimeout.
 func doneWhenChecks(ctx context.Context, dir string, items []domain.DoneWhen) map[string]verify.Result {
 	var checks []domain.Check
 	for _, it := range items {
@@ -192,7 +236,7 @@ func doneWhenChecks(ctx context.Context, dir string, items []domain.DoneWhen) ma
 	if len(checks) == 0 || dir == "" {
 		return out
 	}
-	for _, r := range verify.Run(ctx, dir, checks) {
+	for _, r := range verify.RunBounded(ctx, dir, checks, doneWhenCheckTimeout) {
 		out[r.Name] = r
 	}
 	return out
@@ -211,6 +255,10 @@ func itemResults(items []domain.DoneWhen, checks map[string]verify.Result, lastO
 			r.Checked = true
 			r.Verdict = domain.ItemUnmet
 			switch {
+			case c.Status == verify.StatusTimeout:
+				r.Verdict, r.Detail = domain.ItemUnjudged, fmt.Sprintf("the check did not finish within %s", doneWhenCheckTimeout)
+			case c.Status == verify.StatusNotRun:
+				r.Verdict, r.Detail = domain.ItemUnjudged, "the check never ran"
 			case c.OK && c.RanNoTests:
 				r.Verdict, r.Detail = domain.ItemUnjudged, ranNoTests
 			case c.OK:
@@ -289,11 +337,49 @@ func (e *Engine) WorkflowRevertPreview(ctx context.Context, session domain.Featu
 	if err != nil {
 		return RevertPreview{}, err
 	}
-	return RevertPreview{
-		Run: n, Paths: paths, Tree: now,
-		Note: "Each path goes back to how it was when the run started, and a path the run created is deleted. " +
-			"This also undoes anything the session or a person changed in these paths since then.",
-	}, nil
+	note := "Each path goes back to how it was when the run started, staged as it was then, and a path the run created is deleted. " +
+		"This also undoes anything the session or a person changed in these paths since then."
+	if since := e.sinceRun(ctx, dir, run); since != "" {
+		note += " " + since
+	}
+	return RevertPreview{Run: n, Paths: paths, Tree: now, Note: note}, nil
+}
+
+// sinceRun says what has happened in the tree since run started that a
+// revert of it would undo too: the runs after it and the commits made
+// since, "" when nothing has.
+func (e *Engine) sinceRun(ctx context.Context, dir string, run *domain.Run) string {
+	var parts []string
+	if runs, err := e.cfg.Store.SessionRuns(ctx, run.Session); err == nil {
+		var later []string
+		for _, r := range runs {
+			if r.N > run.N && r.StartTree != "" {
+				later = append(later, strconv.Itoa(r.N))
+			}
+		}
+		switch len(later) {
+		case 0:
+		case 1:
+			parts = append(parts, "run "+later[0]+", which ran after it")
+		default:
+			parts = append(parts, "runs "+strings.Join(later, ", ")+", which ran after it")
+		}
+	}
+	if run.StartHead != "" {
+		if out, err := objectiveGit(ctx, dir, "rev-list", "--count", run.StartHead+"..HEAD"); err == nil {
+			if c, _ := strconv.Atoi(strings.TrimSpace(out)); c > 0 {
+				word := "commits"
+				if c == 1 {
+					word = "commit"
+				}
+				parts = append(parts, fmt.Sprintf("%d %s made since it started (the branch keeps them; the revert undoes their changes in the tree)", c, word))
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "It undoes " + strings.Join(parts, ", and ") + "."
 }
 
 // WorkflowTreeBusy says why a workflow run is still writing the session's
@@ -330,8 +416,10 @@ func (e *Engine) WorkflowTreeBusy(ctx context.Context, session domain.FeatureID)
 }
 
 // WorkflowRevert puts the session's tree back to run n's starting tree:
-// each path that differs is restored, and one the run created is deleted.
-// The branch and the index are left alone. seen is the preview's Tree: a
+// each path that differs is restored, and one the run created is deleted;
+// the index entries of those paths go back to how they were when the run
+// started (a run from before that recorded no index leaves it alone). The
+// branch is left alone. seen is the preview's Tree: a
 // revert is confirmed against what its preview listed, so it is refused
 // when the tree has changed since. Refused while a step, or the session's
 // own agent, is working in the tree.
@@ -351,6 +439,12 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 	}
 	if why := e.WorkflowTreeBusy(ctx, session); why != "" {
 		return nil, fmt.Errorf("%s: revert once it has stopped", why)
+	}
+	if run.State == domain.RunRunning {
+		return nil, fmt.Errorf("run %d is running: pause or stop it before reverting it", n)
+	}
+	if phase := e.RunPhase(session, n); phase != "" {
+		return nil, fmt.Errorf("gummi is running run %d's checks in this tree: revert once they are done", n)
 	}
 	if e.freeformBusy(session) {
 		return nil, errors.New("the session's agent is working in this tree: revert once its turn ends")
@@ -376,6 +470,11 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 	}
 	if err := worktree.RevertTo(ctx, dir, run.StartTree, paths, keep...); err != nil {
 		return nil, err
+	}
+	// what the run (or anyone since) staged of these paths goes back too,
+	// or the next commit would bring the reverted work back
+	if err := worktree.RestoreIndex(ctx, dir, run.StartIndex, paths); err != nil {
+		return nil, fmt.Errorf("the files are put back, but not the index: %w", err)
 	}
 	e.runNote(session, fmt.Sprintf("run %d reverted: %d path%s put back", n, len(paths), plural(len(paths))))
 	e.workflowEvent(session)

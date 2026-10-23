@@ -264,7 +264,8 @@ func BaselineProblem(r domain.ItemResult) bool {
 	return r.Verdict == domain.ItemMet || r.Verdict == domain.ItemUnjudged
 }
 
-// ResultWord is a checked item's verdict as a before → after says it.
+// ResultWord is a checked item's verdict, before the run, as a result
+// says it.
 func ResultWord(v domain.ItemVerdict) string {
 	switch v {
 	case domain.ItemMet:
@@ -275,21 +276,30 @@ func ResultWord(v domain.ItemVerdict) string {
 	return "ran no tests"
 }
 
-// ResultChange is a checked item's result before and after the run, as in
-// "failed → passed" or "passed → passed (already passed before the run)";
-// "" for an item with no baseline.
+// resultNow is a checked item's verdict after the run, in the present.
+func resultNow(v domain.ItemVerdict) string {
+	switch v {
+	case domain.ItemMet:
+		return "passes"
+	case domain.ItemUnmet:
+		return "fails"
+	}
+	return "runs no tests"
+}
+
+// ResultChange is a checked item's result before and after the run, in
+// words a person reads without a legend: "failed before the run, now
+// passes", "passed before the run, still passes"; "" for an item with no
+// baseline.
 func ResultChange(r domain.ItemResult) string {
 	if !r.Checked || r.Before == "" {
 		return ""
 	}
-	out := ResultWord(r.Before) + " → " + ResultWord(r.Verdict)
-	switch r.Before {
-	case domain.ItemMet:
-		out += " (already passed before the run)"
-	case domain.ItemUnjudged:
-		out += " (ran no tests before the run)"
+	how := "now"
+	if r.Before == r.Verdict {
+		how = "still"
 	}
-	return out
+	return ResultWord(r.Before) + " before the run, " + how + " " + resultNow(r.Verdict)
 }
 
 // withBaseline sets each checked result's Before from the run's baseline.

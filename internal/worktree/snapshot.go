@@ -134,8 +134,8 @@ func DiffTrees(ctx context.Context, dir, a, b string) (patch string, paths []str
 // snapshot tree: a path the snapshot holds is restored from it
 // (`git restore --source=<tree> --worktree`), and one it does not hold is
 // deleted, with any directory left empty by that. Only the files change:
-// the index and HEAD are left alone. A path outside dir is refused before
-// anything is touched. A path at or under one of keep — what was on disk,
+// the index and HEAD are left alone (RestoreIndex puts the index back). A
+// path outside dir is refused before anything is touched. A path at or under one of keep — what was on disk,
 // ignored, when the run started — is never deleted: the snapshot did not
 // hold it because it was kept out, not because it was not there.
 func RevertTo(ctx context.Context, dir, tree string, paths []string, keep ...string) error {
@@ -147,17 +147,9 @@ func RevertTo(ctx context.Context, dir, tree string, paths []string, keep ...str
 	if len(paths) == 0 {
 		return nil
 	}
-	// literal pathspecs: a path is a path, never a glob or magic.
-	literal := []string{"GIT_LITERAL_PATHSPECS=1"}
-	raw, err := runGitEnv(ctx, dir, literal, append([]string{"ls-tree", "-r", "-z", "--name-only", tree, "--"}, paths...)...)
+	held, err := snapshotPaths(ctx, dir, tree)
 	if err != nil {
 		return err
-	}
-	held := map[string]bool{}
-	for _, p := range strings.Split(raw, "\x00") {
-		if p != "" {
-			held[p] = true
-		}
 	}
 	var restore []string
 	// deletions first: a path that is a file now may need to become a
@@ -177,8 +169,106 @@ func RevertTo(ctx context.Context, dir, tree string, paths []string, keep ...str
 	if len(restore) == 0 {
 		return nil
 	}
-	_, err = runGitEnv(ctx, dir, literal, append([]string{"restore", "--source=" + tree, "--worktree", "--"}, restore...)...)
+	return restoreFrom(ctx, dir, tree, "--worktree", restore)
+}
+
+// snapshotPaths is every file path tree holds.
+func snapshotPaths(ctx context.Context, dir, tree string) (map[string]bool, error) {
+	raw, err := runGitRaw(ctx, dir, "ls-tree", "-r", "-z", "--name-only", tree)
+	if err != nil {
+		return nil, err
+	}
+	held := map[string]bool{}
+	for _, p := range strings.Split(raw, "\x00") {
+		if p != "" {
+			held[p] = true
+		}
+	}
+	return held, nil
+}
+
+// restoreFrom runs git restore --source=tree with where (--worktree or
+// --staged) on paths, handed over in a file rather than on the command
+// line, so a run that touched thousands of paths is no argument list too
+// long. Each is a literal path, never a glob or magic.
+func restoreFrom(ctx context.Context, dir, tree, where string, paths []string) error {
+	tmp, err := os.MkdirTemp("", "gummi-restore-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	specs := filepath.Join(tmp, "pathspecs")
+	if err := os.WriteFile(specs, []byte(strings.Join(paths, "\x00")+"\x00"), 0o600); err != nil { // #nosec G703 -- specs is in a directory MkdirTemp just made
+		return err
+	}
+	_, err = runGitEnv(ctx, dir, []string{"GIT_LITERAL_PATHSPECS=1"}, "restore", "--source="+tree, where,
+		"--pathspec-from-file="+specs, "--pathspec-file-nul")
 	return err
+}
+
+// IndexTree records the real index of the checkout at dir as a tree, the
+// way Snapshot records the files: through a copy of it, so the index
+// itself is never written. It is "" for a checkout with no index yet.
+func IndexTree(ctx context.Context, dir string) (string, error) {
+	own, err := runGit(ctx, dir, "rev-parse", "--git-path", "index")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(own) {
+		own = filepath.Join(dir, own)
+	}
+	data, err := os.ReadFile(own) // #nosec G304 -- git's own index path for dir
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.MkdirTemp("", "gummi-index-")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	index := filepath.Join(tmp, "index")
+	if err := os.WriteFile(index, data, 0o600); err != nil { // #nosec G703 -- index is in a directory MkdirTemp just made
+		return "", err
+	}
+	return runGitEnv(ctx, dir, []string{"GIT_INDEX_FILE=" + index}, "write-tree")
+}
+
+// RestoreIndex puts the index entry of each of paths back to its state in
+// the tree index (as IndexTree recorded it): staged as it was then, or
+// out of the index when it was not in it. A path in neither is left be.
+// Revert run calls it after RevertTo, so what the run staged is not left
+// for the next commit to bring back.
+func RestoreIndex(ctx context.Context, dir, index string, paths []string) error {
+	if index == "" || len(paths) == 0 {
+		return nil
+	}
+	was, err := snapshotPaths(ctx, dir, index)
+	if err != nil {
+		return err
+	}
+	raw, err := runGitRaw(ctx, dir, "ls-files", "-z", "--cached")
+	if err != nil {
+		return err
+	}
+	now := map[string]bool{}
+	for _, p := range strings.Split(raw, "\x00") {
+		if p != "" {
+			now[p] = true
+		}
+	}
+	var known []string
+	for _, p := range paths {
+		if was[p] || now[p] {
+			known = append(known, p)
+		}
+	}
+	if len(known) == 0 {
+		return nil
+	}
+	return restoreFrom(ctx, dir, index, "--staged", known)
 }
 
 // removeFile deletes rel under dir if it is there, then each directory

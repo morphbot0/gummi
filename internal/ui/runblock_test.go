@@ -474,7 +474,7 @@ func TestARunInTheTerminal(t *testing.T) {
 	var revert tea.Cmd
 	do(func(m *Shell) tea.Cmd {
 		d := revertConfirm(p, m.revertRun)
-		if !strings.Contains(d.detail, "out.txt") || !strings.Contains(d.detail, "also undoes") {
+		if !strings.Contains(d.detail, "out.txt") || !strings.Contains(d.detail, "undoes anything") || !strings.Contains(d.detail, "staged") {
 			t.Errorf("the revert's confirm does not list the path and what it undoes: %q", d.detail)
 		}
 		revert = d.onConfirm()
