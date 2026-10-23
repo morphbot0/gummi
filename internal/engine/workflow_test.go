@@ -907,6 +907,26 @@ func TestTheSessionProposesThroughItsTool(t *testing.T) {
 	}
 }
 
+// TestTheRecipesToolShowsARecipeWhole: given a name, workflow_recipes
+// answers with that recipe's YAML as written, so a session can adapt it;
+// a name no recipe has is an error.
+func TestTheRecipesToolShowsARecipeWhole(t *testing.T) {
+	e, _, _, _ := wfEngine(t, newWFFake())
+	out, err := e.workflowRecipesText("deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "deliver (bundled):") || !strings.Contains(out, "until: { verdict: APPROVED, in: review }") {
+		t.Fatalf("deliver's YAML:\n%s", out)
+	}
+	if list, _ := e.workflowRecipesText(""); !strings.Contains(list, "- fix-until-green (bundled): ") {
+		t.Fatalf("the list:\n%s", list)
+	}
+	if _, err := e.workflowRecipesText("nope"); err == nil {
+		t.Fatal("a name no recipe has answered")
+	}
+}
+
 // TestAStepsQuestionWaitsOnThePerson: a step's ask_user is a question on
 // the step's card; the step waits, asking, until the person answers.
 func TestAStepsQuestionWaitsOnThePerson(t *testing.T) {

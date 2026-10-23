@@ -212,7 +212,9 @@ var errNoRun = errors.New("this session has no open workflow run")
 func workflowTools() []agent.ToolDef {
 	return []agent.ToolDef{
 		mkTool(workflowRecipesToolName, "List the workflow recipes this session may run: the workspace's own "+
-			"(.gummi/workflows/) and gummi's bundled ones, each with its description.", map[string]any{}),
+			"(.gummi/workflows/) and gummi's bundled ones, each with its description. Given a name, returns "+
+			"that recipe's YAML in full instead, to adapt into a recipe_yaml of your own.",
+			map[string]any{"name": str("A recipe's name: return its YAML instead of the list.")}),
 		mkTool(workflowRunToolName,
 			"Propose a workflow run: a recipe of steps, each a fresh-context agent, run in this session's own tree "+
 				"against one of its specs. The person allows it (or always allows this session's runs). Returns at "+
@@ -240,6 +242,7 @@ func (e *Engine) handleWorkflowTool(s *Session, tc *agent.ToolCall) {
 		Inputs     map[string]string `json:"inputs"`
 		Note       string            `json:"note"`
 		Reason     string            `json:"reason"`
+		Name       string            `json:"name"`
 	}
 	_ = json.Unmarshal(tc.Args, &a)
 	f := s.Feature
@@ -252,7 +255,7 @@ func (e *Engine) handleWorkflowTool(s *Session, tc *agent.ToolCall) {
 	var err error
 	switch tc.Name {
 	case workflowRecipesToolName:
-		out, err = e.workflowRecipesText()
+		out, err = e.workflowRecipesText(a.Name)
 	case workflowRunToolName:
 		var n int
 		if n, _, err = parseSpecArg(a.Spec); err == nil {
@@ -318,7 +321,16 @@ func (e *Engine) WorkflowRecipes() ([]WorkflowRecipe, error) {
 	return out, nil
 }
 
-func (e *Engine) workflowRecipesText() (string, error) {
+// workflowRecipesText is workflow_recipes' answer: the list, or with a
+// name that recipe's YAML as written.
+func (e *Engine) workflowRecipesText(name string) (string, error) {
+	if name = strings.TrimSpace(name); name != "" {
+		f, err := workflowrecipe.Load(name, e.pool.Root())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s (%s):\n\n%s", f.Name, f.Source, strings.TrimRight(string(f.YAML), "\n")), nil
+	}
 	rs, err := e.WorkflowRecipes()
 	if err != nil {
 		return "", err
