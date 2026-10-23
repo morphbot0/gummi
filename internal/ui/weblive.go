@@ -94,7 +94,6 @@ func (m *Shell) WebLiveEarlier(id, conv string, before int) (webapi.Earlier, boo
 	return webapi.Earlier{}, false
 }
 
-
 // webConsult is the card's consult exchange, where the TUI thread draws
 // one (consultBlock): never on a freeform card, whose lines go to its
 // own session.
