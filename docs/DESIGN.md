@@ -5618,6 +5618,18 @@ without the pack. That narrowing is why the old `skills.forward` was
 dropped (§4.1a); it is accepted here because the pack is gummi's own
 learning, not a convenience over the operator's discovery.
 
+*Amended for gummi's own skills (§25.14).* Beside the pack, delivery
+hands every session two skills gummi ships in its binary, `workflows`
+and `workflow-recipes` (`internal/skillpack/builtin/`). They teach
+gummi itself — when a workflow run pays, how to write the checks it is
+judged by, how to write a recipe — so they move with the code they
+describe, and no curator, session or person edits them in a workspace.
+They are written once per content under `.gummi/state/skillbuiltin/`
+(`skillpack.Builtin`), outside the pack's cache, which prunes, and reach
+the same three backends under the pack's names (`gummi-skills:<name>`,
+`gummi-<name>`). A pack skill may not take one of their names, and their
+use is not counted as the pack's.
+
 Every pass gets the pack: plan, implement, critique, verify, and
 freeform sessions. A conversation pins the revision it started with, so
 a curator run mid-conversation never changes what it sees. The pin
@@ -7169,6 +7181,28 @@ The build follows §25, with these differences.
   and both faces read as before → after. A proposal whose baseline was
   running when gummi stopped runs it again on the next tick. The driver's
   NDJSON is unchanged.
+
+**Teaching the session agent.**
+- **gummi ships two skills of its own** (§23.2): `workflows` — do the
+  work yourself by default, and propose a run only when the person asks,
+  when fresh-context design, review and validation pay for themselves,
+  for a loop against failing checks or for a written investigation;
+  write the spec first and run every check, each of which must fail
+  before the run (a `go test` check greps its test's own `--- PASS:`
+  line); which recipe for what; what to do while a run is open; how to
+  read the report and commit — and `workflow-recipes`: the grammar, the
+  roles, the templates, the lines a step's output carries, loops and
+  joins, worked examples, with the bundled recipes as its references.
+  Every recipe and done-when block they show is parsed and checked in a
+  test (`TestEveryRecipeTheSkillsShowCanRun`), so they cannot drift from
+  the grammar.
+- **The session's hint carries the rules that matter most**, for a
+  backend that takes no skills: do it yourself by default, run the checks
+  red first, read the report and the diff and commit. Where the backend
+  takes skills it names the two (`sessionWorkflowHintFor`).
+- **`workflow_recipes` shows a recipe whole**: given a name, it answers
+  with that recipe's YAML as written, for the session to adapt into a
+  `recipe_yaml` of its own.
 
 **Running.**
 - **The live strip has two moods its design did not draw**: the run's
