@@ -10,6 +10,7 @@ package ui
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,24 +45,34 @@ type timedBlock struct {
 }
 
 // transcriptLinesWith is transcriptLines with blocks placed among the
-// turns, each before the first turn newer than it (the rest after the
-// last turn). A run's own notes in the transcript are left out: its block
-// says all of them (threadfold.IsRunNote).
+// turns where threadfold places a run (RunPlace, the one rule both faces
+// read): before the first turn written after it that is no part of an
+// activity row, at the top when it predates them all, after the last turn
+// when nothing came since. A run's own notes in the transcript are left
+// out: its block says all of them (threadfold.IsRunNote).
 func transcriptLinesWith(s *theme.Styles, snap engine.Snapshot, w int, showOutput bool, blocks []timedBlock) []string {
 	var lines []string
 	snap.Transcript = threadfold.WithoutRunNotes(snap.Transcript)
+	marks := threadfold.TranscriptMarks(snap.Transcript)
+	type placed struct {
+		at    int
+		lines []string
+	}
+	order := make([]placed, 0, len(blocks))
+	for _, b := range blocks {
+		order = append(order, placed{at: max(threadfold.RunPlace(marks, b.at), 0), lines: b.lines})
+	}
+	sort.SliceStable(order, func(i, j int) bool { return order[i].at < order[j].at })
 	k := 0
-	place := func(before time.Time) {
-		for k < len(blocks) && (before.IsZero() || blocks[k].at.Before(before)) {
-			lines = append(lines, blocks[k].lines...)
+	place := func(before int) {
+		for k < len(order) && order[k].at <= before {
+			lines = append(lines, order[k].lines...)
 			k++
 		}
 	}
 	for i := 0; i < len(snap.Transcript); i++ {
 		msg := snap.Transcript[i]
-		if !msg.At.IsZero() {
-			place(msg.At)
-		}
+		place(i)
 		// everything the agent did between two messages is one summary row
 		// until alt+o expands it; expanded, each entry renders as below.
 		if isActivityMsg(msg) && !showOutput {
@@ -168,7 +179,7 @@ func transcriptLinesWith(s *theme.Styles, snap engine.Snapshot, w int, showOutpu
 		}
 		lines = append(lines, "")
 	}
-	place(time.Time{})
+	place(len(snap.Transcript))
 	lines = append(lines, taskLines(s, snap.Tasks, w)...)
 	lines = append(lines, watchLines(s, snap.Watches, w)...)
 	lines = append(lines, objectiveLines(s, snap.Objective, w)...)

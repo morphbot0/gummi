@@ -272,6 +272,10 @@ type Conversation struct {
 	// Objective is a freeform session's objective (DESIGN §19.11), absent
 	// when it has none: the strip above the composer draws it.
 	Objective *Objective `json:"objective,omitempty"`
+	// Runs places the session's workflow runs among Turns, where each was
+	// proposed (threadfold.RunPlace): a run proposed before the first of
+	// them is not here, and stands among the thread's settled items.
+	Runs []RunPlace `json:"runs,omitempty"`
 }
 
 // Objective is what a session keeps going toward, and where it stands.

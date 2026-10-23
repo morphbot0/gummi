@@ -104,6 +104,17 @@ func TestARunOnTheWebFace(t *testing.T) {
 		len(block.Files) != 1 || block.Files[0] != "out.txt" || !block.CanRevert {
 		t.Fatalf("the run's block: %+v", block)
 	}
+	// the run that ended last is the latest news: whole, its line said;
+	// it stands among the live conversation's turns where it was proposed
+	if block.Folded || !strings.HasPrefix(block.Line, "one · run 1 · spec 1") || block.Mark != "✓" {
+		t.Fatalf("the ended run's fold: folded %t, %q %q", block.Folded, block.Mark, block.Line)
+	}
+	if th.Live == nil || th.Live.Freeform == nil || len(th.Live.Freeform.Runs) != 1 || th.Live.Freeform.Runs[0].N != 1 {
+		t.Fatalf("the live conversation does not place the run: %+v", th.Live)
+	}
+	if at := th.Live.Freeform.Runs[0].Before; at < 1 || at > len(th.Live.Freeform.Turns) {
+		t.Fatalf("the run stands before turn %d of %d", at, len(th.Live.Freeform.Turns))
+	}
 	later, err := d.Thread(ctx, th.LastSeq)
 	if err != nil || len(later.Items) == 0 || later.Items[0].T != webapi.ItemRun {
 		t.Fatalf("a page past every event is not handed the run: %+v %v", later.Items, err)
@@ -132,6 +143,31 @@ func TestARunOnTheWebFace(t *testing.T) {
 		len(specs.Specs[0].Runs) != 1 || !specs.CanStart {
 		t.Fatalf("specs %+v %v", specs, err)
 	}
+
+	if sr := specs.Specs[0].Runs[0]; sr.Mark != "✓" || sr.Met != 1 || sr.Checked != 1 || sr.Ended.IsZero() {
+		t.Fatalf("the spec's run: %+v", sr)
+	}
+	d.UseSpec(1)
+	if sp, err := d.Spec(ctx); err != nil || len(sp.Runs) != 1 || sp.Runs[0].N != run.N {
+		t.Fatalf("the spec does not list its runs: %+v %v", sp.Runs, err)
+	}
+
+	// once the person says something after it, the run folds to its line
+	if err := ff.Send(ctx, "thanks"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntilTrue(t, "the run to fold", func() bool {
+		th, err := webDocsThread(t, b, string(f.ID)).Thread(ctx, 0)
+		if err != nil {
+			return false
+		}
+		for _, it := range th.Items {
+			if it.T == webapi.ItemRun && it.Run.Folded && it.Run.Rev != block.Rev {
+				return true
+			}
+		}
+		return false
+	})
 
 	pre, err := d.RevertPreview(ctx, run.N)
 	if err != nil || len(pre.Paths) != 1 || pre.Paths[0] != "out.txt" || pre.Note == "" {

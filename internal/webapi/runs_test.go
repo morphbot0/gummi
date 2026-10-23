@@ -45,6 +45,7 @@ func TestRunShapes(t *testing.T) {
 	}
 	golden.RequireEqual(t, marshal(t, struct {
 		Item     Item              `json:"item"`
+		Ended    Item              `json:"ended"`
 		Step     StepFace          `json:"step"`
 		Send     StepSendRequest   `json:"send"`
 		Answer   StepAnswerRequest `json:"answer"`
@@ -57,6 +58,12 @@ func TestRunShapes(t *testing.T) {
 		Decision Decision          `json:"decision"`
 	}{
 		Item: Item{Key: "run:2", Seq: 41, T: ItemRun, Time: at, Stage: "open", Run: &block},
+		Ended: Item{Key: "run:1", Seq: 12, T: ItemRun, Time: at, Stage: "open", Run: &RunBlock{
+			N: 1, Rev: "1x9", Recipe: "deliver", Spec: 1, SpecTitle: "Persist turns", State: "done", Spent: 810, Started: at, Ended: at,
+			Strip: []RunStripEntry{}, Rows: []RunStepRow{}, Files: []string{"a.go"},
+			Results: []RunResult{{Item: "DW-1", Verdict: "met", Checked: true}},
+			Mark:    "✓", Line: "deliver · run 1 · spec 1 “Persist turns” · met 1/1 · $8.10 · 1 file", Folded: true,
+		}},
 		Step: StepFace{
 			Card: "FF-14", Session: "FF-12", Run: 2, Recipe: "deliver", Path: "build/2/implement", ID: "implement",
 			Crumb: []string{"Session", "deliver run 2", "build ↺ 2", "implement"}, Role: "implementer", Tier: "standard", Model: "sonnet",
@@ -69,7 +76,7 @@ func TestRunShapes(t *testing.T) {
 		Send:   StepSendRequest{Text: "Keep the migration idempotent."},
 		Answer: StepAnswerRequest{Answer: "Resume (recommended)"},
 		Specs: SpecList{CanStart: true, Specs: []SpecEntry{
-			{N: 1, Title: "Persist turns", State: "met", Rev: 4, DoneWhen: 3, Met: 3, Runs: []SpecRun{{N: 1, Recipe: "deliver", State: "done", Spent: 810}}},
+			{N: 1, Title: "Persist turns", State: "met", Rev: 4, DoneWhen: 3, Met: 3, Runs: []SpecRun{{N: 1, Recipe: "deliver", State: "done", Spent: 810, Mark: "✓", Met: 3, Checked: 3, Ended: at}}},
 			{N: 2, Title: "Resume pre-migration sessions", State: "running", Rev: 2, Frozen: 2, DoneWhen: 1, Runs: []SpecRun{{N: 2, Recipe: "deliver", State: "running", Spent: 310}}},
 			{N: 3, Title: "Trim replay", State: "draft", Rev: 1},
 		}},

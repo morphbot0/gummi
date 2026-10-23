@@ -19,15 +19,21 @@ import (
 )
 
 // runTargets is every place the cursor can stand in the open card's
-// blocks, oldest run first: each run's head, then its rows — an ended
-// run's only while a person has unfolded them.
+// blocks, oldest run first: each run's head, then its rows. An ended run
+// folded to its line is its head alone; a whole one offers its folded
+// steps as one target until a person unfolds them, and its rows after.
 func (m *Shell) runTargets() []runTarget {
 	id := m.selectedID()
 	var out []runTarget
 	for _, r := range m.openRuns() {
 		out = append(out, runTarget{n: r.N})
-		ended := r.State == string(domain.RunDone) || r.State == string(domain.RunPartial) || r.State == string(domain.RunStopped)
-		if ended && !m.wf.unfolded[runFoldKey(id, r.N)] {
+		if m.runFolded(id, r.Run) {
+			continue
+		}
+		if runEnded(r.Run) && !m.wf.stepsOpen[runFoldKey(id, r.N)] {
+			if len(r.Rows) > 0 {
+				out = append(out, runTarget{n: r.N, row: runStepsRow})
+			}
 			continue
 		}
 		for _, row := range r.Rows {
@@ -162,9 +168,11 @@ func (m *Shell) focusRuns(r featureRow) {
 }
 
 // leaveRuns drops everything the terminal held of a card's runs that is
-// about the page: the focus, a step opened over it.
+// about the page: the focus, the person's own folds of its ended runs, a
+// step opened over it.
 func (m *Shell) leaveRuns() {
 	m.wf.focus = false
+	m.wf.folds = nil
 	m.stepv = nil
 }
 
@@ -208,14 +216,20 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 	}
 	switch key {
 	case "enter", "o":
-		if m.wf.cursor.row == "" {
-			ended := run.State == string(domain.RunDone) || run.State == string(domain.RunPartial) || run.State == string(domain.RunStopped)
-			if ended && len(run.Rows) > 0 {
-				if m.wf.unfolded == nil {
-					m.wf.unfolded = map[string]bool{}
-				}
-				k := runFoldKey(r.F.ID, run.N)
-				m.wf.unfolded[k] = !m.wf.unfolded[k]
+		switch m.wf.cursor.row {
+		case "":
+			// an ended run's head folds it to its line, or unfolds it whole
+			if runEnded(run) {
+				m.toggleRunFold(r.F.ID, run)
+			}
+			return nil
+		case runStepsRow:
+			if m.wf.stepsOpen == nil {
+				m.wf.stepsOpen = map[string]bool{}
+			}
+			m.wf.stepsOpen[runFoldKey(r.F.ID, run.N)] = true
+			if len(run.Rows) > 0 {
+				m.wf.cursor = runTarget{n: run.N, row: run.Rows[0].Key}
 			}
 			return nil
 		}
@@ -318,7 +332,7 @@ func (m *Shell) scrollToRunCursor(body []string, budget int) {
 func (m *Shell) runBindings() []binding {
 	bs := []binding{
 		{key: "↑↓ j/k", label: "move", help: "walk the runs' heads and their step rows", bar: true},
-		{key: "enter", label: "open", help: "open the step on the cursor — its transcript, its own diff, its brief, and a line to its agent; on an ended run's head, unfold its steps", bar: true, sticky: true},
+		{key: "enter", label: "open", help: "open the step on the cursor — its transcript, its own diff, its brief, and a line to its agent; on an ended run's head, unfold the run folded to its line, or fold it again; on its steps' line, unfold them", bar: true, sticky: true},
 		{key: "p", label: "pause/resume", help: "pause the open run (its steps' backends stop), or resume a paused one", bar: true},
 		{key: "x", label: "stop", help: "stop the run: its steps are interrupted, nothing is reverted", bar: true},
 		{key: "v", label: "revert", help: "put back every path the run changed, to how it was when the run started — a confirm lists them first", bar: true},

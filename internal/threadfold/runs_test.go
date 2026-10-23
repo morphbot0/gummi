@@ -2,6 +2,7 @@ package threadfold
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -260,5 +261,172 @@ func TestAStepRowReadsItsOwnSession(t *testing.T) {
 				t.Errorf("the strip reads %s, the row %s", r.Strip[0].State, c.state)
 			}
 		})
+	}
+}
+
+// endedRun is a run n of one step that ended in state st at minute end,
+// proposed at minute at.
+func endedRun(n int, st domain.RunState, at, end int) RunInput {
+	return RunInput{
+		Run: domain.Run{
+			Session: "FF-001", N: n, RecipeName: "deliver", Spec: 2, State: st,
+			CreatedAt: runAt.Add(time.Duration(at) * time.Minute), StartedAt: runAt.Add(time.Duration(at+1) * time.Minute),
+			EndedAt: runAt.Add(time.Duration(end) * time.Minute),
+			Results: []domain.ItemResult{
+				{Item: "DW-1", Checked: true, Verdict: domain.ItemMet},
+				{Item: "DW-2", Checked: true, Verdict: domain.ItemUnmet},
+				{Item: "DW-3", Verdict: domain.ItemMet},
+			},
+		},
+		SpecTitle: "Close the TUI's gaps",
+		Files:     []string{"a.go", "b.go", "c.go"},
+		Steps:     []domain.RunStep{step("make", domain.RoleImplementer, domain.StepDone, at+1, 292, "made it")},
+	}
+}
+
+// An ended run folds to one line: its state's glyph, the recipe and run,
+// a state word when it did not end done, its spec, its checked items met,
+// its spend and the files it left.
+func TestAnEndedRunSaysItselfInOneLine(t *testing.T) {
+	cases := []struct {
+		st         domain.RunState
+		mark, line string
+	}{
+		{domain.RunDone, "✓", "deliver · run 2 · spec 2 “Close the TUI's gaps” · met 1/2 · $2.92 · 3 files"},
+		{domain.RunPartial, "◐", "deliver · run 2 · partial · spec 2 “Close the TUI's gaps” · met 1/2 · $2.92 · 3 files"},
+		{domain.RunStopped, "■", "deliver · run 2 · stopped · spec 2 “Close the TUI's gaps” · met 1/2 · $2.92 · 3 files"},
+	}
+	for _, c := range cases {
+		r := FoldRun(endedRun(2, c.st, 0, 10))
+		if r.Mark != c.mark || r.Line != c.line {
+			t.Errorf("%s reads %q %q, want %q %q", c.st, r.Mark, r.Line, c.mark, c.line)
+		}
+	}
+	if r := FoldRun(runningRun()); r.Line != "" || r.Mark != "" {
+		t.Errorf("an open run has a line: %q", r.Line)
+	}
+}
+
+// The run that ended last stays whole while it is the latest news; it
+// folds once a person says something after it ended, or another run is
+// proposed after it. Every older ended run is folded, and an open one
+// never is.
+func TestAnEndedRunFoldsOnceItIsNoLongerTheLatestNews(t *testing.T) {
+	folded := func(rs []Run) string {
+		var out []string
+		for _, r := range rs {
+			out = append(out, fmt.Sprintf("%d:%t", r.N, r.Folded))
+		}
+		return strings.Join(out, " ")
+	}
+	one, two := endedRun(1, domain.RunDone, 0, 10), endedRun(2, domain.RunPartial, 20, 30)
+	if got := folded(FoldRuns([]RunInput{one, two}, time.Time{})); got != "1:true 2:false" {
+		t.Errorf("nothing said since: %s", got)
+	}
+	// a line said before the run ended leaves it whole
+	if got := folded(FoldRuns([]RunInput{one, two}, runAt.Add(25*time.Minute))); got != "1:true 2:false" {
+		t.Errorf("said during the run: %s", got)
+	}
+	// one said after it folds it
+	if got := folded(FoldRuns([]RunInput{one, two}, runAt.Add(31*time.Minute))); got != "1:true 2:true" {
+		t.Errorf("said after the run: %s", got)
+	}
+	// so does another run proposed after it, still open
+	three := runningRun()
+	three.Run.N, three.Run.CreatedAt = 3, runAt.Add(40*time.Minute)
+	got := FoldRuns([]RunInput{one, two, three}, time.Time{})
+	if folded(got) != "1:true 2:true 3:false" {
+		t.Errorf("a later proposal: %s", folded(got))
+	}
+	// folding moves the block's revision, so a face redraws it
+	if whole := FoldRun(two); whole.Rev == got[1].Rev {
+		t.Error("a folded run kept the whole block's revision")
+	}
+	// the run that ended last is the latest, whatever its number
+	late := endedRun(1, domain.RunStopped, 0, 50)
+	if got := folded(FoldRuns([]RunInput{late, two}, time.Time{})); got != "1:false 2:true" {
+		t.Errorf("run 1 ended last: %s", got)
+	}
+	// the fold reaches the thread's items
+	items := Items(nil, Options{Runs: []RunInput{one, two}, Said: runAt.Add(31 * time.Minute)})
+	if len(items) != 2 || !items[0].Run.Folded || !items[1].Run.Folded {
+		t.Errorf("the items do not carry the fold: %+v", items)
+	}
+}
+
+// A person's line is what folds a run: a turn gummi sent the session on
+// its own — a run's report, an objective's — is none.
+func TestPersonSaidIsAPersonsLineAlone(t *testing.T) {
+	at := func(m int) time.Time { return runAt.Add(time.Duration(m) * time.Minute) }
+	tr := []engine.Message{
+		{Author: engine.AuthorUser, Content: "go", At: at(1)},
+		{Author: engine.AuthorAssistant, Content: "ok", At: at(2)},
+		{Author: engine.AuthorUser, By: state.ActorWorkflow, Content: "Run 1 ended", At: at(3)},
+		{Author: engine.AuthorUser, By: state.ActorObjective, Content: "carry on", At: at(4)},
+	}
+	if got := PersonSaid(tr); !got.Equal(at(1)) {
+		t.Fatalf("said at %v, want minute 1", got)
+	}
+	tr = append(tr, engine.Message{Author: engine.AuthorUser, By: "web:ana", Content: "thanks", At: at(5)})
+	if got := PersonSaid(tr); !got.Equal(at(5)) {
+		t.Fatalf("a web viewer's line: said at %v", got)
+	}
+}
+
+// A run stands among a conversation's turns before the first one written
+// after it was proposed, never inside an activity row; after them all
+// when nothing came since; and above them, among the settled items, when
+// it predates every turn shown.
+func TestARunIsPlacedAmongTheTurnsWhereItWasProposed(t *testing.T) {
+	at := func(m int) time.Time { return runAt.Add(time.Duration(m) * time.Minute) }
+	turns := []TurnMark{
+		{At: at(1)},                 // you: make it
+		{At: at(2), Activity: true}, // spec_start
+		{At: at(3), Activity: true}, // workflow_run, the run proposed at minute 3.5
+		{At: at(4), Activity: true}, // a thought after it
+		{At: at(5)},                 // the agent: "I proposed run 1"
+		{At: at(9)},                 // you: thanks
+	}
+	cases := []struct {
+		at   time.Time
+		want int
+	}{
+		{at(3).Add(30 * time.Second), 4}, // after the activity row it was proposed in
+		{at(6), 5},                       // the person answered through decisions, then spoke
+		{at(10), 6},                      // nothing came since: after every turn
+		{runAt, -1},                      // before the conversation shown: the settled items'
+	}
+	for _, c := range cases {
+		if got := RunPlace(turns, c.at); got != c.want {
+			t.Errorf("a run at %v stands at %d, want %d", c.at.Sub(runAt), got, c.want)
+		}
+	}
+	if got := RunPlace(nil, runAt); got != 0 {
+		t.Errorf("no turns: %d", got)
+	}
+	// a transcript's tool calls, thoughts and task lists are activity
+	marks := TranscriptMarks([]engine.Message{{Author: engine.AuthorTool}, {Author: engine.AuthorThinking}, {Author: engine.AuthorTasks}, {Author: engine.AuthorAssistant}})
+	if !marks[0].Activity || !marks[1].Activity || !marks[2].Activity || marks[3].Activity {
+		t.Errorf("marks %+v", marks)
+	}
+}
+
+// In the settled thread a run sits among the log's items where it was
+// proposed, before an item from after it, never stacked at the end.
+func TestARunProposedInTheSettledHistorySitsThere(t *testing.T) {
+	l := newLog()
+	l.add(domain.StageOpen, state.EventPublish, "", state.PublishPayload{}, "")
+	l.add(domain.StageOpen, state.EventPublish, "", state.PublishPayload{}, "")
+	l.add(domain.StageOpen, state.EventPublish, "", state.PublishPayload{}, "")
+	one, two := endedRun(1, domain.RunDone, 0, 1), endedRun(2, domain.RunDone, 0, 2)
+	one.Run.CreatedAt = l.evs[0].At.Add(time.Second)
+	two.Run.CreatedAt = l.evs[1].At.Add(time.Second)
+	items := Items(l.evs, Options{Runs: []RunInput{two, one}})
+	var keys []string
+	for _, it := range items {
+		keys = append(keys, it.Key)
+	}
+	if len(items) != 5 || items[1].Key != "run:1" || items[3].Key != "run:2" {
+		t.Fatalf("items %s", strings.Join(keys, " "))
 	}
 }

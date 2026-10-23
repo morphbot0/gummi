@@ -386,7 +386,7 @@ send b
 expect "its brief is the prompt as filled in"  'prompt'
 send Escape
 expect_long "the run ends done"               'deliver · run 1 .*done · \$' 60
-expect "an ended run folds to its results"     '✓ DW-1  ✓ DW-2'
+expect "an ended run folds to its results"     '│ ✓ DW-1 failed → passed'
 expect "…and the files it left"                '1 file left changed in the tree: made\.txt'
 refute "the head carries no validated mark"    'validated at tree|re-check'
 send v
@@ -397,6 +397,20 @@ refute "n leaves the tree alone"               'Revert run 1\?'
 send Escape
 tmux send-keys -t $S M-s; sleep 1
 expect "the spec view lists the session's specs" '▸ S1 Make the workflow file +met'
+expect "…and the spec's runs, newest first"     '1 ✓ deliver · run 1 · done · met'
+send Escape
+# the person speaks after the run ended: it is no longer the latest news,
+# and folds to one line where it stood (alt+w brings it into view)
+lit 'Thanks, that is all for now'
+send Enter
+expect_long "the person's line is answered"     'Done: noted it in NOTES\.md' 30
+tmux send-keys -t $S M-w; sleep 0.6
+expect "the ended run folds to one line"        '▸ ✓ deliver · run 1 · spec 1 .* ▸'
+send Escape
+# the spec's row jumps to it, unfolded whole
+tmux send-keys -t $S M-s; sleep 1
+send 1
+expect "a run's row jumps to its block, whole"  '▸ workflow deliver · run 1'
 send Escape
 alive "still alive after the run"
 

@@ -79,6 +79,7 @@ func (d *WebDocs) sessionSpec(ctx context.Context, content string, out *webapi.S
 				frozen[r.SpecRev] = append(frozen[r.SpecRev], r.N)
 			}
 		}
+		out.Runs = d.sessionSpecRuns(ctx, runs, d.sessionSpecN())
 	}
 	if revs, err := d.store.SpecRevisions(ctx, d.f.ID, d.sessionSpecN()); err == nil {
 		for _, r := range revs {

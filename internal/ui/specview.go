@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/atomicfile"
@@ -587,6 +589,9 @@ func (sv *specView) bindings() []binding {
 	if hasSessionSpec(sv.f) {
 		bs = append(bs, binding{key: "+", label: "new spec", help: "start a new spec on this session", bar: true})
 	}
+	if len(sv.specRuns()) > 0 {
+		bs = append(bs, binding{key: "1-9", label: "jump to run", help: "jump to the run the list's row names, in the thread, unfolded whole"})
+	}
 	bs = append(bs, []binding{
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
@@ -606,6 +611,13 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		return m.switchSpec(-1)
 	case "]":
 		return m.switchSpec(1)
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		runs := sv.specRuns()
+		i, _ := strconv.Atoi(key)
+		if i > len(runs) {
+			return nil
+		}
+		return m.jumpToRun(runs[i-1].N)
 	case "+":
 		if !hasSessionSpec(sv.f) {
 			return nil
@@ -799,7 +811,99 @@ func specListLines(m *Shell, sv *specView, w int) []string {
 	if len(sv.specs) > 1 {
 		out = append(out, s.Faint.Render("  [ ] switch spec"))
 	}
+	return append(out, specRunLines(m, sv, w)...)
+}
+
+// specRunsShown is how many of a spec's runs its view lists, newest
+// first: one digit key each.
+const specRunsShown = 9
+
+// specRuns are the open spec's runs, newest first, as many as the view
+// lists.
+func (sv *specView) specRuns() []webapi.SpecRun {
+	var out []webapi.SpecRun
+	for _, e := range sv.specs {
+		if e.N != sv.n {
+			continue
+		}
+		for i := len(e.Runs) - 1; i >= 0 && len(out) < specRunsShown; i-- {
+			out = append(out, e.Runs[i])
+		}
+	}
 	return out
+}
+
+// specRunLines lists the open spec's runs, newest first (§25.9): the
+// digit that jumps to its block in the thread, its glyph, recipe and run,
+// its state, its checked items met, its spend and when it ended.
+func specRunLines(m *Shell, sv *specView, w int) []string {
+	runs := sv.specRuns()
+	if len(runs) == 0 {
+		return nil
+	}
+	s := m.styles
+	out := []string{s.Subtle.Render(fmt.Sprintf("  runs of S%d", sv.n)) + s.Faint.Render(" · a digit jumps to one in the thread")}
+	for i, r := range runs {
+		mark := r.Mark
+		if mark == "" {
+			mark = "·"
+		}
+		facts := []string{fmt.Sprintf("%s · run %d", r.Recipe, r.N), r.State}
+		if r.Checked > 0 {
+			facts = append(facts, fmt.Sprintf("met %d/%d", r.Met, r.Checked))
+		}
+		facts = append(facts, domain.FormatDollars(r.Spent))
+		if !r.Ended.IsZero() {
+			facts = append(facts, "ended "+endedWhen(r.Ended, m.now()))
+		}
+		row := "  " + s.KeyHint.Render(strconv.Itoa(i+1)) + " " + specRunStyle(s, r.State).Render(mark) + " " + s.Subtle.Render(sanitize(strings.Join(facts, " · ")))
+		out = append(out, ansi.Truncate(row, max(w, 8), "…"))
+	}
+	return out
+}
+
+// specRunStyle colours a listed run's glyph by its state.
+func specRunStyle(s *theme.Styles, state string) lipgloss.Style {
+	switch domain.RunState(state) {
+	case domain.RunDone:
+		return s.Success
+	case domain.RunPartial:
+		return s.Warning
+	case domain.RunRunning, domain.RunPaused:
+		return s.Info
+	}
+	return s.Faint
+}
+
+// endedWhen is when a run ended, as a list says it: the time today, else
+// the day and the time.
+func endedWhen(t, now time.Time) string {
+	t, now = t.Local(), now.Local()
+	if y, mo, d := t.Date(); y == now.Year() && mo == now.Month() && d == now.Day() {
+		return t.Format("15:04")
+	}
+	return t.Format("Jan 2 15:04")
+}
+
+// jumpToRun leaves the spec for the thread and jumps to run n's block, as
+// alt+w does, unfolded whole: the run a spec's list row names.
+func (m *Shell) jumpToRun(n int) tea.Cmd {
+	r, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	var cmd tea.Cmd
+	m.spec, m.diff, m.stats, m.logv = nil, nil, nil, nil
+	if !m.cardOpen {
+		cmd = m.openCard()
+	}
+	if m.wf.folds == nil {
+		m.wf.folds = map[string]bool{}
+	}
+	m.wf.folds[runFoldKey(r.F.ID, n)] = false
+	m.wf.focus, m.wf.cursor, m.wf.jump = true, runTarget{n: n}, true
+	m.threadScroll = 0
+	return cmd
 }
 
 // reviewerMarker returns the last unresolved `@reviewer` marker in a

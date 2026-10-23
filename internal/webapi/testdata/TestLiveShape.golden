@@ -85,7 +85,17 @@
       "cap": 20,
       "note": "the lexer is still slow",
       "auditing": true
-    }
+    },
+    "runs": [
+      {
+        "n": 1,
+        "before": 1
+      },
+      {
+        "n": 2,
+        "before": 2
+      }
+    ]
   },
   "elsewhere": {
     "pid": 4411,

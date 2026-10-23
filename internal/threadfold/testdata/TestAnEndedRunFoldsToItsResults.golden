@@ -1,6 +1,6 @@
 {
   "n": 2,
-  "rev": "306y4mmaxwkqk",
+  "rev": "3aslhu0y6g49d",
   "recipe": "deliver",
   "spec": 2,
   "specTitle": "Resume pre-migration sessions",
@@ -97,5 +97,7 @@
     "9f8e7d6 feat(state): keep the turns"
   ],
   "report": true,
-  "canRevert": true
+  "canRevert": true,
+  "mark": "✓",
+  "line": "deliver · run 2 · spec 2 “Resume pre-migration sessions” · met 1/1 · $2.80 · 2 files"
 }

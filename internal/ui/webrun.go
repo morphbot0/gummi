@@ -12,7 +12,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/diffannot"
 	"github.com/morphis/gummi/internal/domain"
@@ -81,6 +83,74 @@ func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 	return out
 }
 
+// runFold reads what the fold of the session's runs needs: the runs
+// (runInputs), and when a person last said something to the session,
+// which folds the run that ended last (threadfold.FoldRuns).
+func (d *WebDocs) runFold(ctx context.Context) ([]threadfold.RunInput, time.Time) {
+	ins := d.runInputs(ctx)
+	if len(ins) == 0 || d.eng == nil {
+		return ins, time.Time{}
+	}
+	return ins, threadfold.PersonSaid(sessionTranscript(d.eng, d.f.ID))
+}
+
+// sessionTranscript is the session's conversation as the engine holds it,
+// open or ended, nil when it holds none.
+func sessionTranscript(eng *engine.Engine, id domain.FeatureID) []engine.Message {
+	if ff := eng.Freeform(id); ff != nil {
+		return ff.Snapshot().Transcript
+	}
+	if snap, ok := eng.FreeformHistory(id); ok {
+		return snap.Transcript
+	}
+	return nil
+}
+
+// placeRuns places the session's runs among the live conversation's
+// turns (webapi.Conversation.Runs), each where it was proposed
+// (threadfold.RunPlace); a run proposed before the first of them stays
+// among the thread's settled items. at is each run's proposal moment.
+func placeRuns(live *webapi.Live, at map[int]time.Time) {
+	if live == nil || live.Freeform == nil || len(live.Freeform.Turns) == 0 || len(at) == 0 {
+		return
+	}
+	c := *live.Freeform
+	marks := make([]threadfold.TurnMark, len(c.Turns))
+	for i, t := range c.Turns {
+		marks[i] = threadfold.TurnMark{At: t.Time, Activity: t.Author == "tool" || t.Author == "thinking"}
+	}
+	ns := make([]int, 0, len(at))
+	for n := range at {
+		ns = append(ns, n)
+	}
+	sort.Ints(ns)
+	c.Runs = nil
+	for _, n := range ns {
+		if i := threadfold.RunPlace(marks, at[n]); i >= 0 {
+			c.Runs = append(c.Runs, webapi.RunPlace{N: n, Before: i})
+		}
+	}
+	live.Freeform = &c
+}
+
+// PlaceLiveRuns places the session's runs among live's conversation
+// (placeRuns), reading only when each was proposed: GET …/live's own
+// read, off the board's update loop.
+func (d *WebDocs) PlaceLiveRuns(ctx context.Context, live *webapi.Live) {
+	if live == nil || live.Freeform == nil || !isRunSession(d.f) {
+		return
+	}
+	runs, err := d.store.SessionRuns(ctx, d.f.ID)
+	if err != nil {
+		return
+	}
+	at := make(map[int]time.Time, len(runs))
+	for _, r := range runs {
+		at[r.N] = r.CreatedAt
+	}
+	placeRuns(live, at)
+}
+
 // webRunBlock maps a folded run onto the wire.
 func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 	if r == nil {
@@ -93,6 +163,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 		Files: r.Files, Commits: r.Commits, Report: r.Report,
 		CanPause: r.CanPause, CanResume: r.CanResume, CanStop: r.CanStop, CanRevert: r.CanRevert,
 		CanSave: r.CanSave, SaveName: r.SaveName, SavedAs: r.SavedAs,
+		Mark: r.Mark, Line: r.Line, Folded: r.Folded,
 	}
 	var strip func(e threadfold.StripEntry) webapi.RunStripEntry
 	strip = func(e threadfold.StripEntry) webapi.RunStripEntry {
@@ -200,13 +271,7 @@ func (d *WebDocs) Specs(ctx context.Context) (webapi.SpecList, error) {
 			if r.Spec != sp.N || r.State == domain.RunDenied {
 				continue
 			}
-			spent := 0.0
-			if steps, err := d.store.RunSteps(ctx, d.f.ID, r.N); err == nil {
-				for _, s := range steps {
-					spent += s.Spent
-				}
-			}
-			e.Runs = append(e.Runs, webapi.SpecRun{N: r.N, Recipe: runRecipeName(*r), State: string(r.State), Spent: spent})
+			e.Runs = append(e.Runs, d.specRun(ctx, *r))
 			if r.State.Open() {
 				e.Frozen = r.SpecRev
 			}
@@ -226,9 +291,30 @@ func (d *WebDocs) Specs(ctx context.Context) (webapi.SpecList, error) {
 	return out, nil
 }
 
-// runRecipeName is the run's recipe as a list names it.
-func runRecipeName(r domain.Run) string {
-	return threadfold.FoldRun(threadfold.RunInput{Run: r}).Recipe
+// specRun is a run as its spec lists it: its recipe and state, its
+// spend, and once ended its glyph, its checked items met and when it
+// ended — the words its folded line in the thread says (threadfold).
+func (d *WebDocs) specRun(ctx context.Context, r domain.Run) webapi.SpecRun {
+	steps, _ := d.store.RunSteps(ctx, d.f.ID, r.N)
+	f := threadfold.FoldRun(threadfold.RunInput{Run: r, Steps: steps})
+	out := webapi.SpecRun{N: r.N, Recipe: f.Recipe, State: f.State, Spent: f.Spent, Mark: f.Mark}
+	if r.State.Ended() {
+		out.Met, out.Checked = threadfold.RunMet(f)
+		out.Ended = r.EndedAt
+	}
+	return out
+}
+
+// sessionSpecRuns are spec n's runs, newest first, the ones never run
+// left out.
+func (d *WebDocs) sessionSpecRuns(ctx context.Context, runs []domain.Run, n int) []webapi.SpecRun {
+	var out []webapi.SpecRun
+	for i := len(runs) - 1; i >= 0; i-- {
+		if r := runs[i]; r.Spec == n && r.State != domain.RunDenied {
+			out = append(out, d.specRun(ctx, r))
+		}
+	}
+	return out
 }
 
 // ---------------------------------------------------------------- a step

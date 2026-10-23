@@ -10,14 +10,17 @@
 // one's state, revision, runs and done-when count (GET …/specs), and the
 // one chosen beneath it (GET …/spec?spec=<n>), edited whole (PUT, each save
 // a numbered revision listed under it, with the workflow runs that froze
-// it) and annotated as any spec. "+ New spec" starts another.
+// it) and annotated as any spec. "+ New spec" starts another. A spec lists
+// its workflow runs, newest first: a row jumps to the run's block in the
+// thread, unfolded whole.
 
-import { h, append, clock, plural, clear, cardName } from './dom.js?v=__ASSET_V__'
+import { h, append, clock, plural, clear, cardName, cr } from './dom.js?v=__ASSET_V__'
 import { get, post, put, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { changesButton } from './actions.js?v=__ASSET_V__'
 import { openMenu } from './views.js?v=__ASSET_V__'
+import { jumpToRun } from './workflow.js?v=__ASSET_V__'
 
 export const specTab = {
   name: 'spec',
@@ -247,7 +250,7 @@ function renderSpec (pane, entry, ctx) {
     }, 'Sections ', h('span', { 'aria-hidden': 'true' }, '▾')))
   }
   if (s.session) {
-    doc.querySelector('.src').after(sessionBar(s, ctx))
+    doc.querySelector('.src').after(sessionBar(s, ctx), specRunsEl(s))
     doc.append(revisionsEl(s))
   }
   pane.append(h('div', { class: 'spec', testid: 'spec' }, doc))
@@ -270,6 +273,27 @@ function sessionBar (s, ctx) {
       : 'no done-when item yet: a workflow run is judged against them'),
     h('span', { class: 'sp' }),
     ctx.closed ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-edit', onclick: () => { editing.set(keyOf(ctx), { text: s.markdown || '', rev: s.rev }); ctx.rerender() } }, 'Edit'))
+}
+
+// specRunsEl is the spec's runs, newest first (DESIGN §25.9): each run's
+// glyph, number and recipe, its state, its checked items met, its spend and
+// when it ended. A row jumps to the run's block in the thread, unfolded.
+function specRunsEl (s) {
+  const runs = s.runs || []
+  if (!runs.length) return null
+  return h('nav', { class: 'spec-runs', testid: 'spec-runs', 'aria-label': 'This spec’s workflow runs' },
+    h('span', { class: 'k' }, 'runs'),
+    runs.map(r => h('button', {
+      class: ['spec-run', `s-${r.state}`], type: 'button', testid: `spec-run-${r.n}`,
+      title: `Jump to run ${r.n} in the thread`, onclick: () => jumpToRun(r.n, { unfold: true })
+    },
+    h('span', { class: ['rb-mark', `s-${r.state}`], 'aria-hidden': 'true' }, r.mark || '·'),
+    h('b', null, `run ${r.n}`),
+    h('span', null, r.recipe),
+    h('span', { class: 'st' }, r.state),
+    r.checked ? h('span', { testid: 'spec-run-met' }, `met ${r.met || 0}/${r.checked}`) : null,
+    h('span', { class: 'mono' }, cr(r.spent)),
+    r.ended ? h('span', { class: 'mono' }, `ended ${clock(r.ended)}`) : null)))
 }
 
 function revisionsEl (s) {

@@ -3,8 +3,12 @@
 // here:
 //
 // The run's block (§25.9): one per run, inline in the thread where the run
-// was proposed, built from the thread's run item (threadfold) and redrawn
-// only when its Rev moves. Its head says the recipe, the spec, the spend
+// was proposed (the server places it: among the settled items, or among
+// the live conversation's turns), built from the thread's run item
+// (threadfold) and redrawn only when its Rev moves. An ended run no longer
+// the latest news is folded by the server to one line, which a click
+// unfolds whole and the block's ▾ folds again: the person's own, kept per
+// card and run until they leave the card. Its head says the recipe, the spec, the spend
 // (a run estimates nothing) and the elapsed time, with Pause, Resume and Stop;
 // a strip draws the recipe's top-level entries; a row per step that has
 // run says what it did, with Open; a step's question is answered under
@@ -44,8 +48,9 @@ let ctx = {}
 
 export function initWorkflow (c) {
   ctx = c
-  // a step is opened on its session: another card closes it
-  on(['sel'], () => { if (state.step) set({ step: null }) })
+  // a step is opened on its session: another card closes it, and the
+  // person's folds of its runs are forgotten
+  on(['sel'], () => { runFolds.clear(); if (state.step) set({ step: null }) })
   // the step's own conversation moves with its card's events, which name
   // the step's card, not the session
   onEvent('live', (e) => { if (state.step && e.id === state.step) loadTranscript() })
@@ -105,6 +110,24 @@ function tickElapsed () {
 // stepsOpen remembers, per card and run, a person's unfolding of an ended
 // run's steps.
 const stepsOpen = new Set()
+// runFolds is a person's own fold of an ended run, per card and run: true
+// folded to its line, false whole. A run they never touched folds as the
+// server says (run.folded). It is forgotten when they leave the card.
+const runFolds = new Map()
+
+// folded says an ended run is drawn as its one line.
+function folded (r) {
+  if (!['done', 'partial', 'stopped'].includes(r.state)) return false
+  const k = `${state.sel} ${r.n}`
+  return runFolds.has(k) ? runFolds.get(k) : !!r.folded
+}
+
+// setFold folds run n to its line or unfolds it whole, and has the thread
+// draw it again.
+function setFold (n, fold) {
+  runFolds.set(`${state.sel} ${n}`, fold)
+  set({ runFold: (state.runFold || 0) + 1 })
+}
 // replies are what a person is typing to a step's question, per step card:
 // a block redrawn under them keeps the words.
 const replies = new Map()
@@ -112,7 +135,7 @@ const replies = new Map()
 // runSig is what the thread caches a run's block by: its revision and the
 // page's own state of it.
 export function runSig (it) {
-  return `${it.run.rev}|${stepsOpen.has(`${state.sel} ${it.run.n}`)}|${state.card?.stage || ''}`
+  return `${it.run.rev}|${stepsOpen.has(`${state.sel} ${it.run.n}`)}|${folded(it.run)}|${state.card?.stage || ''}`
 }
 
 // runBlock draws one run's block.
@@ -121,18 +144,36 @@ export function runBlock (it) {
   const id = state.sel
   const ended = ['done', 'partial', 'stopped'].includes(r.state)
   const live = ['running', 'paused'].includes(r.state)
+  if (ended && folded(r)) return foldedLine(id, r)
   const block = h('section', {
     class: ['rb', `rb-${r.state}`, live && 'rb-on', (flashing.get(`${id} ${r.n}`) || 0) > Date.now() && 'rb-flash'],
     testid: `run-${r.n}`,
     data: { run: String(r.n), state: r.state, rev: r.rev },
     'aria-label': `${r.recipe} run ${r.n}, ${STATE_WORD[r.state] || r.state}`
-  }, head(id, r), r.state === 'proposed' ? baselineEl(r.baseline, 'run-baseline') : null,
+  }, head(id, r, ended), r.state === 'proposed' ? baselineEl(r.baseline, 'run-baseline') : null,
   r.state === 'proposed' && (r.canSave || r.savedAs) ? h('div', { class: 'rb-foot' }, h('span', { class: 'sp' }), saveEl(id, r)) : null,
   r.state === 'proposed' || r.state === 'denied' ? null : body(id, r, ended))
   return block
 }
 
-function head (id, r) {
+// foldedLine is an ended run folded to one line (§25.9): its state's glyph
+// and the server's line, ▸; a click unfolds the block whole.
+function foldedLine (id, r) {
+  return h('section', {
+    class: ['rb', 'rb-folded', `rb-${r.state}`, (flashing.get(`${id} ${r.n}`) || 0) > Date.now() && 'rb-flash'],
+    testid: `run-${r.n}`,
+    data: { run: String(r.n), state: r.state, rev: r.rev, folded: 'yes' },
+    'aria-label': `${r.recipe} run ${r.n}, ${STATE_WORD[r.state] || r.state}, folded`
+  }, h('button', {
+    class: 'rb-line', type: 'button', testid: 'run-line', 'aria-expanded': 'false', title: 'Unfold the run',
+    onclick: () => setFold(r.n, false)
+  },
+  h('span', { class: ['rb-mark', `s-${r.state}`], 'aria-hidden': 'true' }, r.mark || '✓'),
+  h('span', { class: 'rb-ltext', testid: 'run-line-text' }, r.line || `${r.recipe} · run ${r.n}`),
+  h('span', { class: 'rb-fold-mark', 'aria-hidden': 'true' }, '▸')))
+}
+
+function head (id, r, ended) {
   const act = (what, label, danger) => h('button', {
     class: ['btn', danger && 'danger'], type: 'button', testid: `run-${what}`,
     onclick: async (e) => {
@@ -159,7 +200,8 @@ function head (id, r) {
       r.started ? h('span', { class: 'mono rb-el', testid: 'run-elapsed', data: { elapsedRun: String(r.n) } }, elapsed(r)) : null,
       r.canPause ? act('pause', 'Pause') : null,
       r.canResume ? act('resume', 'Resume') : null,
-      r.canStop ? act('stop', 'Stop', true) : null),
+      r.canStop ? act('stop', 'Stop', true) : null,
+      ended ? h('button', { class: 'link rb-foldbtn', type: 'button', testid: 'run-fold', 'aria-expanded': 'true', title: 'Fold the run to one line', 'aria-label': `Fold run ${r.n} to one line`, onclick: () => setFold(r.n, true) }, '▾') : null),
     r.reason && r.state !== 'done' ? h('span', { class: 'rb-why', testid: 'run-reason' }, r.reason) : null)
 }
 
@@ -753,11 +795,13 @@ function closePick () {
 // a block redrawn meanwhile (its run moved) keeps the flash.
 const flashing = new Map()
 
-// jumpToRun scrolls the thread to run n's block and flashes it.
-export function jumpToRun (n) {
+// jumpToRun scrolls the thread to run n's block and flashes it; unfold
+// unfolds a run folded to its line whole first (a spec's list of runs).
+export function jumpToRun (n, { unfold = false } = {}) {
   if (isMobile() && state.view !== 'thread') set({ view: 'thread' })
+  if (unfold && runFolds.get(`${state.sel} ${n}`) !== false) setFold(n, false)
   const go = () => {
-    const el = document.querySelector(`#thread-live [data-testid="run-${n}"]`)
+    const el = document.querySelector(`#thread [data-testid="run-${n}"]`)
     if (!el) return
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
     el.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' })
@@ -769,7 +813,7 @@ export function jumpToRun (n) {
     setTimeout(() => {
       if ((flashing.get(key) || 0) > Date.now()) return // jumped to again since
       flashing.delete(key)
-      document.querySelector(`#thread-live [data-testid="run-${n}"]`)?.classList.remove('rb-flash')
+      document.querySelector(`#thread [data-testid="run-${n}"]`)?.classList.remove('rb-flash')
     }, 1850)
   }
   requestAnimationFrame(go)
@@ -785,7 +829,7 @@ let observer = null
 function watchBlock () {
   const pill = $('#run-above')
   const r = stripRun
-  const el = r ? document.querySelector(`#thread-live [data-testid="run-${r.n}"]`) : null
+  const el = r ? document.querySelector(`#thread [data-testid="run-${r.n}"]`) : null
   if (el === watched) return
   observer?.disconnect()
   watched = el

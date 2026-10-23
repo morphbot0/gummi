@@ -1303,6 +1303,11 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .spec-revs{margin-top:18px}
 .spec-revrow{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;color:var(--fg2)}
 .spec-frozen{color:var(--accent);font-size:11.5px}
+.spec-runs{display:flex;flex-direction:column;gap:2px;margin:8px 0 4px}
+.spec-runs > .k{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--fg4)}
+.spec-run{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:none;color:var(--fg2);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;min-height:32px}
+.spec-run:hover{background:color-mix(in srgb,var(--fg) 4%,transparent)}
+.spec-run .st{color:var(--fg3)}
 
 /* a workflow run's block in the thread (DESIGN §25.9, workflow.js) */
 .rb{border:1px solid var(--line2);border-radius:12px;background:var(--panel);overflow:hidden;font-size:13px}
@@ -1381,7 +1386,16 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .rb-foot .btn{height:24px;padding:0 9px;font-size:12px}
 .rb-paths{max-height:40vh;overflow:auto;margin:6px 0;padding-left:18px;font-size:12px}
 /* a run's block among the session's turns */
-#thread-live > .rb{margin:6px 0 10px}
+#thread-live > .rb,#thread-items .rb{margin:6px 0 10px}
+/* an ended run folded to one line: a click unfolds it, ▾ folds it back */
+.rb.rb-folded{border-color:var(--line);background:transparent}
+.rb-line{display:flex;align-items:center;gap:8px;width:100%;padding:6px 12px;border:0;background:none;color:var(--fg2);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;min-height:32px}
+.rb-line:hover{background:color-mix(in srgb,var(--fg) 4%,transparent)}
+.rb-line:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rb-ltext{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-mark.s-done{color:var(--ok)} .rb-mark.s-partial{color:var(--warn)} .rb-mark.s-stopped{color:var(--fg3)}
+.rb-fold-mark{color:var(--fg3)}
+.rb-foldbtn{font-size:13px;color:var(--fg3);padding:0 4px}
 
 /* a workflow step opened beside the thread (DESIGN §25.10) */
 .stp{display:flex;flex-direction:column;gap:10px;min-height:100%}

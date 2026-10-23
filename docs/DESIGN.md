@@ -6945,6 +6945,45 @@ An ended run folds to:
 - Revert run;
 - a link to its report.
 
+**Where a block stands.** Each run's block stands where the run was
+proposed, among the history, in both faces, and `threadfold` alone says
+where: `RunPlace` puts it before the first turn of the session's
+conversation written after its proposal that is no part of an activity
+row (a tool call, a thought, the task list), after every turn when nothing
+came since, and among the thread's settled items (`placeRuns`, by time)
+when it predates every turn shown. The terminal draws the whole
+conversation and places each block by `RunPlace`. The page's live block
+carries only the newest turns, so the server places the runs among them
+(`Conversation.Runs`, on `GET …/live` and the thread's own live block) and
+the page draws a run it does not place there among the settled items. No
+face places a run by a rule of its own, and none stacks runs at the
+bottom.
+
+**An ended run folds to one line** once it is no longer the latest news:
+its state's glyph (✓ done, ◐ partial, ■ stopped), and `deliver · run 2 ·
+spec 2 “Close the TUI's gaps” · met 5/5 · $2.92 · 14 files ▸` — the
+state's word after the run for partial and stopped, the checked items it
+met of those checked, its spend and the files it left changed. The run
+that ended most recently stays whole until the person says something to
+the session after it ended (a line of theirs, never a run's report or an
+objective's turn: `PersonSaid`) or another run is proposed; every older
+ended run is one line. `threadfold.FoldRuns` decides it (`Run.Folded`,
+`Mark`, `Line`; folding moves the block's `Rev`), so both faces fold the
+same runs. An open run (proposed, queued, running, paused) is always
+whole. Activating the line unfolds the whole block as above; activating
+the block's fold (▾ on the page, enter on its head in the terminal) folds
+it again. That unfolding is the face's own, kept per card and run until
+the person leaves the card. In the terminal enter on a whole ended run's
+head folds it, and its steps' line is a cursor stop of its own that enter
+unfolds.
+
+**Each spec lists its runs**, newest first: the run's glyph, number and
+recipe, its state, the checked items met, its spend and when it ended —
+on the web page's Specs tab under the spec's bar (`Spec.Runs`), and in the
+terminal's spec view under the list of specs. A row jumps to the run's
+block in the thread and unfolds it: the page's Jump (scroll and flash),
+the terminal's alt+w (a digit, 1–9, names the row).
+
 **A live strip stands above the composer while a run is open** (running
 or paused; never while it is proposed or queued, and gone once it ends),
 so a person talking to the session keeps the run in sight after its
@@ -7303,6 +7342,15 @@ The build follows §25, with these differences.
   written running by the tick, but the faces were told only once each
   step's backend had come up, which on a real backend takes seconds; the
   block showed the step before done and nothing at work meanwhile.
+- **Ended runs no longer pile up at the bottom of the page's thread.**
+  The page dropped every run from the settled items and drew runs only
+  inside the live conversation, before the first line a person typed
+  after each; runs from earlier stretches stacked at the start of the
+  live part, and a run with no typed line after it (answered through
+  decisions, its report gummi's turn) fell to the very bottom. Placement
+  is now `threadfold`'s alone (`RunPlace`, the settled items' `placeRuns`
+  and `Conversation.Runs`), read by both faces, and an ended run folds to
+  one line once it is no longer the latest news.
 - **A step's transcript follows its newest line**, as the thread does:
   it opens at the end, follows while the reader is there, and stays put
   while the reader has scrolled back (the terminal's BG-042 rule).

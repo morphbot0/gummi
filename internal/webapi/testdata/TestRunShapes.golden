@@ -154,6 +154,39 @@
       }
     }
   },
+  "ended": {
+    "key": "run:1",
+    "seq": 12,
+    "t": "run",
+    "time": "2026-09-27T09:12:00Z",
+    "stage": "open",
+    "run": {
+      "n": 1,
+      "rev": "1x9",
+      "recipe": "deliver",
+      "spec": 1,
+      "specTitle": "Persist turns",
+      "state": "done",
+      "spent": 810,
+      "started": "2026-09-27T09:12:00Z",
+      "ended": "2026-09-27T09:12:00Z",
+      "strip": [],
+      "rows": [],
+      "files": [
+        "a.go"
+      ],
+      "results": [
+        {
+          "item": "DW-1",
+          "verdict": "met",
+          "checked": true
+        }
+      ],
+      "mark": "✓",
+      "line": "deliver · run 1 · spec 1 “Persist turns” · met 1/1 · $8.10 · 1 file",
+      "folded": true
+    }
+  },
   "step": {
     "card": "FF-14",
     "session": "FF-12",
@@ -218,7 +251,11 @@
             "n": 1,
             "recipe": "deliver",
             "state": "done",
-            "spent": 810
+            "spent": 810,
+            "mark": "✓",
+            "met": 3,
+            "checked": 3,
+            "ended": "2026-09-27T09:12:00Z"
           }
         ]
       },

@@ -35,12 +35,19 @@ let shownFor = null
 let following = true
 
 export function initThread () {
-  on(['thread', 'sel', 'card', 'sessionDraft'], render)
-  on(['live'], () => { if (state.thread && !threadItems(state.thread).length) render() })
+  on(['thread', 'sel', 'card', 'sessionDraft', 'runFold'], render)
+  // a run the live conversation places among its turns leaves the settled
+  // items, and one it no longer places comes back to them
+  let placed = ''
+  on(['live'], () => {
+    const now = liveRunKeys().join(',')
+    if (state.thread && (now !== placed || !threadItems(state.thread).length)) render()
+    placed = now
+  })
   // a session's workflow runs are drawn among its turns (runsAt), so the
   // live block is drawn again when the thread brings a run that moved
-  on(['live', 'card', 'board', 'thread'], renderLive)
-  on(['step'], () => markStep($('#thread-live')))
+  on(['live', 'card', 'board', 'thread', 'runFold'], renderLive)
+  on(['step'], () => markStep($('#thread')))
   // a step opened beside the thread is drawn the way a session's
   // conversation is (DESIGN §25.10)
   setTranscriptDrawer(stepTranscript, reconcile)
@@ -204,26 +211,38 @@ function render () {
   while (box.children.length > gs.length) box.lastChild.remove()
   for (const k of [...groups.keys()]) if (!keepGroups.has(k)) groups.delete(k)
   for (const k of [...nodes.keys()]) if (!keepItems.has(k)) nodes.delete(k)
+  markStep(box)
   stickToEnd(sc)
 }
 
 // threadItems is what the thread's own list draws: every item but a
-// workflow run's block, which sits among the session's turns (renderLive).
-function threadItems (t) { return (t?.items || []).filter(it => it.t !== 'run') }
+// workflow run's block the live conversation places among its turns
+// (renderLive). A run proposed before the turns it carries stands here,
+// where the server's fold put it among the settled items.
+function threadItems (t) {
+  const live = new Set(liveRunKeys())
+  return (t?.items || []).filter(it => it.t !== 'run' || !live.has(it.key))
+}
 
-// runsAt places each of the session's runs after the turn it was proposed
-// in: before the first line a person (or the run's own report) sent after
-// it. It answers a map of turn index to the blocks that go before it, the
-// ones after every turn under the last index.
-function runsAt (turns) {
-  const runs = (state.thread?.items || []).filter(it => it.t === 'run')
+// liveRunKeys are the runs the live conversation places among its turns,
+// by their items' keys.
+function liveRunKeys () {
+  return (state.live?.freeform?.runs || []).map(p => `run:${p.n}`)
+}
+
+// runsAt is where the server placed each of the session's runs among the
+// live conversation's turns (webapi.Conversation.Runs, threadfold's
+// RunPlace): a map of turn index to the blocks that go before it, the
+// ones after every turn under the last index. The page places nothing
+// itself.
+function runsAt (places) {
+  const items = new Map((state.thread?.items || []).filter(it => it.t === 'run').map(it => [it.run.n, it]))
   const at = new Map()
-  for (const it of runs) {
-    const t = new Date(it.time).getTime()
-    let i = turns.findIndex(x => x.author === 'you' && x.time && new Date(x.time).getTime() > t)
-    if (i < 0) i = turns.length
-    if (!at.has(i)) at.set(i, [])
-    at.get(i).push(cached(`run:${it.run.n}`, runSig(it), () => runBlock(it)))
+  for (const p of places || []) {
+    const it = items.get(p.n)
+    if (!it) continue
+    if (!at.has(p.before)) at.set(p.before, [])
+    at.get(p.before).push(cached(`run:${p.n}`, runSig(it), () => runBlock(it)))
   }
   return at
 }
@@ -296,7 +315,8 @@ function groupNode (grp, last) {
 
 function itemNode (it, live = false) {
   live = live && it.t === 'activity'
-  const sig = `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}|${live}`
+  // a run's block moves without an event, and with the page's own fold of it
+  const sig = it.t === 'run' ? `run|${runSig(it)}` : `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}|${live}`
   const have = nodes.get(it.key)
   if (have && have.sig === sig) return have.el
   const el = itemEl(it, live)
@@ -318,6 +338,7 @@ export function itemEl (it, live = false) {
     case 'verify': return verify(it)
     case 'decision': return decision(it)
     case 'note': return h('div', { class: 'note-ev' }, h('span', null, it.text), h('span', { class: 'when' }, clock(it.time)))
+    case 'run': return runBlock(it)
     default: return h('div', { class: 'note-ev' }, it.text || it.t)
   }
 }
@@ -619,8 +640,8 @@ function renderLive () {
   const l = state.live
   if (turnsFor !== state.sel) { turnNodes.clear(); earlier.clear(); turnsFor = state.sel }
   const parts = []
-  // the session's runs, placed among its turns; drawn after everything
-  // when there is no conversation to place them in
+  // the session's runs the server placed among its turns; the rest stand
+  // among the settled items (threadItems)
   let runs = null
   if (r) {
     const pausing = r.running?.pausing
@@ -654,7 +675,7 @@ function renderLive () {
         parts.push(cached(`${k}:head`, `${label}|${role}`, () => h('div', { class: ['ev-stage', k === 'freeform' ? 'st-open' : 'st-todo'], testid: `live-${k}-head` }, h('b', null, label),
           k === 'freeform' ? h('span', { class: 'sum' }, role) : null)))
         if (c.notice) parts.push(cached(`${k}:notice`, c.notice, () => h('div', { class: 'live warnc', testid: `live-${k}-notice` }, c.notice)))
-        if (k === 'freeform') runs = runsAt(c.turns || [])
+        if (k === 'freeform') runs = runsAt(c.runs)
         parts.push(...talk(k, c, {
           role: c.role || (k === 'freeform' ? 'implementer' : 'consult'),
           stage: k === 'freeform' ? 'open' : null,
@@ -667,7 +688,6 @@ function renderLive () {
       parts.push(busyLine('live', 'run', `${ROLE[r.stage] || 'agent'} is ${r.running?.verb || 'working'}${pausing ? ' · pauses after this turn' : ''}`, null))
     }
   }
-  if (!runs && r) for (const els of runsAt([]).values()) parts.push(...els)
   const sc = $('#thread')
   reconcile(box, parts)
   markStep(box)

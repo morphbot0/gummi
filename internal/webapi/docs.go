@@ -34,6 +34,9 @@ type Spec struct {
 	Session   bool           `json:"session,omitempty"`
 	Revisions []SpecRevision `json:"revisions,omitempty"`
 	DoneWhen  []DoneWhenItem `json:"doneWhen,omitempty"`
+	// Runs are a session spec's workflow runs, newest first: a row each,
+	// which jumps to the run's block in the thread.
+	Runs []SpecRun `json:"runs,omitempty"`
 }
 
 // SpecSection is one heading and the line it starts on (1-based).

@@ -173,6 +173,76 @@ test.describe('a board served with --terminal', () => {
   });
 });
 
+// An ended run stands in the thread where it was proposed (DESIGN §25.9),
+// before the turns sent after it and never stacked at the bottom; it stays
+// whole while it is the latest news and folds to one line once the person
+// says something after it; a click unfolds it and ▾ folds it again; its
+// spec lists it, and the row jumps to its block, unfolded.
+test('an ended run stays where it was proposed, folds once the person speaks, and its spec lists it', async ({ pairedPage: page, server, api, workspace }, info) => {
+  test.setTimeout(150_000);
+  fs.mkdirSync(path.join(workspace.repo, '.gummi', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(workspace.repo, '.gummi', 'workflows', 'make-and-read.yaml'), RECIPE);
+  await openSession(page, server, api, 'Fold the ended run');
+  const input = page.getByTestId('composer-input');
+  await input.click();
+  await input.fill('[workflow=make-and-read] make the workflow file');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('decision-option-0')).toContainText('Allow', { timeout: 45_000 });
+  await page.getByTestId('decision-option-0').click();
+  const block = page.getByTestId('run-1');
+  await expect(block).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
+  await expect(page.getByTestId('thread-workflow').last()).toContainText('has reported', { timeout: 30_000 });
+  await expect(page.getByTestId('thread-live')).toContainText('The run reported', { timeout: 30_000 });
+
+  // the latest news: whole, with its fold offered
+  await expect(block).not.toHaveAttribute('data-folded', 'yes');
+  await expect(block.getByTestId('run-results')).toBeVisible();
+  await expect(block.getByTestId('run-fold')).toBeVisible();
+
+  // the person speaks after it: the run folds to its line, in place
+  const said = 'Thanks, that is all for now';
+  await input.click();
+  await input.fill(said);
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('bubble').filter({ hasText: said })).toBeVisible({ timeout: 30_000 });
+  await expect(block).toHaveAttribute('data-folded', 'yes', { timeout: 30_000 });
+  await expect(block.getByTestId('run-line-text')).toHaveText(/^make-and-read · run 1 · spec 1 “Make the workflow file” · met 1\/1 · \$[\d.]+ · 1 file$/);
+  await expect(block.getByTestId('run-results')).toHaveCount(0);
+  // where it was proposed: before the run's report and the person's line,
+  // never the thread's last thing
+  const order = await block.evaluate((el, text) => {
+    const after = (x: Element | undefined) => !!x && !!(el.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const bubbles = [...document.querySelectorAll('[data-testid="bubble"]')];
+    const mine = bubbles.find(x => x.textContent?.includes(text));
+    const report = [...document.querySelectorAll('[data-testid="thread-workflow"]')].pop();
+    const all = [...document.querySelectorAll('#thread-items > *, #thread-live > *')];
+    return { mine: after(mine), report: after(report), last: all[all.length - 1] === el || all[all.length - 1]?.contains(el) };
+  }, said);
+  expect(order).toEqual({ mine: true, report: true, last: false });
+  await shot(page, info, 'workflow-run-folded');
+
+  // a click unfolds it whole; ▾ folds it again
+  await block.getByTestId('run-line').click();
+  await expect(block).not.toHaveAttribute('data-folded', 'yes');
+  await expect(block.getByTestId('run-result-DW-1')).toBeVisible();
+  await expect(block.getByTestId('run-files')).toContainText('1 file');
+  await block.getByTestId('run-fold').click();
+  await expect(block).toHaveAttribute('data-folded', 'yes');
+
+  // its spec lists it; the row jumps to its block, unfolded
+  await showTab(page, 'spec');
+  const row = page.getByTestId('spec-run-1');
+  await expect(row).toContainText('make-and-read', { timeout: 15_000 });
+  await expect(row).toContainText('done');
+  await expect(row.getByTestId('spec-run-met')).toHaveText('met 1/1');
+  await expect(row).toContainText('ended');
+  await shot(page, info, 'workflow-spec-runs');
+  await row.click();
+  await expect(block).not.toHaveAttribute('data-folded', 'yes');
+  await expect(block).toBeInViewport();
+  await expect(block).toHaveClass(/rb-flash/);
+});
+
 // The Specs tab lists a session's specs, each with its state, and shows
 // the one picked; a new spec is started from the list, and a spec is
 // edited whole, each save a revision of its own.

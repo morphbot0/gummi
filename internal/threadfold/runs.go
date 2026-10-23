@@ -119,6 +119,16 @@ type Run struct {
 	// Live is the open run's live strip, drawn above the composer; nil
 	// for a run that is not running or paused.
 	Live *RunStrip `json:"live,omitempty"`
+	// Mark and Line are an ended run in one line, the way it folds in the
+	// thread (§25.9): its state's glyph, and "deliver · run 2 · spec 2
+	// “Close the TUI's gaps” · met 5/5 · $2.92 · 14 files". Empty on a run
+	// that has not ended.
+	Mark string `json:"mark,omitempty"`
+	Line string `json:"line,omitempty"`
+	// Folded says an ended run is folded to its Line by rule: it is no
+	// longer the latest news (FoldRuns). A face draws it as the one line
+	// until a person unfolds it; a person's unfolding is the face's own.
+	Folded bool `json:"folded,omitempty"`
 }
 
 // StripEntry is one top-level entry of the recipe.
@@ -247,14 +257,163 @@ func foldBaseline(b *domain.RunBaseline) *RunBaseline {
 }
 
 // runItems folds the session's runs into their items, the newest last.
-func runItems(runs []RunInput) []Item {
+// said is when a person last said something to the session (PersonSaid).
+func runItems(runs []RunInput, said time.Time) []Item {
 	out := make([]Item, 0, len(runs))
-	for _, in := range runs {
-		r := FoldRun(in)
-		out = append(out, Item{Key: "run:" + strconv.Itoa(r.N), T: ItemRun, At: in.Run.CreatedAt, Stage: domain.StageOpen, Run: &r})
+	for i, r := range FoldRuns(runs, said) {
+		out = append(out, Item{Key: "run:" + strconv.Itoa(r.N), T: ItemRun, At: runs[i].Run.CreatedAt, Stage: domain.StageOpen, Run: &r})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Run.N < out[j].Run.N })
 	return out
+}
+
+// FoldRuns folds each of a session's runs (FoldRun), in the order given,
+// and folds an ended one to its line once it is no longer the latest
+// news (§25.9). The run that ended most recently stays whole until a
+// person says something to the session after it ended (said, PersonSaid)
+// or another run is proposed after it ended; every other ended run is
+// folded. An open run is never folded, nor one that never ran.
+func FoldRuns(ins []RunInput, said time.Time) []Run {
+	out := make([]Run, len(ins))
+	latest := -1
+	var latestAt time.Time
+	latestN := 0
+	for i, in := range ins {
+		out[i] = FoldRun(in)
+		if !in.Run.State.Ended() {
+			continue
+		}
+		at := in.Run.EndedAt
+		if latest < 0 || at.After(latestAt) || (at.Equal(latestAt) && in.Run.N > latestN) {
+			latest, latestAt, latestN = i, at, in.Run.N
+		}
+	}
+	for i, in := range ins {
+		if !in.Run.State.Ended() {
+			continue
+		}
+		fold := i != latest || said.After(in.Run.EndedAt)
+		for _, o := range ins {
+			if o.Run.N != in.Run.N && o.Run.CreatedAt.After(in.Run.EndedAt) {
+				fold = true
+			}
+		}
+		if fold {
+			out[i].Folded = true
+			out[i].Rev = runRev(out[i])
+		}
+	}
+	return out
+}
+
+// PersonSaid is when a person last said something in a session's
+// transcript: a line of theirs, never one gummi sent on its own (an
+// objective's turn, a run's report or an old crew's), zero when none.
+func PersonSaid(tr []engine.Message) time.Time {
+	for i := len(tr) - 1; i >= 0; i-- {
+		msg := tr[i]
+		if msg.Author != engine.AuthorUser || msg.At.IsZero() {
+			continue
+		}
+		switch TurnBy(msg.By) {
+		case "gummi", "workflow", "crew":
+			continue
+		}
+		return msg.At
+	}
+	return time.Time{}
+}
+
+// TurnMark is one turn of a conversation as a run's place among the turns
+// reads it: when it was written, and whether it sits inside an activity
+// row (a tool call, a thought, the agent's task list), which a run's
+// block never splits.
+type TurnMark struct {
+	At       time.Time
+	Activity bool
+}
+
+// TranscriptMarks are a transcript's turns as RunPlace reads them.
+func TranscriptMarks(tr []engine.Message) []TurnMark {
+	out := make([]TurnMark, len(tr))
+	for i, msg := range tr {
+		out[i] = TurnMark{At: msg.At, Activity: msg.Author == engine.AuthorTool || msg.Author == engine.AuthorThinking || msg.Author == engine.AuthorTasks}
+	}
+	return out
+}
+
+// RunPlace is where a run proposed at at stands among a conversation's
+// turns, the one rule both faces place a run's block by (§25.9): before
+// turn i, the first turn written after it that is no part of an activity
+// row; len(turns) after every turn. It is -1 when the run predates every
+// turn given: it stands among the thread's settled items, where Items
+// places it, above the conversation.
+func RunPlace(turns []TurnMark, at time.Time) int {
+	seen := false
+	for i, t := range turns {
+		if t.At.IsZero() {
+			continue
+		}
+		if !seen {
+			seen = true
+			if t.At.After(at) {
+				return -1
+			}
+		}
+		if !t.Activity && t.At.After(at) {
+			return i
+		}
+	}
+	return len(turns)
+}
+
+// endedLine is an ended run in one line: its glyph, and its recipe and
+// number, its state's word when it did not end done, its spec, its checked
+// items met, its spend and the files it left changed.
+func endedLine(r Run) (string, string) {
+	mark, word := "✓", ""
+	switch domain.RunState(r.State) {
+	case domain.RunPartial:
+		mark, word = "◐", "partial"
+	case domain.RunStopped:
+		mark, word = "■", "stopped"
+	}
+	parts := []string{RunLine(r)}
+	if word != "" {
+		parts = append(parts, word)
+	}
+	spec := fmt.Sprintf("spec %d", r.Spec)
+	if r.SpecTitle != "" {
+		spec += " “" + cut(r.SpecTitle, 48) + "”"
+	}
+	parts = append(parts, spec)
+	if met, of := RunMet(r); of > 0 {
+		parts = append(parts, fmt.Sprintf("met %d/%d", met, of))
+	}
+	parts = append(parts, domain.FormatDollars(r.Spent))
+	switch n := len(r.Files); n {
+	case 0:
+	case 1:
+		parts = append(parts, "1 file")
+	default:
+		parts = append(parts, fmt.Sprintf("%d files", n))
+	}
+	return mark, strings.Join(parts, " · ")
+}
+
+// RunMet is how many of an ended run's checked done-when items it met, of
+// how many were checked.
+func RunMet(r Run) (met, of int) {
+	for _, x := range r.Results {
+		if !x.Checked {
+			continue
+		}
+		of++
+		if x.Verdict == string(domain.ItemMet) {
+			met++
+		}
+	}
+	return met, of
 }
 
 // placeRuns puts each run item into the thread where its run was
@@ -357,6 +516,9 @@ func FoldRun(in RunInput) Run {
 		}
 	}
 	r.Live = liveStrip(in, r, now)
+	if run.State.Ended() {
+		r.Mark, r.Line = endedLine(r)
+	}
 	r.Rev = runRev(r)
 	return r
 }

@@ -168,6 +168,10 @@ type Options struct {
 	// caller: each is one item, keyed run:<n> (runs.go), placed where it
 	// was proposed.
 	Runs []RunInput
+	// Said is when a person last said something to the session
+	// (PersonSaid): an ended run folds to its line once they have spoken
+	// after it (FoldRuns).
+	Said time.Time
 }
 
 // Items folds a card's event log into the items a page draws, oldest
@@ -321,7 +325,7 @@ func Items(events []state.CardEvent, opt Options) []Item {
 			}
 		}
 	}
-	return placeRuns(out, runItems(opt.Runs))
+	return placeRuns(out, runItems(opt.Runs, opt.Said))
 }
 
 // Since returns the items a client that has seen everything up to seq

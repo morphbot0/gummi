@@ -162,7 +162,8 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 	if err != nil {
 		spend = nil
 	}
-	items := threadfold.Items(evs, threadfold.Options{Spend: spend, Runs: d.runInputs(ctx)})
+	ins, said := d.runFold(ctx)
+	items := threadfold.Items(evs, threadfold.Options{Spend: spend, Runs: ins, Said: said})
 	var last int64
 	for _, it := range items {
 		last = max(last, it.Seq)
@@ -172,7 +173,19 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 	for _, it := range items {
 		converted = append(converted, webItem(it, cmds))
 	}
-	out := webapi.Thread{Items: []webapi.Item{}, Live: d.live, LastSeq: max(last, 0)}
+	live := d.live
+	if live != nil && len(ins) > 0 {
+		// the session's runs stand among the live conversation where each
+		// was proposed: the page places them as told
+		cp := *live
+		at := make(map[int]time.Time, len(ins))
+		for _, in := range ins {
+			at[in.Run.N] = in.Run.CreatedAt
+		}
+		placeRuns(&cp, at)
+		live = &cp
+	}
+	out := webapi.Thread{Items: []webapi.Item{}, Live: live, LastSeq: max(last, 0)}
 	for _, it := range groupActivity(converted) {
 		// a run's block changes without an event: every page carries it
 		// (threadfold.Since), and the page redraws it by its Rev

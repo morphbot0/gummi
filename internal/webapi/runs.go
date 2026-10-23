@@ -67,6 +67,22 @@ type RunBlock struct {
 	// Live is the open run's live strip, drawn above the composer while
 	// the run is running or paused; absent otherwise.
 	Live *RunLive `json:"live,omitempty"`
+	// Mark and Line are an ended run in one line, the way it folds in the
+	// thread: its state's glyph and "deliver · run 2 · spec 2 “…” · met
+	// 5/5 · $2.92 · 14 files". Folded says it is folded by rule — no longer
+	// the latest news — and drawn as that line until a person unfolds it.
+	Mark   string `json:"mark,omitempty"`
+	Line   string `json:"line,omitempty"`
+	Folded bool   `json:"folded,omitempty"`
+}
+
+// RunPlace is where one of the session's runs stands among a live
+// conversation's turns (Conversation.Runs): before turn Before, or after
+// every turn when Before is the number of turns. A run not placed there
+// stands among the thread's settled items, where the thread put it.
+type RunPlace struct {
+	N      int `json:"n"`
+	Before int `json:"before"`
 }
 
 // RunLive is an open run's live strip (DESIGN §25.9): one line above the
@@ -288,12 +304,19 @@ type SpecEntry struct {
 	Runs     []SpecRun `json:"runs,omitempty"`
 }
 
-// SpecRun is one run on a spec, newest last.
+// SpecRun is one run on a spec: newest last in a SpecEntry, newest first
+// in a session's Spec.
 type SpecRun struct {
 	N      int     `json:"n"`
 	Recipe string  `json:"recipe"`
 	State  string  `json:"state"`
 	Spent  float64 `json:"spent,omitempty"`
+	// Mark is an ended run's state glyph; Met is how many of its checked
+	// done-when items it met, of Checked; Ended is when it ended.
+	Mark    string    `json:"mark,omitempty"`
+	Met     int       `json:"met,omitempty"`
+	Checked int       `json:"checked,omitempty"`
+	Ended   time.Time `json:"ended,omitzero"`
 }
 
 // RevertPreview is GET /api/cards/{id}/runs/{n}/revert: every path that

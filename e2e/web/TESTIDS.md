@@ -160,15 +160,22 @@ drawn beneath with the ids below. `spec-start-session` (start the first one
 from the template, on `spec-none`), `spec-session` (its bar), `spec-rev`,
 `spec-ready` (its done-when items), `spec-edit`, `spec-editor`, `spec-save`,
 `spec-cancel`, `spec-stale` (the spec changed while it was being edited),
-`spec-revisions`, `spec-revision-<n>`.
+`spec-revisions`, `spec-revision-<n>`; `spec-runs`, the spec's workflow runs
+newest first, one `spec-run-<n>` each (its glyph, recipe, state,
+`spec-run-met`, spend and when it ended), which jumps to the run's block in
+the thread, unfolded whole.
 
 A session's workflow runs (DESIGN §25): in the thread, a turn a run sent (its
 report): `thread-workflow`.
 
-A run's block, among the session's turns (§25.9, `workflow.js`): `run-<n>`
-(`data-state`, `data-rev`), its `run-head` with `run-title`, `run-state`,
+A run's block, where its run was proposed — among the session's turns or the
+thread's settled items (§25.9, `workflow.js`): `run-<n>`
+(`data-state`, `data-rev`; `data-folded="yes"` while an ended run is folded
+to one line: `run-line`, which unfolds it, with `run-line-text`), its
+`run-head` with `run-title`, `run-state`,
 `run-spent`, `run-elapsed`, `run-reason` and the acts
-`run-pause`, `run-resume`, `run-stop`; `run-strip` with one `run-strip-<id>`
+`run-pause`, `run-resume`, `run-stop`, and on an ended run `run-fold` (▾,
+folds it to its line); `run-strip` with one `run-strip-<id>`
 per top-level entry of the recipe; `run-pending` (the run waits on the pinned
 decision); `run-baseline` (while it is proposed or queued, or open before its
 first step: the done-when checks run before the run — `baseline-running`

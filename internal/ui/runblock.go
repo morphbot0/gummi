@@ -12,8 +12,8 @@ package ui
 // (liveStripRows): the run, where it stands, its step at work and that
 // step's action. alt+w jumps to the open run's block with the cursor on
 // its active step, and steps into the blocks: ↑↓ walk a run's head and
-// its step rows, enter opens a step (stepview.go) or unfolds an ended
-// run's steps, p pauses or resumes the run, x stops it and v reverts it,
+// its step rows, enter opens a step (stepview.go), unfolds an ended run
+// folded to its one line (or folds it again) and unfolds its steps, p pauses or resumes the run, x stops it and v reverts it,
 // behind a confirm that lists every path it puts back, and s saves a
 // recipe the session wrote inline as a workspace recipe.
 
@@ -51,9 +51,14 @@ type runState struct {
 	// jump asks the next frame to bring the cursor's block into view
 	// from its head (alt+w).
 	jump bool
-	// unfolded holds the ended runs whose steps a person unfolded, by
-	// card and run.
-	unfolded map[string]bool
+	// stepsOpen holds the ended runs whose steps a person unfolded, by
+	// card and run (runFoldKey).
+	stepsOpen map[string]bool
+	// folds is a person's own fold of an ended run, by card and run: true
+	// folded to its line, false whole. A run they never touched folds as
+	// threadfold says (Run.Folded). It is kept until they leave the card
+	// (leaveRuns).
+	folds map[string]bool
 	// seen is what each step card's session last said (stepNowKey), so a
 	// streaming delta that moves nothing in its block reads nothing.
 	seen map[domain.FeatureID]string
@@ -96,10 +101,10 @@ func (m *Shell) loadRuns(id domain.FeatureID) tea.Cmd {
 	}
 	m.wf.loading = true
 	return func() tea.Msg {
-		ins := d.runInputs(context.Background())
+		ins, said := d.runFold(context.Background())
 		runs := make([]foldedRun, 0, len(ins))
-		for _, in := range ins {
-			runs = append(runs, foldedRun{Run: threadfold.FoldRun(in), at: in.Run.CreatedAt})
+		for i, r := range threadfold.FoldRuns(ins, said) {
+			runs = append(runs, foldedRun{Run: r, at: ins[i].Run.CreatedAt})
 		}
 		return runsLoadedMsg{id: id, runs: runs}
 	}
@@ -213,17 +218,23 @@ func (m *Shell) runBlocks(s *theme.Styles, r featureRow, w int) []timedBlock {
 				sel = "row:" + m.wf.cursor.row
 			}
 		}
-		unfolded := m.wf.unfolded[runFoldKey(r.F.ID, run.N)]
+		k := runFoldKey(r.F.ID, run.N)
+		open := m.wf.stepsOpen[k]
+		folded := m.runFolded(r.F.ID, run.Run)
 		el := runElapsed(run.Run, now)
 		// a block with a step at work turns its spinner, as a working line does
 		spin := ""
 		if runWorking(run.Run) {
 			spin = m.spinnerGlyph(m.motionEnabled)
 		}
-		key := strings.Join([]string{string(r.F.ID), strconv.Itoa(run.N), run.Rev, strconv.Itoa(w), sel, strconv.FormatBool(unfolded), el, strconv.FormatBool(m.wf.focus), spin}, "|")
+		key := strings.Join([]string{string(r.F.ID), strconv.Itoa(run.N), run.Rev, strconv.Itoa(w), sel, strconv.FormatBool(open), strconv.FormatBool(folded), el, strconv.FormatBool(m.wf.focus), spin}, "|")
 		lines, ok := m.wf.cache[key]
 		if !ok {
-			lines = runBlockLines(s, run.Run, sel, unfolded, !m.wf.focus, el, spin, w)
+			if folded {
+				lines = runFoldedLines(s, run.Run, sel == "head", w)
+			} else {
+				lines = runBlockLines(s, run.Run, sel, open, !m.wf.focus, el, spin, w)
+			}
 			m.wf.cache[key] = lines
 		}
 		live[key] = true
@@ -240,6 +251,58 @@ func (m *Shell) runBlocks(s *theme.Styles, r featureRow, w int) []timedBlock {
 }
 
 func runFoldKey(id domain.FeatureID, n int) string { return string(id) + "|" + strconv.Itoa(n) }
+
+// runStepsRow is the cursor's target on an ended run's folded steps, the
+// line enter unfolds them from.
+const runStepsRow = "\x00steps"
+
+// runEnded says a run ran and will run no more.
+func runEnded(r threadfold.Run) bool { return domain.RunState(r.State).Ended() }
+
+// runFolded says an ended run is drawn as its one line: as the person
+// last left it on this card, else as threadfold folds it (§25.9).
+func (m *Shell) runFolded(id domain.FeatureID, r threadfold.Run) bool {
+	if !runEnded(r) {
+		return false
+	}
+	if f, ok := m.wf.folds[runFoldKey(id, r.N)]; ok {
+		return f
+	}
+	return r.Folded
+}
+
+// toggleRunFold folds an ended run to its line, or unfolds it whole: the
+// person's own, kept until they leave the card. A run folded again keeps
+// its steps folded too.
+func (m *Shell) toggleRunFold(id domain.FeatureID, r threadfold.Run) {
+	if m.wf.folds == nil {
+		m.wf.folds = map[string]bool{}
+	}
+	k := runFoldKey(id, r.N)
+	fold := !m.runFolded(id, r)
+	m.wf.folds[k] = fold
+	if fold {
+		delete(m.wf.stepsOpen, k)
+	}
+}
+
+// runFoldedLines is an ended run folded to its one line (§25.9): its
+// state's glyph and its line, and ▸, which enter unfolds; selected marks
+// the cursor on it. It names no key unless the cursor is on it: a thread
+// of many folded runs is no column of hints.
+func runFoldedLines(s *theme.Styles, r threadfold.Run, selected bool, w int) []string {
+	w = max(w, 24)
+	lead := s.Faint.Render("─ ")
+	if selected {
+		lead = s.Cursor.Render("▸ ")
+	}
+	left := lead + runStateStyle(s, r).Render(r.Mark) + " " + s.Subtle.Render(r.Line) + s.Faint.Render(" ▸")
+	right := ""
+	if selected {
+		right = s.KeyHint.Render("enter") + s.Faint.Render(" unfolds it")
+	}
+	return []string{spread(left, right, w)}
+}
 
 // runWorking says one of a run's rows is a step at work.
 func runWorking(r threadfold.Run) bool {
@@ -283,10 +346,11 @@ func runElapsed(r threadfold.Run, now time.Time) string {
 
 // runBlockLines draws one run's block at width w. sel is what the cursor
 // is on in it — "head", "row:<key>" or "" — unfolded whether an ended
-// run's steps are drawn, hint whether its foot names the key that steps
+// run's steps are drawn (else they are one line, the cursor's target
+// "row:"+runStepsRow), hint whether its foot names the key that steps
 // into the blocks, el its elapsed time and spin the spinner's frame a step
 // at work is marked with.
-func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint bool, el, spin string, w int) []string {
+func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, stepsOpen, hint bool, el, spin string, w int) []string {
 	w = max(w, 24)
 	var lines []string
 	bar := s.Faint.Render("│ ")
@@ -383,7 +447,7 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 				add(strings.Join(res, "  "))
 			}
 		}
-		if unfolded {
+		if stepsOpen {
 			rows()
 		} else if len(r.Rows) > 0 {
 			var ids []string
@@ -394,11 +458,13 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 				}
 				ids = append(ids, x.ID)
 			}
-			more := ""
-			if sel == "head" {
-				more = s.Faint.Render(" · enter unfolds them")
+			steps := s.Muted.Render(fmt.Sprintf("%d step%s", len(r.Rows), plural(len(r.Rows)))) + s.Faint.Render(" · "+strings.Join(ids, " · "))
+			if sel == "row:"+runStepsRow {
+				more := s.Faint.Render(" · ") + s.KeyHint.Render("enter") + s.Faint.Render(" unfolds them")
+				lines = append(lines, ansi.Truncate(s.Cursor.Render("▸ ")+steps+more, w, "…"))
+			} else {
+				add(steps)
 			}
-			add(s.Muted.Render(fmt.Sprintf("%d step%s", len(r.Rows), plural(len(r.Rows)))) + s.Faint.Render(" · "+strings.Join(ids, " · ")) + more)
 		}
 		if len(r.Commits) > 0 {
 			add(s.Faint.Render("commits made while it ran: ") + s.Subtle.Render(strings.Join(r.Commits, " · ")))
@@ -431,6 +497,9 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, unfolded, hint
 		tail = append(tail, s.Faint.Render("saved as ")+s.Subtle.Render(r.SavedAs))
 	case r.CanSave && sel == "head":
 		tail = append(tail, s.KeyHint.Render("s")+s.Faint.Render(" saves its recipe"))
+	}
+	if ended && sel == "head" {
+		tail = append(tail, s.KeyHint.Render("enter")+s.Faint.Render(" folds it"))
 	}
 	if hint {
 		tail = append(tail, s.KeyHint.Render("alt+w")+s.Faint.Render(" steps in"))

@@ -139,19 +139,31 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 }
 
-// handleLive is GET /api/cards/{id}/live: a projection, no reads.
+// handleLive is GET /api/cards/{id}/live: a projection, and the one read
+// a session's runs need to stand among its turns where each was proposed
+// (WebDocs.PlaceLiveRuns), made off the board's update loop.
 func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var (
 		live webapi.Live
 		ok   bool
+		d    *ui.WebDocs
 	)
-	if !s.do(w, r, func(m *ui.Shell) tea.Cmd { live, ok = m.WebLive(id); return nil }) {
+	if !s.do(w, r, func(m *ui.Shell) tea.Cmd {
+		live, ok = m.WebLive(id)
+		if ok && live.Freeform != nil {
+			d, _ = m.WebDocs(id)
+		}
+		return nil
+	}) {
 		return
 	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "no card "+id+" on this board")
 		return
+	}
+	if d != nil {
+		d.PlaceLiveRuns(r.Context(), &live)
 	}
 	writeJSON(w, http.StatusOK, live)
 }

@@ -143,8 +143,17 @@ func TestRunBlockGolden(t *testing.T) {
 	}
 	draw("running, its asking step selected", runBlockLines(s, running, "row:build/2/implement", false, false, "14m", "", 110))
 	draw("running, unfocused", runBlockLines(s, running, "", false, true, "14m", "", 110))
-	draw("ended, folded, head selected", runBlockLines(s, ended, "head", false, false, "1h12m", "", 110))
-	draw("ended, unfolded", runBlockLines(s, ended, "", true, true, "1h12m", "", 110))
+	draw("ended whole, its steps folded, head selected", runBlockLines(s, ended, "head", false, false, "1h12m", "", 110))
+	draw("ended whole, its folded steps selected", runBlockLines(s, ended, "row:"+runStepsRow, false, false, "1h12m", "", 110))
+	draw("ended whole, its steps unfolded", runBlockLines(s, ended, "", true, true, "1h12m", "", 110))
+	// an ended run no longer the latest news folds to one line (§25.9)
+	draw("ended, folded to its line", runFoldedLines(s, ended, false, 110))
+	draw("ended, folded to its line, selected", runFoldedLines(s, ended, true, 110))
+	for _, st := range []domain.RunState{domain.RunPartial, domain.RunStopped} {
+		in := tuiEndedRun()
+		in.Run.State = st
+		draw("ended "+string(st)+", folded to its line", runFoldedLines(s, threadfold.FoldRun(in), false, 110))
+	}
 	draw("proposed", runBlockLines(s, proposed, "", false, true, "", "", 110))
 	draw("narrow", runBlockLines(s, running, "", false, true, "14m", "", 60))
 	draw("two reviews at work side by side", runBlockLines(s, threadfold.FoldRun(tuiReviewsRun()), "", false, true, "16m", "⠹", 110))
@@ -266,6 +275,72 @@ func terminalRun(t *testing.T, reply func(msg string) string) (*Bridge, *engine.
 	})
 	reloadRows(t, b)
 	return b, eng, f, ff
+}
+
+// An ended run folds to one line once it is no longer the latest news —
+// here, once the person says something to the session after it — and a
+// person unfolds it whole with enter on its line, and folds it again with
+// enter on its head. Their unfolding is kept until they leave the card.
+func TestAnEndedRunFoldsAndUnfoldsInTheTerminal(t *testing.T) {
+	b, _, f, ff := terminalRun(t, nil)
+	do, view, key := shellDriver(t, b)
+	thread := func() string { return view(func(m *Shell) string { return m.threadView(137, 46) }) }
+	do(func(m *Shell) tea.Cmd { m.width, m.height = 140, 50; m.sel = 0; return m.openCard() })
+	waitUntilTrue(t, "the run's block, whole", func() bool { return strings.Contains(thread(), "┌ workflow one · run 1") })
+
+	// the person speaks after the run ended: it is no longer the latest news
+	if err := ff.Send(context.Background(), "thanks"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntilTrue(t, "the session to answer", func() bool { return !ff.Busy() })
+	folded := "✓ one · run 1 · spec 1 “Out file” · met 1/1"
+	waitUntilTrue(t, "the run to fold to its line", func() bool {
+		do(func(m *Shell) tea.Cmd { return m.loadRuns(f.ID) })
+		return strings.Contains(thread(), folded)
+	})
+	th := thread()
+	if strings.Contains(th, "┌ workflow one · run 1") || !strings.Contains(th, "1 file ▸") {
+		t.Fatalf("the folded run still draws its block:\n%s", th)
+	}
+	// it stands where it was proposed: before the person's later line
+	if i, j := strings.Index(th, folded), strings.Index(th, "thanks"); i < 0 || j < i {
+		t.Errorf("the folded run does not stand before the line sent after it:\n%s", th)
+	}
+
+	// alt+w lands on its line; enter unfolds it whole, enter folds it again
+	key("alt+w")
+	if !strings.Contains(thread(), "▸ ✓ one · run 1") {
+		t.Fatalf("the cursor is not on the folded run's line:\n%s", thread())
+	}
+	key("enter")
+	if th := thread(); !strings.Contains(th, "▸ workflow one · run 1") || !strings.Contains(th, "1 step · write") || !strings.Contains(th, "enter folds it") {
+		t.Fatalf("enter did not unfold the run whole:\n%s", th)
+	}
+	key("enter")
+	if th := thread(); !strings.Contains(th, "▸ ✓ one · run 1") || strings.Contains(th, "1 step · write") {
+		t.Fatalf("enter on the head did not fold the run again:\n%s", th)
+	}
+	// unfolded, then the card left and opened again: the rule's fold
+	key("enter")
+	key("esc")
+	do(func(m *Shell) tea.Cmd { m.closeCard(); return m.openCard() })
+	waitUntilTrue(t, "the rule's fold again", func() bool { return strings.Contains(thread(), "─ "+folded) })
+
+	// the spec lists its runs, newest first; a row's digit jumps to the
+	// run's block in the thread, unfolded whole
+	key("alt+s")
+	spec := func() string { return view(func(m *Shell) string { return m.mainView(140, 48) }) }
+	waitUntilTrue(t, "the spec's runs", func() bool { return strings.Contains(spec(), "runs of S1") })
+	if sp := spec(); !strings.Contains(sp, "1 ✓ one · run 1 · done · met 1/1") || !strings.Contains(sp, "ended ") {
+		t.Fatalf("the spec does not list its run:\n%s", sp)
+	}
+	key("1")
+	if surface := view(func(m *Shell) string { s, _ := m.activeSurface(); return s }); surface != "runs" {
+		t.Fatalf("the spec's row put the keyboard on %q, not the run", surface)
+	}
+	if th := thread(); !strings.Contains(th, "▸ workflow one · run 1") || !strings.Contains(th, "1 step · write") {
+		t.Fatalf("the row did not jump to the run unfolded:\n%s", th)
+	}
 }
 
 // shellDriver drives a headless board's Shell: do runs fn on it, view
