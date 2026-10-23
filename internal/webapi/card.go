@@ -84,8 +84,8 @@ const (
 type Decision struct {
 	// Ref identifies the decision: an ask's decision id, or a workflow
 	// decision's record id. An answer names it back.
-	Ref      string       `json:"ref"`
-	Kind     DecisionKind `json:"kind"`
+	Ref  string       `json:"ref"`
+	Kind DecisionKind `json:"kind"`
 	// RunKind is set on a workflow run's own decision: what it asks
 	// (proposal, plan, max, unjudged, budget, resume).
 	RunKind  string `json:"runKind,omitempty"`

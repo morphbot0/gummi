@@ -38,7 +38,7 @@ func (e *Engine) writeRunFile(session domain.FeatureID, n int, rel, content stri
 		return "", fmt.Errorf("%q is not a path inside the run's directory", rel)
 	}
 	path := filepath.Join(e.RunDir(session, n), rel)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // #nosec G703 -- rel is checked local above, joined under the run's own directory
 		return "", err
 	}
 	return path, atomicfile.Write(path, []byte(content), 0o600)

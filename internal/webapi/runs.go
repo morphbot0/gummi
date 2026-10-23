@@ -433,8 +433,8 @@ type RunProposal struct {
 	SpecTitle   string `json:"specTitle,omitempty"`
 	// SpecRev is the revision of the spec the run is judged against,
 	// frozen when it was proposed.
-	SpecRev  int            `json:"specRev,omitempty"`
-	Steps []ProposalStep `json:"steps"`
+	SpecRev int            `json:"specRev,omitempty"`
+	Steps   []ProposalStep `json:"steps"`
 	// Replaces is, on a revised plan, the run's remaining steps the plan
 	// would replace: what would not run.
 	Replaces []ProposalStep `json:"replaces,omitempty"`
