@@ -7181,9 +7181,9 @@ The build follows §25, with these differences.
   never held: the loop ran to its max. A step's backend is handed the
   directory (`SessionOpts.WriteDirs`, made before it spawns): claude
   takes it as `--add-dir`, opencode opens it to edit, write, read and
-  `external_directory` beside the scratch directory. pi, copilot, codex,
-  antigravity and the headless backend cage nothing but their working
-  directory, so they need nothing.
+  `external_directory` beside the scratch directory. copilot and the
+  headless backend cage nothing but their working directory, so they need
+  nothing.
 - **A missing artifact is captured from the step's output** when the
   step ends done (`workflowrecipe.CaptureArtifact`), before the step
   reads as done, so the loop is judged on it; one the output does not

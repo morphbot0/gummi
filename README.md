@@ -58,8 +58,7 @@ session on main is always your read of its diff and your keypress.
 - **In the browser** — `gummi web` serves the same board to a browser,
   over loopback or your tailnet, with each workflow run drawn in the
   thread as it goes.
-- **Many backends** — Copilot CLI (default), Claude Code, Codex, opencode,
-  pi, Antigravity, or any binary speaking a small stdio protocol.
+- **Three backends** — Copilot CLI (default), Claude Code and opencode.
 
 ## Install
 

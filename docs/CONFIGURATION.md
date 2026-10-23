@@ -32,82 +32,18 @@ a run's writing steps, claude for its planner and reviews.
   read. Both degrade silently: a CLI whose `--help` does not advertise
   `--tools` keeps the full roster, and a conversation the CLI no longer
   holds is simply not resumed.
-- **codex**: the Codex CLI (`GUMMI_CODEX_BIN` overrides the binary), using
-  `codex exec --json` JSONL turns and `codex exec resume` — for turns
-  within one gummi session, and for a session that continues an earlier
-  one (a restored question, a reattached chat), whose thread gummi hands
-  back so it keeps what it had already read. A thread the CLI no longer
-  holds is dropped and the turn re-runs on a new one, so a stale id costs
-  a slower turn rather than the session. Codex owns authentication (`codex login`) and provider
-  config; gummi passes the profile's model through Codex's `-m` flag and
-  never copies credentials. Requires `permissions: allow-all`: the exec
-  stream cannot service guarded approval callbacks. Messages appear when
-  Codex completes each message item; command, file-change and MCP activity
-  stays visible as tool events.
 - **opencode**: the opencode CLI (`GUMMI_OPENCODE_BIN` overrides the
   binary). Provider and model config is owned by opencode itself
   (`opencode auth`, `opencode.json`). Conversations carry across gummi
-  processes through `run --session`, with the same fallback codex has: a
-  session opencode cannot find is dropped and the turn re-runs on a fresh
-  one. Under `permissions: guarded`, edits and writes inside the card's
+  processes through `run --session`; a session opencode cannot find is
+  dropped and the turn re-runs on a fresh one. Under `permissions: guarded`, edits and writes inside the card's
   worktree are not asked for: the worktree cage allows them outright, and
   guarded asks only for what the cage does not name (the shell, web
   fetches, everything outside the worktree). opencode's own `question`
   tool is always denied; agents ask through gummi's `ask_user`.
-- **pi**: the pi coding agent in RPC mode (`GUMMI_PI_BIN` overrides the
-  binary): one `pi --mode rpc` child per session, speaking JSON lines on
-  stdio. Provider and model config is owned by pi itself (`pi` →
-  `/login`, or the provider's API-key env var such as
-  `OPENROUTER_API_KEY`); `GUMMI_PI_PROVIDER` names the provider for model
-  ids that do not carry one (`openrouter/z-ai/glm-flash-latest` carries
-  its own, a bare `claude-sonnet-4.5` does not and would hit pi's
-  built-in default). Conversations carry across gummi processes through
-  `--session <id>`, with the same fallback the other CLI adapters have: a
-  session pi cannot confirm is dropped and the turn re-runs on a fresh
-  one. `--tools` gives pi's read-only sessions (a consult, a workflow
-  step of a reading role) a structural allowlist (bash/edit/write are absent, not merely unapproved). pi has
-  no native MCP client, so gummi's tools reach it through a generated
-  `--extension` (a per-session artifact): the session's tool descriptors
-  register at load, and a spawned `gummi __mcp` child serves the actual
-  calls, so ask_user and friends block exactly as on the MCP-native
-  backends. RPC mode has no approval gate, so guarded collapses to
-  allow-all.
-- **antigravity**: Google's Antigravity CLI (binary `agy`;
-  `GUMMI_ANTIGRAVITY_BIN` overrides it) in its bidirectional stream-json
-  mode: one `agy` child per session, turns framed on stdin, events
-  streamed off stdout. agy has no config-dir flag, so the adapter spawns
-  every child with `HOME` redirected to a per-card directory under the
-  workspace state area (`.gummi/state/agent-home/<ID>/agy`, and
-  `agy-consult` beside it for the card's consult conversation) — the
-  card's config tree (OAuth token copy, `mcp_config.json`,
-  conversations) lives there and nowhere in the operator's own config.
-  It is kept apart from the card's scratch directory, which the agent is
-  told is its own; a home an older gummi kept under
-  `.gummi/state/scratch/<ID>/agy-home` is moved on the card's next
-  session, conversations and all, so a resume still finds them. The card
-  home is seeded from the operator's
-  login (re-run `agy` in your real home to refresh it) and removed with
-  the card's cleanup. The tools agy runs inherit that `HOME`, so gummi
-  points the few settings they need back at your real home, each only
-  when you have not set it yourself: `GIT_CONFIG_GLOBAL` (your git
-  identity and signing setup), `GNUPGHOME`, and Go's `GOENV`, `GOPATH`,
-  `GOCACHE` and `GOLANGCI_LINT_CACHE`, so cards share your module and
-  build caches. `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` stay redirected,
-  because agy reads them itself. gummi's tools reach the child through the card
-  home's `mcp_config.json`, and your own agy skills
-  (`~/.gemini/config/skills`) are symlinked into the card home's copy of
-  that directory, so a card loads them as agy run by hand would.
-  Usage is metered as per-turn deltas from agy's cumulative token totals;
-  `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` prices them into credits, or the
-  engine's default token pricing applies. Requires `permissions:
-  allow-all` (agy's print mode has no approval surface, so guarded is
-  refused); read-only sessions are refused too (no structural
-  write-stripping); a turn cannot be interrupted mid-flight (the stream
-  protocol has no cancel event) — the board's stop control waits for the
-  turn to end; images are not carried. The model id carries the effort
-  dial (`gemini-3.1-pro-high`); an empty model runs agy's own default.
 - **headless**: a generic subprocess adapter for any agent binary speaking
-  a small stdio JSON protocol. `GUMMI_AGENT_CMD` is its command line. The
+  a small stdio JSON protocol. It is what gummi's own demo and browser
+  tests drive, not a supported agent. `GUMMI_AGENT_CMD` is its command line. The
   child inherits gummi's environment and reads its own provider config from
   there. `GUMMI_HEADLESS_CREDITS_PER_1K` prices a local endpoint's token
   spend into credits so it meters against the same envelope.
@@ -127,8 +63,8 @@ beside yours. Only a read-only session on claude runs with
 env is scrubbed.
 
 A card's **consult** (a question asked beside its session) runs in the
-main checkout, not the card's worktree. On claude, opencode and pi it runs
-read-only: the backend's own write tools are stripped. copilot, codex and antigravity cannot strip them, so a consult
+main checkout, not the card's worktree. On claude and opencode it runs
+read-only: the backend's own write tools are stripped. copilot cannot strip them, so a consult
 there still answers but can write to the checkout; the consult says so
 where it opens (TUI and web), and `gummi doctor` reports it per backend as
 `consult:<backend>`. Route the profile's `consult` role (it falls back to
@@ -184,9 +120,8 @@ Scaffolded on first run. Every key is optional.
 
 The first run seeds this file. Its default `thrifty` profile leaves
 `backend:` out, so the default backend drives it, and its model ids are
-written for that backend: the CLI's aliases for claude, `provider/model`
-for opencode and pi, OpenAI ids for codex, and `agy models` ids for
-antigravity. An existing file is never rewritten.
+written for that backend: the CLI's aliases for claude and
+`provider/model` for opencode. An existing file is never rewritten.
 
 A `default:` name plus a `profiles:` map. Each profile maps roles to
 `{backend, model}`. A workflow run's step takes its model from its
@@ -203,12 +138,12 @@ profiles:
     architect:   { backend: claude,  model: claude-opus-5 }
     implementer: { backend: copilot, model: gpt-5 }
     reviewer:    { backend: claude,  model: claude-sonnet-5 }
-    scribe:      { backend: headless, model: qwen2.5-coder-32b }
-  gemini: # everything on Antigravity
-    architect:   { backend: antigravity, model: gemini-3.1-pro-high }
-    implementer: { backend: antigravity, model: gemini-3.1-pro-high }
-    reviewer:    { backend: antigravity, model: gemini-3.1-pro-high }
-    scribe:      { backend: antigravity, model: gemini-3.1-pro-low }
+    scribe:      { backend: copilot, model: gpt-5-mini }
+  open: # everything on opencode
+    architect:   { backend: opencode, model: anthropic/claude-sonnet-5-5 }
+    implementer: { backend: opencode, model: openai/gpt-5 }
+    reviewer:    { backend: opencode, model: anthropic/claude-sonnet-5-5 }
+    scribe:      { backend: opencode, model: anthropic/claude-haiku-4-5 }
 ```
 
 A recipe's planner step reads the work and may revise the run's
@@ -319,12 +254,10 @@ re-raised decision that deduped to a no-op raises nothing).
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `codex`, `opencode`, `pi`, `antigravity`, `headless` |
+| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `opencode` (or `headless`, for tests and demos) |
 | `GUMMI_AGENT_CMD` | the headless adapter's command line |
-| `GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, `GUMMI_OPENCODE_BIN`, `GUMMI_PI_BIN`, `GUMMI_ANTIGRAVITY_BIN` | a backend's binary, when it is not the default name on PATH |
-| `GUMMI_PI_PROVIDER` | the provider pi routes a session to when its model id does not name one |
+| `GUMMI_CLAUDE_BIN`, `GUMMI_OPENCODE_BIN` | a backend's binary, when it is not the default name on PATH |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
-| `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` | token→credit rate for antigravity sessions (agy reports token counts only); 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_ENVELOPE` | default budget for new cards, in dollars (`20`, `$12.50`). Unset, the board prefills $20 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
 | `GUMMI_STAGE_BUDGET` | flat credit cap for a card's agent session when the card has no envelope |
