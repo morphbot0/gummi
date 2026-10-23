@@ -16,6 +16,13 @@ var templateRe = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // config.SaveProfile holds a profile's roles to.
 var slotName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
 
+// idRe is what an entry's id may hold.
+var idRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func allDigits(s string) bool {
+	return strings.Trim(s, "0123456789") == ""
+}
+
 // Check judges whether a recipe can run (§25.4). Problems refuse it: an id
 // missing or used twice, an unknown role or tier, a step without a prompt,
 // a {{…}} naming no input, artifact or earlier step, a repeat without a
@@ -67,6 +74,11 @@ func (c *checker) id(id, kind string) string {
 	if id == "" {
 		c.problem("a %s has no id", kind)
 		return "a " + kind + " without an id"
+	}
+	if !idRe.MatchString(id) || allDigits(id) {
+		// a path joins ids with "/" and numbers a repeat's iterations, and a
+		// template names an id before ".output": an id holds none of them
+		c.problem("the id %q may hold only letters, digits, - and _, and not digits alone", id)
 	}
 	if prev, dup := c.ids[id]; dup {
 		c.problem("the id %q is used twice (a %s and a %s)", id, prev, kind)
