@@ -146,3 +146,22 @@ func TestAStepsQuestionCarriesItsCall(t *testing.T) {
 		t.Fatalf("question %+v", q)
 	}
 }
+
+// TestTheNewestPartialRunOffersARetry: the session's newest run that ended
+// partial with a failed step offers a retry; an earlier attempt of a
+// retried step says it is one.
+func TestTheNewestPartialRunOffersARetry(t *testing.T) {
+	steps := []domain.RunStep{
+		{Path: "after@1", StepID: "after", State: domain.StepFailed, StartedAt: runAt, Reason: "it said it failed"},
+		{Path: "after", StepID: "after", State: domain.StepFailed, StartedAt: runAt.Add(time.Minute), Reason: "again"},
+	}
+	older := RunInput{Run: domain.Run{N: 1, Recipe: oneLoop(), State: domain.RunPartial, StartTree: "a", StartedAt: runAt, EndedAt: runAt}, Steps: steps}
+	newer := RunInput{Run: domain.Run{N: 2, Recipe: oneLoop(), State: domain.RunPartial, StartTree: "b", StartedAt: runAt, EndedAt: runAt.Add(time.Hour)}, Steps: steps}
+	out := FoldRuns([]RunInput{older, newer}, time.Time{})
+	if out[0].CanRetry || !out[1].CanRetry {
+		t.Fatalf("retry offered on %v %v", out[0].CanRetry, out[1].CanRetry)
+	}
+	if line := out[1].Rows[0].Line; line != "an earlier attempt · it said it failed" {
+		t.Fatalf("the earlier attempt's row says %q", line)
+	}
+}

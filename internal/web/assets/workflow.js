@@ -417,6 +417,7 @@ function foot (id, r, ended) {
     h('span', { class: 'sp' }),
     files.length && r.started ? h('button', { class: 'link', type: 'button', testid: 'run-diff', onclick: () => openRunDiff(id, r) }, 'diff ▸') : null,
     r.report ? h('button', { class: 'link', type: 'button', testid: 'run-report', onclick: () => openSpec(r.spec) }, 'report ▸') : null,
+    r.canRetry ? h('button', { class: 'btn', type: 'button', testid: 'run-retry', title: 'Run its failed and stopped steps again, keeping every step that finished', onclick: (e) => runPost(id, r.n, 'retry', 'its failed steps run again', e.currentTarget) }, 'Retry failed steps') : null,
     r.canRevert ? h('button', { class: 'btn', type: 'button', testid: 'run-revert', onclick: () => openRevert(id, r.n) }, 'Revert run…') : null,
     saveEl(id, r))
 }
@@ -527,21 +528,26 @@ export function markStep (root) {
 
 // ---------------------------------------------------------------- revert
 
-async function openRevert (id, n) {
+// openRevert previews and confirms a revert of run n: to where it started,
+// or with step to where that step started.
+async function openRevert (id, n, step = '') {
   let pre
+  const q = step ? `?step=${encodeURIComponent(step)}` : ''
   try {
-    pre = await get(cardPath(id, `runs/${n}/revert`))
+    pre = await get(cardPath(id, `runs/${n}/revert${q}`))
   } catch (err) {
     toast(err.data?.error || err.message, { err: true })
     return
   }
   const paths = pre.paths || []
   openModal({
-    title: `Revert run ${n}?`,
+    title: step ? `Revert run ${n} to before ${step}?` : `Revert run ${n}?`,
     testid: 'revert-dialog',
     card: id,
     bodyEl: h('div', { class: 'mbody' },
-      h('p', null, paths.length ? `${plural(paths.length, 'path')} go back to how they were when run ${n} started:` : 'Nothing differs from where the run started.'),
+      h('p', null, paths.length
+        ? `${plural(paths.length, 'path')} go back to how they were ${step ? `before ${step} started` : `when run ${n} started`}:`
+        : step ? 'Nothing differs from where the step started.' : 'Nothing differs from where the run started.'),
       paths.length ? h('ul', { class: 'rb-paths mono', testid: 'revert-paths' }, paths.map(p => h('li', null, p))) : null,
       h('p', { class: 'hint', testid: 'revert-note' }, pre.note)),
     actions: [
@@ -555,7 +561,7 @@ async function openRevert (id, n) {
         onClick: async () => {
           try {
             // the revert is of what this preview listed: the server refuses it if the tree has moved since
-            const done = await post(cardPath(id, `runs/${n}/revert`), { tree: pre.tree })
+            const done = await post(cardPath(id, `runs/${n}/revert`), { tree: pre.tree, step })
             toast(`Run ${n} reverted: ${plural((done.paths || []).length, 'path')} put back`)
             ctx.refresh(id)
           } catch (err) {
@@ -666,7 +672,11 @@ function renderStep (pane, entry, pctx) {
       [s.model, s.slot && `slot ${s.slot}`].filter(Boolean).join(' · '),
       h('span', { class: 'mono', testid: 'step-spent' }, money),
       'in the session’s tree'),
-    s.reason ? h('div', { class: 'rb-why' }, s.reason) : null)
+    s.reason ? h('div', { class: 'rb-why' }, s.reason) : null,
+    s.canRevert ? h('div', { class: 'stp-acts' }, h('button', {
+      class: 'btn', type: 'button', testid: 'step-revert', title: 'Put the tree back to where this step started, keeping what the steps before it did',
+      onclick: () => openRevert(s.session, s.run, s.path)
+    }, 'Revert to before this step…')) : null)
   const tabs = [['transcript', 'Transcript'], ['diff', 'Diff'], ['brief', 'Brief']]
   const bar = h('div', { class: 'seg stp-tabs', role: 'tablist', 'aria-label': 'The step' }, tabs.map(([k, l]) => h('button', {
     class: tab === k && 'on', type: 'button', role: 'tab', 'aria-selected': String(tab === k), testid: `step-tab-${k}`, onclick: () => setInner(k)
@@ -909,12 +919,17 @@ function liveActs (r, l) {
       return [btn('run-live-answer', 'Answer', () => openStep(l.card), true), jump(false)]
     case 'budget': {
       // the run's own question is the top-up: Top up… answers it with an
-      // amount; with none open, the card's budget is raised instead
-      const d = state.card?.decision
-      const words = d?.options?.find(o => o.words)
-      if (words) return [btn('run-live-topup', 'Top up…', () => openTopUp(id, r, d, words), true), jump(false)]
+      // amount, read when pressed; with none open, the card's budget is
+      // raised instead
       const raise = state.card?.actions?.find(a => a.id === 'envelope')
-      return [raise ? btn('run-live-topup', 'Top up…', () => runAction(state.card, raise), true) : null, jump(!raise)]
+      const question = () => state.card?.decision?.runKind === 'budget' ? state.card.decision : null
+      return [btn('run-live-topup', 'Top up…', () => {
+        const d = question()
+        const words = d?.options?.find(o => o.words)
+        if (words) openTopUp(id, r, d, words)
+        else if (raise) runAction(state.card, raise)
+        else toast('Raise the session’s budget from its menu')
+      }, true), jump(false)]
     }
     case 'paused':
       return [l.canResume ? btn('run-live-resume', 'Resume', async (e) => {

@@ -572,3 +572,149 @@ func TestRunPhaseSaysWhatGummiDoesBetweenSteps(t *testing.T) {
 		t.Errorf("another run's phase %q", got)
 	}
 }
+
+// TestAFollowUpWaitsWhileTheRunWritesTheTree: a person's follow-up to an
+// ended step may change the tree, which the run's step at work is
+// writing: it is refused until that step is done, and taken after.
+func TestAFollowUpWaitsWhileTheRunWritesTheTree(t *testing.T) {
+	wf := newWFFake()
+	g := newGate(t)
+	wf.on("two", func(string, string, int) wfReply {
+		<-g.ch
+		return wfReply{text: "done", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: two\nsteps:\n" +
+		"  - { id: one, role: implementer, prompt: first }\n  - { id: two, role: implementer, prompt: second }\n"})
+	tickRuns(t, e, f.ID, run.N, "the second step at work", func(*domain.Run) bool { return wf.count("two") > 0 })
+	one := stepPaths(t, e, f.ID, run.N)["one"].Card
+	if err := e.StepSend(ctx, one, "and one more thing"); err == nil || !strings.Contains(err.Error(), "step two of run 1 is at work") {
+		t.Fatalf("a follow-up under a step at work: %v", err)
+	}
+	g.open()
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if err := e.StepSend(ctx, one, "and one more thing"); err != nil {
+		t.Fatalf("a follow-up once the run has ended: %v", err)
+	}
+}
+
+// TestAReaderBesideAWriterIsNotFlaggedForItsWork: a reviewer at work
+// beside an implementer in a parallel is not flagged for the files the
+// implementer changed meanwhile; one it changed itself still is.
+func TestAReaderBesideAWriterIsNotFlaggedForItsWork(t *testing.T) {
+	wf := newWFFake()
+	var e *Engine
+	var f domain.Feature
+	wf.on("write", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "theirs.txt"), []byte("the writer's\n"), 0o600)
+		return wfReply{text: "wrote", credits: 1}
+	})
+	wf.on("read", func(dir, _ string, _ int) wfReply {
+		// the reader's own change comes once the writer's step has ended,
+		// so it is in neither the writer's snapshots nor its diff
+		deadline := time.Now().Add(testWaitTimeout)
+		for time.Now().Before(deadline) {
+			if s, _ := e.cfg.Store.RunStep(context.Background(), f.ID, 1, "both/write"); s != nil && s.EndTree != "" {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_ = os.WriteFile(filepath.Join(dir, "mine.txt"), []byte("the reader's\n"), 0o600)
+		return wfReply{text: "read", credits: 1}
+	})
+	e, _, f, _ = wfEngine(t, wf)
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: side\nsteps:\n  - id: both\n    parallel:\n      join: allSettled\n" +
+		"      steps:\n        - { id: write, role: implementer, prompt: w }\n        - { id: read, role: reviewer, prompt: r }\n"})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if got := stepPaths(t, e, f.ID, run.N)["both/read"].Changed; len(got) != 1 || got[0] != "mine.txt" {
+		t.Fatalf("the reader is flagged for %q", got)
+	}
+}
+
+// TestARetryRunsTheFailedStepsAgain: a person retrying a run that ended
+// partial runs its failed step again, keeping the earlier attempt (and
+// what it spent) beside it and every step that finished as it was; the run
+// ends anew. Only the newest run that ended, with nothing failed or open,
+// is retried.
+func TestARetryRunsTheFailedStepsAgain(t *testing.T) {
+	wf := newWFFake()
+	wf.on("one", writesOut)
+	wf.on("two", func(_ string, _ string, n int) wfReply {
+		if n == 1 {
+			return wfReply{text: "could not\nFAILED: the tool was missing", credits: 3}
+		}
+		return wfReply{text: "done now", credits: 1}
+	})
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: two\nsteps:\n" +
+		"  - { id: one, role: implementer, prompt: first }\n  - { id: two, role: implementer, prompt: second }\n"})
+	if err := e.WorkflowRetry(ctx, f.ID, run.N); err == nil {
+		t.Fatal("a running run was retried")
+	}
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunPartial {
+		t.Fatalf("first ended %s", r.State)
+	}
+	spent := r.Spent
+	if err := e.WorkflowRetry(ctx, f.ID, run.N); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ = store.Run(ctx, f.ID, run.N); r.State != domain.RunRunning || !r.EndedAt.IsZero() || len(r.Results) != 0 {
+		t.Fatalf("the retried run %s, ended %v, results %v", r.State, r.EndedAt, r.Results)
+	}
+	r = tickRuns(t, e, f.ID, run.N, "ended again", ended)
+	steps := stepPaths(t, e, f.ID, run.N)
+	if r.State != domain.RunDone || steps["two"].State != domain.StepDone || steps["two@1"].State != domain.StepFailed ||
+		wf.count("one") != 1 || wf.count("two") != 2 {
+		t.Fatalf("after the retry: run %s, steps %+v, one ran %d, two %d", r.State, steps, wf.count("one"), wf.count("two"))
+	}
+	if r.Spent < spent+1 {
+		t.Fatalf("the earlier attempt's spend went: %.0f after %.0f", r.Spent, spent)
+	}
+	if err := e.WorkflowRetry(ctx, f.ID, run.N); err == nil || !strings.Contains(err.Error(), "only a run that ended partial or stopped") {
+		t.Fatalf("a run that ended done was retried: %v", err)
+	}
+}
+
+// TestARevertToAStepKeepsWhatTheStepsBeforeItDid: reverting a run to where
+// one of its steps started puts back what that step and those after it
+// changed, and keeps what the steps before it did.
+func TestARevertToAStepKeepsWhatTheStepsBeforeItDid(t *testing.T) {
+	wf := newWFFake()
+	wf.on("one", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "first.txt"), []byte("first\n"), 0o600)
+		return wfReply{text: "first", credits: 1}
+	})
+	wf.on("two", func(dir, _ string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "second.txt"), []byte("second\n"), 0o600)
+		return wfReply{text: "second", credits: 1}
+	})
+	e, store, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: two\nsteps:\n" +
+		"  - { id: one, role: implementer, prompt: first }\n  - { id: two, role: implementer, prompt: second }\n"})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	pre, err := e.WorkflowRevertPreviewTo(ctx, f.ID, run.N, "two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(pre.Paths, ",") != "second.txt" || pre.Step != "two" || !strings.Contains(pre.Note, "before step two started") {
+		t.Fatalf("preview %+v", pre)
+	}
+	if _, err := e.WorkflowRevertPreviewTo(ctx, f.ID, run.N, "three"); err == nil {
+		t.Fatal("a step the run never had was reverted to")
+	}
+	if _, err := e.WorkflowRevertTo(ctx, f.ID, run.N, "two", pre.Tree); err != nil {
+		t.Fatal(err)
+	}
+	sess, _ := store.GetFeature(ctx, f.ID)
+	tree := e.treeOf(ctx, sess)
+	if _, err := os.Stat(filepath.Join(tree, "second.txt")); !os.IsNotExist(err) {
+		t.Errorf("the reverted step's file is still there: %v", err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(tree, "first.txt")); err != nil || string(raw) != "first\n" {
+		t.Errorf("the step before it lost its work: %q %v", raw, err)
+	}
+}

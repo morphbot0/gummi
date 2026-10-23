@@ -397,3 +397,18 @@ func (s *Store) SessionStepSpends(ctx context.Context, session domain.FeatureID)
 	}
 	return out, rows.Err()
 }
+
+// RenameRunStep moves run n's step instance at path to path to: a retried
+// step's earlier attempt is kept beside the new one, its spend and card
+// with it.
+func (s *Store) RenameRunStep(ctx context.Context, session domain.FeatureID, n int, path, to string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE workflow_steps SET path=? WHERE session_id=? AND run_n=? AND path=?`,
+		to, string(session), n, path)
+	if err != nil {
+		return err
+	}
+	if k, _ := res.RowsAffected(); k == 0 {
+		return fmt.Errorf("run %d's step %s: %w", n, path, ErrNotFound)
+	}
+	return nil
+}

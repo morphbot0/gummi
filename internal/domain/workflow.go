@@ -623,3 +623,46 @@ type SpecRevision struct {
 	By      string
 	At      time.Time
 }
+
+// RetryRefusal says why run cannot be retried, "" when it can: a person
+// retrying a run that ended partial or stopped runs its failed and stopped
+// steps again, keeping every step that finished (DESIGN §25.6). Only the
+// session's newest run that started may be, while no other run is open or
+// queued — a retry reopens it in the tree — and only one with something to
+// run again: a step that failed or stopped, or a loop a person stopped.
+// steps are run's; runs are the session's every run.
+func RetryRefusal(run Run, steps []RunStep, runs []Run) string {
+	if run.State != RunPartial && run.State != RunStopped {
+		return fmt.Sprintf("run %d is %s: only a run that ended partial or stopped is retried", run.N, run.State)
+	}
+	if run.StartTree == "" {
+		return fmt.Sprintf("run %d never started", run.N)
+	}
+	for _, o := range runs {
+		switch {
+		case o.N == run.N:
+		case o.State.Open() || o.State == RunQueued:
+			return fmt.Sprintf("run %d is %s: retry once it has ended", o.N, o.State)
+		case o.N > run.N && o.StartTree != "":
+			return fmt.Sprintf("run %d ran after it: only the newest run is retried", o.N)
+		}
+	}
+	for _, s := range steps {
+		if s.State == StepFailed || s.State == StepStopped {
+			return ""
+		}
+	}
+	for _, a := range run.OnMax {
+		if a == "stop" {
+			return ""
+		}
+	}
+	return fmt.Sprintf("run %d has no failed or stopped step to run again", run.N)
+}
+
+// RetriedPath is where a retried step's earlier attempt is kept: its path
+// with the attempt's number, as in build/2/implement@1. An entry's id never
+// holds "@", so the path names no step of the recipe.
+func RetriedPath(path string, attempt int) string {
+	return fmt.Sprintf("%s@%d", path, attempt)
+}

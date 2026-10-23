@@ -658,10 +658,51 @@ func (e *Engine) flagReaderChanges(ctx context.Context, st *domain.RunStep) {
 	if err != nil {
 		return
 	}
-	if _, paths, err := worktree.DiffTrees(ctx, dir, st.StartTree, st.EndTree); err == nil && len(paths) > 0 {
-		st.Changed = paths
-		e.runNote(st.Session, fmt.Sprintf("run %d: %s, a reading step, changed %d file%s", st.Run, st.Path, len(paths), plural(len(paths))))
+	_, paths, err := worktree.DiffTrees(ctx, dir, st.StartTree, st.EndTree)
+	if err != nil || len(paths) == 0 {
+		return
 	}
+	// a writing step at work beside it (a parallel's implementer, say)
+	// changes the same tree: the paths that step changed are its work, not
+	// the reader's
+	theirs := map[string]bool{}
+	steps, _ := e.cfg.Store.RunSteps(ctx, st.Session, st.Run)
+	for _, o := range steps {
+		if o.Path == st.Path || o.Role.Reads() || o.StartTree == "" || !overlaps(o, *st) {
+			continue
+		}
+		end := o.EndTree
+		if end == "" {
+			end = st.EndTree
+		}
+		if _, ps, err := e.diffTreesCached(ctx, dir, o.StartTree, end, o.EndTree != ""); err == nil {
+			for _, p := range ps {
+				theirs[p] = true
+			}
+		}
+	}
+	var mine []string
+	for _, p := range paths {
+		if !theirs[p] {
+			mine = append(mine, p)
+		}
+	}
+	if len(mine) > 0 {
+		st.Changed = mine
+		e.runNote(st.Session, fmt.Sprintf("run %d: %s, a reading step, changed %d file%s", st.Run, st.Path, len(mine), plural(len(mine))))
+	}
+}
+
+// overlaps reports whether two steps were at work at the same time.
+func overlaps(a, b domain.RunStep) bool {
+	aEnd, bEnd := a.EndedAt, b.EndedAt
+	if aEnd.IsZero() {
+		aEnd = time.Now()
+	}
+	if bEnd.IsZero() {
+		bEnd = time.Now()
+	}
+	return a.StartedAt.Before(bEnd) && b.StartedAt.Before(aEnd)
 }
 
 // settleStep ends a live step without an output of its own: stopped,
@@ -762,12 +803,32 @@ func (e *Engine) StepSend(ctx context.Context, stepCard domain.FeatureID, text s
 		if run, err := e.cfg.Store.Run(ctx, inst.Session, inst.Run); err == nil && run != nil && run.State == domain.RunPaused {
 			return fmt.Errorf("run %d is paused: resume it before talking to its step %s", run.N, inst.Path)
 		}
+	} else if busy := e.liveStepOf(ctx, inst.Session); busy != nil {
+		// a follow-up may change the tree, which the open run's steps are
+		// writing: its edits would land in their diffs as theirs
+		return fmt.Errorf("step %s of run %d is at work in this tree: talk to %s once the run has paused or ended",
+			busy.Path, busy.Run, inst.Path)
 	}
 	ff, err := e.OpenFreeform(ctx, card)
 	if err != nil {
 		return err
 	}
 	return ff.SendTurn(ctx, text, nil)
+}
+
+// liveStepOf is a step at work in the session's open run, nil when none is.
+func (e *Engine) liveStepOf(ctx context.Context, session domain.FeatureID) *domain.RunStep {
+	run, err := e.cfg.Store.OpenRun(ctx, session)
+	if err != nil || run == nil || run.State != domain.RunRunning {
+		return nil
+	}
+	steps, _ := e.cfg.Store.RunSteps(ctx, session, run.N)
+	for i := range steps {
+		if steps[i].State.Live() && steps[i].EndTree == "" {
+			return &steps[i]
+		}
+	}
+	return nil
 }
 
 // RunSteps lists a run's step instances, oldest first, for the faces.

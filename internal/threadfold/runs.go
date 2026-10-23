@@ -139,6 +139,9 @@ type Run struct {
 	// CanWithdraw offers to take back a run allowed and queued behind the
 	// open one, before it starts.
 	CanWithdraw bool `json:"canWithdraw,omitempty"`
+	// CanRetry offers to run an ended run's failed and stopped steps again
+	// (domain.RetryRefusal), set where all the session's runs are folded.
+	CanRetry bool `json:"canRetry,omitempty"`
 	// AlwaysAllowed is set on the session's newest run while a person
 	// always allows its runs: the block says so, with Ask again.
 	AlwaysAllowed bool `json:"alwaysAllowed,omitempty"`
@@ -322,8 +325,16 @@ func FoldRuns(ins []RunInput, said time.Time) []Run {
 	latest := -1
 	var latestAt time.Time
 	latestN := 0
+	all := make([]domain.Run, len(ins))
+	for i, in := range ins {
+		all[i] = in.Run
+	}
 	for i, in := range ins {
 		out[i] = FoldRun(in)
+		if domain.RetryRefusal(in.Run, in.Steps, all) == "" {
+			out[i].CanRetry = true
+			out[i].Rev = runRev(out[i])
+		}
 		if !in.Run.State.Ended() {
 			continue
 		}
@@ -869,6 +880,7 @@ func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 	l, seen := live[s.Path]
 	state := liveState(s, l, seen)
 	row.State = string(state)
+	earlier := strings.Contains(s.Path, "@")
 	switch {
 	case state == domain.StepAsking && s.EndTree != "":
 		row.Line = "its revised plan waits on you"
@@ -890,6 +902,10 @@ func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 		row.Model = Sanitize(l.Model)
 	}
 	row.Flag = ReaderFlag(len(s.Changed))
+	if earlier {
+		// a retried step's earlier attempt, kept beside the one run again
+		row.Line = "an earlier attempt · " + row.Line
+	}
 	return row
 }
 

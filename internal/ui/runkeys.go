@@ -298,6 +298,12 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 		return m.runAct(r, run.N, "askagain")
 	case "f":
 		return m.openRunDiff(r, run.N)
+	case "t":
+		if !run.CanRetry {
+			m.notice = noticeMsg{text: fmt.Sprintf("run %d has nothing to retry: only the newest run that ended partial or stopped, with no other run open", run.N)}
+			return nil
+		}
+		return m.runAct(r, run.N, "retry")
 	case "r":
 		return m.readRunArtifacts(r, run)
 	case "v":
@@ -363,6 +369,7 @@ func (m *Shell) runBindings() []binding {
 		{key: "s", label: "save recipe", help: "save the run's inline recipe as a workspace recipe (.gummi/workflows/<name>.yaml), named in a prompt; a run of a kept recipe has nothing to save"},
 		{key: "f", label: "run diff", help: "read the run's whole diff, from where it started to the tree now"},
 		{key: "r", label: "artifacts", help: "read the artifacts the run wrote beside the tree: a report, a design, a review"},
+		{key: "t", label: "retry", help: "run an ended run's failed and stopped steps again, keeping every step that finished"},
 		{key: "w", label: "withdraw", help: "withdraw a run allowed and queued behind the open one, before it starts"},
 		{key: "a", label: "ask again", help: "take back always-allow: the session's next proposal asks you again"},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread"},
@@ -438,6 +445,8 @@ func actWord(act string) string {
 		return "stopping"
 	case "withdraw":
 		return "withdrawn"
+	case "retry":
+		return "retried: its failed steps run again"
 	case "askagain":
 		return "its session's runs ask you again"
 	}
@@ -513,8 +522,10 @@ type runArtifactsMsg struct {
 
 // revertPreviewMsg carries what reverting run n would put back.
 type revertPreviewMsg struct {
-	card  domain.FeatureID
-	run   int
+	card domain.FeatureID
+	run  int
+	// step is the step it reverts to before, "" for the run's start
+	step  string
 	paths []string
 	// tree is the tree the preview was read from: the confirm reverts
 	// against it, and is refused if the tree has changed since
@@ -526,29 +537,39 @@ type revertPreviewMsg struct {
 // previewRevert reads what reverting run n would put back, for its
 // confirm.
 func (m *Shell) previewRevert(r featureRow, n int) tea.Cmd {
+	return m.previewRevertTo(r, n, "")
+}
+
+// previewRevertTo reads what reverting run n to before step (the run's
+// start when "") would put back, for its confirm.
+func (m *Shell) previewRevertTo(r featureRow, n int, step string) tea.Cmd {
 	d, err := m.webDocsFor(r)
 	if err != nil {
 		return errNoticeCmd(err.Error())
 	}
 	id := r.F.ID
 	return func() tea.Msg {
-		p, err := d.RevertPreview(context.Background(), n)
-		return revertPreviewMsg{card: id, run: n, paths: p.Paths, tree: p.Tree, note: p.Note, err: err}
+		p, err := d.RevertPreviewTo(context.Background(), n, step)
+		return revertPreviewMsg{card: id, run: n, step: step, paths: p.Paths, tree: p.Tree, note: p.Note, err: err}
 	}
 }
 
 // revertConfirm is the confirm a revert waits on: every path it puts back,
 // and what that also undoes.
-func revertConfirm(p revertPreviewMsg, revert func(domain.FeatureID, int, string) tea.Cmd) *confirmDialog {
+func revertConfirm(p revertPreviewMsg, revert func(domain.FeatureID, int, string, string) tea.Cmd) *confirmDialog {
 	var b strings.Builder
+	when := fmt.Sprintf("when run %d started", p.run)
+	if p.step != "" {
+		when = "before " + p.step + " started"
+	}
 	if len(p.paths) == 0 {
-		b.WriteString("Nothing differs from where the run started.")
+		b.WriteString("Nothing differs from where it started.")
 	} else {
 		goes := "goes back to how it was"
 		if len(p.paths) > 1 {
 			goes = "go back to how they were"
 		}
-		fmt.Fprintf(&b, "%d path%s %s when run %d started:\n", len(p.paths), plural(len(p.paths)), goes, p.run)
+		fmt.Fprintf(&b, "%d path%s %s %s:\n", len(p.paths), plural(len(p.paths)), goes, when)
 		const shown = 12
 		for i, path := range p.paths {
 			if i == shown {
@@ -561,18 +582,22 @@ func revertConfirm(p revertPreviewMsg, revert func(domain.FeatureID, int, string
 	if p.note != "" {
 		b.WriteString("\n" + wrapText(sanitize(p.note), 64))
 	}
+	question := fmt.Sprintf("Revert run %d?", p.run)
+	if p.step != "" {
+		question = fmt.Sprintf("Revert run %d to before %s?", p.run, p.step)
+	}
 	return &confirmDialog{
 		id: "run-revert", card: p.card,
-		question:     fmt.Sprintf("Revert run %d?", p.run),
+		question:     question,
 		detail:       strings.TrimRight(b.String(), "\n"),
 		confirmLabel: "Revert",
-		onConfirm:    func() tea.Cmd { return revert(p.card, p.run, p.tree) },
+		onConfirm:    func() tea.Cmd { return revert(p.card, p.run, p.step, p.tree) },
 	}
 }
 
 // revertRun is the confirmed revert of run n, against the tree its
 // preview was read from.
-func (m *Shell) revertRun(id domain.FeatureID, n int, tree string) tea.Cmd {
+func (m *Shell) revertRun(id domain.FeatureID, n int, step, tree string) tea.Cmd {
 	r, ok := m.rowByID(id)
 	if !ok {
 		return nil
@@ -582,7 +607,7 @@ func (m *Shell) revertRun(id domain.FeatureID, n int, tree string) tea.Cmd {
 		return errNoticeCmd(err.Error())
 	}
 	return func() tea.Msg {
-		done, err := d.Revert(context.Background(), n, tree)
+		done, err := d.RevertTo(context.Background(), n, step, tree)
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}

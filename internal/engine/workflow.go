@@ -1273,6 +1273,76 @@ func (e *Engine) WorkflowWithdraw(ctx context.Context, session domain.FeatureID,
 	return nil
 }
 
+// WorkflowRetry is a person retrying run n (domain.RetryRefusal says
+// when they may): every step that failed or stopped runs again, its
+// earlier attempt kept beside it (domain.RetriedPath) with its spend; a
+// loop a person stopped asks again at its max; every step that finished
+// stays as it was. The run is open again, judged against the same frozen
+// spec, its diff still from where it first started. Only a person retries:
+// no session tool does.
+func (e *Engine) WorkflowRetry(ctx context.Context, session domain.FeatureID, n int) error {
+	st := e.cfg.Store
+	if st == nil {
+		return errors.New("workflows need the store")
+	}
+	unlock := e.lockRuns(session)
+	defer unlock()
+	run, err := st.Run(ctx, session, n)
+	if err != nil {
+		return err
+	}
+	if run == nil {
+		return fmt.Errorf("this session has no run %d", n)
+	}
+	runs, err := st.SessionRuns(ctx, session)
+	if err != nil {
+		return err
+	}
+	steps, err := st.RunSteps(ctx, session, n)
+	if err != nil {
+		return err
+	}
+	if why := domain.RetryRefusal(*run, steps, runs); why != "" {
+		return errors.New(why)
+	}
+	taken := map[string]bool{}
+	for _, s := range steps {
+		taken[s.Path] = true
+	}
+	var again []string
+	for _, s := range steps {
+		if s.State != domain.StepFailed && s.State != domain.StepStopped {
+			continue
+		}
+		k := 1
+		for taken[domain.RetriedPath(s.Path, k)] {
+			k++
+		}
+		to := domain.RetriedPath(s.Path, k)
+		if err := st.RenameRunStep(ctx, session, n, s.Path, to); err != nil {
+			return err
+		}
+		taken[to] = true
+		again = append(again, s.Path)
+	}
+	for k, a := range run.OnMax {
+		if a == string(workflowpolicy.OnMaxStop) {
+			delete(run.OnMax, k)
+			again = append(again, k)
+		}
+	}
+	run.State, run.Reason, run.Stopping, run.Pending, run.OutOfBudget = domain.RunRunning, "", false, nil, false
+	run.EndedAt, run.EndTree, run.Results, run.Report, run.Commits = time.Time{}, "", nil, "", nil
+	e.clockStart(run)
+	e.wfRT().conduct(session, n)
+	if err := st.UpdateRun(ctx, run); err != nil {
+		return err
+	}
+	e.runNote(session, fmt.Sprintf("run %d retried: %s again", n, strings.Join(again, ", ")))
+	e.workflowEvent(session)
+	return nil
+}
+
 // WorkflowAlwaysAllows reports whether a person always allows session's
 // runs, so its proposals start without asking.
 func (e *Engine) WorkflowAlwaysAllows(ctx context.Context, session domain.FeatureID) bool {

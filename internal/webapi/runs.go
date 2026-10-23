@@ -69,6 +69,9 @@ type RunBlock struct {
 	// CanWithdraw offers to take back a queued run before it starts (POST
 	// …/runs/{n}/withdraw).
 	CanWithdraw bool `json:"canWithdraw,omitempty"`
+	// CanRetry offers to run an ended run's failed and stopped steps again
+	// (POST …/runs/{n}/retry), keeping every step that finished.
+	CanRetry bool `json:"canRetry,omitempty"`
 	// AlwaysAllowed, on the session's newest run, says a person always
 	// allows its runs: Ask again (POST …/runs/{n}/askagain) takes it back.
 	AlwaysAllowed bool `json:"alwaysAllowed,omitempty"`
@@ -301,6 +304,10 @@ type StepFace struct {
 	// POST /api/cards/{id}/steps/{card}/answer (the strip's Answer opens
 	// the step on it).
 	Question *StepQuestion `json:"question,omitempty"`
+	// CanRevert offers to put the tree back to where the step started
+	// (GET/POST …/runs/{n}/revert?step=<path>): its run is not running,
+	// and nothing of it is at work.
+	CanRevert bool `json:"canRevert,omitempty"`
 }
 
 // StepArtifact is one artifact a step's brief names: its name, its path
@@ -379,12 +386,17 @@ type RevertPreview struct {
 	Tree string `json:"tree"`
 	// Note says what reverting also undoes.
 	Note string `json:"note"`
+	// Step is the step it reverts to before (?step=), "" for the run's
+	// start.
+	Step string `json:"step,omitempty"`
 }
 
 // RevertRequest is POST /api/cards/{id}/runs/{n}/revert: the confirmed
 // revert, naming the preview's Tree.
 type RevertRequest struct {
 	Tree string `json:"tree"`
+	// Step reverts to where that step started rather than the run.
+	Step string `json:"step,omitempty"`
 }
 
 // SaveRecipeRequest is POST /api/cards/{id}/runs/{n}/save: a person

@@ -86,7 +86,10 @@ type Decision struct {
 	// decision's record id. An answer names it back.
 	Ref      string       `json:"ref"`
 	Kind     DecisionKind `json:"kind"`
-	Question string       `json:"question"`
+	// RunKind is set on a workflow run's own decision: what it asks
+	// (proposal, plan, max, unjudged, budget, resume).
+	RunKind  string `json:"runKind,omitempty"`
+	Question string `json:"question"`
 	// Word is the decision's one-word name as the page heads it ("design
 	// gate", "verify passed", "working"): said by the server, which knows
 	// the outcome behind a kind, so the page never derives it.

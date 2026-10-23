@@ -169,7 +169,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 		Strip: []webapi.RunStripEntry{}, Rows: []webapi.RunStepRow{},
 		Files: r.Files, Commits: r.Commits, Report: r.Report,
 		CanPause: r.CanPause, CanResume: r.CanResume, CanStop: r.CanStop, CanRevert: r.CanRevert,
-		CanWithdraw: r.CanWithdraw, AlwaysAllowed: r.AlwaysAllowed,
+		CanWithdraw: r.CanWithdraw, CanRetry: r.CanRetry, AlwaysAllowed: r.AlwaysAllowed,
 		CanSave: r.CanSave, SaveName: r.SaveName, SavedAs: r.SavedAs,
 		Mark: r.Mark, Line: r.Line, Folded: r.Folded,
 	}
@@ -387,6 +387,8 @@ func (d *WebDocs) Step(ctx context.Context, card string) (webapi.StepFace, error
 	if st.State.Live() {
 		out.Says = "a turn to " + st.StepID + " while it runs: its output is whatever it says last"
 	}
+	out.CanRevert = st.StartTree != "" && !st.State.Live() && run.State != domain.RunRunning &&
+		(d.eng == nil || d.eng.RunPhase(d.f.ID, run.N) == "")
 	return out, nil
 }
 
@@ -498,6 +500,8 @@ func (d *WebDocs) RunAct(ctx context.Context, n int, act, person string) error {
 		return engineRefusal(d.eng.WorkflowWithdraw(ctx, d.f.ID, n, "by "+personWord(person)))
 	case "askagain":
 		return engineRefusal(d.eng.WorkflowAskAgain(ctx, d.f.ID))
+	case "retry":
+		return engineRefusal(d.eng.WorkflowRetry(ctx, d.f.ID, n))
 	}
 	if open == nil || open.N != n {
 		return &conflictError{msg: fmt.Sprintf("run %d is not open", n)}
@@ -525,22 +529,34 @@ func personWord(person string) string {
 // RevertPreview is GET /api/cards/{id}/runs/{n}/revert: what reverting
 // run n would put back.
 func (d *WebDocs) RevertPreview(ctx context.Context, n int) (webapi.RevertPreview, error) {
+	return d.RevertPreviewTo(ctx, n, "")
+}
+
+// RevertPreviewTo is RevertPreview to where step started (?step=), the
+// run's start when step is "".
+func (d *WebDocs) RevertPreviewTo(ctx context.Context, n int, step string) (webapi.RevertPreview, error) {
 	if !isRunSession(d.f) {
 		return webapi.RevertPreview{}, ErrNoCard
 	}
 	if d.eng == nil {
 		return webapi.RevertPreview{}, ErrDetached
 	}
-	p, err := d.eng.WorkflowRevertPreview(ctx, d.f.ID, n)
+	p, err := d.eng.WorkflowRevertPreviewTo(ctx, d.f.ID, n, step)
 	if err != nil {
 		return webapi.RevertPreview{}, engineRefusal(err)
 	}
-	return webapi.RevertPreview{Run: p.Run, Paths: nonNil(p.Paths), Tree: p.Tree, Note: p.Note}, nil
+	return webapi.RevertPreview{Run: p.Run, Step: p.Step, Paths: nonNil(p.Paths), Tree: p.Tree, Note: p.Note}, nil
 }
 
 // Revert is POST /api/cards/{id}/runs/{n}/revert: the person's confirmed
 // revert of run n, against the tree its preview was read from (tree).
 func (d *WebDocs) Revert(ctx context.Context, n int, tree string) (webapi.RevertDone, error) {
+	return d.RevertTo(ctx, n, "", tree)
+}
+
+// RevertTo is Revert to where step started, the run's start when step is
+// "".
+func (d *WebDocs) RevertTo(ctx context.Context, n int, step, tree string) (webapi.RevertDone, error) {
 	if !isRunSession(d.f) {
 		return webapi.RevertDone{}, ErrNoCard
 	}
@@ -550,7 +566,7 @@ func (d *WebDocs) Revert(ctx context.Context, n int, tree string) (webapi.Revert
 	if err := closedToReview(d.f, "its tree is no run's to put back"); err != nil {
 		return webapi.RevertDone{}, err
 	}
-	paths, err := d.eng.WorkflowRevert(ctx, d.f.ID, n, tree)
+	paths, err := d.eng.WorkflowRevertTo(ctx, d.f.ID, n, step, tree)
 	if err != nil {
 		return webapi.RevertDone{}, engineRefusal(err)
 	}

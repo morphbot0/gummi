@@ -314,16 +314,45 @@ type RevertPreview struct {
 	Tree string
 	// Note says what reverting also undoes.
 	Note string
+	// Step is the step it reverts to before, "" for the run's start.
+	Step string
 }
 
 // WorkflowRevertPreview lists what reverting run n would put back.
 func (e *Engine) WorkflowRevertPreview(ctx context.Context, session domain.FeatureID, n int) (RevertPreview, error) {
+	return e.WorkflowRevertPreviewTo(ctx, session, n, "")
+}
+
+// revertBase is the tree a revert of run n puts back: where the run
+// started, or with step the path of one of its steps, where that step
+// started — the snapshot gummi took at its boundary.
+func (e *Engine) revertBase(ctx context.Context, run *domain.Run, step string) (string, string, error) {
+	if step == "" {
+		return run.StartTree, "when the run started", nil
+	}
+	st, err := e.cfg.Store.RunStep(ctx, run.Session, run.N, step)
+	if err != nil {
+		return "", "", err
+	}
+	if st == nil || st.StartTree == "" {
+		return "", "", fmt.Errorf("step %s of run %d has not started", step, run.N)
+	}
+	return st.StartTree, "before step " + step + " started", nil
+}
+
+// WorkflowRevertPreviewTo lists what reverting run n would put back: to
+// where it started, or with step to where that step started.
+func (e *Engine) WorkflowRevertPreviewTo(ctx context.Context, session domain.FeatureID, n int, step string) (RevertPreview, error) {
 	run, err := e.cfg.Store.Run(ctx, session, n)
 	if err != nil {
 		return RevertPreview{}, err
 	}
 	if run == nil || run.StartTree == "" {
 		return RevertPreview{}, fmt.Errorf("run %d has not started", n)
+	}
+	base, when, err := e.revertBase(ctx, run, step)
+	if err != nil {
+		return RevertPreview{}, err
 	}
 	dir, err := e.sessionTree(ctx, session)
 	if err != nil {
@@ -333,16 +362,19 @@ func (e *Engine) WorkflowRevertPreview(ctx context.Context, session domain.Featu
 	if err != nil {
 		return RevertPreview{}, err
 	}
-	_, paths, err := worktree.DiffTrees(ctx, dir, run.StartTree, now)
+	_, paths, err := worktree.DiffTrees(ctx, dir, base, now)
 	if err != nil {
 		return RevertPreview{}, err
 	}
-	note := "Each path goes back to how it was when the run started, staged as it was then, and a path the run created is deleted. " +
-		"This also undoes anything the session or a person changed in these paths since then."
+	note := "Each path goes back to how it was when the run started, staged as it was then, and a path the run created is deleted. "
+	if step != "" {
+		note = "Each path goes back to how it was " + when + ", staged as it was when the run started, and a path made since is deleted. "
+	}
+	note += "This also undoes anything the session or a person changed in these paths since then."
 	if since := e.sinceRun(ctx, dir, run); since != "" {
 		note += " " + since
 	}
-	return RevertPreview{Run: n, Paths: paths, Tree: now, Note: note}, nil
+	return RevertPreview{Run: n, Step: step, Paths: paths, Tree: now, Note: note}, nil
 }
 
 // sinceRun says what has happened in the tree since run started that a
@@ -424,6 +456,13 @@ func (e *Engine) WorkflowTreeBusy(ctx context.Context, session domain.FeatureID)
 // when the tree has changed since. Refused while a step, or the session's
 // own agent, is working in the tree.
 func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n int, seen string) ([]string, error) {
+	return e.WorkflowRevertTo(ctx, session, n, "", seen)
+}
+
+// WorkflowRevertTo is WorkflowRevert to where step started, or with step
+// "" to where the run did: a person undoing the run from one of its steps
+// on, keeping what the steps before it did.
+func (e *Engine) WorkflowRevertTo(ctx context.Context, session domain.FeatureID, n int, step, seen string) ([]string, error) {
 	st := e.cfg.Store
 	if st == nil {
 		return nil, errors.New("workflows need the store")
@@ -457,6 +496,10 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 		return nil, err
 	}
 	keep := e.runKeepOut(session, n)
+	base, when, err := e.revertBase(ctx, run, step)
+	if err != nil {
+		return nil, err
+	}
 	now, err := worktree.Snapshot(ctx, dir, keep...)
 	if err != nil {
 		return nil, err
@@ -464,11 +507,11 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 	if now != seen {
 		return nil, errors.New("the tree has changed since the revert was previewed: read what it would put back again")
 	}
-	_, paths, err := worktree.DiffTrees(ctx, dir, run.StartTree, now)
+	_, paths, err := worktree.DiffTrees(ctx, dir, base, now)
 	if err != nil {
 		return nil, err
 	}
-	if err := worktree.RevertTo(ctx, dir, run.StartTree, paths, keep...); err != nil {
+	if err := worktree.RevertTo(ctx, dir, base, paths, keep...); err != nil {
 		return nil, err
 	}
 	// what the run (or anyone since) staged of these paths goes back too,
@@ -476,7 +519,7 @@ func (e *Engine) WorkflowRevert(ctx context.Context, session domain.FeatureID, n
 	if err := worktree.RestoreIndex(ctx, dir, run.StartIndex, paths); err != nil {
 		return nil, fmt.Errorf("the files are put back, but not the index: %w", err)
 	}
-	e.runNote(session, fmt.Sprintf("run %d reverted: %d path%s put back", n, len(paths), plural(len(paths))))
+	e.runNote(session, fmt.Sprintf("run %d reverted to %s: %d path%s put back", n, when, len(paths), plural(len(paths))))
 	e.workflowEvent(session)
 	return paths, nil
 }

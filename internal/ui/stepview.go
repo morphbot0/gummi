@@ -256,6 +256,18 @@ func (m *Shell) handleStepKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "r":
 		return m.reloadStep(sv.card)
+	case "v":
+		// the tree back to where this step started, behind the same
+		// confirm a run's revert has
+		if !sv.face.CanRevert {
+			m.notice = noticeMsg{text: sv.face.ID + ": nothing to revert to now — the step has not started, is at work, or its run is running"}
+			return nil
+		}
+		r, ok := m.rowByID(sv.session)
+		if !ok {
+			return nil
+		}
+		return m.previewRevertTo(r, sv.face.Run, sv.face.Path)
 	case "/", "i", "m":
 		sv.composing = true
 		return sv.input.Focus()
@@ -405,11 +417,13 @@ func (m *Shell) stepBindings() []binding {
 	if m.stepQuestion() != nil {
 		bs = append(bs,
 			binding{key: "1-9", label: "choose", help: "highlight that answer to the step's question"},
+			binding{key: "space", label: "tick", help: "on a question that takes several answers, tick the highlighted one; enter sends every one ticked"},
 			binding{key: "enter", label: "answer", help: "answer the step's question with the highlighted option", bar: true, sticky: true},
 		)
 	}
 	bs = append(bs,
 		binding{key: "r", label: "refresh", help: "read the step's head and diff again"},
+		binding{key: "v", label: "revert to here", help: "put the tree back to where this step started, keeping what the steps before it did — a confirm lists the paths first"},
 		m.threadOutputsBinding(),
 		binding{key: "esc", label: "back", help: "back to the session's thread", bar: true},
 	)

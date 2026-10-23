@@ -122,6 +122,12 @@ func TestARunOnTheWebFace(t *testing.T) {
 
 	card := block.Rows[0].Card
 	face, err := d.Step(ctx, card)
+	if err != nil || !face.CanRevert {
+		t.Fatalf("an ended run's step offers no revert to it: %+v %v", face, err)
+	}
+	if pre, err := d.RevertPreviewTo(ctx, run.N, "write"); err != nil || pre.Step != "write" || len(pre.Paths) != 1 {
+		t.Fatalf("the step's revert preview %+v %v", pre, err)
+	}
 	if err != nil || face.Path != "write" || face.Role != "implementer" || !strings.Contains(face.Brief, "Write out.txt.") ||
 		strings.Join(face.Crumb, " › ") != "Session › one run 1 › write" {
 		t.Fatalf("the step's face %+v %v", face, err)

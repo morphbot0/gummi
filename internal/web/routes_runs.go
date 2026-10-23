@@ -154,7 +154,7 @@ func (s *Server) handleRevertPreview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, err := d.RevertPreview(r.Context(), n)
+	out, err := d.RevertPreviewTo(r.Context(), n, r.URL.Query().Get("step"))
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return
@@ -178,7 +178,7 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, err := d.Revert(r.Context(), n, body.Tree)
+	out, err := d.RevertTo(r.Context(), n, body.Step, body.Tree)
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return
