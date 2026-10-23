@@ -339,13 +339,34 @@ func TestDecidePausesOnASpentPool(t *testing.T) {
 		State: domain.RunRunning, Recipe: deliver, Bounded: true, Left: 0,
 		Steps: []Step{{Path: "design", State: domain.StepDone, Spent: 60}, {Path: "build/1/implement", State: domain.StepRunning, Spent: 40}},
 	})
-	if len(got) != 1 || got[0].Kind != Pause || !strings.Contains(got[0].Reason, "spent 100") {
+	// the reason names the run's spend in dollars, as everything beside it does
+	if len(got) != 1 || got[0].Kind != Pause || !strings.Contains(got[0].Reason, "spent $1.00") {
 		t.Fatalf("actions = %v", got)
 	}
 	// an unbounded pool never pauses
 	got = Decide(Snapshot{State: domain.RunRunning, Recipe: deliver, Bounded: false, Left: 0})
 	if !reflect.DeepEqual(render(got), []string{"start design"}) {
 		t.Fatalf("unbounded = %v", got)
+	}
+}
+
+// TestASpentPoolEndsARunWithNothingLeft: a run whose every step has
+// settled ends on a spent pool, rather than pausing for a top-up its end
+// checks and report would never spend; one with a step still to start
+// pauses.
+func TestASpentPoolEndsARunWithNothingLeft(t *testing.T) {
+	r := parse(t, "name: two\nsteps:\n  - {id: a, role: implementer, prompt: x}\n  - {id: b, role: reviewer, prompt: x}\n")
+	done := Decide(Snapshot{State: domain.RunRunning, Recipe: r, Bounded: true, Left: -3, Steps: steps("a=done", "b=done")})
+	if !reflect.DeepEqual(render(done), []string{"end done"}) {
+		t.Fatalf("all settled on a spent pool = %v", render(done))
+	}
+	failed := Decide(Snapshot{State: domain.RunRunning, Recipe: r, Bounded: true, Left: 0, Steps: steps("a=failed")})
+	if !reflect.DeepEqual(render(failed), []string{"end partial"}) {
+		t.Fatalf("a failed step on a spent pool = %v", render(failed))
+	}
+	more := Decide(Snapshot{State: domain.RunRunning, Recipe: r, Bounded: true, Left: 0, Steps: steps("a=done")})
+	if !reflect.DeepEqual(render(more), []string{"pause"}) {
+		t.Fatalf("a step left to start on a spent pool = %v", render(more))
 	}
 }
 

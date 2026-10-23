@@ -14,6 +14,7 @@ package ui
 import (
 	"context"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -47,6 +48,12 @@ type stepView struct {
 	diff       *diffView
 	diffWhy    string
 	diffLoaded bool
+	// diffBusy marks a read of the diff in flight, diffAt when the last
+	// one began: a step at work moves its card on every tool call, and its
+	// diff snapshots the tree, so it is read again at most every
+	// stepDiffEvery and never twice at once
+	diffBusy bool
+	diffAt   time.Time
 	// scroll is how far the transcript is paged back from its end, or the
 	// brief down from its top. bodyLen is how many rows the transcript had
 	// at the last frame: one that grows while scrolled back keeps its
@@ -57,8 +64,10 @@ type stepView struct {
 	// composing says it holds the keyboard.
 	input     textarea.Model
 	composing bool
-	// qCursor is the option highlighted in the step's open question.
+	// qCursor is the option highlighted in the step's open question;
+	// qPicked the options ticked on a question that takes several.
 	qCursor int
+	qPicked map[int]bool
 }
 
 type stepLoadedMsg struct {
@@ -110,11 +119,15 @@ func (m *Shell) reloadStep(card domain.FeatureID) tea.Cmd {
 		return nil
 	}
 	cmds := []tea.Cmd{m.loadStep(card)}
-	if sv.tab == stepTabDiff {
+	if sv.tab == stepTabDiff && !sv.diffBusy && m.now().Sub(sv.diffAt) >= stepDiffEvery {
 		cmds = append(cmds, m.loadStepDiff())
 	}
 	return tea.Batch(cmds...)
 }
+
+// stepDiffEvery bounds how often an open step's diff is read again while
+// its card moves.
+const stepDiffEvery = 2 * time.Second
 
 // loadStepDiff reads the open step's own diff: its start snapshot to its
 // end one, to now while it runs.
@@ -132,6 +145,7 @@ func (m *Shell) loadStepDiff() tea.Cmd {
 		return errNoticeCmd(err.Error())
 	}
 	card := sv.card
+	sv.diffBusy, sv.diffAt = true, m.now()
 	return func() tea.Msg {
 		ctx := context.Background()
 		st, _, _, err := d.step(ctx, string(card))
@@ -172,7 +186,7 @@ func (m *Shell) stepDiffLoaded(msg stepDiffMsg) {
 	if sv == nil || sv.card != msg.card {
 		return
 	}
-	sv.diffLoaded = true
+	sv.diffLoaded, sv.diffBusy = true, false
 	if msg.err != nil {
 		sv.diff, sv.diffWhy = nil, sanitize(msg.err.Error())
 		return
@@ -254,11 +268,45 @@ func (m *Shell) handleStepKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "r":
 		return m.reloadStep(sv.card)
+	case "v":
+		// the tree back to where this step started, behind the same
+		// confirm a run's revert has
+		if !sv.face.CanRevert {
+			m.notice = noticeMsg{text: sv.face.ID + ": nothing to revert to now — the step has not started, is at work, or its run is running"}
+			return nil
+		}
+		r, ok := m.rowByID(sv.session)
+		if !ok {
+			return nil
+		}
+		return m.previewRevertTo(r, sv.face.Run, sv.face.Path)
 	case "/", "i", "m":
 		sv.composing = true
 		return sv.input.Focus()
+	case "space":
+		// a question that takes several answers: space ticks the
+		// highlighted one, enter sends every one ticked
+		if q != nil && q.Multi && len(q.Options) > 0 {
+			i := clamp(sv.qCursor, 0, len(q.Options)-1)
+			if sv.qPicked == nil {
+				sv.qPicked = map[int]bool{}
+			}
+			sv.qPicked[i] = !sv.qPicked[i]
+			return nil
+		}
 	case "enter":
 		if q != nil && len(q.Options) > 0 {
+			if q.Multi {
+				var labels []string
+				for i, o := range q.Options {
+					if sv.qPicked[i] {
+						labels = append(labels, o.Label)
+					}
+				}
+				if len(labels) > 0 {
+					return m.answerStep(strings.Join(labels, ", "))
+				}
+			}
 			return m.answerStep(q.Options[clamp(sv.qCursor, 0, len(q.Options)-1)].Label)
 		}
 		sv.composing = true
@@ -344,9 +392,14 @@ func (m *Shell) answerStep(answer string) tea.Cmd {
 		return errNoticeCmd(err.Error())
 	}
 	card, id, name := sv.card, sv.session, sv.face.ID
-	sv.qCursor = 0
+	// the answer is to the question drawn: refused once the step asks another
+	call := ""
+	if q := sv.face.Question; q != nil {
+		call = q.Call
+	}
+	sv.qCursor, sv.qPicked = 0, nil
 	return func() tea.Msg {
-		if err := d.StepAnswer(context.Background(), string(card), answer, ""); err != nil {
+		if err := d.StepAnswer(context.Background(), string(card), call, answer, ""); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return tea.BatchMsg{
@@ -376,11 +429,13 @@ func (m *Shell) stepBindings() []binding {
 	if m.stepQuestion() != nil {
 		bs = append(bs,
 			binding{key: "1-9", label: "choose", help: "highlight that answer to the step's question"},
+			binding{key: "space", label: "tick", help: "on a question that takes several answers, tick the highlighted one; enter sends every one ticked"},
 			binding{key: "enter", label: "answer", help: "answer the step's question with the highlighted option", bar: true, sticky: true},
 		)
 	}
 	bs = append(bs,
 		binding{key: "r", label: "refresh", help: "read the step's head and diff again"},
+		binding{key: "v", label: "revert to here", help: "put the tree back to where this step started, keeping what the steps before it did — a confirm lists the paths first"},
 		m.threadOutputsBinding(),
 		binding{key: "esc", label: "back", help: "back to the session's thread", bar: true},
 	)
@@ -606,10 +661,10 @@ func (m *Shell) stepQuestionBlock(q *threadfold.StepQuestion, w, rows int) []str
 		title += " · your line is the answer"
 	}
 	width := max(w-2, 10)
-	lines := strings.Split(pickerView(s, title, q.Question, options, cursor, nil, q.Multi, w, sv.composing), "\n")
+	lines := strings.Split(pickerView(s, title, q.Question, options, cursor, sv.qPicked, q.Multi, w, sv.composing), "\n")
 	headRows := len(pickerHead(s, title, q.Question, width))
 	windowed := windowDecisionBlock(s, lines, headRows, len(options), cursor, rows)
-	return expandHighlighted(s, windowed, lines, headRows, options, cursor, nil, q.Multi, width, rows, sv.composing)
+	return expandHighlighted(s, windowed, lines, headRows, options, cursor, sv.qPicked, q.Multi, width, rows, sv.composing)
 }
 
 // stepTranscriptLines is the step card's own conversation, live: its

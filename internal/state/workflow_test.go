@@ -118,7 +118,8 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	got.Results = []domain.ItemResult{{Item: "DW-1", Checked: true, Verdict: domain.ItemMet}}
 	got.OutOfBudget, got.Stopping = true, true
 	got.EndTree, got.Report, got.Reason = "t1", "all met", "why"
-	got.StartHead = "abc"
+	got.StartHead, got.StartIndex = "abc", "idx0"
+	got.Active, got.ResumedAt = 90*time.Second, started.Add(time.Hour)
 	got.Until = map[string]domain.UntilJudgement{"build/1": {Met: true, Detail: "verdict APPROVED"}}
 	got.OnMax = map[string]string{"build/3": "more"}
 	if err := s.UpdateRun(ctx, got); err != nil {
@@ -128,7 +129,8 @@ func TestWorkflowRunsRoundTrip(t *testing.T) {
 	if back.Revision != 2 || back.Pending != nil || back.Feedback != "go ahead" || back.SpecRev != 4 ||
 		!back.StartedAt.Equal(started) || back.Steers[0] != "mind the tests" || back.Results[0].Verdict != domain.ItemMet ||
 		!back.OutOfBudget || !back.Stopping || back.EndTree != "t1" || back.Report != "all met" || back.Spent != 12.5 ||
-		back.StartHead != "abc" || !back.Until["build/1"].Met || back.OnMax["build/3"] != "more" {
+		back.StartHead != "abc" || !back.Until["build/1"].Met || back.OnMax["build/3"] != "more" ||
+		back.StartIndex != "idx0" || back.Active != 90*time.Second || !back.ResumedAt.Equal(started.Add(time.Hour)) {
 		t.Fatalf("updated run came back as %+v", back)
 	}
 	if open, _ := s.OpenRun(ctx, sess.ID); open == nil || open.N != 1 {

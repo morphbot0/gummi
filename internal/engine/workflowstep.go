@@ -16,11 +16,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/workflowpolicy"
 	"github.com/morphis/gummi/internal/workflowrecipe"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -120,7 +122,14 @@ func (e *Engine) startStepAsync(session domain.FeatureID, n int, path string) {
 			e.workflowEvent(session)
 		}()
 		ctx := e.lifetime()
-		if err := e.startStep(ctx, session, n, path); err != nil {
+		err := e.startStep(ctx, session, n, path)
+		switch {
+		case errors.Is(err, errStepPoolSpent):
+			// a sibling spent the pool between the tick and this start: the
+			// run pauses for a top-up, and the step, never briefed, starts
+			// again when it carries on — it did nothing to fail over
+			e.pauseOnSpentPool(ctx, session, n)
+		case err != nil:
 			e.settleStep(ctx, session, n, path, domain.StepFailed, "it could not start: "+err.Error())
 		}
 	}) {
@@ -146,6 +155,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	if err != nil {
 		return err
 	}
+	e.stampArtifacts(session, n, path, step)
 	startTree, err := e.snapshotRun(ctx, session, n)
 	if err != nil {
 		return fmt.Errorf("snapshotting the tree: %w", err)
@@ -412,7 +422,13 @@ func (e *Engine) afterStepTurn(ctx context.Context, card domain.Feature, reply s
 	if err != nil || run == nil {
 		return
 	}
-	endTree, _ := e.snapshotRun(ctx, inst.Session, inst.Run)
+	endTree, err := e.snapshotRun(ctx, inst.Session, inst.Run)
+	if err != nil {
+		// with no end snapshot the step has no diff, and a planner's plan
+		// would never read as waiting: the step fails, saying why
+		e.endStep(ctx, inst, domain.StepFailed, "gummi could not read the tree when it ended: "+err.Error(), reply, "")
+		return
+	}
 	if inst.Role == domain.RolePlanner {
 		if handled := e.plannerEnded(ctx, run, inst, reply, endTree); handled {
 			return
@@ -535,10 +551,22 @@ func (e *Engine) captureArtifacts(ctx context.Context, inst *domain.RunStep, out
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	stamps := e.takeStamps(inst.Session, inst.Run, inst.Path)
 	for _, name := range names {
 		file := def.Artifacts[name]
-		if _, err := os.Stat(filepath.Join(e.RunDir(inst.Session, inst.Run), file)); !errors.Is(err, os.ErrNotExist) {
+		fi, err := os.Stat(filepath.Join(e.RunDir(inst.Session, inst.Run), file))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			continue
+		}
+		// written by this step: its own. One an earlier iteration left,
+		// untouched since this step started, is no answer of this step's —
+		// a verdict step that only printed its verdict would otherwise
+		// leave the last iteration's to be judged
+		if err == nil {
+			was, stamped := stamps[file]
+			if !stamped || !fi.ModTime().Equal(was) {
+				continue
+			}
 		}
 		body, ok := workflowrecipe.CaptureArtifact(output, file)
 		if !ok {
@@ -552,6 +580,52 @@ func (e *Engine) captureArtifacts(ctx context.Context, inst *domain.RunStep, out
 		e.runNote(inst.Session, fmt.Sprintf("run %d: %s did not write its artifact %s (%s); gummi wrote it from the step's output",
 			inst.Run, inst.Path, name, file))
 	}
+}
+
+// stampArtifacts records, as a step starts, when each artifact it declares
+// was last written, for captureArtifacts to tell one it wrote from one an
+// earlier iteration left.
+func (e *Engine) stampArtifacts(session domain.FeatureID, n int, path string, step domain.Step) {
+	if len(step.Artifacts) == 0 {
+		return
+	}
+	at := map[string]time.Time{}
+	for _, file := range step.Artifacts {
+		if fi, err := os.Stat(filepath.Join(e.RunDir(session, n), file)); err == nil {
+			at[file] = fi.ModTime()
+		}
+	}
+	rt := e.wfRT()
+	rt.mu.Lock()
+	rt.stamps[stepKey(session, n, path)] = at
+	rt.mu.Unlock()
+}
+
+// takeStamps hands over (and forgets) a step's artifact stamps.
+func (e *Engine) takeStamps(session domain.FeatureID, n int, path string) map[string]time.Time {
+	rt := e.wfRT()
+	key := stepKey(session, n, path)
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	at := rt.stamps[key]
+	delete(rt.stamps, key)
+	return at
+}
+
+// pauseOnSpentPool pauses run n for a top-up when its session's pool is
+// spent and it still runs.
+func (e *Engine) pauseOnSpentPool(ctx context.Context, session domain.FeatureID, n int) {
+	unlock := e.lockRuns(session)
+	defer unlock()
+	run, err := e.cfg.Store.Run(ctx, session, n)
+	if err != nil || run == nil || run.State != domain.RunRunning || run.Stopping {
+		return
+	}
+	in, _, err := e.runSnapshot(ctx, run)
+	if err != nil {
+		return
+	}
+	_ = e.pauseForBudgetLocked(ctx, run, fmt.Sprintf("the session's budget is spent (the run has spent %s)", domain.FormatDollars(workflowpolicy.Spent(in))))
 }
 
 // stepWriteDirs is what a step's backend must be able to write beyond its
@@ -584,10 +658,51 @@ func (e *Engine) flagReaderChanges(ctx context.Context, st *domain.RunStep) {
 	if err != nil {
 		return
 	}
-	if _, paths, err := worktree.DiffTrees(ctx, dir, st.StartTree, st.EndTree); err == nil && len(paths) > 0 {
-		st.Changed = paths
-		e.runNote(st.Session, fmt.Sprintf("run %d: %s, a reading step, changed %d file%s", st.Run, st.Path, len(paths), plural(len(paths))))
+	_, paths, err := worktree.DiffTrees(ctx, dir, st.StartTree, st.EndTree)
+	if err != nil || len(paths) == 0 {
+		return
 	}
+	// a writing step at work beside it (a parallel's implementer, say)
+	// changes the same tree: the paths that step changed are its work, not
+	// the reader's
+	theirs := map[string]bool{}
+	steps, _ := e.cfg.Store.RunSteps(ctx, st.Session, st.Run)
+	for _, o := range steps {
+		if o.Path == st.Path || o.Role.Reads() || o.StartTree == "" || !overlaps(o, *st) {
+			continue
+		}
+		end := o.EndTree
+		if end == "" {
+			end = st.EndTree
+		}
+		if _, ps, err := e.diffTreesCached(ctx, dir, o.StartTree, end, o.EndTree != ""); err == nil {
+			for _, p := range ps {
+				theirs[p] = true
+			}
+		}
+	}
+	var mine []string
+	for _, p := range paths {
+		if !theirs[p] {
+			mine = append(mine, p)
+		}
+	}
+	if len(mine) > 0 {
+		st.Changed = mine
+		e.runNote(st.Session, fmt.Sprintf("run %d: %s, a reading step, changed %d file%s", st.Run, st.Path, len(mine), plural(len(mine))))
+	}
+}
+
+// overlaps reports whether two steps were at work at the same time.
+func overlaps(a, b domain.RunStep) bool {
+	aEnd, bEnd := a.EndedAt, b.EndedAt
+	if aEnd.IsZero() {
+		aEnd = time.Now()
+	}
+	if bEnd.IsZero() {
+		bEnd = time.Now()
+	}
+	return a.StartedAt.Before(bEnd) && b.StartedAt.Before(aEnd)
 }
 
 // settleStep ends a live step without an output of its own: stopped,
@@ -688,12 +803,32 @@ func (e *Engine) StepSend(ctx context.Context, stepCard domain.FeatureID, text s
 		if run, err := e.cfg.Store.Run(ctx, inst.Session, inst.Run); err == nil && run != nil && run.State == domain.RunPaused {
 			return fmt.Errorf("run %d is paused: resume it before talking to its step %s", run.N, inst.Path)
 		}
+	} else if busy := e.liveStepOf(ctx, inst.Session); busy != nil {
+		// a follow-up may change the tree, which the open run's steps are
+		// writing: its edits would land in their diffs as theirs
+		return fmt.Errorf("step %s of run %d is at work in this tree: talk to %s once the run has paused or ended",
+			busy.Path, busy.Run, inst.Path)
 	}
 	ff, err := e.OpenFreeform(ctx, card)
 	if err != nil {
 		return err
 	}
 	return ff.SendTurn(ctx, text, nil)
+}
+
+// liveStepOf is a step at work in the session's open run, nil when none is.
+func (e *Engine) liveStepOf(ctx context.Context, session domain.FeatureID) *domain.RunStep {
+	run, err := e.cfg.Store.OpenRun(ctx, session)
+	if err != nil || run == nil || run.State != domain.RunRunning {
+		return nil
+	}
+	steps, _ := e.cfg.Store.RunSteps(ctx, session, run.N)
+	for i := range steps {
+		if steps[i].State.Live() && steps[i].EndTree == "" {
+			return &steps[i]
+		}
+	}
+	return nil
 }
 
 // RunSteps lists a run's step instances, oldest first, for the faces.

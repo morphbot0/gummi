@@ -207,7 +207,8 @@ steps:
 
 ## Before you propose
 
-- Every id is unique across the recipe, nested ones included.
+- Every id is unique across the recipe, nested ones included, and holds
+  only letters, digits, `-` and `_` — never digits alone.
 - Every `{{…}}` names an input, an artifact some step declares, or an
   earlier step.
 - Each loop has a `max` and one `until`; an `until` verdict's artifact is

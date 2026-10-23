@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -253,6 +254,65 @@ func TestDiffTreesAndRevertTo(t *testing.T) {
 	}
 	if got := mustGit(t, root, "diff", "--cached", "--name-only"); got != staged {
 		t.Errorf("revert changed the index: %q → %q", staged, got)
+	}
+}
+
+// TestRestoreIndexPutsBackWhatTheRunStaged: what a run (or the session
+// after it) staged of the paths a revert puts back is unstaged with them —
+// a created file leaves the index, an edited one is staged as it was when
+// the run started — so the next commit cannot bring the reverted work
+// back; an entry staged before the run, and paths the run never touched,
+// keep theirs. IndexTree reads the index without writing it.
+func TestRestoreIndexPutsBackWhatTheRunStaged(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, "edit.txt", "one\n")
+	writeFile(t, root, "other.txt", "other\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "start")
+	writeFile(t, root, "edit.txt", "staged before the run\n")
+	mustGit(t, root, "add", "edit.txt")
+
+	before := observe(t, root)
+	index, err := IndexTree(ctx, root)
+	if err != nil || index == "" {
+		t.Fatalf("IndexTree = %q, %v", index, err)
+	}
+	before.same(t, root)
+	start, err := Snapshot(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// what the run did, all of it staged
+	writeFile(t, root, "edit.txt", "the run's edit\n")
+	writeFile(t, root, "made.txt", "made by the run\n")
+	writeFile(t, root, "other.txt", "staged by a person, not the run's path\n")
+	mustGit(t, root, "add", "-A")
+	now, err := Snapshot(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, paths, err := DiffTrees(ctx, root, start, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths = slices.DeleteFunc(paths, func(p string) bool { return p == "other.txt" })
+	if err := RevertTo(ctx, root, start, paths); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreIndex(ctx, root, index, paths); err != nil {
+		t.Fatal(err)
+	}
+	status := mustGit(t, root, "status", "--porcelain=v1", "--untracked-files=all")
+	if want := "M  edit.txt\nM  other.txt"; status != want {
+		t.Errorf("status after the revert:\n%s\nwant:\n%s", status, want)
+	}
+	if got := mustGit(t, root, "show", ":edit.txt"); got != "staged before the run" {
+		t.Errorf("edit.txt is staged as %q", got)
+	}
+	// nothing to do is no error, and a path in neither is left be
+	if err := RestoreIndex(ctx, root, index, []string{"never.txt"}); err != nil {
+		t.Errorf("a path in neither: %v", err)
 	}
 }
 

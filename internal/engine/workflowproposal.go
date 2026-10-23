@@ -30,8 +30,10 @@ type WorkflowProposal struct {
 	SpecTitle string
 	SpecRev   int
 	// Steps is the recipe's step tree, depth first: for a revised plan,
-	// the steps that would replace the run's remaining ones.
+	// the steps that would replace the run's remaining ones, and Replaces
+	// those remaining ones, which would not run.
 	Steps    []ProposalStep
+	Replaces []ProposalStep
 	Warnings []string
 	// Checks are the done-when check commands the run will execute in the
 	// tree when it ends.
@@ -97,7 +99,7 @@ type ProposalStep struct {
 	Kind string
 	// A step's role, the profile slot it named (empty: its role's), the
 	// model it runs on under the session's profile in words, and the first
-	// line of its prompt.
+	// paragraph of its prompt.
 	Role   domain.WorkflowRole
 	Slot   string
 	Model  string
@@ -146,6 +148,11 @@ func (e *Engine) WorkflowProposal(ctx context.Context, session domain.FeatureID,
 		if entries, err = workflowrecipe.ParseEntries([]byte(d.RecipeYAML)); err != nil {
 			return WorkflowProposal{}, err
 		}
+		if steps, err := st.RunSteps(ctx, session, n); err == nil {
+			if started := startedEntries(run.Recipe, steps); started < len(run.Recipe.Steps) {
+				p.Replaces = e.proposalSteps(sess.Profile, run.Recipe.Steps[started:], 0)
+			}
+		}
 	}
 	p.Steps = e.proposalSteps(sess.Profile, entries, 0)
 	if sp, ok, err := st.SessionSpec(ctx, session, run.Spec); err == nil && ok {
@@ -157,13 +164,12 @@ func (e *Engine) WorkflowProposal(ctx context.Context, session domain.FeatureID,
 	if run.SpecRev > 0 {
 		p.SpecRev = run.SpecRev
 	}
-	if text, ok := e.SessionSpec(sess, run.Spec); ok {
-		if items, _, err := spec.ParseDoneWhen(text); err == nil {
-			for _, it := range items {
-				if strings.TrimSpace(it.Check) != "" {
-					p.Checks = append(p.Checks, ProposalCheck{Item: it.ID, Says: it.Says, Cmd: it.Check})
-				}
-			}
+	// the checks of the revision the run is judged against: frozen when it
+	// was proposed, and the spec as it is now only for a run from before
+	items, _ := e.frozenSpecItems(ctx, sess, run)
+	for _, it := range items {
+		if strings.TrimSpace(it.Check) != "" {
+			p.Checks = append(p.Checks, ProposalCheck{Item: it.ID, Says: it.Says, Cmd: it.Check})
 		}
 	}
 	if d.Kind == domain.RunDecideProposal {
@@ -176,12 +182,28 @@ func (e *Engine) WorkflowProposal(ctx context.Context, session domain.FeatureID,
 	return p, nil
 }
 
+// frozenSpecItems is the done-when items a run is judged against: its
+// frozen revision's, or for a run from before that froze none, the spec's
+// as it is now.
+func (e *Engine) frozenSpecItems(ctx context.Context, sess domain.Feature, run *domain.Run) ([]domain.DoneWhen, error) {
+	if run.SpecRev > 0 {
+		_, items := e.frozenSpec(ctx, run)
+		return items, nil
+	}
+	text, ok := e.SessionSpec(sess, run.Spec)
+	if !ok {
+		return nil, fmt.Errorf("spec %d is gone", run.Spec)
+	}
+	items, _, err := spec.ParseDoneWhen(text)
+	return items, err
+}
+
 // proposalSteps flattens entries into the proposal's tree, depth first.
 func (e *Engine) proposalSteps(profile string, es []domain.Entry, depth int) []ProposalStep {
 	step := func(s domain.Step, depth int) ProposalStep {
 		return ProposalStep{
 			ID: s.ID, Depth: depth, Kind: "step", Role: s.Role, Slot: s.Slot,
-			Model: e.stepModelWords(profile, s.Role, s.Slot), Prompt: firstLine(s.Prompt),
+			Model: e.stepModelWords(profile, s.Role, s.Slot), Prompt: promptGist(s.Prompt),
 		}
 	}
 	var out []ProposalStep
@@ -205,4 +227,16 @@ func (e *Engine) proposalSteps(profile string, es []domain.Entry, depth int) []P
 		}
 	}
 	return out
+}
+
+// promptGist is a step's prompt as its proposal row says it: its first
+// paragraph on one line, cut at a sentence or 200 characters, so a prompt
+// wrapped in its YAML reads whole rather than cut mid-sentence.
+func promptGist(prompt string) string {
+	para, _, _ := strings.Cut(strings.TrimSpace(prompt), "\n\n")
+	s := strings.Join(strings.Fields(para), " ")
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:199]) + "…"
+	}
+	return s
 }

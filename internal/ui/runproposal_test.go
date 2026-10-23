@@ -42,7 +42,7 @@ func TestTheProposalInThePicker(t *testing.T) {
 	got := ansi.Strip(m.threadView(137, 56))
 	for _, want := range []string{
 		"workflow run 2 · allow run", "Run the deliver workflow on spec S2",
-		"design, build until approved, validate", "freezes revision 2 when it starts",
+		"design, build until approved, validate", "revision 2, frozen now",
 		"$16.20 left in the session; the run spends from it", "the tree holds uncommitted work",
 		"build ↺ ≤3", "implementer", "go test ./internal/engine -run TestMigrate",
 		"baseline, before the run", "⚠ DW-1 ran no tests — it proves nothing about the run",

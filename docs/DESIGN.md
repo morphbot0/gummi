@@ -6766,10 +6766,14 @@ call returns at once, saying the run is proposed.
   is one deep.
 - The proposal goes to the person as a **decision in the thread**. It
   shows:
-  - the recipe's step tree, with each step's role and the model it runs
-    on under the session's profile;
-  - `Check`'s warnings;
-  - the spec and the revision it will freeze;
+  - the recipe's step tree, with each step's role, the model it runs
+    on under the session's profile, and its prompt's first paragraph;
+  - `Check`'s warnings, and gummi's own on running this recipe on this
+    spec: a loop until the checks pass on a spec with none, and checks
+    on a recipe with no step that writes code;
+  - the spec and the revision it is judged against, frozen as the
+    proposal is made: what the person reads is what the run is judged
+    against, whenever it starts;
   - every done-when check command the run will execute;
   - the run's **baseline**, each checked item as it stands before the
     run (below), or that the checks are still running;
@@ -6786,8 +6790,12 @@ call returns at once, saying the run is proposed.
 - A run on a session whose runs are always allowed is allowed without
   asking. No agent allows its own run.
 - A run allowed while another is open waits as **queued**. It starts
-  when the open run ends. Its spec revision is frozen when it starts,
-  not when it was allowed.
+  when the open run ends and the session's turn reading its report is
+  over. A person may **withdraw** it until then. An edit of its spec
+  after the proposal does not move what it is judged against.
+- **Always allow is visible and revocable.** The newest run's block of a
+  session whose runs are always allowed says so, with **Ask again**,
+  which makes the next proposal wait on the person.
 - **A recipe the session wrote inline is the person's to keep.** From a
   proposal on, the run's block offers **Save as recipe…**: a person names
   it, and gummi writes the recipe as the session gave it to
@@ -6798,9 +6806,10 @@ call returns at once, saying the run is proposed.
   test -run` that matches no test, proves nothing about what the run did,
   and its end result alone cannot tell. So gummi runs the spec's done-when
   checks as the run's baseline: in the background when the run is
-  proposed (`workflow_run` still returns at once), and again before the
-  first step starts — allowed, always allowed or dequeued — when the tree
-  or the frozen revision has moved since. It records each checked item's
+  proposed (`workflow_run` still returns at once) — unless another run's
+  steps are writing the tree, whose half-done work the checks would read
+  — and again before the first step starts — allowed, always allowed or
+  dequeued — when the tree or the frozen revision has moved since. It records each checked item's
   result (passes, fails, or ran no tests by `verify.RanNoTests`; an item
   judged by a step has none) and the tree snapshot it ran at.
   - An item that **already passes** or **ran no tests** is named on the
@@ -6809,8 +6818,8 @@ call returns at once, saying the run is proposed.
     workflow's actor, so it can rewrite the check, withdraw the proposal
     and propose again, or carry on.
   - The report and the ended block read each checked item before and
-    after: "DW-1 failed → passed", "DW-2 passed → passed (already passed
-    before the run)".
+    after: "DW-1 failed before the run, now passes", "DW-2 passed before
+    the run, still passes".
   - It is evidence, never a gate (decision 28): no proposal is refused
     and no run is paused over what it finds. The first step waits only
     for the checks to have run; checks that cannot run at all leave the
@@ -6835,17 +6844,46 @@ call returns at once, saying the run is proposed.
   - a step's own diff runs from its start snapshot to its end snapshot;
   - the run's diff runs from the run's start snapshot to a fresh one.
 - **Stop** interrupts the running steps at their next tool boundary,
-  marks the run stopped, and reverts nothing.
-- **Revert run** is a person's act, from the run's block or `gummi
-  workflow revert`. It lists every path that differs between the run's
-  start snapshot and now. Once the person confirms, each path is put
-  back to its start state (`git restore --source=<tree> --worktree`),
-  and a path the run created is deleted. This also undoes anything the
-  session changed during the run, and the list says so. Revert is
-  refused while a step is running.
+  marks the run stopped, and reverts nothing. Both faces confirm it
+  first.
+- **Revert run** is a person's act, from the run's block (the web
+  page's Revert run…, the terminal's `v`). It lists every path that
+  differs between the run's start snapshot and now. Once the person
+  confirms, each path is put back to its start state (`git restore
+  --source=<tree> --worktree`), and a path the run created is deleted.
+  Each path's index entry goes back too, to the index recorded as a tree
+  when the run started (`worktree.IndexTree`, `RestoreIndex`), so a
+  reverted file the run staged is not brought back by the next commit.
+  This also undoes anything the session changed during the run, and the
+  list says so, naming the runs after it and the commits made since.
+  Revert is refused while a step is running, while the run itself is
+  running (pause it first), and while gummi runs its checks.
+- **The run's own diff and artifacts** are read from its block: the
+  diff from its start to the tree now, and each artifact its recipe
+  declares (a report, a design, a review) once written.
+- **Revert to a step.** An opened step offers to put the tree back to
+  where it started — the snapshot at its boundary — keeping what the
+  steps before it did, behind the same preview and confirm (the page's
+  Revert to before this step…, the terminal step view's `v`). Its index
+  entries go back to the run's start, as a step stages nothing.
+- **Retry.** A person retries the session's newest run that ended
+  partial or stopped, while no other run is open or queued
+  (`domain.RetryRefusal`): each step that failed or stopped runs again at
+  its own path, its earlier attempt kept beside it as `<path>@<k>` with
+  its card and its spend; a loop a person stopped asks again at its max;
+  every step that finished stays. The run is open again, against the same
+  frozen spec, its diff still from where it first started. It is a
+  person's act from the faces (Retry failed steps, the terminal's `t`);
+  no session tool retries.
+- **A follow-up waits while the run writes the tree.** A person's message
+  to an ended step may change the tree; while a step of the open run is
+  at work it is refused, or its edits would land in that step's diff.
 - **Run end.** When the last step settles, gummi runs the frozen spec's
   done-when check commands in the tree (`verify`) and records each
-  result.
+  result. Each check is bounded (fifteen minutes, or the check's own
+  timeout) and killed with its process group past it; one that timed out
+  or never ran leaves its item unjudged. A tree gummi cannot snapshot at
+  the end still ends the run, partial, its report saying why.
   - An item without a check is judged by the last step's `MET: DW-n`
     or `UNMET: DW-n` line, if it has one. Otherwise it is unjudged
     (`–`).
@@ -6865,7 +6903,9 @@ builds the snapshot, executes the actions, and is called from the faces'
 tick loops (`ui/workflowloop.go`) and the headless driver. In order:
 
 1. Wind down when stopped: interrupt running steps, then end the run.
-2. Pause when the session's pool is spent (§24.7a), and do nothing else.
+2. Pause when the session's pool is spent (§24.7a), and do nothing else
+   — unless nothing is left to start, settle or judge: the end checks
+   and the report spend nothing, so the run ends.
 3. Settle a `parallel` whose join is decided, and a `repeat` whose
    iteration has ended: check `until`, then iterate, end the loop, or
    apply `onMax`.
@@ -6885,15 +6925,29 @@ tick loops (`ui/workflowloop.go`) and the headless driver. In order:
 - only a person raises the money.
 
 **Questions.** A step's `ask_user` is a decision to the person, drawn
-under the step in the run's block. The step waits for the answer.
+under the step in the run's block. The step waits for the answer. An
+answer names the question it was read off, and is refused once the step
+asks another. A loop whose `until: checks` finds no checks, or a check
+that timed out, cannot judge itself: it asks the person, as one whose
+check ran no tests does. A person's own words to a run's question that
+are none of its answers — a loop at its max, the budget, a parked run —
+go to the session agent as a turn, and the question stays open for the
+person alone to answer.
 
 **Steering.** `workflow_steer(note)` from the session agent, and an edit
 to the frozen spec, reach every running step as a turn. A step that has
-not started yet sees the note in its prompt.
+not started yet sees the note in its prompt. A spec edit's note names the
+file in the run's directory holding the edited spec, rather than copying
+the whole spec into every step again.
 
 **Nothing resumes itself.** A quit parks a running run, keeping its state
-and stopping its steps. After a restart it shows as paused, and runs
-again only when a person resumes it.
+and stopping its steps. A run is parked by the first tick of a gummi
+that did not start or resume it — at once, when a board starts — and
+asks its person: **Resume the run** or **Stop the run**, the session's
+pinned decision, so the board counts it as needing them. Its steps read
+as stopped where they were. It runs again only when a person resumes it;
+`gummi resume` is a person resuming it. A run's clock leaves its pauses
+out: its elapsed time is the time it worked.
 
 ### 25.8 The session during a run
 
@@ -6950,7 +7004,7 @@ that proves nothing marked amber. The proposal's card says the same.
 
 An ended run folds to:
 - its result per done-when item, a checked one with its baseline before
-  it ("DW-1 failed → passed");
+  it ("DW-1 failed before the run, now passes");
 - the files it left changed;
 - the commits steps made, if any;
 - Revert run;
@@ -7109,7 +7163,11 @@ Review, checks and design are what a recipe chooses, and the bundled
 
 ### 25.13 Deferred
 
-- **Waiting on a command** without spending model turns, as a step kind.
+- **Waiting on a command** without spending model turns, as a step kind
+  (Kiro's `watch` node).
+- **Narrowing a step's tools**, per step: a step has every tool its
+  role's session has, and a reading role is told, not caged, to change
+  no files.
   A wait on a PR is a person's publishing (§22), never a run's.
 - **Recipes kept outside the workspace**, per person.
 - **Isolated parallel writers**, as an option a recipe asks for: §24's
@@ -7366,3 +7424,27 @@ The build follows §25, with these differences.
 - **A step's transcript follows its newest line**, as the thread does:
   it opens at the end, follows while the reader is there, and stays put
   while the reader has scrolled back (the terminal's BG-042 rule).
+- **A run's end, its loop and its baseline cannot wedge it.** Done-when
+  checks ran unbounded, so a check that never exited held the run's end
+  (and Stop, which ends through it) for good; a tree gummi could not
+  snapshot left the run open, retried on every tick; a spent pool paused
+  a run that had nothing left but its free end checks; and one session's
+  failing tick stopped every other session's. Each check is now bounded,
+  a run with an unreadable tree ends partial saying why, a settled run
+  ends on a spent pool, and the tick carries on past a session in
+  trouble, naming it.
+- **What a loop or a step cannot settle reaches the person.** `until:
+  checks` on a spec with no checks read as met, and a check that timed
+  out as failed; both now ask. A step's question answered on one face
+  could be answered again, read off a stale page, into the step's next
+  question; an answer now names its question's call. The session agent's
+  own `ask_user` hid behind a run's decision in the picker; it now comes
+  first. A person's words to a loop at its max were refused with "answer
+  with one of"; they now reach the session and the question stays open.
+- **A parked run asks to be resumed.** A run left running by a gummi
+  that is gone was parked by the board's first tick, ten seconds in, and
+  said so only in its block; the board showed nothing needing the
+  person. It is now parked at the board's start and pins Resume or Stop;
+  `gummi resume` answers it by resuming.
+- **Revert run puts the index back.** It restored the files only, so a
+  file the run had staged came back with the next commit.

@@ -75,15 +75,21 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		// routes a foreign card's line to its consult session instead.
 		return nil
 	}
-	if d := workflowDecision(r); d != nil {
-		return d
-	}
-	if sess := liveSessionFor(m.engine, r); sess != nil {
-		snap := sess.Snapshot()
-		if ask := snap.PendingAsk; ask != nil {
+	// the session agent's own question first, as decisions.Rank ranks it:
+	// the agent waits inside ask_user, while a run's question keeps — and
+	// shown behind a run's, its answer would go to the run instead
+	sess := liveSessionFor(m.engine, r)
+	if sess != nil {
+		if ask := sess.Snapshot().PendingAsk; ask != nil {
 			key := "ask|" + string(r.F.ID) + "|" + ask.CallID + "|" + ask.Question
 			return &threadDecision{card: r.F.ID, key: key, kind: decisionAsk, question: ask.Question, ask: ask}
 		}
+	}
+	if d := workflowDecision(r); d != nil {
+		return d
+	}
+	if sess != nil {
+		snap := sess.Snapshot()
 		if sess.Interactive && snap.Busy {
 			// the architect is mid-turn in this very thread: the composer
 			// below is the input to a conversation still going, and there
@@ -785,12 +791,12 @@ func (m *Shell) proseAnswersAsk() bool {
 // is confirmed live — a line typed with nothing to answer stays put
 // rather than vanishing under the notice explaining why it wasn't sent.
 func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
-	if d := workflowDecision(r); d != nil {
+	sess := liveSessionFor(m.engine, r)
+	if d := workflowDecision(r); d != nil && (sess == nil || sess.Snapshot().PendingAsk == nil) {
 		m.threadInput.Reset()
 		m.threadFreeForm = false
 		return m.answerWorkflow(r, d, text)
 	}
-	sess := liveSessionFor(m.engine, r)
 	if sess == nil {
 		m.notice = noticeMsg{text: r.F.Name() + ": no live session to answer — attach first (enter)"}
 		return nil

@@ -213,12 +213,13 @@
         "id": "2",
         "label": "Stop the run",
         "detail": "the run stops; its changes stay in the tree",
-        "words": false
+        "words": false,
+        "danger": true
       },
       {
         "id": "chat",
-        "label": "Chat about this",
-        "detail": "reply with your own words instead of picking an option",
+        "label": "Talk it over",
+        "detail": "type it below: the session hears it, and the question stays open for you",
         "words": true,
         "chat": true
       }

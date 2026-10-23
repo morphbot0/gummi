@@ -61,6 +61,7 @@ func (m *Shell) webOpenDecision(r featureRow) *webOpenDecision {
 		od := m.worded(m.webAskDecision(r, d))
 		if d.run != nil {
 			od.api.Word, od.api.Tone = workflowDecisionWord(d.run.Pending), "info"
+			od.api.RunKind = string(d.run.Pending.Kind)
 		}
 		return od
 	}

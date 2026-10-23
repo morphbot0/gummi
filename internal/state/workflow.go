@@ -26,15 +26,18 @@ var ErrRunQueued = errors.New("a run is already queued behind the open one")
 const runCols = `session_id, n, recipe_name, recipe_yaml, recipe, inputs, spec_n, spec_rev, state,
 	spent, start_tree, end_tree, results, report, reason,
 	stopping, out_of_budget, steers, pending, feedback, revision,
-	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max, commits, baseline, saved_as`
+	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max, commits, baseline, saved_as,
+	start_index, active_ms, resumed_at`
 
 func scanRun(r rowScanner) (domain.Run, error) {
 	var run domain.Run
-	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated, until, onMax, commits, baseline string
+	var session, st, recipe, inputs, results, steers, pending, created, started, ended, updated, until, onMax, commits, baseline, resumed string
+	var activeMS int64
 	err := r.Scan(&session, &run.N, &run.RecipeName, &run.RecipeYAML, &recipe, &inputs, &run.Spec, &run.SpecRev, &st,
 		&run.Spent, &run.StartTree, &run.EndTree, &results, &run.Report, &run.Reason,
 		&run.Stopping, &run.OutOfBudget, &steers, &pending, &run.Feedback, &run.Revision,
-		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax, &commits, &baseline, &run.SavedAs)
+		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax, &commits, &baseline, &run.SavedAs,
+		&run.StartIndex, &activeMS, &resumed)
 	if err != nil {
 		return run, err
 	}
@@ -66,6 +69,8 @@ func scanRun(r rowScanner) (domain.Run, error) {
 	run.UpdatedAt, _ = time.Parse(timeFmt, updated)
 	run.StartedAt, _ = parseOptTime(started)
 	run.EndedAt, _ = parseOptTime(ended)
+	run.ResumedAt, _ = parseOptTime(resumed)
+	run.Active = time.Duration(activeMS) * time.Millisecond
 	return run, nil
 }
 
@@ -125,12 +130,13 @@ func (s *Store) CreateRun(ctx context.Context, r *domain.Run) error {
 		r.N = int(last.Int64) + 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_runs (`+runCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(r.Session), r.N, r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State),
 		r.Spent, r.StartTree, r.EndTree, j[2], r.Report, r.Reason,
 		r.Stopping, r.OutOfBudget, j[3], j[4], r.Feedback, r.Revision,
 		r.CreatedAt.UTC().Format(timeFmt), formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), r.UpdatedAt.UTC().Format(timeFmt),
-		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs); err != nil {
+		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs,
+		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt)); err != nil {
 		return fmt.Errorf("creating run %d on %s: %w", r.N, r.Session, err)
 	}
 	return tx.Commit()
@@ -154,12 +160,14 @@ func (s *Store) updateRun(ctx context.Context, db execer, r *domain.Run) error {
 	res, err := db.ExecContext(ctx, `UPDATE workflow_runs SET recipe_name=?, recipe_yaml=?, recipe=?, inputs=?,
 		spec_n=?, spec_rev=?, state=?, spent=?, start_tree=?, end_tree=?,
 		results=?, report=?, reason=?, stopping=?, out_of_budget=?, steers=?, pending=?, feedback=?,
-		revision=?, started_at=?, ended_at=?, updated_at=?, start_head=?, until_results=?, on_max=?, commits=?, baseline=?, saved_as=?
+		revision=?, started_at=?, ended_at=?, updated_at=?, start_head=?, until_results=?, on_max=?, commits=?, baseline=?, saved_as=?,
+		start_index=?, active_ms=?, resumed_at=?
 		WHERE session_id=? AND n=?`,
 		r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State), r.Spent,
 		r.StartTree, r.EndTree, j[2], r.Report, r.Reason, r.Stopping, r.OutOfBudget,
 		j[3], j[4], r.Feedback, rev, formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), updated.Format(timeFmt),
-		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs, string(r.Session), r.N)
+		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs,
+		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), string(r.Session), r.N)
 	if err != nil {
 		return err
 	}
@@ -367,4 +375,40 @@ func (s *Store) RunStepByCard(ctx context.Context, card domain.FeatureID) (*doma
 		return nil, err
 	}
 	return &steps[0], nil
+}
+
+// SessionStepSpends is the spend of every step card of every workflow run
+// the session has had, read in one query: the money the session's pool
+// has paid its runs (each card once, however many steps name it).
+func (s *Store) SessionStepSpends(ctx context.Context, session domain.FeatureID) ([]domain.Spend, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT f.spend_credits, f.spend_in, f.spend_out FROM features f
+		WHERE f.id IN (SELECT DISTINCT card_id FROM workflow_steps WHERE session_id=? AND card_id<>'')`, string(session))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Spend
+	for rows.Next() {
+		var sp domain.Spend
+		if err := rows.Scan(&sp.Credits, &sp.InputTokens, &sp.OutputTokens); err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
+// RenameRunStep moves run n's step instance at path to path to: a retried
+// step's earlier attempt is kept beside the new one, its spend and card
+// with it.
+func (s *Store) RenameRunStep(ctx context.Context, session domain.FeatureID, n int, path, to string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE workflow_steps SET path=? WHERE session_id=? AND run_n=? AND path=?`,
+		to, string(session), n, path)
+	if err != nil {
+		return err
+	}
+	if k, _ := res.RowsAffected(); k == 0 {
+		return fmt.Errorf("run %d's step %s: %w", n, path, ErrNotFound)
+	}
+	return nil
 }

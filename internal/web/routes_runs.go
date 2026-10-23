@@ -25,6 +25,8 @@ func (s *Server) runRoutes() {
 	s.api("GET /api/cards/{id}/runs/{n}/revert", s.handleRevertPreview)
 	s.api("POST /api/cards/{id}/runs/{n}/revert", s.handleRevert)
 	s.api("POST /api/cards/{id}/runs/{n}/save", s.handleSaveRecipe)
+	s.api("GET /api/cards/{id}/runs/{n}/diff", s.handleRunDiff)
+	s.api("GET /api/cards/{id}/runs/{n}/artifacts/{name}", s.handleRunArtifact)
 }
 
 // runN reads the {n} of a run route, answering the request itself when it
@@ -109,7 +111,7 @@ func (s *Server) handleStepAnswer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := d.StepAnswer(r.Context(), r.PathValue("card"), req.Answer, person(r)); err != nil {
+	if err := d.StepAnswer(r.Context(), r.PathValue("card"), req.Call, req.Answer, person(r)); err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return
 	}
@@ -152,7 +154,7 @@ func (s *Server) handleRevertPreview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, err := d.RevertPreview(r.Context(), n)
+	out, err := d.RevertPreviewTo(r.Context(), n, r.URL.Query().Get("step"))
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return
@@ -176,7 +178,7 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, err := d.Revert(r.Context(), n, body.Tree)
+	out, err := d.RevertTo(r.Context(), n, body.Step, body.Tree)
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return
@@ -207,5 +209,43 @@ func (s *Server) handleSaveRecipe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.changed(r.PathValue("id"))
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleRunDiff is GET /api/cards/{id}/runs/{n}/diff: the run's whole
+// diff, from where it started to the tree now.
+func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
+	n, ok := runN(w, r)
+	if !ok {
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	out, err := d.RunDiff(r.Context(), n)
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleRunArtifact is GET /api/cards/{id}/runs/{n}/artifacts/{name}: one
+// artifact the run's recipe declares, as text.
+func (s *Server) handleRunArtifact(w http.ResponseWriter, r *http.Request) {
+	n, ok := runN(w, r)
+	if !ok {
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	out, err := d.RunArtifact(r.Context(), n, r.PathValue("name"))
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -50,7 +50,17 @@ export function initWorkflow (c) {
   ctx = c
   // a step is opened on its session: another card closes it, and the
   // person's folds of its runs are forgotten
-  on(['sel'], () => { runFolds.clear(); if (state.step) set({ step: null }) })
+  on(['sel'], () => {
+    runFolds.clear()
+    stepsOpen.clear()
+    replies.clear()
+    inner.clear()
+    picks.clear()
+    focusedReply = null
+    // what a person typed to a step is kept across cards, but not without end
+    while (drafts.size > 50) drafts.delete(drafts.keys().next().value)
+    if (state.step) set({ step: null })
+  })
   // the step's own conversation moves with its card's events, which name
   // the step's card, not the session
   onEvent('live', (e) => { if (state.step && e.id === state.step) loadTranscript() })
@@ -88,18 +98,29 @@ const STATE_WORD = {
 
 const MARK = { done: '✓', failed: '✕', stopped: '–', asking: '?', running: '', waiting: '' }
 
+// elapsed is how long a run has worked, its pauses left out: the time it
+// worked before, and the time since it last resumed while it runs. A run
+// from before gummi kept its clock reads its whole span.
 function elapsed (r) {
   if (!r.started) return ''
-  const from = new Date(r.started).getTime()
-  const to = r.ended ? new Date(r.ended).getTime() : Date.now()
-  return to > from ? dur(to - from) : ''
+  let ms = r.activeMs || 0
+  if (r.resumed) ms += Math.max(0, Date.now() - new Date(r.resumed).getTime())
+  if (!ms && !r.resumed && r.ended) ms = new Date(r.ended).getTime() - new Date(r.started).getTime()
+  return ms > 0 ? dur(ms) : ''
+}
+
+// PHASE says what gummi does on a run between its steps.
+const PHASE = {
+  baseline: 'running the done-when checks before the first step',
+  until: 'judging whether the loop is done',
+  ending: 'running the done-when checks and writing the report'
 }
 
 function tickElapsed () {
   const runs = (state.thread?.items || []).filter(it => it.t === 'run')
   for (const el of document.querySelectorAll('[data-elapsed-run]')) {
     const it = runs.find(x => String(x.run.n) === el.dataset.elapsedRun)
-    if (!it || it.run.ended) continue
+    if (!it || it.run.ended || !it.run.resumed) continue
     const t = elapsed(it.run)
     if (el.textContent !== t) el.textContent = t
   }
@@ -129,8 +150,12 @@ function setFold (n, fold) {
   set({ runFold: (state.runFold || 0) + 1 })
 }
 // replies are what a person is typing to a step's question, per step card:
-// a block redrawn under them keeps the words.
+// a block redrawn under them keeps the words; focusedReply is the step card
+// whose reply has the focus, and where its caret stood, so a redraw gives
+// both back. picks are the options ticked on a question that takes several.
 const replies = new Map()
+let focusedReply = null
+const picks = new Map()
 
 // runSig is what the thread caches a run's block by: its revision and the
 // page's own state of it.
@@ -173,20 +198,45 @@ function foldedLine (id, r) {
   h('span', { class: 'rb-fold-mark', 'aria-hidden': 'true' }, '▸')))
 }
 
+// runPost does what to run n, saying so in a toast.
+async function runPost (id, n, what, said, b) {
+  if (b) b.disabled = true
+  try {
+    await post(cardPath(id, `runs/${n}/${what}`))
+    toast(`Run ${n}: ${said}`)
+    ctx.refresh(id)
+    return true
+  } catch (err) {
+    if (b) b.disabled = false
+    toast(err.data?.error || err.message, { err: true })
+    return false
+  }
+}
+
+// CONFIRM is the acts a person confirms first: they end what cannot be
+// carried on again, as the terminal confirms them.
+const CONFIRM = {
+  stop: (r) => ({ title: `Stop ${r.recipe} · run ${r.n}?`, body: 'Its running steps are interrupted at their next tool call. Nothing is reverted: its changes stay in the tree.', label: 'Stop' }),
+  withdraw: (r) => ({ title: `Withdraw ${r.recipe} · run ${r.n}?`, body: 'It was allowed and waits behind the open run. Withdrawn, it never starts; the session may propose again.', label: 'Withdraw' })
+}
+
 function head (id, r, ended) {
   const act = (what, label, danger) => h('button', {
     class: ['btn', danger && 'danger'], type: 'button', testid: `run-${what}`,
-    onclick: async (e) => {
+    onclick: (e) => {
       const b = e.currentTarget
-      b.disabled = true
-      try {
-        await post(cardPath(id, `runs/${r.n}/${what}`))
-        toast(`Run ${r.n}: ${label.toLowerCase()}`)
-        ctx.refresh(id)
-      } catch (err) {
-        b.disabled = false
-        toast(err.data?.error || err.message, { err: true })
-      }
+      const ask = CONFIRM[what]?.(r)
+      if (!ask) { runPost(id, r.n, what, label.toLowerCase(), b); return }
+      openModal({
+        title: ask.title,
+        testid: `run-${what}-dialog`,
+        card: id,
+        bodyEl: h('div', { class: 'mbody' }, h('p', null, ask.body)),
+        actions: [
+          { label: 'Cancel', testid: `run-${what}-cancel` },
+          { label: ask.label, danger: true, primary: true, testid: `run-${what}-confirm`, onClick: async () => { if (!await runPost(id, r.n, what, label.toLowerCase(), null)) return false } }
+        ]
+      })
     }
   }, label)
   const money = cr(r.spent)
@@ -201,8 +251,12 @@ function head (id, r, ended) {
       r.canPause ? act('pause', 'Pause') : null,
       r.canResume ? act('resume', 'Resume') : null,
       r.canStop ? act('stop', 'Stop', true) : null,
+      r.canWithdraw ? act('withdraw', 'Withdraw', true) : null,
       ended ? h('button', { class: 'link rb-foldbtn', type: 'button', testid: 'run-fold', 'aria-expanded': 'true', title: 'Fold the run to one line', 'aria-label': `Fold run ${r.n} to one line`, onclick: () => setFold(r.n, true) }, '▾') : null),
-    r.reason && r.state !== 'done' ? h('span', { class: 'rb-why', testid: 'run-reason' }, r.reason) : null)
+    r.reason && r.state !== 'done' ? h('span', { class: 'rb-why', testid: 'run-reason' }, r.reason) : null,
+    PHASE[r.phase] ? h('span', { class: 'rb-why rb-phase', testid: 'run-phase' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ` gummi is ${PHASE[r.phase]}`) : null,
+    r.alwaysAllowed ? h('span', { class: 'rb-why rb-always', testid: 'run-always' }, 'every run of this session starts without asking · ',
+      h('button', { class: 'link', type: 'button', testid: 'run-askagain', onclick: (e) => runPost(id, r.n, 'askagain', 'its session’s runs ask you again', e.currentTarget) }, 'Ask again')) : null)
 }
 
 // baselineEl is a run's baseline (§25.5): the done-when checks run before
@@ -244,6 +298,7 @@ function body (id, r, ended) {
   } else {
     parts.push(rows)
   }
+  parts.push(artifactsEl(id, r))
   parts.push(foot(id, r, ended))
   return parts
 }
@@ -275,10 +330,18 @@ function stepRow (id, row) {
     h('span', { class: 'n' }, row.folded ? row.steps : row.id),
     row.line ? h('small', { testid: 'run-row-line' }, row.line) : null,
     row.flag ? h('small', { class: 'flag', testid: 'run-row-flag' }, row.flag) : null),
-  h('span', { class: 'cost mono' }, row.spent ? cr(row.spent) : '–'),
+  h('span', { class: 'cost mono', title: [row.model, rowTook(row) && `took ${rowTook(row)}`].filter(Boolean).join(' · ') || null },
+    rowTook(row) ? h('small', { class: 'hint', testid: 'run-row-took' }, `${rowTook(row)} `) : null, row.spent ? cr(row.spent) : '–'),
   open
     ? h('button', { class: 'link rb-open', type: 'button', testid: 'run-open', 'aria-label': `Open step ${row.path}`, onclick: () => openStep(row.card) }, 'Open')
     : h('span'))
+}
+
+// rowTook is how long an ended step took, '' for one still at work.
+function rowTook (row) {
+  if (!row.started || !row.ended || row.folded) return ''
+  const ms = new Date(row.ended).getTime() - new Date(row.started).getTime()
+  return ms > 0 ? dur(ms) : ''
 }
 
 function question (id, row) {
@@ -287,8 +350,10 @@ function question (id, row) {
     if (!String(answer || '').trim()) return
     if (btn) btn.disabled = true
     try {
-      await post(cardPath(id, `steps/${encodeURIComponent(row.card)}/answer`), { answer })
+      // the answer names the question read: refused once the step asks another
+      await post(cardPath(id, `steps/${encodeURIComponent(row.card)}/answer`), { answer, call: q.call || '' })
       replies.delete(row.card)
+      picks.delete(row.card)
       toast(`Answered ${row.id}: ${answer}`)
       ctx.refresh(id)
     } catch (err) {
@@ -297,15 +362,40 @@ function question (id, row) {
     }
   }
   const input = h('input', { type: 'text', class: 'rb-reply', testid: 'run-question-reply', placeholder: 'Reply…', 'aria-label': `Reply to ${row.id} in your own words`, value: replies.get(row.card) || '' })
-  input.addEventListener('input', () => replies.set(row.card, input.value))
+  const caret = () => { if (focusedReply?.card === row.card) focusedReply.at = input.selectionStart }
+  input.addEventListener('input', () => { replies.set(row.card, input.value); caret() })
+  input.addEventListener('keyup', caret)
+  input.addEventListener('click', caret)
+  input.addEventListener('focus', () => { focusedReply = { card: row.card, at: input.selectionStart } })
+  // a redraw removes the input without a blur: only the person leaving it
+  // lets the focus go
+  input.addEventListener('blur', () => { if (focusedReply?.card === row.card) focusedReply = null })
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(input.value, null) } })
+  if (focusedReply?.card === row.card) {
+    const at = focusedReply.at ?? input.value.length
+    requestAnimationFrame(() => { if (input.isConnected && document.activeElement !== input) { input.focus(); input.setSelectionRange(at, at) } })
+  }
+  // a question that takes several answers: each option ticks, and Send
+  // picked sends every one ticked, as the decision picker does
+  const ticked = picks.get(row.card) || new Set()
+  const opts = q.multi
+    ? (q.options || []).map((o, i) => h('label', { class: ['rb-pick', o.recommended && 'pri'], title: o.detail || o.label },
+        h('input', {
+          type: 'checkbox', testid: `run-question-pick-${i}`, checked: ticked.has(o.label),
+          onchange: (e) => { if (e.target.checked) ticked.add(o.label); else ticked.delete(o.label); picks.set(row.card, ticked) }
+        }), ' ', o.label))
+    : (q.options || []).map((o, i) => h('button', {
+        class: ['btn', o.recommended && 'pri'], type: 'button', testid: `run-question-option-${i}`, title: o.detail || o.label,
+        onclick: (e) => send(o.label, e.currentTarget)
+      }, o.label))
   return h('div', { class: 'rb-ask', testid: 'run-question', data: { card: row.card } },
-    h('b', null, `${row.id} asks`),
+    h('b', null, `${row.id} asks`, q.multi ? h('span', { class: 'hint' }, ' · pick any') : null),
     h('div', { class: 'rb-q' }, q.question),
-    h('div', { class: 'rb-opts' }, (q.options || []).map((o, i) => h('button', {
-      class: ['btn', o.recommended && 'pri'], type: 'button', testid: `run-question-option-${i}`, title: o.detail || o.label,
-      onclick: (e) => send(o.label, e.currentTarget)
-    }, o.label))),
+    h('div', { class: 'rb-opts' }, opts,
+      q.multi ? h('button', {
+        class: 'btn pri', type: 'button', testid: 'run-question-send-picked',
+        onclick: (e) => { const labels = (q.options || []).map(o => o.label).filter(l => ticked.has(l)); if (labels.length) send(labels.join(', '), e.currentTarget); else toast('Tick an answer first') }
+      }, 'Send picked') : null),
     h('div', { class: 'rb-replyrow' }, input,
       h('button', { class: 'btn', type: 'button', testid: 'run-question-send', onclick: (e) => send(input.value, e.currentTarget) }, 'Send')))
 }
@@ -325,9 +415,62 @@ function foot (id, r, ended) {
       ? h('span', { title: files.join('\n') }, h('b', null, plural(files.length, 'file')), ended ? ' left changed in the tree' : ' changed in the tree', ' · uncommitted unless committed since')
       : h('span', null, ended ? 'the run left the tree as it found it' : 'nothing changed yet'),
     h('span', { class: 'sp' }),
+    files.length && r.started ? h('button', { class: 'link', type: 'button', testid: 'run-diff', onclick: () => openRunDiff(id, r) }, 'diff ▸') : null,
     r.report ? h('button', { class: 'link', type: 'button', testid: 'run-report', onclick: () => openSpec(r.spec) }, 'report ▸') : null,
+    r.canRetry ? h('button', { class: 'btn', type: 'button', testid: 'run-retry', title: 'Run its failed and stopped steps again, keeping every step that finished', onclick: (e) => runPost(id, r.n, 'retry', 'its failed steps run again', e.currentTarget) }, 'Retry failed steps') : null,
     r.canRevert ? h('button', { class: 'btn', type: 'button', testid: 'run-revert', onclick: () => openRevert(id, r.n) }, 'Revert run…') : null,
     saveEl(id, r))
+}
+
+// artifactsEl lists what the run's recipe declares beside the tree — a
+// report, a design, a review — each read in a dialog once written.
+function artifactsEl (id, r) {
+  const arts = r.artifacts || []
+  if (!arts.length) return null
+  return h('div', { class: 'rb-arts', testid: 'run-artifacts' }, h('span', { class: 'k' }, 'artifacts'),
+    arts.map(a => a.exists
+      ? h('button', { class: 'link mono', type: 'button', testid: `run-artifact-${a.name}`, title: `read ${a.file}`, onclick: () => openArtifact(id, r.n, a) }, a.file)
+      : h('span', { class: 'mono hint', testid: `run-artifact-${a.name}`, title: 'not written yet' }, a.file)))
+}
+
+async function openArtifact (id, n, a) {
+  let t
+  try {
+    t = await get(cardPath(id, `runs/${n}/artifacts/${encodeURIComponent(a.name)}`))
+  } catch (err) {
+    toast(err.data?.error || err.message, { err: true })
+    return
+  }
+  openModal({
+    title: `Run ${n} · ${t.file}`,
+    testid: 'artifact-dialog',
+    card: id,
+    bodyEl: h('div', { class: 'mbody' },
+      h('pre', { class: 'rb-artpre', testid: 'artifact-text', tabindex: '0' }, t.text),
+      t.cut ? h('p', { class: 'hint' }, 'Only its first part is shown.') : null),
+    actions: [{ label: 'Close', testid: 'artifact-close' }]
+  })
+}
+
+// openRunDiff shows the run's whole diff: from where it started to the
+// tree now.
+async function openRunDiff (id, r) {
+  let d
+  try {
+    d = await get(cardPath(id, `runs/${r.n}/diff`))
+  } catch (err) {
+    toast(err.data?.error || err.message, { err: true })
+    return
+  }
+  const box = h('div', { class: 'stp-diff rb-rundiff', testid: 'run-diff-body' })
+  drawDiff(box, d)
+  openModal({
+    title: `${r.recipe} · run ${r.n}: its diff`,
+    testid: 'run-diff-dialog',
+    card: id,
+    bodyEl: h('div', { class: 'mbody' }, h('p', { class: 'hint' }, 'From where the run started to the tree now, uncommitted work beside it included.'), box),
+    actions: [{ label: 'Close', testid: 'run-diff-close' }]
+  })
 }
 
 // saveEl is a run's recipe as a person keeps it: Save as recipe… on a run
@@ -385,21 +528,26 @@ export function markStep (root) {
 
 // ---------------------------------------------------------------- revert
 
-async function openRevert (id, n) {
+// openRevert previews and confirms a revert of run n: to where it started,
+// or with step to where that step started.
+async function openRevert (id, n, step = '') {
   let pre
+  const q = step ? `?step=${encodeURIComponent(step)}` : ''
   try {
-    pre = await get(cardPath(id, `runs/${n}/revert`))
+    pre = await get(cardPath(id, `runs/${n}/revert${q}`))
   } catch (err) {
     toast(err.data?.error || err.message, { err: true })
     return
   }
   const paths = pre.paths || []
   openModal({
-    title: `Revert run ${n}?`,
+    title: step ? `Revert run ${n} to before ${step}?` : `Revert run ${n}?`,
     testid: 'revert-dialog',
     card: id,
     bodyEl: h('div', { class: 'mbody' },
-      h('p', null, paths.length ? `${plural(paths.length, 'path')} go back to how they were when run ${n} started:` : 'Nothing differs from where the run started.'),
+      h('p', null, paths.length
+        ? `${plural(paths.length, 'path')} go back to how they were ${step ? `before ${step} started` : `when run ${n} started`}:`
+        : step ? 'Nothing differs from where the step started.' : 'Nothing differs from where the run started.'),
       paths.length ? h('ul', { class: 'rb-paths mono', testid: 'revert-paths' }, paths.map(p => h('li', null, p))) : null,
       h('p', { class: 'hint', testid: 'revert-note' }, pre.note)),
     actions: [
@@ -413,7 +561,7 @@ async function openRevert (id, n) {
         onClick: async () => {
           try {
             // the revert is of what this preview listed: the server refuses it if the tree has moved since
-            const done = await post(cardPath(id, `runs/${n}/revert`), { tree: pre.tree })
+            const done = await post(cardPath(id, `runs/${n}/revert`), { tree: pre.tree, step })
             toast(`Run ${n} reverted: ${plural((done.paths || []).length, 'path')} put back`)
             ctx.refresh(id)
           } catch (err) {
@@ -524,7 +672,11 @@ function renderStep (pane, entry, pctx) {
       [s.model, s.slot && `slot ${s.slot}`].filter(Boolean).join(' · '),
       h('span', { class: 'mono', testid: 'step-spent' }, money),
       'in the session’s tree'),
-    s.reason ? h('div', { class: 'rb-why' }, s.reason) : null)
+    s.reason ? h('div', { class: 'rb-why' }, s.reason) : null,
+    s.canRevert ? h('div', { class: 'stp-acts' }, h('button', {
+      class: 'btn', type: 'button', testid: 'step-revert', title: 'Put the tree back to where this step started, keeping what the steps before it did',
+      onclick: () => openRevert(s.session, s.run, s.path)
+    }, 'Revert to before this step…')) : null)
   const tabs = [['transcript', 'Transcript'], ['diff', 'Diff'], ['brief', 'Brief']]
   const bar = h('div', { class: 'seg stp-tabs', role: 'tablist', 'aria-label': 'The step' }, tabs.map(([k, l]) => h('button', {
     class: tab === k && 'on', type: 'button', role: 'tab', 'aria-selected': String(tab === k), testid: `step-tab-${k}`, onclick: () => setInner(k)
@@ -634,15 +786,10 @@ export function proposalEl (p) {
       h('span', { class: 'hint', testid: 'proposal-tree' }, ['in the session’s tree', p.branch, p.dirty ? 'holds uncommitted work' : 'nothing uncommitted'].filter(Boolean).join(' · '))),
     p.description ? h('div', { class: 'hint' }, p.description) : null,
     h('div', { class: 'wfp-spec', testid: 'proposal-spec' }, h('span', { class: 'k' }, 'spec'), ' ',
-      `S${p.spec} ${p.specTitle || ''}`, p.specRev ? ` · revision ${p.specRev}, frozen when it starts` : ''),
-    h('div', { class: 'wfp-steps', role: 'table', 'aria-label': 'Its steps' }, p.steps.map(s => h('div', {
-      class: ['wfp-step', `k-${s.kind}`], role: 'row', testid: `proposal-step-${s.id}`, style: { '--depth': String(s.depth) }
-    },
-    h('span', { class: 'id mono', role: 'cell' }, s.kind === 'repeat' ? `${s.id} ↺≤${s.max}` : s.kind === 'parallel' ? `${s.id} ∥` : s.id),
-    h('span', { class: ['wrole', s.role && `r-${s.role}`], role: 'cell' }, s.role || (s.kind === 'parallel' ? s.join : '')),
-    h('span', { class: 'ti', role: 'cell' }, s.kind === 'repeat'
-      ? `until ${s.until} · at the max: ${s.onMax}`
-      : s.kind === 'parallel' ? `side by side, join ${s.join}` : [s.model, s.prompt].filter(Boolean).join(' · '))))),
+      `S${p.spec} ${p.specTitle || ''}`, p.specRev ? ` · revision ${p.specRev}, frozen now` : ''),
+    stepTable(p.steps, 'Its steps', 'proposal-step'),
+    p.replaces?.length ? h('div', { class: 'wfp-replaces', testid: 'proposal-replaces' }, h('span', { class: 'k' }, 'what it replaces, which would not run'),
+      stepTable(p.replaces, 'The steps it replaces', 'proposal-replaced')) : null,
     p.checks?.length ? h('div', { class: 'wfp-checks', testid: 'proposal-checks' }, h('span', { class: 'k' }, 'runs in the tree when it ends'),
       p.checks.map(c => h('div', null, h('b', { class: 'mono' }, c.item), ' ', h('span', { class: 'mono' }, c.cmd)))) : null,
     baselineEl(p.baseline, 'proposal-baseline'),
@@ -652,6 +799,20 @@ export function proposalEl (p) {
         : h('span', { class: 'okc' }, '✓ recipe checks pass'),
       h('span', { class: p.bounded && p.poolLeft <= 0 ? 'warnc' : 'okc', testid: 'proposal-money' }, `${left}; the run spends from it`)),
     h('div', { class: 'hint' }, 'Changes stay uncommitted in the tree · a snapshot at every step'))
+}
+
+// stepTable is a proposal's step tree: each step with its role, the
+// model it runs on and its prompt's gist; a repeat with its bound and its
+// condition; a parallel with its join.
+function stepTable (steps, label, testid) {
+  return h('div', { class: 'wfp-steps', role: 'table', 'aria-label': label }, steps.map(s => h('div', {
+    class: ['wfp-step', `k-${s.kind}`], role: 'row', testid: `${testid}-${s.id}`, style: { '--depth': String(s.depth) }
+  },
+  h('span', { class: 'id mono', role: 'cell' }, s.kind === 'repeat' ? `${s.id} ↺≤${s.max}` : s.kind === 'parallel' ? `${s.id} ∥` : s.id),
+  h('span', { class: ['wrole', s.role && `r-${s.role}`], role: 'cell' }, s.role || (s.kind === 'parallel' ? s.join : '')),
+  h('span', { class: 'ti', role: 'cell', title: s.prompt || null }, s.kind === 'repeat'
+    ? `until ${s.until} · at the max: ${s.onMax}`
+    : s.kind === 'parallel' ? `side by side, join ${s.join}` : [s.model, s.prompt].filter(Boolean).join(' · ')))))
 }
 
 // ---------------------------------------------------------------- the live strip
@@ -696,7 +857,7 @@ function renderStrip () {
     ['now', JSON.stringify([l.mood, l.who, l.action, l.question, l.line]), () => liveNow(l)],
     ['m', `${l.mood}|${r.spent}|${r.started}`, () => l.mood === 'asking' || l.mood === 'deciding' ? null
       : h('span', { class: 'm', testid: 'run-live-money' }, cr(r.spent),
-        running && r.started ? [' · ', h('span', { data: { elapsedRun: String(r.n) } }, elapsed(r))] : null)],
+        r.started && elapsed(r) ? [' · ', h('span', { data: { elapsedRun: String(r.n) } }, elapsed(r))] : null)],
     ['acts', JSON.stringify([state.sel, r.n, l.mood, l.card, l.steps, l.canTopUp, l.canResume, !!state.card?.actions?.some(a => a.id === 'envelope')]), () => h('span', { class: 'acts' }, liveActs(r, l))]
   ]
   let i = 0
@@ -757,8 +918,18 @@ function liveActs (r, l) {
     case 'asking':
       return [btn('run-live-answer', 'Answer', () => openStep(l.card), true), jump(false)]
     case 'budget': {
+      // the run's own question is the top-up: Top up… answers it with an
+      // amount, read when pressed; with none open, the card's budget is
+      // raised instead
       const raise = state.card?.actions?.find(a => a.id === 'envelope')
-      return [raise ? btn('run-live-topup', 'Top up…', () => runAction(state.card, raise), true) : null, jump(!raise)]
+      const question = () => state.card?.decision?.runKind === 'budget' ? state.card.decision : null
+      return [btn('run-live-topup', 'Top up…', () => {
+        const d = question()
+        const words = d?.options?.find(o => o.words)
+        if (words) openTopUp(id, r, d, words)
+        else if (raise) runAction(state.card, raise)
+        else toast('Raise the session’s budget from its menu')
+      }, true), jump(false)]
     }
     case 'paused':
       return [l.canResume ? btn('run-live-resume', 'Resume', async (e) => {
@@ -775,6 +946,43 @@ function liveActs (r, l) {
       }, true) : null, jump(!l.canResume)]
   }
   return [jump(true)]
+}
+
+// openTopUp asks how much to top the session up by, in dollars, and
+// answers the run's budget question with it: the run carries on.
+function openTopUp (id, r, d, words) {
+  const suggest = (d.question.match(/\$(\d+(?:\.\d+)?)/) || [])[1] || ''
+  const input = h('input', { type: 'text', inputmode: 'decimal', class: 'mono', testid: 'topup-amount', 'aria-label': 'Dollars to top up by', placeholder: '1.00', value: suggest })
+  const err = h('p', { class: 'warnc', testid: 'topup-error', hidden: true })
+  const go = {
+    label: 'Top up',
+    primary: true,
+    testid: 'topup-confirm',
+    onClick: async () => {
+      const v = input.value.trim().replace(/^\$/, '')
+      if (!(Number(v) > 0)) { err.textContent = 'Give an amount in dollars, as 2.50'; err.hidden = false; return false }
+      try {
+        await post(cardPath(id, 'answer'), { ref: d.ref, option: words.id, words: `$${v}`, against: d.against?.token || '' })
+        toast(`Topped up by $${Number(v).toFixed(2)}: run ${r.n} carries on`)
+        ctx.refresh(id)
+      } catch (e) {
+        err.textContent = e.data?.error || e.message
+        err.hidden = false
+        return false
+      }
+    }
+  }
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go.el?.click() } })
+  openModal({
+    title: `Top up for ${r.recipe} · run ${r.n}`,
+    testid: 'topup-dialog',
+    card: id,
+    bodyEl: h('div', { class: 'mbody' },
+      h('p', null, 'The session’s budget is spent. Raise it by this much, in dollars, and the run carries on where it paused.'),
+      input, err),
+    actions: [{ label: 'Cancel', testid: 'topup-cancel' }, go]
+  })
+  requestAnimationFrame(() => { input.focus(); input.select() })
 }
 
 // openPick offers the live steps to open, under (or over) the strip.

@@ -215,6 +215,9 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 	commits        TEXT NOT NULL DEFAULT 'null',
 	baseline       TEXT NOT NULL DEFAULT '',
 	saved_as       TEXT NOT NULL DEFAULT '',
+	start_index    TEXT NOT NULL DEFAULT '',
+	active_ms      INTEGER NOT NULL DEFAULT 0,
+	resumed_at     TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, n)
 );
 CREATE TABLE IF NOT EXISTS workflow_steps (
@@ -1021,6 +1024,11 @@ var migrations = []string{
 	// The workspace recipe a person saved a run's inline recipe as (DESIGN
 	// §25.9). Empty is a run whose recipe nobody saved.
 	`ALTER TABLE workflow_runs ADD COLUMN saved_as TEXT NOT NULL DEFAULT ''`,
+	// A workflow run's index at its start, which Revert run puts back, and
+	// its clock: how long it has worked, its pauses left out (DESIGN §25.9).
+	`ALTER TABLE workflow_runs ADD COLUMN start_index TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE workflow_runs ADD COLUMN active_ms INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE workflow_runs ADD COLUMN resumed_at TEXT NOT NULL DEFAULT ''`,
 	// When a session's turn was written, and who typed a user turn, so a
 	// restored thread still places and folds its runs (DESIGN §25.9).
 	// Empty on every row from before.

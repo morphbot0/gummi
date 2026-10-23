@@ -31,9 +31,17 @@ type RunBlock struct {
 	// Spent (live steps included), in credits, from the session's budget:
 	// a run estimates nothing.
 	Spent float64 `json:"spent"`
-	// Started and Ended bound its elapsed time; an open run's runs to now.
-	Started time.Time `json:"started,omitzero"`
-	Ended   time.Time `json:"ended,omitzero"`
+	// Started and Ended bound the run. Its elapsed time is the time it
+	// worked, its pauses left out: ActiveMs, and while it runs the time
+	// since Resumed.
+	Started  time.Time `json:"started,omitzero"`
+	Ended    time.Time `json:"ended,omitzero"`
+	ActiveMs int64     `json:"activeMs,omitempty"`
+	Resumed  time.Time `json:"resumed,omitzero"`
+	// Phase is what gummi does on the run between its steps: baseline
+	// (the checks before the first step), until (judging a loop), ending
+	// (the end checks and the report).
+	Phase string `json:"phase,omitempty"`
 	// Strip is the recipe's top-level entries, each in its state.
 	Strip []RunStripEntry `json:"strip"`
 	// Rows is a row per step that has run or is running, a finished
@@ -58,6 +66,18 @@ type RunBlock struct {
 	CanResume bool `json:"canResume,omitempty"`
 	CanStop   bool `json:"canStop,omitempty"`
 	CanRevert bool `json:"canRevert,omitempty"`
+	// CanWithdraw offers to take back a queued run before it starts (POST
+	// …/runs/{n}/withdraw).
+	CanWithdraw bool `json:"canWithdraw,omitempty"`
+	// CanRetry offers to run an ended run's failed and stopped steps again
+	// (POST …/runs/{n}/retry), keeping every step that finished.
+	CanRetry bool `json:"canRetry,omitempty"`
+	// AlwaysAllowed, on the session's newest run, says a person always
+	// allows its runs: Ask again (POST …/runs/{n}/askagain) takes it back.
+	AlwaysAllowed bool `json:"alwaysAllowed,omitempty"`
+	// Artifacts are what the recipe declares in the run's directory, each
+	// read with GET …/runs/{n}/artifacts/{name}.
+	Artifacts []RunArtifact `json:"artifacts,omitempty"`
 	// CanSave offers Save as recipe… for a run whose recipe was written
 	// inline (POST …/runs/{n}/save), SaveName the name it suggests; SavedAs
 	// is the workspace recipe it was saved as, offered no more after.
@@ -74,6 +94,24 @@ type RunBlock struct {
 	Mark   string `json:"mark,omitempty"`
 	Line   string `json:"line,omitempty"`
 	Folded bool   `json:"folded,omitempty"`
+}
+
+// RunArtifact is one artifact a run's recipe declares: its name, its file
+// in the run's directory, and whether it has been written.
+type RunArtifact struct {
+	Name   string `json:"name"`
+	File   string `json:"file"`
+	Exists bool   `json:"exists,omitempty"`
+}
+
+// RunArtifactText is GET /api/cards/{id}/runs/{n}/artifacts/{name}: an
+// artifact's text.
+type RunArtifactText struct {
+	Name string `json:"name"`
+	File string `json:"file"`
+	Text string `json:"text"`
+	// Cut says the text was cut to its first part.
+	Cut bool `json:"cut,omitempty"`
 }
 
 // RunPlace is where one of the session's runs stands among a live
@@ -142,7 +180,8 @@ type RunStepRow struct {
 	Iter   int    `json:"iter,omitempty"`
 	ID     string `json:"id"`
 	Role   string `json:"role,omitempty"`
-	// State is waiting, running, asking, done, failed or stopped.
+	// State is waiting, running, asking, done, failed or stopped, or
+	// paused: at work when its run paused, stopped where it was.
 	State string  `json:"state"`
 	Spent float64 `json:"spent"`
 	// Line is its last action while it works, its end summary after.
@@ -156,13 +195,20 @@ type RunStepRow struct {
 	Verdict string `json:"verdict,omitempty"`
 	// Waiting rings the row the run's open decision is about.
 	Waiting bool `json:"waiting,omitempty"`
+	// Started and Ended bound the step's time; Model is what its agent
+	// runs on while it works.
+	Started time.Time `json:"started,omitzero"`
+	Ended   time.Time `json:"ended,omitzero"`
+	Model   string    `json:"model,omitempty"`
 	// Question is the step's own question, its recommended answer first,
 	// answered with POST /api/cards/{id}/steps/{card}/answer.
 	Question *StepQuestion `json:"question,omitempty"`
 }
 
-// StepQuestion is a step's ask_user question.
+// StepQuestion is a step's ask_user question. Call names it: an answer
+// sends it back, and is refused once the step asks another.
 type StepQuestion struct {
+	Call     string           `json:"call,omitempty"`
 	Question string           `json:"question"`
 	Options  []QuestionOption `json:"options,omitempty"`
 	Multi    bool             `json:"multi,omitempty"`
@@ -186,7 +232,7 @@ type RunPending struct {
 // RunResult is one done-when item at the run's end: met, unmet or
 // unjudged, Checked when its check command decided it. Before is a
 // checked item's verdict in the run's baseline, and Change its result
-// before and after in words ("failed → passed").
+// before and after in words ("failed before the run, now passes").
 type RunResult struct {
 	Item    string `json:"item"`
 	Verdict string `json:"verdict"`
@@ -258,6 +304,10 @@ type StepFace struct {
 	// POST /api/cards/{id}/steps/{card}/answer (the strip's Answer opens
 	// the step on it).
 	Question *StepQuestion `json:"question,omitempty"`
+	// CanRevert offers to put the tree back to where the step started
+	// (GET/POST …/runs/{n}/revert?step=<path>): its run is not running,
+	// and nothing of it is at work.
+	CanRevert bool `json:"canRevert,omitempty"`
 }
 
 // StepArtifact is one artifact a step's brief names: its name, its path
@@ -280,6 +330,9 @@ type StepSendRequest struct {
 // answer to a step's question, an option's label or the person's words.
 type StepAnswerRequest struct {
 	Answer string `json:"answer"`
+	// Call is the question answered (StepQuestion.Call): the answer is
+	// refused once the step asks another.
+	Call string `json:"call,omitempty"`
 }
 
 // SpecList is GET /api/cards/{id}/specs: a session's specs, one per piece
@@ -333,12 +386,17 @@ type RevertPreview struct {
 	Tree string `json:"tree"`
 	// Note says what reverting also undoes.
 	Note string `json:"note"`
+	// Step is the step it reverts to before (?step=), "" for the run's
+	// start.
+	Step string `json:"step,omitempty"`
 }
 
 // RevertRequest is POST /api/cards/{id}/runs/{n}/revert: the confirmed
 // revert, naming the preview's Tree.
 type RevertRequest struct {
 	Tree string `json:"tree"`
+	// Step reverts to where that step started rather than the run.
+	Step string `json:"step,omitempty"`
 }
 
 // SaveRecipeRequest is POST /api/cards/{id}/runs/{n}/save: a person
@@ -373,9 +431,13 @@ type RunProposal struct {
 	Description string `json:"description,omitempty"`
 	Spec        int    `json:"spec"`
 	SpecTitle   string `json:"specTitle,omitempty"`
-	// SpecRev is the revision the run would freeze if it started now.
-	SpecRev  int            `json:"specRev,omitempty"`
-	Steps    []ProposalStep `json:"steps"`
+	// SpecRev is the revision of the spec the run is judged against,
+	// frozen when it was proposed.
+	SpecRev int            `json:"specRev,omitempty"`
+	Steps   []ProposalStep `json:"steps"`
+	// Replaces is, on a revised plan, the run's remaining steps the plan
+	// would replace: what would not run.
+	Replaces []ProposalStep `json:"replaces,omitempty"`
 	Warnings []string       `json:"warnings,omitempty"`
 	// Checks are the done-when check commands the run will execute.
 	Checks []ProposalCheck `json:"checks,omitempty"`

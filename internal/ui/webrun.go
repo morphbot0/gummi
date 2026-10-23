@@ -62,11 +62,17 @@ func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 		}
 	}
 	out := make([]threadfold.RunInput, 0, len(runs))
-	for _, r := range runs {
+	always := d.eng != nil && d.eng.WorkflowAlwaysAllows(ctx, d.f.ID)
+	for i, r := range runs {
 		steps, _ := d.store.RunSteps(ctx, d.f.ID, r.N)
 		in := threadfold.RunInput{Run: r, Steps: steps, SpecTitle: titles[r.Spec], Live: map[string]threadfold.StepLive{}, Envelope: float64(d.f.Budget.Envelope)}
+		in.AlwaysAllowed = always && i == len(runs)-1
 		if d.eng != nil {
 			in.Files = d.eng.RunFiles(ctx, r, steps)
+			in.Phase = d.eng.RunPhase(d.f.ID, r.N)
+			for _, a := range d.eng.RunArtifactList(r) {
+				in.Artifacts = append(in.Artifacts, threadfold.RunArtifact{Name: a.Name, File: a.File, Exists: a.Exists})
+			}
 			for _, s := range steps {
 				if s.Card == "" {
 					continue
@@ -74,7 +80,7 @@ func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 				// an ended step is read too: a person's follow-up has it
 				// working again
 				if now, ok := d.eng.StepNow(s.Card); ok && (s.State.Live() || now.Busy) {
-					in.Live[s.Path] = threadfold.StepLive{Busy: now.Busy, Spent: now.Spent, Action: now.Action, Ask: now.Ask}
+					in.Live[s.Path] = threadfold.StepLive{Busy: now.Busy, Spent: now.Spent, Action: now.Action, Ask: now.Ask, Model: now.Model}
 				}
 			}
 		}
@@ -159,9 +165,11 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 	out := &webapi.RunBlock{
 		N: r.N, Rev: r.Rev, Recipe: r.Recipe, Spec: r.Spec, SpecTitle: r.SpecTitle, SpecRev: r.SpecRev,
 		State: r.State, Reason: r.Reason, Stopping: r.Stopping, Spent: r.Spent,
-		Started: r.Started, Ended: r.Ended, Strip: []webapi.RunStripEntry{}, Rows: []webapi.RunStepRow{},
+		Started: r.Started, Ended: r.Ended, ActiveMs: r.ActiveMs, Resumed: r.Resumed, Phase: r.Phase,
+		Strip: []webapi.RunStripEntry{}, Rows: []webapi.RunStepRow{},
 		Files: r.Files, Commits: r.Commits, Report: r.Report,
 		CanPause: r.CanPause, CanResume: r.CanResume, CanStop: r.CanStop, CanRevert: r.CanRevert,
+		CanWithdraw: r.CanWithdraw, CanRetry: r.CanRetry, AlwaysAllowed: r.AlwaysAllowed,
 		CanSave: r.CanSave, SaveName: r.SaveName, SavedAs: r.SavedAs,
 		Mark: r.Mark, Line: r.Line, Folded: r.Folded,
 	}
@@ -180,7 +188,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 		w := webapi.RunStepRow{
 			Key: row.Key, Path: row.Path, Repeat: row.Repeat, Iter: row.Iter, ID: row.ID, Role: row.Role, State: row.State,
 			Spent: row.Spent, Line: row.Line, Flag: row.Flag, Card: row.Card, Folded: row.Folded, Steps: row.Steps,
-			Verdict: row.Verdict, Waiting: row.Waiting,
+			Verdict: row.Verdict, Waiting: row.Waiting, Started: row.Started, Ended: row.Ended, Model: row.Model,
 		}
 		w.Question = webQuestion(row.Question)
 		out.Rows = append(out.Rows, w)
@@ -196,6 +204,9 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 		for _, st := range l.Steps {
 			out.Live.Steps = append(out.Live.Steps, webapi.RunLiveStep{ID: st.ID, Path: st.Path, Card: st.Card, State: st.State})
 		}
+	}
+	for _, a := range r.Artifacts {
+		out.Artifacts = append(out.Artifacts, webapi.RunArtifact{Name: a.Name, File: a.File, Exists: a.Exists})
 	}
 	for _, res := range r.Results {
 		out.Results = append(out.Results, webapi.RunResult{
@@ -228,7 +239,7 @@ func webQuestion(q *threadfold.StepQuestion) *webapi.StepQuestion {
 	if q == nil {
 		return nil
 	}
-	out := &webapi.StepQuestion{Question: q.Question, Multi: q.Multi}
+	out := &webapi.StepQuestion{Call: q.Call, Question: q.Question, Multi: q.Multi}
 	for _, o := range q.Options {
 		out.Options = append(out.Options, webapi.QuestionOption{Label: o.Label, Detail: o.Detail, Recommended: o.Recommended})
 	}
@@ -376,6 +387,8 @@ func (d *WebDocs) Step(ctx context.Context, card string) (webapi.StepFace, error
 	if st.State.Live() {
 		out.Says = "a turn to " + st.StepID + " while it runs: its output is whatever it says last"
 	}
+	out.CanRevert = st.StartTree != "" && !st.State.Live() && run.State != domain.RunRunning &&
+		(d.eng == nil || d.eng.RunPhase(d.f.ID, run.N) == "")
 	return out, nil
 }
 
@@ -452,7 +465,7 @@ func (d *WebDocs) StepSend(ctx context.Context, card, text, person string) (weba
 
 // StepAnswer is POST /api/cards/{id}/steps/{card}/answer: the answer to
 // the step's open question, one of its options or the person's words.
-func (d *WebDocs) StepAnswer(ctx context.Context, card, answer, person string) error {
+func (d *WebDocs) StepAnswer(ctx context.Context, card, call, answer, person string) error {
 	if _, _, _, err := d.step(ctx, card); err != nil {
 		return err
 	}
@@ -462,14 +475,15 @@ func (d *WebDocs) StepAnswer(ctx context.Context, card, answer, person string) e
 	if strings.TrimSpace(answer) == "" {
 		return invalid("an answer needs some text")
 	}
-	return engineRefusal(d.eng.AnswerAs(ctx, domain.FeatureID(card), answer, state.PersonActor(person)))
+	return engineRefusal(d.eng.AnswerCall(ctx, domain.FeatureID(card), call, answer, state.PersonActor(person)))
 }
 
 // ---------------------------------------------------------------- the run
 
-// RunAct is POST /api/cards/{id}/runs/{n}/{pause,resume,stop}: a person
-// pausing, resuming or stopping the session's open run, which must be run
-// n.
+// RunAct is POST /api/cards/{id}/runs/{n}/{pause,resume,stop,withdraw,
+// askagain}: a person pausing, resuming or stopping the session's open
+// run, which must be run n; withdrawing run n while it is queued; or taking
+// back their always-allow of the session's runs.
 func (d *WebDocs) RunAct(ctx context.Context, n int, act, person string) error {
 	if !isRunSession(d.f) {
 		return ErrNoCard
@@ -480,6 +494,14 @@ func (d *WebDocs) RunAct(ctx context.Context, n int, act, person string) error {
 	open, err := d.store.OpenRun(ctx, d.f.ID)
 	if err != nil {
 		return err
+	}
+	switch act {
+	case "withdraw":
+		return engineRefusal(d.eng.WorkflowWithdraw(ctx, d.f.ID, n, "by "+personWord(person)))
+	case "askagain":
+		return engineRefusal(d.eng.WorkflowAskAgain(ctx, d.f.ID))
+	case "retry":
+		return engineRefusal(d.eng.WorkflowRetry(ctx, d.f.ID, n))
 	}
 	if open == nil || open.N != n {
 		return &conflictError{msg: fmt.Sprintf("run %d is not open", n)}
@@ -507,22 +529,34 @@ func personWord(person string) string {
 // RevertPreview is GET /api/cards/{id}/runs/{n}/revert: what reverting
 // run n would put back.
 func (d *WebDocs) RevertPreview(ctx context.Context, n int) (webapi.RevertPreview, error) {
+	return d.RevertPreviewTo(ctx, n, "")
+}
+
+// RevertPreviewTo is RevertPreview to where step started (?step=), the
+// run's start when step is "".
+func (d *WebDocs) RevertPreviewTo(ctx context.Context, n int, step string) (webapi.RevertPreview, error) {
 	if !isRunSession(d.f) {
 		return webapi.RevertPreview{}, ErrNoCard
 	}
 	if d.eng == nil {
 		return webapi.RevertPreview{}, ErrDetached
 	}
-	p, err := d.eng.WorkflowRevertPreview(ctx, d.f.ID, n)
+	p, err := d.eng.WorkflowRevertPreviewTo(ctx, d.f.ID, n, step)
 	if err != nil {
 		return webapi.RevertPreview{}, engineRefusal(err)
 	}
-	return webapi.RevertPreview{Run: p.Run, Paths: nonNil(p.Paths), Tree: p.Tree, Note: p.Note}, nil
+	return webapi.RevertPreview{Run: p.Run, Step: p.Step, Paths: nonNil(p.Paths), Tree: p.Tree, Note: p.Note}, nil
 }
 
 // Revert is POST /api/cards/{id}/runs/{n}/revert: the person's confirmed
 // revert of run n, against the tree its preview was read from (tree).
 func (d *WebDocs) Revert(ctx context.Context, n int, tree string) (webapi.RevertDone, error) {
+	return d.RevertTo(ctx, n, "", tree)
+}
+
+// RevertTo is Revert to where step started, the run's start when step is
+// "".
+func (d *WebDocs) RevertTo(ctx context.Context, n int, step, tree string) (webapi.RevertDone, error) {
 	if !isRunSession(d.f) {
 		return webapi.RevertDone{}, ErrNoCard
 	}
@@ -532,7 +566,7 @@ func (d *WebDocs) Revert(ctx context.Context, n int, tree string) (webapi.Revert
 	if err := closedToReview(d.f, "its tree is no run's to put back"); err != nil {
 		return webapi.RevertDone{}, err
 	}
-	paths, err := d.eng.WorkflowRevert(ctx, d.f.ID, n, tree)
+	paths, err := d.eng.WorkflowRevertTo(ctx, d.f.ID, n, step, tree)
 	if err != nil {
 		return webapi.RevertDone{}, engineRefusal(err)
 	}
@@ -587,13 +621,61 @@ func (m *Shell) webProposal(ctx context.Context, f domain.Feature) *webapi.RunPr
 		Baseline: webBaseline(p.Baseline),
 	}
 	for _, s := range p.Steps {
-		out.Steps = append(out.Steps, webapi.ProposalStep{
-			ID: s.ID, Depth: s.Depth, Kind: s.Kind, Role: string(s.Role), Slot: s.Slot, Model: threadfold.Sanitize(s.Model),
-			Prompt: threadfold.Sanitize(s.Prompt), Max: s.Max, Until: s.Until, OnMax: string(s.OnMax), Join: string(s.Join),
-		})
+		out.Steps = append(out.Steps, webProposalStep(s))
+	}
+	for _, s := range p.Replaces {
+		out.Replaces = append(out.Replaces, webProposalStep(s))
 	}
 	for _, c := range p.Checks {
 		out.Checks = append(out.Checks, webapi.ProposalCheck{Item: c.Item, Says: threadfold.Sanitize(c.Says), Cmd: threadfold.Sanitize(c.Cmd)})
 	}
 	return out
+}
+
+// webProposalStep is one entry of a proposal's step tree as the page reads
+// it.
+func webProposalStep(s engine.ProposalStep) webapi.ProposalStep {
+	return webapi.ProposalStep{
+		ID: s.ID, Depth: s.Depth, Kind: s.Kind, Role: string(s.Role), Slot: s.Slot, Model: threadfold.Sanitize(s.Model),
+		Prompt: threadfold.Sanitize(s.Prompt), Max: s.Max, Until: s.Until, OnMax: string(s.OnMax), Join: string(s.Join),
+	}
+}
+
+// RunDiff is GET /api/cards/{id}/runs/{n}/diff: run n's whole diff, from
+// the tree it started on to the tree now, as the Changes tab draws one.
+func (d *WebDocs) RunDiff(ctx context.Context, n int) (webapi.Diff, error) {
+	if !isRunSession(d.f) {
+		return webapi.Diff{}, ErrNoCard
+	}
+	if d.eng == nil {
+		return webapi.Diff{}, ErrDetached
+	}
+	patch, _, err := d.eng.RunDiff(ctx, d.f.ID, n)
+	if err != nil {
+		return webapi.Diff{}, engineRefusal(err)
+	}
+	out := webapi.Diff{Files: []webapi.DiffFile{}, Annotations: []webapi.Annotation{}}
+	for _, f := range diffannot.Parse(diffannot.Lines(patch)) {
+		out.Files = append(out.Files, webDiffFile(f, nil, false))
+	}
+	if len(out.Files) == 0 {
+		out.Why = fmt.Sprintf("the tree is as run %d found it", n)
+	}
+	return out, nil
+}
+
+// RunArtifact is GET /api/cards/{id}/runs/{n}/artifacts/{name}: one
+// artifact run n's recipe declares, as text.
+func (d *WebDocs) RunArtifact(ctx context.Context, n int, name string) (webapi.RunArtifactText, error) {
+	if !isRunSession(d.f) {
+		return webapi.RunArtifactText{}, ErrNoCard
+	}
+	if d.eng == nil {
+		return webapi.RunArtifactText{}, ErrDetached
+	}
+	a, text, cut, err := d.eng.ReadRunArtifact(ctx, d.f.ID, n, name)
+	if err != nil {
+		return webapi.RunArtifactText{}, &conflictError{msg: err.Error()}
+	}
+	return webapi.RunArtifactText{Name: a.Name, File: a.File, Text: threadfold.Sanitize(text), Cut: cut}, nil
 }

@@ -136,3 +136,40 @@ func TestRanNoTests(t *testing.T) {
 		t.Fatalf("results %+v", rs)
 	}
 }
+
+// TestRunBoundsEachCheck: a check that would hang is killed at the bound
+// given, and its group with it, while the next check still runs; a check
+// naming its own timeout keeps to that one instead.
+func TestRunBoundsEachCheck(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Now()
+	res := RunBounded(context.Background(), dir, []domain.Check{
+		{Name: "hangs", Cmd: "sleep 30 & wait"},
+		{Name: "own", Cmd: "sleep 30", Timeout: "200ms"},
+		{Name: "after", Cmd: "true"},
+	}, 300*time.Millisecond)
+	if took := time.Since(start); took > 10*time.Second {
+		t.Fatalf("the bounded checks took %s", took)
+	}
+	if res[0].Status != StatusTimeout || res[1].Status != StatusTimeout || !res[2].OK {
+		t.Fatalf("results = %+v", res)
+	}
+	if res[1].Duration > 5*time.Second {
+		t.Errorf("a check's own timeout was not kept: %s", res[1].Duration)
+	}
+}
+
+// TestRunHoldsABoundedOutput: a check that prints without end is held to
+// a bounded buffer while it runs, not its whole output.
+func TestRunHoldsABoundedOutput(t *testing.T) {
+	res := Run(context.Background(), t.TempDir(), []domain.Check{{Name: "loud", Cmd: "head -c 5000000 /dev/zero | tr '\\0' x"}})
+	if !res[0].OK {
+		t.Fatalf("result = %+v", res[0])
+	}
+	if n := len(res[0].Output); n > maxOutput+64 {
+		t.Errorf("output kept %d bytes", n)
+	}
+	if !strings.HasSuffix(res[0].Output, "(truncated)") {
+		t.Errorf("a cut output does not say so: %q", res[0].Output[len(res[0].Output)-40:])
+	}
+}

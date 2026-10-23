@@ -106,7 +106,10 @@ func liveStrip(in RunInput, r Run, steps []domain.RunStep) *RunStrip {
 		s.Card = s.Steps[0].Card
 	}
 	if len(s.Steps) == 0 {
-		s.Action = "the next step is starting"
+		s.Action = PhaseWords(r.Phase)
+		if s.Action == "" {
+			s.Action = "the next step is starting"
+		}
 	}
 	d := run.Pending
 	switch {

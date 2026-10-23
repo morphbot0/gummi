@@ -21,7 +21,8 @@
 //
 //  1. Only a running run is conducted, but a stop winds down a paused one
 //     too: interrupt the live steps, then end the run stopped.
-//  2. A spent pool pauses the run for a top-up; nothing else happens.
+//  2. A spent pool pauses the run for a top-up; nothing else happens —
+//     unless nothing is left to start, settle or judge, when the run ends.
 //  3. A parallel whose join is decided settles, stopping branches it no
 //     longer needs; a repeat whose iteration has ended has its until
 //     judged, then iterates, ends, or applies onMax. An until that could
@@ -194,11 +195,15 @@ func Decide(in Snapshot) []Action {
 	if in.State != domain.RunRunning {
 		return nil
 	}
-	if in.Bounded && in.Left <= 0 {
-		return []Action{{Kind: Pause, Reason: fmt.Sprintf("the session's budget is spent (the run has spent %.0f)", Spent(in))}}
-	}
 
 	res, why := d.seq("", in.Recipe.Steps)
+	if in.Bounded && in.Left <= 0 {
+		// a spent pool pauses whatever would spend more; a run with nothing
+		// left to start or settle ends, its checks and report costing nothing
+		if res == pending || len(live) > 0 || len(d.starts) > 0 || len(d.settle) > 0 {
+			return []Action{{Kind: Pause, Reason: fmt.Sprintf("the session's budget is spent (the run has spent %s)", domain.FormatDollars(Spent(in)))}}
+		}
+	}
 	var out []Action
 	out = append(out, d.settle...)
 	out = append(out, d.starts...)

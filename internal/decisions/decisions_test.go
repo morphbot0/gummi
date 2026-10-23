@@ -3,6 +3,7 @@ package decisions
 import (
 	"testing"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 )
@@ -145,5 +146,25 @@ func TestDecisionPermissionRanksWithAsk(t *testing.T) {
 	lane, escalated, ok := Attention(string(state.DecisionKindAsk))
 	if !ok || lane != LaneQuestion || escalated {
 		t.Errorf("Attention = (%v, %v, %v), want the question lane", lane, escalated, ok)
+	}
+}
+
+// TestRunOptionsNameWhatWordsDo: each kind of run decision names its words
+// row for what the person's words do there — the session hears them on a
+// loop, a parked run and the money, while the question stays open — and
+// stopping the run is marked as the answer that cannot be taken back.
+func TestRunOptionsNameWhatWordsDo(t *testing.T) {
+	ask := &engine.Ask{Options: []engine.AskOption{{Label: engine.WorkflowOneMore}, {Label: engine.WorkflowStopRun}}}
+	for kind, want := range map[domain.RunDecisionKind]string{
+		domain.RunDecideMax: "Talk it over", domain.RunDecideUnjudged: "Talk it over", domain.RunDecideResume: "Talk it over",
+		domain.RunDecideBudget: "Another amount", domain.RunDecideProposal: RunFeedbackLabel,
+	} {
+		opts := RunOptions(kind, ask)
+		if last := opts[len(opts)-1]; last.Label != want || !last.Chat {
+			t.Errorf("%s: words row %+v, want %q", kind, last, want)
+		}
+		if opts[0].Danger || !opts[1].Danger {
+			t.Errorf("%s: danger marks %v %v", kind, opts[0].Danger, opts[1].Danger)
+		}
 	}
 }

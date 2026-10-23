@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestWorkflowRoles(t *testing.T) {
 	reads := map[WorkflowRole]bool{RoleScout: true, RoleReviewer: true}
@@ -188,5 +191,43 @@ func TestSessionSpecPath(t *testing.T) {
 	}
 	if got := SessionSpecPath(id, 1, "!!!"); got != ".gummi/specs/FF-007/1-spec.md" {
 		t.Errorf("path for a slugless title = %q", got)
+	}
+}
+
+// TestRetryRefusal: only the session's newest run that started, ended
+// partial or stopped with a failed or stopped step (or a loop a person
+// stopped), and with no other run open or queued, is retried.
+func TestRetryRefusal(t *testing.T) {
+	partial := Run{N: 2, State: RunPartial, StartTree: "t"}
+	failed := []RunStep{{Path: "a", State: StepDone}, {Path: "b", State: StepFailed}}
+	for _, c := range []struct {
+		name  string
+		run   Run
+		steps []RunStep
+		runs  []Run
+		want  string
+	}{
+		{"a partial run with a failed step", partial, failed, []Run{{N: 1, State: RunDone, StartTree: "s"}, partial}, ""},
+		{"a run that ended done", Run{N: 2, State: RunDone, StartTree: "t"}, failed, nil, "only a run that ended partial or stopped"},
+		{"a run that never started", Run{N: 2, State: RunStopped}, failed, nil, "never started"},
+		{"another run open", partial, failed, []Run{partial, {N: 3, State: RunPaused, StartTree: "u"}}, "run 3 is paused"},
+		{"a run queued", partial, failed, []Run{partial, {N: 3, State: RunQueued}}, "run 3 is queued"},
+		{"a later run ran", partial, failed, []Run{partial, {N: 3, State: RunDone, StartTree: "u"}}, "ran after it"},
+		{"a later run denied", partial, failed, []Run{partial, {N: 3, State: RunDenied}}, ""},
+		{"nothing failed", partial, []RunStep{{Path: "a", State: StepDone}}, nil, "no failed or stopped step"},
+		{
+			"a loop a person stopped",
+			Run{N: 2, State: RunStopped, StartTree: "t", OnMax: map[string]string{"fix/2": "stop"}},
+			[]RunStep{{Path: "fix/2/a", State: StepDone}},
+			nil, "",
+		},
+	} {
+		got := RetryRefusal(c.run, c.steps, c.runs)
+		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	if RetriedPath("build/2/implement", 1) != "build/2/implement@1" {
+		t.Error(RetriedPath("build/2/implement", 1))
 	}
 }

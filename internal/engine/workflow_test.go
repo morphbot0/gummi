@@ -457,8 +457,19 @@ func TestARepeatAtItsMaxAsksThePerson(t *testing.T) {
 	if again, _ := e.cfg.Store.Run(ctx, f.ID, run.N); again.Pending == nil || again.Pending.ID != id {
 		t.Fatalf("the decision was raised again: %+v", again.Pending)
 	}
-	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), "maybe"); err == nil {
-		t.Fatal("an answer that is no option was taken")
+	// the person's own words are no answer: they go to the session, and
+	// the question stays open, the same one
+	before := len(wf.sessionTurns())
+	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), "why does it keep failing?"); err != nil {
+		t.Fatalf("words to an open question: %v", err)
+	}
+	waitUntil(t, "the session heard the person", func() bool { return len(wf.sessionTurns()) > before })
+	if turns := wf.sessionTurns(); !strings.Contains(turns[len(turns)-1], "says: why does it keep failing?") ||
+		!strings.Contains(turns[len(turns)-1], "do not answer it for them") {
+		t.Fatalf("the session was told %q", turns[len(turns)-1])
+	}
+	if still, _ := e.cfg.Store.Run(ctx, f.ID, run.N); still.Pending == nil || still.Pending.ID != id || len(still.OnMax) != 0 {
+		t.Fatalf("words closed the question: %+v %v", still.Pending, still.OnMax)
 	}
 	if err := e.WorkflowAnswer(ctx, f.ID, run.N, pendingID(t, e, f.ID, run.N), WorkflowOneMore); err != nil {
 		t.Fatal(err)
@@ -682,8 +693,15 @@ func TestARunAllowedWhileAnotherIsOpenWaitsQueued(t *testing.T) {
 	first := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: slow\nsteps:\n  - { id: slow, role: scout, prompt: wait }\n"})
 	tickRuns(t, e, f.ID, first.N, "started its step", func(*domain.Run) bool { return wf.count("slow") > 0 })
 	second := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: quick\nsteps:\n  - { id: quick, role: scout, prompt: look }\n"})
-	if r, _ := e.cfg.Store.Run(ctx, f.ID, second.N); r.State != domain.RunQueued || r.SpecRev != 0 {
-		t.Fatalf("second run %s, revision %d", r.State, r.SpecRev)
+	// the spec is frozen as the person read it, when the run was proposed;
+	// no baseline is taken while the first run's steps write the tree
+	queued, _ := e.cfg.Store.Run(ctx, f.ID, second.N)
+	if queued.State != domain.RunQueued || queued.SpecRev == 0 || queued.Baseline != nil {
+		t.Fatalf("second run %s, revision %d, baseline %+v", queued.State, queued.SpecRev, queued.Baseline)
+	}
+	// an edit while it waits does not move what it is judged against
+	if _, err := e.WriteSessionSpec(ctx, f, 1, wfTestSpec+"\nedited while queued\n", "user"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: "investigate"}); err == nil || !strings.Contains(err.Error(), "queued") {
 		t.Fatalf("a third run behind the queue: %v", err)
@@ -691,7 +709,7 @@ func TestARunAllowedWhileAnotherIsOpenWaitsQueued(t *testing.T) {
 	g.open()
 	tickRuns(t, e, f.ID, first.N, "ended", ended)
 	r := tickRuns(t, e, f.ID, second.N, "ended", ended)
-	if r.SpecRev == 0 || wf.count("quick") != 1 {
+	if r.SpecRev != queued.SpecRev || wf.count("quick") != 1 || r.Baseline == nil {
 		t.Fatalf("the queued run %+v", r)
 	}
 }
@@ -829,6 +847,15 @@ func TestAPlannerReplacesTheRemainingSteps(t *testing.T) {
 	if r.Pending.Step != "plan" || !strings.Contains(r.Pending.RecipeYAML, "fresh") {
 		t.Fatalf("decision %+v", r.Pending)
 	}
+	// the person reads what the plan drops, and the checks still in force
+	if q := r.Pending.Question; !strings.Contains(q, "What they replace, which would not run:\n- stale") ||
+		!strings.Contains(q, "still judged against spec S1") || !strings.Contains(q, "DW-1: test -f out.txt") {
+		t.Fatalf("the question:\n%s", q)
+	}
+	if p, err := e.WorkflowProposal(ctx, f.ID, run.N); err != nil || len(p.Replaces) != 1 || p.Replaces[0].ID != "stale" ||
+		len(p.Steps) != 1 || p.Steps[0].ID != "fresh" {
+		t.Fatalf("the plan's card %+v %v", p, err)
+	}
 	if s := stepPaths(t, e, f.ID, run.N)["plan"]; s.State != domain.StepAsking {
 		t.Fatalf("the planner %+v", s)
 	}
@@ -952,7 +979,14 @@ func TestAStepsQuestionWaitsOnThePerson(t *testing.T) {
 		return stepPaths(t, e, f.ID, run.N)["ask"].State == domain.StepAsking
 	})
 	card := stepPaths(t, e, f.ID, run.N)["ask"].Card
-	if err := e.AnswerAs(ctx, card, "blue", state.ActorUser); err != nil {
+	// an answer read off another question — one answered elsewhere, or
+	// replaced since — is refused, naming what the step asks now
+	if err := e.AnswerCall(ctx, card, "an-older-call", "green", state.ActorUser); err == nil ||
+		!strings.Contains(err.Error(), "Blue or green?") {
+		t.Fatalf("an answer to a question no longer open: %v", err)
+	}
+	call := e.Freeform(card).Snapshot().PendingAsk.CallID
+	if err := e.AnswerCall(ctx, card, call, "blue", state.ActorUser); err != nil {
 		t.Fatal(err)
 	}
 	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
@@ -1002,6 +1036,12 @@ func TestAProposalReadsAsItsCard(t *testing.T) {
 	}
 	if r := kinds["review-b"]; r.Slot != "reviewer-alt" {
 		t.Fatalf("review-b %+v", r)
+	}
+	// each step names what it runs on, and its prompt's first paragraph
+	// whole, not its first wrapped line
+	if im := kinds["implement"]; !strings.Contains(im.Model, "m on ") ||
+		im.Prompt != "Implement {{artifacts.design}} for the spec below. If {{artifacts.review}} exists, address its findings first." {
+		t.Fatalf("implement %+v", im)
 	}
 	always := run.Pending.Options[1]
 	if always != WorkflowAlways {
@@ -1441,7 +1481,7 @@ func TestASessionIsNotHandedOffUnderItsRun(t *testing.T) {
 // "300cr" or "300 credits" (the form the headless driver asks for, where a
 // bare number picks an option), or dollars as $N.NN.
 func TestAnAmountReadsWithItsUnit(t *testing.T) {
-	for in, want := range map[string]int{"300": 300, "300cr": 300, "300 cr": 300, "300 credits": 300, "$3": 300} {
+	for in, want := range map[string]int{"3": 300, "2.5": 250, "300cr": 300, "300 cr": 300, "300 credits": 300, "$3": 300} {
 		if got, err := parseCredits(in); err != nil || got != want {
 			t.Errorf("parseCredits(%q) = %d, %v; want %d", in, got, err, want)
 		}
@@ -1659,7 +1699,7 @@ func TestACheckThatRanNoTestsIsUnjudged(t *testing.T) {
 	if r.State != domain.RunPartial || domain.ResultsMet(r.Results) || r.Reason != "a done-when check ran no tests" {
 		t.Fatalf("ended %s (%s), results %+v", r.State, r.Reason, r.Results)
 	}
-	if !strings.Contains(r.Report, "– DW-1 out.txt exists (check): ran no tests → ran no tests (ran no tests before the run): the check ran no tests") {
+	if !strings.Contains(r.Report, "– DW-1 out.txt exists (check): ran no tests before the run, still runs no tests: the check ran no tests") {
 		t.Fatalf("the report:\n%s", r.Report)
 	}
 	if specs, _ := e.cfg.Store.SessionSpecs(ctx, f.ID); specs[0].State == domain.SpecMet {

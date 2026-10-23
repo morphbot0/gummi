@@ -368,6 +368,15 @@ type Run struct {
 	// StartHead is the session's HEAD when the run started: the commits
 	// made while it ran are the ones after it, which its report names.
 	StartHead string
+	// StartIndex is the session's index when the run started, as a tree:
+	// Revert run puts the index entries of the paths it puts back as they
+	// were then. Empty on a run from before, or a checkout with no index.
+	StartIndex string
+	// Active is how long the run has worked, its pauses left out, up to
+	// ResumedAt: when it last started or resumed running, zero while it is
+	// not running. A face counts a running run's to now.
+	Active    time.Duration
+	ResumedAt time.Time
 	// Commits are the commits made in the session's tree while the run ran
 	// ("<short sha> <subject>", oldest last), recorded when it ended: gummi
 	// commits nothing, so these are a step's or the session's own.
@@ -438,6 +447,10 @@ const (
 	// RunDecideBudget: the session's pool is spent and the run paused.
 	// Amount is the top-up suggested.
 	RunDecideBudget RunDecisionKind = "budget"
+	// RunDecideResume: gummi stopped while the run ran, and it was parked
+	// when gummi came back. A parked run never resumes itself (§25.7): the
+	// person resumes it or stops it.
+	RunDecideResume RunDecisionKind = "resume"
 )
 
 // RunDecision is a run's one open question to its person. A step's own
@@ -609,4 +622,47 @@ type SpecRevision struct {
 	Content string
 	By      string
 	At      time.Time
+}
+
+// RetryRefusal says why run cannot be retried, "" when it can: a person
+// retrying a run that ended partial or stopped runs its failed and stopped
+// steps again, keeping every step that finished (DESIGN §25.6). Only the
+// session's newest run that started may be, while no other run is open or
+// queued — a retry reopens it in the tree — and only one with something to
+// run again: a step that failed or stopped, or a loop a person stopped.
+// steps are run's; runs are the session's every run.
+func RetryRefusal(run Run, steps []RunStep, runs []Run) string {
+	if run.State != RunPartial && run.State != RunStopped {
+		return fmt.Sprintf("run %d is %s: only a run that ended partial or stopped is retried", run.N, run.State)
+	}
+	if run.StartTree == "" {
+		return fmt.Sprintf("run %d never started", run.N)
+	}
+	for _, o := range runs {
+		switch {
+		case o.N == run.N:
+		case o.State.Open() || o.State == RunQueued:
+			return fmt.Sprintf("run %d is %s: retry once it has ended", o.N, o.State)
+		case o.N > run.N && o.StartTree != "":
+			return fmt.Sprintf("run %d ran after it: only the newest run is retried", o.N)
+		}
+	}
+	for _, s := range steps {
+		if s.State == StepFailed || s.State == StepStopped {
+			return ""
+		}
+	}
+	for _, a := range run.OnMax {
+		if a == "stop" {
+			return ""
+		}
+	}
+	return fmt.Sprintf("run %d has no failed or stopped step to run again", run.N)
+}
+
+// RetriedPath is where a retried step's earlier attempt is kept: its path
+// with the attempt's number, as in build/2/implement@1. An entry's id never
+// holds "@", so the path names no step of the recipe.
+func RetriedPath(path string, attempt int) string {
+	return fmt.Sprintf("%s@%d", path, attempt)
 }

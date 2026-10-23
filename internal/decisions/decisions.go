@@ -176,7 +176,15 @@ func RunOptions(kind domain.RunDecisionKind, ask *engine.Ask) []Option {
 	case domain.RunDecidePlan:
 		chat.Label, chat.Detail = "Talk it over", "type it below: the planner hears it, and may revise the plan again"
 	case domain.RunDecideBudget:
-		chat.Label, chat.Detail = "Another amount", "type the credits to top the session up by"
+		chat.Label, chat.Detail = "Another amount", "type it below in dollars, as 2.50; other words go to the session, and the question stays open"
+	case domain.RunDecideMax, domain.RunDecideUnjudged, domain.RunDecideResume:
+		chat.Label, chat.Detail = "Talk it over", "type it below: the session hears it, and the question stays open for you"
+	}
+	for i := range options {
+		// the answer that ends a run for good
+		if options[i].Label == engine.WorkflowStopRun {
+			options[i].Danger = true
+		}
 	}
 	return options
 }
