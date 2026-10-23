@@ -179,6 +179,15 @@ func (m *Shell) updateRuns(msg tea.Msg) (tea.Cmd, bool) {
 	case stepDiffMsg:
 		m.stepDiffLoaded(msg)
 		return nil, true
+	case runArtifactsMsg:
+		m.Overlay.Push(&confirmDialog{
+			id: "run-artifacts", card: msg.card,
+			question:     fmt.Sprintf("Run %d's artifacts", msg.run),
+			detail:       msg.detail,
+			confirmLabel: "Close",
+			onConfirm:    func() tea.Cmd { return nil },
+		})
+		return nil, true
 	}
 	return nil, false
 }
@@ -325,16 +334,17 @@ func (m *Shell) runsWorking() bool {
 	return false
 }
 
-// runElapsed is a run's elapsed time to the minute, "" before it starts.
+// runElapsed is how long a run has worked, to the minute, its pauses left
+// out; "" before it starts.
 func runElapsed(r threadfold.Run, now time.Time) string {
 	if r.Started.IsZero() {
 		return ""
 	}
-	end := now
-	if !r.Ended.IsZero() {
-		end = r.Ended
-	}
-	d := end.Sub(r.Started)
+	return runDur(threadfold.RunWorked(r, now))
+}
+
+// runDur is a duration to the minute: "<1m", "14m", "1h12m".
+func runDur(d time.Duration) string {
 	switch {
 	case d < time.Minute:
 		return "<1m"
@@ -381,6 +391,16 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, stepsOpen, hin
 	if r.Reason != "" && r.State != string(domain.RunDone) {
 		add(s.Subtle.Render(r.Reason))
 	}
+	if words := threadfold.PhaseWords(r.Phase); words != "" {
+		add(s.Info.Render("gummi is " + words))
+	}
+	if r.AlwaysAllowed {
+		l := s.Warning.Render("every run of this session starts without asking")
+		if sel == "head" {
+			l += s.Faint.Render(" · ") + s.KeyHint.Render("a") + s.Faint.Render(" asks again")
+		}
+		add(l)
+	}
 	ended := r.State == string(domain.RunDone) || r.State == string(domain.RunPartial) || r.State == string(domain.RunStopped)
 	baseline := func() {
 		b := r.Baseline
@@ -403,6 +423,12 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, stepsOpen, hin
 		}
 	}
 	switch r.State {
+	case string(domain.RunQueued):
+		l := s.Subtle.Render("allowed · starts when the open run ends")
+		if r.CanWithdraw && sel == "head" {
+			l += s.Faint.Render(" · ") + s.KeyHint.Render("w") + s.Faint.Render(" withdraws it")
+		}
+		add(l)
 	case string(domain.RunProposed):
 		add(s.Warning.Render("waits on your answer below"))
 		baseline()
@@ -472,6 +498,21 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, stepsOpen, hin
 	} else {
 		rows()
 	}
+	if len(r.Artifacts) > 0 {
+		var arts []string
+		for _, a := range r.Artifacts {
+			if a.Exists {
+				arts = append(arts, s.Base.Render(a.File))
+			} else {
+				arts = append(arts, s.Faint.Render(a.File+" (not yet)"))
+			}
+		}
+		l := s.Faint.Render("artifacts: ") + strings.Join(arts, s.Faint.Render(" · "))
+		if sel == "head" {
+			l += s.Faint.Render(" · ") + s.KeyHint.Render("r") + s.Faint.Render(" reads them")
+		}
+		add(l)
+	}
 	// the foot: what the run has changed in the tree
 	foot := s.Faint.Render("└ ")
 	var said string
@@ -497,6 +538,9 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, stepsOpen, hin
 		tail = append(tail, s.Faint.Render("saved as ")+s.Subtle.Render(r.SavedAs))
 	case r.CanSave && sel == "head":
 		tail = append(tail, s.KeyHint.Render("s")+s.Faint.Render(" saves its recipe"))
+	}
+	if sel == "head" && len(r.Files) > 0 {
+		tail = append(tail, s.KeyHint.Render("f")+s.Faint.Render(" its diff"))
 	}
 	if ended && sel == "head" {
 		tail = append(tail, s.KeyHint.Render("enter")+s.Faint.Render(" folds it"))
@@ -676,6 +720,9 @@ func stepRowLines(s *theme.Styles, row threadfold.StepRow, selected bool, spin s
 	if row.Spent > 0 {
 		cost = domain.FormatDollars(row.Spent)
 	}
+	if !row.Started.IsZero() && !row.Ended.IsZero() && !row.Folded {
+		cost = runDur(row.Ended.Sub(row.Started)) + " " + cost
+	}
 	glyph, nameStyle, lineStyle := stepGlyph(row.State), s.Base, s.Subtle
 	if working {
 		if spin != "" {
@@ -747,6 +794,8 @@ func stepGlyph(state string) string {
 		return "?"
 	case "running":
 		return "●"
+	case threadfold.RowPaused:
+		return "‖"
 	}
 	return "○"
 }

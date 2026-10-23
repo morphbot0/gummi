@@ -57,8 +57,10 @@ type stepView struct {
 	// composing says it holds the keyboard.
 	input     textarea.Model
 	composing bool
-	// qCursor is the option highlighted in the step's open question.
+	// qCursor is the option highlighted in the step's open question;
+	// qPicked the options ticked on a question that takes several.
 	qCursor int
+	qPicked map[int]bool
 }
 
 type stepLoadedMsg struct {
@@ -257,8 +259,30 @@ func (m *Shell) handleStepKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "/", "i", "m":
 		sv.composing = true
 		return sv.input.Focus()
+	case "space":
+		// a question that takes several answers: space ticks the
+		// highlighted one, enter sends every one ticked
+		if q != nil && q.Multi && len(q.Options) > 0 {
+			i := clamp(sv.qCursor, 0, len(q.Options)-1)
+			if sv.qPicked == nil {
+				sv.qPicked = map[int]bool{}
+			}
+			sv.qPicked[i] = !sv.qPicked[i]
+			return nil
+		}
 	case "enter":
 		if q != nil && len(q.Options) > 0 {
+			if q.Multi {
+				var labels []string
+				for i, o := range q.Options {
+					if sv.qPicked[i] {
+						labels = append(labels, o.Label)
+					}
+				}
+				if len(labels) > 0 {
+					return m.answerStep(strings.Join(labels, ", "))
+				}
+			}
 			return m.answerStep(q.Options[clamp(sv.qCursor, 0, len(q.Options)-1)].Label)
 		}
 		sv.composing = true
@@ -344,9 +368,14 @@ func (m *Shell) answerStep(answer string) tea.Cmd {
 		return errNoticeCmd(err.Error())
 	}
 	card, id, name := sv.card, sv.session, sv.face.ID
-	sv.qCursor = 0
+	// the answer is to the question drawn: refused once the step asks another
+	call := ""
+	if q := sv.face.Question; q != nil {
+		call = q.Call
+	}
+	sv.qCursor, sv.qPicked = 0, nil
 	return func() tea.Msg {
-		if err := d.StepAnswer(context.Background(), string(card), answer, ""); err != nil {
+		if err := d.StepAnswer(context.Background(), string(card), call, answer, ""); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return tea.BatchMsg{
@@ -606,10 +635,10 @@ func (m *Shell) stepQuestionBlock(q *threadfold.StepQuestion, w, rows int) []str
 		title += " · your line is the answer"
 	}
 	width := max(w-2, 10)
-	lines := strings.Split(pickerView(s, title, q.Question, options, cursor, nil, q.Multi, w, sv.composing), "\n")
+	lines := strings.Split(pickerView(s, title, q.Question, options, cursor, sv.qPicked, q.Multi, w, sv.composing), "\n")
 	headRows := len(pickerHead(s, title, q.Question, width))
 	windowed := windowDecisionBlock(s, lines, headRows, len(options), cursor, rows)
-	return expandHighlighted(s, windowed, lines, headRows, options, cursor, nil, q.Multi, width, rows, sv.composing)
+	return expandHighlighted(s, windowed, lines, headRows, options, cursor, sv.qPicked, q.Multi, width, rows, sv.composing)
 }
 
 // stepTranscriptLines is the step card's own conversation, live: its

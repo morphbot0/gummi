@@ -1138,7 +1138,9 @@ func (m *Shell) Init() tea.Cmd {
 		// badges them (and withholds the actions that would fight them)
 		// instead of presenting a card it cannot touch as idle.
 		cmds = append(cmds, foreignTick())
-		cmds = append(cmds, workflowPollTick())
+		// tick the runs at once, not a poll later: a run left running by a
+		// gummi that is gone is parked, and asks its person, from the start
+		cmds = append(cmds, workflowPollTick(), m.workflowTickCmd())
 		// The stats tab's own slow refresh. It reads the record rather
 		// than the event stream, so nothing wakes it when a running lane
 		// grows or a wait is answered — a tick does, only while the tab

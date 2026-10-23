@@ -180,6 +180,19 @@ func TestRunBlockGolden(t *testing.T) {
 		{Item: "DW-3", Verdict: domain.ItemUnjudged},
 	}
 	draw("ended, before and after", runBlockLines(s, threadfold.FoldRun(before), "", false, true, "1h12m", "", 110))
+	// gummi at work between steps, a person's always-allow, the run's
+	// artifacts, a paused run's steps and a queued run's withdrawal
+	ending := tuiRunningRun()
+	ending.Phase, ending.AlwaysAllowed = "ending", true
+	ending.Artifacts = []threadfold.RunArtifact{{Name: "design", File: "design.md", Exists: true}, {Name: "review", File: "review.json"}}
+	draw("running its end checks, always allowed, head selected", runBlockLines(s, threadfold.FoldRun(ending), "head", false, false, "14m", "", 110))
+	paused := tuiRunningRun()
+	paused.Run.State, paused.Run.Reason, paused.Run.Pending = domain.RunPaused, "parked: gummi stopped while it ran", nil
+	draw("parked", runBlockLines(s, threadfold.FoldRun(paused), "", false, false, "14m", "", 110))
+	queued := threadfold.FoldRun(threadfold.RunInput{Run: domain.Run{
+		Session: "FF-001", N: 5, Recipe: domain.Recipe{Name: "one"}, Spec: 2, State: domain.RunQueued, CreatedAt: tuiRunAt,
+	}})
+	draw("queued, head selected", runBlockLines(s, queued, "head", false, false, "", "", 110))
 	golden.RequireEqual(t, []byte(b.String()))
 }
 
@@ -462,6 +475,25 @@ func TestARunInTheTerminal(t *testing.T) {
 	// (a headless board keeps no dialog a web intent does not own, so the
 	// confirm is read here rather than off the overlay)
 	key("up")
+	// f reads the run's whole diff into the diff view, saying whose it is
+	var runDiff tea.Cmd
+	do(func(m *Shell) tea.Cmd { runDiff = m.handleRunKey("f"); return nil })
+	if runDiff == nil {
+		t.Fatal("f read no diff")
+	}
+	if dl, ok := runDiff().(diffLoadedMsg); !ok || !strings.Contains(dl.diff, "+hi") || !strings.Contains(dl.drift, "run 1's own diff") {
+		t.Fatalf("the run's diff: %+v", dl)
+	}
+	// r, w and a say why there is nothing to do on this run
+	for k, want := range map[string]string{
+		"r": "declares no artifacts", "w": "only a queued run is withdrawn", "a": "allowed one by one already",
+	} {
+		var said string
+		do(func(m *Shell) tea.Cmd { m.handleRunKey(k); said = m.notice.text; return nil })
+		if !strings.Contains(said, want) {
+			t.Errorf("%s says %q, want %q", k, said, want)
+		}
+	}
 	var preview tea.Cmd
 	do(func(m *Shell) tea.Cmd { preview = m.handleRunKey("v"); return nil })
 	if preview == nil {

@@ -42,10 +42,28 @@ type RunInput struct {
 	// Envelope is the session's envelope, in credits (0 uncapped): what a
 	// strip paused on a spent pool says is spent.
 	Envelope float64
+	// Phase is what gummi itself is doing on the run between its steps
+	// (engine.RunPhase): "baseline", "until", "ending", or "".
+	Phase string
+	// AlwaysAllowed says a person always allows the session's runs; the
+	// session's newest run says so, with a way to ask again.
+	AlwaysAllowed bool
+	// Artifacts are the run's declared artifacts in its directory, and
+	// whether each has been written.
+	Artifacts []RunArtifact
+}
+
+// RunArtifact is one artifact a run's recipe declares.
+type RunArtifact struct {
+	Name   string `json:"name"`
+	File   string `json:"file"`
+	Exists bool   `json:"exists,omitempty"`
 }
 
 // StepLive is what a step's own session says while it works.
 type StepLive struct {
+	// Model is what the step's agent runs on.
+	Model string
 	// Busy says a turn is in flight on the step's card.
 	Busy bool
 	// Spent is the step card's spend so far, in credits.
@@ -78,10 +96,18 @@ type Run struct {
 	// Spent is what its steps have spent, live ones included, in credits:
 	// a run estimates nothing, and spends from the session's budget.
 	Spent float64 `json:"spent"`
-	// Started and Ended bound its elapsed time; a face counts an open
-	// run's to now.
-	Started time.Time `json:"started,omitzero"`
-	Ended   time.Time `json:"ended,omitzero"`
+	// Started and Ended bound the run. ActiveMs is how long it has
+	// worked, its pauses left out, up to Resumed — when it last started
+	// running, zero while it is not: a face counts a running run's
+	// elapsed time as ActiveMs and the time since Resumed.
+	Started  time.Time `json:"started,omitzero"`
+	Ended    time.Time `json:"ended,omitzero"`
+	ActiveMs int64     `json:"activeMs,omitempty"`
+	Resumed  time.Time `json:"resumed,omitzero"`
+	// Phase is what gummi does on the run between its steps: "baseline"
+	// (the checks before the first step), "until" (judging a loop),
+	// "ending" (the end checks and the report), or "".
+	Phase string `json:"phase,omitempty"`
 	// Strip is the recipe's top-level entries, each in its state.
 	Strip []StripEntry `json:"strip"`
 	// Rows is a row per step that has run or is running, in the order they
@@ -110,6 +136,15 @@ type Run struct {
 	CanResume bool `json:"canResume,omitempty"`
 	CanStop   bool `json:"canStop,omitempty"`
 	CanRevert bool `json:"canRevert,omitempty"`
+	// CanWithdraw offers to take back a run allowed and queued behind the
+	// open one, before it starts.
+	CanWithdraw bool `json:"canWithdraw,omitempty"`
+	// AlwaysAllowed is set on the session's newest run while a person
+	// always allows its runs: the block says so, with Ask again.
+	AlwaysAllowed bool `json:"alwaysAllowed,omitempty"`
+	// Artifacts are what the recipe declares in the run's directory — a
+	// report, a design, a review — each to be read.
+	Artifacts []RunArtifact `json:"artifacts,omitempty"`
 	// CanSave offers to save the run's inline recipe as a workspace recipe
 	// (a person's act), SaveName the name it suggests; SavedAs is the name
 	// it was saved as, after which it is not offered again.
@@ -182,6 +217,11 @@ type StepRow struct {
 	Verdict string `json:"verdict,omitempty"`
 	// Waiting marks the row the run's open decision is about.
 	Waiting bool `json:"waiting,omitempty"`
+	// Started and Ended bound the step's time; Model is what its agent
+	// runs on, while it works.
+	Started time.Time `json:"started,omitzero"`
+	Ended   time.Time `json:"ended,omitzero"`
+	Model   string    `json:"model,omitempty"`
 	// Question is the step's own open question, drawn under its row.
 	Question *StepQuestion `json:"question,omitempty"`
 }
@@ -189,6 +229,9 @@ type StepRow struct {
 // StepQuestion is a step's ask_user question, its recommended answer
 // first.
 type StepQuestion struct {
+	// Call names the question: an answer names it back, and is refused
+	// once the step asks another.
+	Call     string           `json:"call,omitempty"`
 	Question string           `json:"question"`
 	Options  []QuestionOption `json:"options,omitempty"`
 	Multi    bool             `json:"multi,omitempty"`
@@ -218,7 +261,8 @@ type RunResult struct {
 	Checked bool   `json:"checked,omitempty"`
 	Detail  string `json:"detail,omitempty"`
 	// Before is a checked item's verdict in the run's baseline, and Change
-	// its result before and after in words ("failed → passed").
+	// its result before and after in words ("failed before the run, now
+	// passes").
 	Before string `json:"before,omitempty"`
 	Change string `json:"change,omitempty"`
 }
@@ -449,8 +493,15 @@ func FoldRun(in RunInput) Run {
 	r := Run{
 		N: run.N, Recipe: runRecipe(run), Spec: run.Spec, SpecTitle: Sanitize(in.SpecTitle), SpecRev: run.SpecRev,
 		State: string(run.State), Reason: Sanitize(run.Reason), Stopping: run.Stopping,
-		Started: run.StartedAt, Ended: run.EndedAt,
+		Started: run.StartedAt, Ended: run.EndedAt, ActiveMs: run.Active.Milliseconds(), Resumed: run.ResumedAt,
 		Files: in.Files, Strip: []StripEntry{}, Rows: []StepRow{},
+	}
+	if run.State.Open() {
+		r.Phase = in.Phase
+	}
+	r.AlwaysAllowed = in.AlwaysAllowed
+	for _, a := range in.Artifacts {
+		r.Artifacts = append(r.Artifacts, RunArtifact{Name: Sanitize(a.Name), File: Sanitize(a.File), Exists: a.Exists})
 	}
 	steps := append([]domain.RunStep(nil), in.Steps...)
 	sort.SliceStable(steps, func(i, j int) bool {
@@ -478,9 +529,18 @@ func FoldRun(in RunInput) Run {
 		}
 	}
 	for _, en := range run.Recipe.Steps {
-		r.Strip = append(r.Strip, stripEntry(en, "", now))
+		r.Strip = append(r.Strip, stripEntry(run, en, "", now))
 	}
 	r.Rows = stepRows(run, steps, in.Live)
+	if run.State == domain.RunPaused {
+		// a paused run's steps have no backend: none of them works now,
+		// whatever its row last said
+		for i := range r.Rows {
+			if row := &r.Rows[i]; !row.Folded && domain.StepState(row.State).Live() && row.Line != "its revised plan waits on you" {
+				row.State, row.Line = RowPaused, "stopped where it was · carries on when the run resumes"
+			}
+		}
+	}
 	if d := run.Pending; d != nil {
 		r.Pending = &RunPending{Kind: string(d.Kind), Question: Sanitize(d.Question), Options: d.Options, Step: d.Step}
 		for i := range r.Rows {
@@ -505,10 +565,14 @@ func FoldRun(in RunInput) Run {
 		}
 		r.Report = run.Report != ""
 	}
-	r.CanPause = run.State == domain.RunRunning && !run.Stopping
+	// while gummi runs the end checks nothing a person does lands: the end
+	// overwrites a pause, ignores a stop, and a revert would race the checks
+	ending := r.Phase == "ending"
+	r.CanPause = run.State == domain.RunRunning && !run.Stopping && !ending
 	r.CanResume = run.State == domain.RunPaused && !run.Stopping
-	r.CanStop = run.State.Open() && !run.Stopping
-	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0
+	r.CanStop = run.State.Open() && !run.Stopping && !ending
+	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0 && run.State != domain.RunRunning && r.Phase == ""
+	r.CanWithdraw = run.State == domain.RunQueued
 	r.SavedAs = Sanitize(run.SavedAs)
 	if r.CanSave = engine.RunSaveRefusal(run) == ""; r.CanSave {
 		if workflowrecipe.CheckName(run.Recipe.Name) == nil {
@@ -554,8 +618,12 @@ func stepSpent(s domain.RunStep, live map[string]StepLive) float64 {
 // under reports whether path is prefix or sits beneath it.
 func under(path, prefix string) bool { return path == prefix || strings.HasPrefix(path, prefix+"/") }
 
+// RowPaused is a step row's state while its run is paused: a step that was
+// at work, stopped where it was, which carries on when the run resumes.
+const RowPaused = "paused"
+
 // stripEntry is one recipe entry at prefix, in the state its steps are in.
-func stripEntry(en domain.Entry, prefix string, steps []domain.RunStep) StripEntry {
+func stripEntry(run domain.Run, en domain.Entry, prefix string, steps []domain.RunStep) StripEntry {
 	id := en.ID()
 	path := id
 	if prefix != "" {
@@ -572,7 +640,7 @@ func stripEntry(en domain.Entry, prefix string, steps []domain.RunStep) StripEnt
 	case en.Parallel != nil:
 		e.Kind = "parallel"
 		for _, s := range en.Parallel.Steps {
-			e.Branches = append(e.Branches, stripEntry(domain.Entry{Step: &domain.Step{ID: s.ID}}, path, steps))
+			e.Branches = append(e.Branches, stripEntry(run, domain.Entry{Step: &domain.Step{ID: s.ID}}, path, steps))
 		}
 	case en.Repeat != nil:
 		e.Kind, e.Max = "repeat", en.Repeat.Max
@@ -581,8 +649,43 @@ func stripEntry(en domain.Entry, prefix string, steps []domain.RunStep) StripEnt
 				e.Iter = n
 			}
 		}
+		if e.State == "done" && !repeatOver(run, path, e.Iter, steps) {
+			// its steps have settled, but the loop has not: its condition is
+			// being judged, or its question waits on the person
+			e.State = "running"
+			if d := run.Pending; d != nil && under(d.Step, path) {
+				e.State = "asking"
+			}
+		}
 	}
 	return e
+}
+
+// repeatOver reports whether the repeat at path, last run to iteration
+// iter, is over: its condition met, the person's answer to go on or stop,
+// an entry after it begun, or the run ended.
+func repeatOver(run domain.Run, path string, iter int, steps []domain.RunStep) bool {
+	if run.State.Ended() {
+		return true
+	}
+	last := path + "/" + strconv.Itoa(iter)
+	if j, ok := run.Until[last]; ok && j.Met {
+		return true
+	}
+	if a := run.OnMax[last]; a == "continue" || a == "stop" {
+		return true
+	}
+	// an entry after it begun: a step outside it started after its last
+	for _, s := range steps {
+		if !under(s.Path, path) && s.State != domain.StepWaiting {
+			for _, o := range steps {
+				if under(o.Path, last) && s.StartedAt.After(o.StartedAt) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // iterationOf is the iteration of the repeat at prefix that path sits in.
@@ -757,7 +860,7 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 	row := StepRow{
 		Key: s.Path, Path: s.Path, ID: s.StepID, Role: string(s.Role), State: string(s.State),
-		Spent: roundCredits(stepSpent(s, live)), Card: string(s.Card),
+		Spent: roundCredits(stepSpent(s, live)), Card: string(s.Card), Started: s.StartedAt, Ended: s.EndedAt,
 	}
 	if row.ID == "" {
 		row.ID = s.Path[strings.LastIndex(s.Path, "/")+1:]
@@ -782,6 +885,9 @@ func stepRow(s domain.RunStep, live map[string]StepLive) StepRow {
 	}
 	if s.State.Live() && l.Ask != nil {
 		row.Question = AskQuestion(l.Ask)
+	}
+	if seen && state.Live() {
+		row.Model = Sanitize(l.Model)
 	}
 	row.Flag = ReaderFlag(len(s.Changed))
 	return row
@@ -858,7 +964,7 @@ func endSummary(out string) string {
 // AskQuestion is a step's ask with its recommended answer first, as its
 // row and its opened step both draw it.
 func AskQuestion(a *engine.Ask) *StepQuestion {
-	q := &StepQuestion{Question: Sanitize(a.Question), Multi: a.MultiPick}
+	q := &StepQuestion{Call: a.CallID, Question: Sanitize(a.Question), Multi: a.MultiPick}
 	rec := engine.RecommendedOption(a)
 	first := 0
 	for i, o := range a.Options {
@@ -990,4 +1096,35 @@ func RunStateWord(r Run) string {
 		return "not run"
 	}
 	return r.State
+}
+
+// PhaseWords is what gummi is doing on a run between its steps, as both
+// faces say it; "" for no phase.
+func PhaseWords(phase string) string {
+	switch phase {
+	case "baseline":
+		return "running the done-when checks before the first step"
+	case "until":
+		return "judging whether the loop is done"
+	case "ending":
+		return "running the done-when checks and writing the report"
+	}
+	return ""
+}
+
+// RunWorked is how long a run has worked at now, its pauses left out: its
+// active time, and the time since it last resumed while it runs. A run
+// from before its clock was kept reads its whole span.
+func RunWorked(r Run, now time.Time) time.Duration {
+	if r.Started.IsZero() {
+		return 0
+	}
+	d := time.Duration(r.ActiveMs) * time.Millisecond
+	if !r.Resumed.IsZero() && now.After(r.Resumed) {
+		d += now.Sub(r.Resumed)
+	}
+	if d == 0 && !r.Ended.IsZero() && r.Resumed.IsZero() && r.ActiveMs == 0 {
+		return r.Ended.Sub(r.Started)
+	}
+	return d
 }

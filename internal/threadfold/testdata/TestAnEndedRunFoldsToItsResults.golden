@@ -1,6 +1,6 @@
 {
   "n": 2,
-  "rev": "3aslhu0y6g49d",
+  "rev": "3o44gpk2iqrdo",
   "recipe": "deliver",
   "spec": 2,
   "specTitle": "Resume pre-migration sessions",
@@ -37,7 +37,8 @@
       "state": "done",
       "spent": 40,
       "line": "Design for the spec",
-      "card": "FF-1de"
+      "card": "FF-1de",
+      "started": "2026-10-01T09:00:00Z"
     },
     {
       "key": "build/1",
@@ -75,7 +76,8 @@
       "spent": 20,
       "line": "all good",
       "flag": "changed 2 files although it only reads",
-      "card": "FF-1va"
+      "card": "FF-1va",
+      "started": "2026-10-01T09:25:00Z"
     }
   ],
   "files": [

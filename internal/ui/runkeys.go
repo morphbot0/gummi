@@ -9,6 +9,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -276,9 +277,32 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 		n := run.N
 		m.Overlay.Push(newRecipeNameDialog(n, run.SaveName, func(name string) tea.Cmd { return m.saveRecipe(r, n, name) }))
 		return nil
+	case "w":
+		if !run.CanWithdraw {
+			m.notice = noticeMsg{text: fmt.Sprintf("run %d is %s: only a queued run is withdrawn", run.N, threadfold.RunStateWord(run))}
+			return nil
+		}
+		n := run.N
+		m.Overlay.Push(&confirmDialog{
+			id: "run-withdraw", card: r.F.ID,
+			question:     fmt.Sprintf("Withdraw %s?", threadfold.RunLine(run)),
+			detail:       "It was allowed and waits behind the open run. Withdrawn, it never starts; the session may propose again.",
+			confirmLabel: "Withdraw",
+			onConfirm:    func() tea.Cmd { return m.runAct(r, n, "withdraw") },
+		})
+	case "a":
+		if !run.AlwaysAllowed {
+			m.notice = noticeMsg{text: "this session's runs are allowed one by one already"}
+			return nil
+		}
+		return m.runAct(r, run.N, "askagain")
+	case "f":
+		return m.openRunDiff(r, run.N)
+	case "r":
+		return m.readRunArtifacts(r, run)
 	case "v":
 		if !run.CanRevert {
-			m.notice = noticeMsg{text: fmt.Sprintf("run %d has nothing to revert now: it changed nothing, or a step is still running", run.N)}
+			m.notice = noticeMsg{text: fmt.Sprintf("run %d has nothing to revert now: it changed nothing, or it is still running — pause it first", run.N)}
 			return nil
 		}
 		return m.previewRevert(r, run.N)
@@ -337,6 +361,10 @@ func (m *Shell) runBindings() []binding {
 		{key: "x", label: "stop", help: "stop the run: its steps are interrupted, nothing is reverted", bar: true},
 		{key: "v", label: "revert", help: "put back every path the run changed, to how it was when the run started — a confirm lists them first", bar: true},
 		{key: "s", label: "save recipe", help: "save the run's inline recipe as a workspace recipe (.gummi/workflows/<name>.yaml), named in a prompt; a run of a kept recipe has nothing to save"},
+		{key: "f", label: "run diff", help: "read the run's whole diff, from where it started to the tree now"},
+		{key: "r", label: "artifacts", help: "read the artifacts the run wrote beside the tree: a report, a design, a review"},
+		{key: "w", label: "withdraw", help: "withdraw a run allowed and queued behind the open one, before it starts"},
+		{key: "a", label: "ask again", help: "take back always-allow: the session's next proposal asks you again"},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread"},
 		m.threadOutputsBinding(),
 		{key: "esc", label: "composer", help: "back to the composer (also alt+w)", bar: true},
@@ -408,8 +436,79 @@ func actWord(act string) string {
 		return "resumed"
 	case "stop":
 		return "stopping"
+	case "withdraw":
+		return "withdrawn"
+	case "askagain":
+		return "its session's runs ask you again"
 	}
 	return act
+}
+
+// openRunDiff opens run n's whole diff — from where it started to the
+// tree now — in the diff view, read-only words above it saying so.
+func (m *Shell) openRunDiff(r featureRow, n int) tea.Cmd {
+	d, err := m.webDocsFor(r)
+	if err != nil {
+		return errNoticeCmd(err.Error())
+	}
+	f := r.F
+	return func() tea.Msg {
+		if d.eng == nil {
+			return noticeMsg{text: ErrDetached.Error(), isErr: true}
+		}
+		patch, _, err := d.eng.RunDiff(context.Background(), f.ID, n)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		if strings.TrimSpace(patch) == "" {
+			return noticeMsg{text: fmt.Sprintf("run %d: the tree is as the run found it", n)}
+		}
+		return diffLoadedMsg{f: f, diff: patch, drift: fmt.Sprintf("run %d's own diff: from where it started to the tree now", n)}
+	}
+}
+
+// readRunArtifacts shows the artifacts run wrote beside the tree, each's
+// first lines, with where it is.
+func (m *Shell) readRunArtifacts(r featureRow, run threadfold.Run) tea.Cmd {
+	if len(run.Artifacts) == 0 {
+		m.notice = noticeMsg{text: fmt.Sprintf("run %d's recipe declares no artifacts", run.N)}
+		return nil
+	}
+	d, err := m.webDocsFor(r)
+	if err != nil {
+		return errNoticeCmd(err.Error())
+	}
+	n, id := run.N, r.F.ID
+	arts := run.Artifacts
+	return func() tea.Msg {
+		var b strings.Builder
+		for _, a := range arts {
+			if !a.Exists {
+				fmt.Fprintf(&b, "%s (%s): not written yet\n\n", a.Name, a.File)
+				continue
+			}
+			t, err := d.RunArtifact(context.Background(), n, a.Name)
+			if err != nil {
+				fmt.Fprintf(&b, "%s (%s): %s\n\n", a.Name, a.File, err)
+				continue
+			}
+			lines := strings.Split(strings.TrimRight(t.Text, "\n"), "\n")
+			more := ""
+			if len(lines) > 14 {
+				more = fmt.Sprintf("\n  … %d more lines in %s", len(lines)-14, filepath.Join(d.eng.RunDir(id, n), a.File))
+				lines = lines[:14]
+			}
+			fmt.Fprintf(&b, "%s (%s):\n  %s%s\n\n", a.Name, a.File, strings.Join(lines, "\n  "), more)
+		}
+		return runArtifactsMsg{card: id, run: n, detail: sanitize(strings.TrimRight(b.String(), "\n"))}
+	}
+}
+
+// runArtifactsMsg carries a run's artifacts, read, for their dialog.
+type runArtifactsMsg struct {
+	card   domain.FeatureID
+	run    int
+	detail string
 }
 
 // revertPreviewMsg carries what reverting run n would put back.

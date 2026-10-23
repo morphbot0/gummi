@@ -995,9 +995,26 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 // and the record must say so, or the morning receipt silently
 // under-counts what ran unattended (DESIGN §6.3).
 func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by string) error {
+	return e.AnswerCall(ctx, id, "", answer, by)
+}
+
+// AnswerCall is AnswerAs for the question call (Ask.CallID) a person read:
+// once the card asks another — answered on another face, or asked again
+// since — the answer is refused rather than given to a question the
+// person never saw. An empty call answers whatever is open.
+func (e *Engine) AnswerCall(ctx context.Context, id domain.FeatureID, call, answer, by string) error {
 	mu, _ := e.answering.LoadOrStore(id, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
+	if call != "" {
+		if ff := e.Freeform(id); ff != nil {
+			if s := ff.Session(); s != nil {
+				if open := s.Snapshot().PendingAsk; open != nil && open.CallID != call {
+					return fmt.Errorf("the question answered is no longer open: it now asks %q — read it and answer that", firstLine(open.Question))
+				}
+			}
+		}
+	}
 	// Every session that can ask is a freeform card's (DESIGN §24): the
 	// answer reaches its own session, the same way whether its call is
 	// still blocked or the question was restored.

@@ -979,7 +979,14 @@ func TestAStepsQuestionWaitsOnThePerson(t *testing.T) {
 		return stepPaths(t, e, f.ID, run.N)["ask"].State == domain.StepAsking
 	})
 	card := stepPaths(t, e, f.ID, run.N)["ask"].Card
-	if err := e.AnswerAs(ctx, card, "blue", state.ActorUser); err != nil {
+	// an answer read off another question — one answered elsewhere, or
+	// replaced since — is refused, naming what the step asks now
+	if err := e.AnswerCall(ctx, card, "an-older-call", "green", state.ActorUser); err == nil ||
+		!strings.Contains(err.Error(), "Blue or green?") {
+		t.Fatalf("an answer to a question no longer open: %v", err)
+	}
+	call := e.Freeform(card).Snapshot().PendingAsk.CallID
+	if err := e.AnswerCall(ctx, card, call, "blue", state.ActorUser); err != nil {
 		t.Fatal(err)
 	}
 	r := tickRuns(t, e, f.ID, run.N, "ended", ended)

@@ -1344,6 +1344,10 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .rb-row.s-running .ti small{color:var(--fg2)}
 @keyframes rb-live{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--q-run) 6%,transparent)}}
 .rb-row.s-failed .dot{background:var(--q-fail)} .rb-row.s-stopped .dot{background:var(--fg4)}
+/* a step stopped where it was while its run is paused: no backend works it */
+.rb-row.s-paused .dot{background:transparent;border:2px solid var(--warn);box-sizing:border-box}
+.rb-row.s-paused .ti small{color:var(--warn)}
+.rb-row .cost small{font-family:var(--mono);font-size:11px}
 .rb-row.asking,.rb-row.waiting{background:color-mix(in srgb,var(--q-needs) 6%,var(--panel))}
 .rb-row.asking .dot,.rb-row.waiting .dot{background:var(--q-needs);box-shadow:0 0 0 3px color-mix(in srgb,var(--q-needs) 22%,transparent)}
 .rb-row.sel{box-shadow:inset 3px 0 0 var(--accent);background:var(--accent-soft)}
@@ -1380,6 +1384,14 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .rb-commits{display:flex;flex-direction:column;gap:2px;padding:7px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--fg2)}
 .rb-commits .mono::before{content:"● ";color:var(--s-verify)}
 .rb-foot{display:flex;align-items:center;gap:10px;padding:7px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--fg3)}
+.rb-phase{display:inline-flex;align-items:center;gap:6px;color:var(--q-run)}
+.rb-always{color:var(--warn)}
+.rb-arts{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:7px 12px;border-top:1px solid var(--line);font-size:12px}
+.rb-arts .k{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--fg4)}
+.rb-artpre{max-height:60vh;overflow:auto;white-space:pre-wrap;font-size:12.5px;background:var(--sunk);border-radius:8px;padding:10px 12px;margin:0}
+.rb-rundiff{max-height:64vh;overflow:auto}
+.rb-pick{display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--panel);cursor:pointer}
+.rb-pick.pri{border-color:var(--accent)}
 .rb-foot b{color:var(--fg2)}
 .rb-foot .sp{flex:1}
 .rb-foot .link{white-space:nowrap}
@@ -1437,6 +1449,8 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .wfp-step .ti{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg2)}
 .wfp-step.k-repeat,.wfp-step.k-parallel{background:var(--sunk)}
 .wfp-checks{display:flex;flex-direction:column;gap:2px;font-size:12px}
+.wfp-replaces{display:flex;flex-direction:column;gap:4px}
+.wfp-replaces .wfp-steps{opacity:.75;text-decoration:line-through;text-decoration-color:var(--fg4)}
 .wfp-ticks{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px}
 .wfp-fbrow{display:flex;gap:6px;padding:4px 14px 10px}
 .wfp-fb{flex:1;min-width:0;resize:vertical;min-height:30px;border:1px solid var(--line2);border-radius:8px;padding:5px 10px;background:var(--panel);font-size:13px}

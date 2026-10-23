@@ -169,6 +169,25 @@ func TestARunOnTheWebFace(t *testing.T) {
 		return false
 	})
 
+	// the run's whole diff, beside its steps' own
+	if rd, err := d.RunDiff(ctx, run.N); err != nil || len(rd.Files) != 1 || rd.Files[0].Path != "out.txt" {
+		t.Fatalf("the run's diff %+v %v", rd, err)
+	}
+	if _, err := d.RunDiff(ctx, 9); err == nil {
+		t.Fatal("a run the session never had has a diff")
+	}
+	// an artifact its recipe never declared is no artifact of the run's
+	if _, err := d.RunArtifact(ctx, run.N, "report"); err == nil || !strings.Contains(err.Error(), "declares no artifact") {
+		t.Fatalf("an undeclared artifact: %v", err)
+	}
+	// only a queued run is withdrawn; ask again takes back nothing given
+	if err := d.RunAct(ctx, run.N, "withdraw", ""); err == nil || !strings.Contains(err.Error(), "not waiting to start") {
+		t.Fatalf("withdrawing an ended run: %v", err)
+	}
+	if err := d.RunAct(ctx, run.N, "askagain", ""); err != nil {
+		t.Fatalf("ask again: %v", err)
+	}
+
 	pre, err := d.RevertPreview(ctx, run.N)
 	if err != nil || len(pre.Paths) != 1 || pre.Paths[0] != "out.txt" || pre.Note == "" {
 		t.Fatalf("revert preview %+v %v", pre, err)
