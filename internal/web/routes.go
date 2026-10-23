@@ -15,6 +15,7 @@ package web
 //	routes_repos.go    repositories and their branches
 //	routes_schedules.go  schedules and heartbeats
 //	routes_curator.go  the skill pack and its curator
+//	routes_profiles.go the board's profiles
 //	routes_system.go   doctor and the fleet's stats
 //	routes_push.go     Web Push subscriptions
 //	routes_attachments.go  image upload and serve
@@ -38,6 +39,7 @@ func (s *Server) routes() {
 	s.repoRoutes()
 	s.scheduleRoutes()
 	s.curatorRoutes()
+	s.profilesRoutes()
 	s.systemRoutes()
 	s.pushRoutes()
 	s.attachmentRoutes()

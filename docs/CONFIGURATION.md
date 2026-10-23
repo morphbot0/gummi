@@ -153,8 +153,19 @@ nothing, and goes on until the session's envelope is spent. A mid-size model is 
 `planner: { backend: claude, model: claude-sonnet-5 }` under an Opus
 architect, for example.
 
+A person may edit the file from the board instead: the web page's
+**Profiles** view (the More menu) and the terminal's (`P`) add, edit and
+delete a profile and make one the default. Each role is checked the way a
+session's agent and model are — a claude role given a gpt model is
+refused — a backend the board has not started is started, and the file is
+validated as a whole before it is written, so a save never leaves one the
+board refuses. Both list a file that does not load beside why, so the
+profile that breaks it can be fixed or deleted there. A misspelt key
+(`Default:`, a role's `adapter:`) is refused rather than ignored.
+
 `backend:` is optional; a role without one uses `GUMMI_AGENT`.
-`output_token_max` caps a role's output tokens per turn. Provider config
+`output_token_max` raises a role's cap on output tokens per turn; only
+the opencode backend reads it. Provider config
 (endpoints, keys, credit rates) stays in each backend's native store, so
 this file is safe to commit.
 
@@ -163,8 +174,8 @@ and its **next** session resolves against the edit; a session already
 running keeps the model it started with. An edit that does not parse, or
 that routes a role to a backend the board did not start, is refused — the
 board keeps the profiles it had and says why (the web Doctor view's
-`profiles:live` line) — and backends are started once, so a new backend
-needs a restart.
+`profiles:live` line) — and a hand edit naming a backend the board did
+not start needs a restart; the same edit saved from the board does not.
 
 Sessions (freeform cards) are the one exception to "the profiles decide
 which backends start". A session picks its own agent and model in the web

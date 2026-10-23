@@ -103,12 +103,14 @@ func (e *Engine) currentProfiles() config.Profiles {
 }
 
 // startedBackendsCover refuses a profiles edit that routes a role to a
-// backend this process never started. Backends are started once, at
-// launch, from the profiles as they read then; a role pointed at another
-// one would silently fall back to the default backend (agentFor), which
+// backend this process has not started. Backends are started at launch,
+// from the profiles as they read then, and after it only for a session
+// or a profile saved through the board (SaveProfile), which starts the
+// backend before the file names it. A hand edit pointing a role at any
+// other would silently fall back to the default backend (agentFor), which
 // is a model and a backend that disagree — the failure resolveConsultRole's
 // comment describes. Saying so and keeping the old profiles is honest;
-// the fix is a restart.
+// the fix is a restart, or the same edit saved through the board.
 func (e *Engine) startedBackendsCover(p config.Profiles) error {
 	var missing []string
 	seen := map[string]bool{}
@@ -118,7 +120,7 @@ func (e *Engine) startedBackendsCover(p config.Profiles) error {
 				continue
 			}
 			seen[rc.Backend] = true
-			if _, ok := e.cfg.Agents[rc.Backend]; !ok {
+			if e.knownAgent(rc.Backend) == nil {
 				missing = append(missing, rc.Backend)
 			}
 		}

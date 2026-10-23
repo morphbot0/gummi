@@ -1,0 +1,38 @@
+/* views/profiles.css — the profiles view: one card per profile, its roles
+   and the agent and model each runs on, and the form that edits one. */
+
+.prf .grow{flex:1;min-width:0}
+.prf-bar{display:flex;align-items:center;gap:10px}
+.prf-count{color:var(--fg3);font-size:12.5px;margin-right:auto}
+.prf-lede{margin:0;font-size:12.5px;color:var(--fg3)}
+.prf-list{display:flex;flex-direction:column;gap:12px}
+.prf-problem{font-size:12.5px;color:var(--err);padding:8px 10px;border:1px solid color-mix(in srgb,var(--err) 40%,var(--line));border-radius:8px;background:var(--sunk);overflow-wrap:anywhere}
+.prf-path{margin:0;font-size:11.5px;color:var(--fg4);overflow-wrap:anywhere}
+
+.prf-card{border:1px solid var(--line);border-radius:12px;background:var(--panel);display:flex;flex-direction:column;gap:8px;padding:12px 14px}
+.prf-card.def{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.prf-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.prf-name{font-size:14px;color:var(--fg)}
+.prf-badge{font-size:10.5px;font-weight:600;padding:0 7px;height:18px;display:inline-flex;align-items:center;border-radius:5px;color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,transparent)}
+.prf-meta{font-size:12px;color:var(--fg3)}
+.prf-roles{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0;font-size:12px}
+.prf-roles dt{color:var(--fg3)}
+.prf-roles dd{margin:0;color:var(--fg2);overflow-wrap:anywhere}
+.prf-unread{color:var(--warn)}
+
+.prf-form{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--line2);border-radius:10px;background:var(--sunk)}
+.prf-form .field input,.prf-form .field select{background:var(--panel)}
+.prf-form-row{display:flex;flex-wrap:wrap;gap:10px}
+.prf-form-row .field{min-width:180px}
+.prf-slot{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.prf-slot-l{display:flex;flex-direction:column;min-width:200px;flex:1}
+.prf-slot-l b{font-size:12.5px;color:var(--fg)}
+.prf-slot-l small{font-size:11.5px;color:var(--fg3)}
+.prf-check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--fg2)}
+.prf-form-foot{display:flex;justify-content:flex-end;gap:8px}
+.prf-form-error:empty{display:none}
+.prf-slot .pairf{border:1px solid var(--line2);background:var(--panel)}
+@media (max-width:760px){
+  .prf-slot{flex-direction:column;align-items:stretch}
+  .prf-slot .pairf{max-width:none}
+}

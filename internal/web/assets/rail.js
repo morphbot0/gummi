@@ -393,6 +393,7 @@ function renderFoot (unpair, newSession) {
       item('repos', 'Repositories', 'repo'),
       item('schedules', 'Schedules', 'clock'),
       item('skills', 'Skills', 'skill'),
+      item('profiles', 'Profiles', 'settings'),
       'sep',
       item('doctor', 'Doctor', 'doctor'),
       item('settings', 'Settings', 'settings')

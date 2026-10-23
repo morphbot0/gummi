@@ -99,6 +99,7 @@ func (m *Shell) globalCommands() []command {
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "L", name: "schedules", label: "Schedules and heartbeats", key: "L", available: attached},
 		{id: "E", name: "skills", label: "Skill pack and its curator", key: "E", available: attached},
+		{id: "P", name: "profiles", label: "Profiles — the agent and model each role runs on", key: "P", available: true},
 		{id: "settings", name: "settings", label: "Settings — name this gummi instance", key: "", available: true},
 		{id: "?", name: "keys", label: "Show the keys for this surface", key: helpKeyFor(m.cardOpen), available: true},
 		{id: "q", name: "quit", label: "Quit gummi", key: "q", available: true},

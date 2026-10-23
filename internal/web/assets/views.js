@@ -25,6 +25,7 @@ export const VIEW_LABELS = {
   repos: 'Repositories',
   schedules: 'Schedules',
   skills: 'Skills',
+  profiles: 'Profiles',
   doctor: 'Doctor',
   settings: 'Settings'
 }
