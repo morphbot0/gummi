@@ -344,8 +344,11 @@ until a browser already paired approves it on its page.
 Plain HTTP on an address other than loopback carries the pairing code and
 the token in clear; the server warns when it starts that way.
 
-`--terminal` gives paired devices a **Terminal** tab on every card that
-has a worktree: your own shell (`$SHELL`), started in that worktree. It is
+`--terminal` gives paired devices a **Terminal** tab on every open session
+(and any other card that has a worktree): your own shell (`$SHELL`),
+started in that worktree — made when the shell opens if the session has
+taken no turn yet — or in the main checkout for a session that works
+there. It is
 off by default and refused with `--no-pairing`, because it is more than
 the board: a paired device can then run any command as you, outside any
 agent sandbox. The shell stays running when the page closes and is

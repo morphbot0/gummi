@@ -45,7 +45,8 @@ type Card struct {
 	// nil while the card has no worktree on this machine.
 	Files *Files `json:"files,omitempty"`
 	// Terminal says the page may open a shell in the card's worktree: the
-	// server was started with --terminal and the card has one.
+	// server was started with --terminal and the card has one, or is an
+	// open session, whose tree opening the shell makes.
 	Terminal bool `json:"terminal,omitempty"`
 }
 

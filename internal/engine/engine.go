@@ -572,6 +572,23 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	return e.locateFor(ctx, f, false)
 }
 
+// WorkDir is the directory a session's next turn works in — its worktree,
+// its home or the main checkout — made now if it has none yet, exactly as
+// that turn would make it. It is where a person's shell starts (the web
+// face's Terminal tab), so a session that has not taken a turn yet still
+// has somewhere to open one. Fork drift is no refusal here: a person's
+// shell is one way to deal with it. Only an open session has one.
+func (e *Engine) WorkDir(ctx context.Context, f domain.Feature) (string, error) {
+	if !f.IsFreeform() || f.IsChild() {
+		return "", fmt.Errorf("%s is not a session: it has no working directory of its own", f.Name())
+	}
+	if f.Stage == domain.StageDone {
+		return "", fmt.Errorf("%s is closed: its working directory is gone", f.Name())
+	}
+	dir, _, err := e.locateFor(ctx, f, true)
+	return dir, err
+}
+
 // locateFor is locate, with allowDrift skipping the fork-drift refusal —
 // for the rebase-resolve pass alone (newAgentSession).
 func (e *Engine) locateFor(ctx context.Context, f domain.Feature, allowDrift bool) (workDir, specPath string, err error) {

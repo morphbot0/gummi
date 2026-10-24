@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/coder/websocket"
 
 	"github.com/morphis/gummi/internal/term"
+	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -64,15 +66,40 @@ func (s *Server) termRoutes() {
 	s.api("GET /api/cards/{id}/term", s.handleTerm)
 }
 
+// termDir is where card id's shell opens (ui.WebDocs.TermDir), made now
+// when create is set; ok is false once it has answered.
+func (s *Server) termDir(w http.ResponseWriter, r *http.Request, id string, create bool) (string, bool) {
+	var (
+		d   *ui.WebDocs
+		err error
+	)
+	if !s.do(w, r, func(m *ui.Shell) tea.Cmd { d, err = m.WebDocs(id); return nil }) {
+		return "", false
+	}
+	if err != nil {
+		writeDocsError(w, err, id)
+		return "", false
+	}
+	dir, err := d.TermDir(r.Context(), create)
+	if err != nil {
+		s.fail(w, err)
+		return "", false
+	}
+	return dir, true
+}
+
 // handleTerm is GET /api/cards/{id}/term, upgraded to a WebSocket: the
 // card's shell, started if it has none.
 func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	dir, ok := s.worktreeDir(w, r, id)
+	upgrade := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+	// a session that has taken no turn yet has no tree: the shell makes
+	// it, as the turn would, but the check without the upgrade makes nothing
+	dir, ok := s.termDir(w, r, id, upgrade && isSameOrigin(r))
 	if !ok {
 		return
 	}
-	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+	if !upgrade {
 		if err := s.terms.Check(id); err != nil {
 			writeError(w, http.StatusConflict, err.Error())
 			return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +137,36 @@ func TestTheTerminalIsRefused(t *testing.T) {
 	if b.logged("opened a terminal") {
 		t.Error("a refused terminal started a shell")
 	}
+}
+
+// A session whose tree is not on disk — it has taken no turn yet, or its
+// tree went — is offered a terminal all the same: asking makes nothing,
+// and opening one makes the tree its next turn would have made.
+func TestASessionWithNoTreeIsOfferedATerminal(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	docsSeedSession = true
+	t.Cleanup(func() { docsSeedSession = false })
+	b := newDocsBoard(t, agent.NewFake("ok"), withTerminal)
+	gitIn(t, b.root, "worktree", "remove", "--force", b.wt)
+
+	var c webapi.Card
+	if st := b.get("/api/cards/FF-001", &c); st != http.StatusOK || !c.Terminal || c.Files != nil {
+		t.Fatalf("card = %d, terminal %v, files %v; want a terminal offered and no files", st, c.Terminal, c.Files)
+	}
+	if st := b.get("/api/cards/FF-001/term", nil); st != http.StatusOK {
+		t.Errorf("asking = %d, want 200", st)
+	}
+	if _, err := os.Stat(b.wt); !os.IsNotExist(err) {
+		t.Fatalf("asking made the tree: %v", err)
+	}
+
+	conn, _, err := b.dialTerm(b.c, "FF-001", b.http.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	_ = conn.Write(context.Background(), websocket.MessageBinary, []byte("echo in:$(pwd -P):end\n"))
+	termUntil(t, conn, "in:"+b.wt+":end")
 }
 
 func TestTheTerminalIsOffUnlessAskedFor(t *testing.T) {
