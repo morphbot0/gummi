@@ -252,7 +252,8 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .btn.pri.danger{background:var(--err);border-color:var(--err);color:var(--on-err)}
 .btn.on{border-color:var(--warn);color:var(--warn)}
 .btn.held{border-style:dashed;color:var(--fg3)}
-.btn.held small{font-size:11.5px;color:var(--warn);font-weight:500}
+.btn.held small{font-size:11.5px;color:var(--warn);font-weight:500;max-width:22ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn.held{min-width:0}
 .subline{display:flex;align-items:center;gap:6px 14px;font-size:12.5px;color:var(--fg3);min-width:0;white-space:nowrap}
 /* nothing spills past the head: what a card waits on or belongs to gives
    way first, its stage and its spend last */
@@ -1101,7 +1102,6 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
      the thread's fold lines and the inline links (padding widens what an
      inline link takes a tap on without moving the line it sits in) */
   .stages button{min-height:28px}
-  .tools summary,.sg > summary{min-height:32px}
   .center .link,.dock .link,.mdec .link,.mcard .link{border-bottom:0;text-decoration:underline dotted;text-underline-offset:3px;padding:5px 0}
 }
 /* typing on a phone: the keyboard has half the screen, so everything but
@@ -1554,3 +1554,21 @@ button.tr-path:disabled{opacity:1;cursor:default}
 }
 .repos .landed{color:var(--ok, inherit)}
 .repotabs{margin:0 0 8px}
+
+/* a phone is pressed with a thumb: what it presses is at least 44px each
+   way (WCAG 2.5.5), the board's status pills 40px. The visible chrome
+   stays as drawn where it can; the hit area grows around it. */
+@media (max-width:760px){
+  .iconbtn,.mback{min-width:44px;min-height:44px}
+  .btn,.send,.mbtn,.seg button,.wraptgl{min-height:44px}
+  .pill{min-height:40px}
+  .tools summary,.sg > summary,.memdoc > summary{min-height:44px}
+  .msg .copy,.msg .who .rewind{min-height:44px;min-width:44px;display:inline-flex;align-items:center;justify-content:center}
+  .dfile input[type="checkbox"],.diffbox input[type="checkbox"],input[type="checkbox"]{width:22px;height:22px}
+  label:has(> input[type="checkbox"]){min-height:44px;display:inline-flex;align-items:center;gap:8px}
+  .search input{min-height:40px}
+  .link-spend{min-height:44px;display:inline-flex;align-items:center}
+  /* the chip under the title says what holds it: the button keeps the
+     title its room */
+  .btn.held small{display:none}
+}
