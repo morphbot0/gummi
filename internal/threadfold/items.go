@@ -100,6 +100,8 @@ type Item struct {
 	Decision *Decision  `json:"decision,omitempty"`
 	// Run is an ItemRun's block (runs.go).
 	Run *Run `json:"run,omitempty"`
+	// Dispatch is an ItemDispatch's block (dispatches.go).
+	Dispatch *Dispatch `json:"dispatch,omitempty"`
 
 	// Supersedes names the keys of items this one takes the place of: the
 	// decisions a gate or ask receipt answered. A client that drew such a
@@ -168,6 +170,10 @@ type Options struct {
 	// caller: each is one item, keyed run:<n> (runs.go), placed where it
 	// was proposed.
 	Runs []RunInput
+	// Dispatches are the sessions an agent dispatched, read by the caller:
+	// each is one item, keyed dispatch:<card> (dispatches.go), placed
+	// where it was dispatched.
+	Dispatches []DispatchInput
 	// Said is when a person last said something to the session
 	// (PersonSaid): an ended run folds to its line once they have spoken
 	// after it (FoldRuns).
@@ -325,18 +331,18 @@ func Items(events []state.CardEvent, opt Options) []Item {
 			}
 		}
 	}
-	return placeRuns(out, runItems(opt.Runs, opt.Said))
+	return placeRuns(placeRuns(out, runItems(opt.Runs, opt.Said)), dispatchItems(opt.Dispatches))
 }
 
 // Since returns the items a client that has seen everything up to seq
 // after still needs: every item whose Seq is newer, including one it
 // already drew that has grown since (upsert it by Key). A run's block
-// changes without an event of its own, so every one is delivered on every
-// page: a client upserts it by Key and redraws it only when its Rev moved.
+// changes without an event of its own, as does a dispatched session's, so
+// every one is delivered on every page: a client upserts it by Key and redraws it only when its Rev moved.
 func Since(items []Item, after int64) []Item {
 	var out []Item
 	for _, it := range items {
-		if it.Seq > after || it.T == ItemRun {
+		if it.Seq > after || it.T == ItemRun || it.T == ItemDispatch {
 			out = append(out, it)
 		}
 	}

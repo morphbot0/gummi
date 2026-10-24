@@ -91,6 +91,7 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 		return HandOffResult{}, err
 	}
 	closed.HandedOffAt = now
+	e.NoteDispatcherClosed(ctx, id)
 	return HandOffResult{Feature: closed, Status: HandOffClosed}, nil
 }
 

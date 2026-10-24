@@ -69,6 +69,9 @@ type runState struct {
 type runTarget struct {
 	n   int
 	row string
+	// dispatch names the dispatched session's block an agent's cursor
+	// stands on (dispatchblock.go); n and row are then unset.
+	dispatch domain.FeatureID
 }
 
 // foldedRun is a run's block and the moment its run was proposed, where

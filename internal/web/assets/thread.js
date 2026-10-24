@@ -21,6 +21,8 @@ import { attachmentURL, get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { restoreComposer } from './composer.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { runBlock, runSig, markStep, setTranscriptDrawer } from './workflow.js?v=__ASSET_V__'
+import { dispatchBlock, dispatchSig } from './dispatch.js?v=__ASSET_V__'
+import { select } from './selection.js?v=__ASSET_V__'
 
 const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
@@ -325,7 +327,7 @@ function groupNode (grp, last) {
 function itemNode (it, live = false) {
   live = live && it.t === 'activity'
   // a run's block moves without an event, and with the page's own fold of it
-  const sig = it.t === 'run' ? `run|${runSig(it)}` : `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}|${live}`
+  const sig = it.t === 'run' ? `run|${runSig(it)}` : it.t === 'dispatch' ? `dispatch|${dispatchSig(it)}` : `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}|${live}`
   const have = nodes.get(it.key)
   if (have && have.sig === sig) return have.el
   const el = itemEl(it, live)
@@ -348,6 +350,7 @@ export function itemEl (it, live = false) {
     case 'decision': return decision(it)
     case 'note': return h('div', { class: 'note-ev' }, h('span', null, it.text), h('span', { class: 'when' }, clock(it.time)))
     case 'run': return runBlock(it)
+    case 'dispatch': return dispatchBlock(it, (card) => select(card))
     default: return h('div', { class: 'note-ev' }, it.text || it.t)
   }
 }

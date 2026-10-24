@@ -41,6 +41,9 @@ func (m *Shell) runTargets() []runTarget {
 			out = append(out, runTarget{n: r.N, row: row.Key})
 		}
 	}
+	for _, d := range m.openDispatches() {
+		out = append(out, runTarget{dispatch: domain.FeatureID(d.Card)})
+	}
 	return out
 }
 
@@ -73,7 +76,17 @@ func (m *Shell) clampRunCursor() {
 func (m *Shell) newestRunTarget(ts []runTarget) runTarget {
 	runs := m.openRuns()
 	if len(runs) == 0 {
-		return runTarget{}
+		// an agent's blocks: the newest session that waits on someone
+		var pick runTarget
+		waiting := false
+		for _, d := range m.openDispatches() {
+			w := strings.HasPrefix(d.State, "waiting")
+			if pick == (runTarget{}) || (w && !waiting) {
+				pick = runTarget{dispatch: domain.FeatureID(d.Card)}
+				waiting = w
+			}
+		}
+		return pick
 	}
 	if open, ok := m.liveRun(m.selectedID()); ok {
 		if t, ok := m.activeRunTarget(open, ts); ok {
@@ -208,6 +221,12 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 			at++
 		}
 		m.wf.cursor = ts[clamp(at, 0, len(ts)-1)]
+		return nil
+	}
+	if id := m.wf.cursor.dispatch; id != "" {
+		if key == "enter" || key == "o" {
+			return m.openDispatch(id)
+		}
 		return nil
 	}
 	run, ok := m.runAt(m.wf.cursor)
@@ -360,6 +379,14 @@ func (m *Shell) scrollToRunCursor(body []string, budget int) {
 
 // runBindings is the table while the keyboard is on the blocks.
 func (m *Shell) runBindings() []binding {
+	if m.wf.cursor.dispatch != "" {
+		return m.withCardTabs([]binding{
+			{key: "↑↓ j/k", label: "move", help: "walk the sessions this agent dispatched", bar: true},
+			{key: "enter", label: "open", help: "open the dispatched session's card", bar: true, sticky: true},
+			{key: "pgup/pgdn", label: "scroll", help: "scroll the thread"},
+			{key: "esc", label: "composer", help: "back to the composer (also alt+w)", bar: true},
+		})
+	}
 	bs := []binding{
 		{key: "↑↓ j/k", label: "move", help: "walk the runs' heads and their step rows", bar: true},
 		{key: "enter", label: "open", help: "open the step on the cursor — its transcript, its own diff, its brief, and a line to its agent; on an ended run's head, unfold the run folded to its line, or fold it again; on its steps' line, unfold them", bar: true, sticky: true},
@@ -386,6 +413,8 @@ func (m *Shell) runKeyBindings(r featureRow) []binding {
 	switch _, open := m.liveRun(r.F.ID); {
 	case open:
 		bs = append(bs, binding{key: "alt+w", label: "jump to run", help: "jump to the open run's block, the cursor on its active step: enter opens it, esc comes back; pause, stop or revert a run from there"})
+	case len(m.dispatches[r.F.ID]) > 0:
+		bs = append(bs, binding{key: "alt+w", label: "sessions", help: "step into the sessions this agent dispatched: enter opens one's card"})
 	case len(m.wf.byCard[r.F.ID]) > 0:
 		bs = append(bs, binding{key: "alt+w", label: "runs", help: "step into the workflow runs' blocks: open a step, pause, stop, revert a run or save its recipe"})
 	}

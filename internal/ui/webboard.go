@@ -71,6 +71,11 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 		Landed:    r.Landed || f.LandedSHA != "",
 		PR:        f.PullRequest.Badge(),
 	}
+	row.Dispatched = r.Dispatched
+	if r.DispatchedBy != "" {
+		row.DispatchedBy = string(r.DispatchedBy)
+		row.DispatchedByTitle = m.cardName(r.DispatchedBy)
+	}
 	if live := m.liveCardSpent(f.ID); live > 0 {
 		row.Spend = live
 	}

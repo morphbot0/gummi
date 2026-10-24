@@ -271,6 +271,14 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if b := r.F.PullRequest.Badge(); b != "" {
 		pr = " " + s.Info.Render(b)
 	}
+	disp := ""
+	if m.nestedRows[r.F.ID] {
+		// the row above is its agent
+	} else if r.DispatchedBy != "" {
+		disp = " " + faint.Render("from "+m.cardName(r.DispatchedBy))
+	} else if r.Dispatched > 0 {
+		disp = " " + faint.Render(fmt.Sprintf("%d dispatched", r.Dispatched))
+	}
 	cost := ""
 	live := m.liveCardSpent(r.F.ID)
 	if !r.F.Spend.Zero() || live > 0 {
@@ -291,9 +299,13 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if r.F.Repo != "" && m.spansRepos() {
 		repo = " " + s.Repo(r.F.Repo).Render(r.F.Repo)
 	}
-	prefix := cursor + num + " " + glyph + " " + id + repo + badge + " "
-	tail := func() string { return loop + tag + wtMark + landed + pr + cost }
-	dropOrder := []*string{&cost, &tag, &wtMark, &pr, &landed}
+	nest := " "
+	if m.nestedRows[r.F.ID] {
+		nest = faint.Render("└")
+	}
+	prefix := cursor + num + nest + glyph + " " + id + repo + badge + " "
+	tail := func() string { return loop + tag + wtMark + disp + landed + pr + cost }
+	dropOrder := []*string{&cost, &tag, &wtMark, &disp, &pr, &landed}
 	for i := 0; i < len(dropOrder) && ansi.StringWidth(prefix+tail()) > w-8; i++ {
 		*dropOrder[i] = ""
 	}

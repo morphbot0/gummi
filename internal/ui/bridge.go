@@ -330,10 +330,12 @@ func (m *Shell) emitEngineChange(ev engine.Event) {
 			m.setWebState(ev.Feature, busy, watching)
 			m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
 			m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: id})
+			m.emitDispatcherChange(ev.Feature)
 		}
 		return
 	}
 	m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
+	m.emitDispatcherChange(ev.Feature)
 	if id != "" {
 		// every other kind moves the card anyway; the busy flag is taken
 		// again here too, or a turn that ended in exhaustion or an error
@@ -342,6 +344,14 @@ func (m *Shell) emitEngineChange(ev engine.Event) {
 		m.setWebState(ev.Feature, m.webCardBusy(ev.Feature), m.webCardWatching(ev.Feature))
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: id})
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeLive, ID: id})
+	}
+}
+
+// emitDispatcherChange moves the agent that dispatched card id: its thread
+// draws a block for the session, so a change of the session's is one of its.
+func (m *Shell) emitDispatcherChange(id domain.FeatureID) {
+	if r, ok := m.rowByID(id); ok && r.DispatchedBy != "" {
+		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(r.DispatchedBy)})
 	}
 }
 

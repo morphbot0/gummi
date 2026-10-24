@@ -245,14 +245,22 @@ function renderRail () {
   // is grouped by repository: an agent is in none, so this is its only group
   const byRepo = state.railGroup === 'repo' && wide
   const agents = vis.filter(r => r.home && (byRepo || r.status !== 'done'))
+  // an open session an agent dispatched stands directly under that agent
+  // when the agent is in this group; otherwise it keeps its own place
+  // and its "from <agent>" badge
+  const nestedUnder = new Map()
+  for (const r of vis) {
+    if (r.dispatchedBy && r.status !== 'done' && !r.home && agents.some(a => a.id === r.dispatchedBy && a.status !== 'done')) nestedUnder.set(r.id, r.dispatchedBy)
+  }
+  const notNested = (r) => !nestedUnder.has(r.id)
   if (agents.length) {
     box.append(h('section', { class: 'group agents', testid: 'rail-group-agents', 'aria-label': 'Agents' },
       h('h3', null, 'Agents', h('span', null, String(agents.length))),
-      agents.map(r => rowEl(r, false))))
+      agents.flatMap(r => [rowEl(r, false), ...vis.filter(c => nestedUnder.get(c.id) === r.id).map(c => rowEl(c, false, true))])))
   }
   if (byRepo) {
     for (const repo of [...new Set(inRepo().map(r => r.repo || ''))].sort()) {
-      const list = vis.filter(r => !r.home && (r.repo || '') === repo)
+      const list = vis.filter(r => !r.home && notNested(r) && (r.repo || '') === repo)
       if (!list.length) continue
       box.append(h('section', { class: 'group', testid: `rail-repo-group-${repo || 'default'}`, 'aria-label': repo || 'default' },
         h('h3', null, repo || 'default', h('span', null, String(list.length))),
@@ -260,7 +268,7 @@ function renderRail () {
     }
   } else {
     for (const [k, label] of GROUPS) {
-      let list = vis.filter(r => r.status === k && !(r.home && k !== 'done'))
+      let list = vis.filter(r => r.status === k && !(r.home && k !== 'done') && notNested(r))
       if (!list.length) continue
       const total = list.length
       const fold = k === 'done' && !state.doneAll && !state.filter && total > DONE_SHOWN
@@ -302,7 +310,7 @@ function renderRail () {
 // names the budget at all.
 const near = (r) => !!r.envelope && r.spend / r.envelope >= NEAR
 
-function rowEl (r, wide) {
+function rowEl (r, wide, nested = false) {
   const sel = r.id === state.sel
   const q = quality(r)
   const w = word(r)
@@ -319,6 +327,8 @@ function rowEl (r, wide) {
     r.severity && r.status === 'todo' ? h('span', null, r.severity) : null,
     r.objective ? h('span', { class: ['badge obj', `obj-${r.objective}`], title: `objective ${r.objective}`, testid: `rail-row-objective-${r.id}` }, `◆ ${r.objective}`) : null,
     r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.map(ref).join(', ')}`) : null,
+    r.dispatchedBy && !nested ? h('span', { class: 'dispatched', title: `Dispatched by ${r.dispatchedByTitle || r.dispatchedBy}`, testid: `rail-row-dispatched-by-${r.id}` }, `from ${r.dispatchedByTitle || r.dispatchedBy}`) : null,
+    r.dispatched ? h('span', { class: 'dispatched', title: 'Sessions this agent dispatched that are still open', testid: `rail-row-dispatched-${r.id}` }, `${r.dispatched} dispatched`) : null,
     r.stack && show.includes('stack') ? h('span', { class: ['stackpos', r.stack.stale && 'stale'], title: r.stack.stale ? `${r.stack.name} — its base has moved` : r.stack.name }, `stack ${r.stack.pos + 1}/${r.stack.of}`) : null,
     r.elsewhere ? h('span', { class: 'else', title: 'Another gummi is driving this card' }, 'elsewhere') : null
   ].filter(Boolean)
@@ -328,7 +338,7 @@ function rowEl (r, wide) {
     ? h('span', { class: 'spend near', testid: `rail-row-spend-${r.id}` }, `${cr(r.spend)} of ${cr(r.envelope)}`)
     : show.includes('spend') && r.spend ? h('span', { class: 'spend', testid: `rail-row-spend-${r.id}` }, cr(r.spend)) : null
   return h('button', {
-    class: ['row', sel && 'sel', r.status === 'needs' && 'needs'],
+    class: ['row', sel && 'sel', r.status === 'needs' && 'needs', nested && 'nested'],
     data: { id: r.id, status: r.status, q },
     testid: `rail-row-${r.id}`,
     // a collapsed rail draws the dot alone: the row still names itself

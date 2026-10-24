@@ -278,8 +278,13 @@ func landedAs(method domain.LandMethod, base string) string {
 
 // closeLandedCard moves a just-landed card to done.
 func (m *Shell) closeLandedCard(ctx context.Context, f domain.Feature, actor string) error {
-	_, err := m.store.CloseCard(ctx, f.ID, actor)
-	return err
+	if _, err := m.store.CloseCard(ctx, f.ID, actor); err != nil {
+		return err
+	}
+	if m.engine != nil {
+		m.engine.NoteDispatcherClosed(ctx, f.ID)
+	}
+	return nil
 }
 
 // recordCommitDraftFail persists a squash-merge scribe pass's outcome on

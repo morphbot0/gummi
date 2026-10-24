@@ -87,3 +87,25 @@ func TestRunSchedulesAndDispatchesRoundTrip(t *testing.T) {
 		t.Errorf("Dispatched: %+v", list)
 	}
 }
+
+// DispatchesByCard reads every dispatch in one go, keyed by the session.
+func TestDispatchesByCard(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	if got, err := s.DispatchesByCard(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("none: %v %v", got, err)
+	}
+	for i, c := range []domain.FeatureID{"FF-2", "FF-3"} {
+		d := Dispatch{Card: c, Agent: "FF-1", Run: 1, Path: "d" + string(rune('a'+i)), Envelope: 2}
+		if err := s.RecordDispatch(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.DispatchesByCard(ctx)
+	if err != nil || len(got) != 2 || got["FF-3"].Agent != "FF-1" || got["FF-2"].Envelope != 2 {
+		t.Fatalf("many: %+v %v", got, err)
+	}
+	if err := s.RecordDispatch(ctx, Dispatch{Card: "FF-2", Agent: "FF-1", Run: 1, Path: "dz", Envelope: 1}); err == nil {
+		t.Error("a card dispatched twice was recorded")
+	}
+}

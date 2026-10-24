@@ -73,6 +73,25 @@ func (s *Store) DispatchAt(ctx context.Context, agent domain.FeatureID, n int, p
 	return d, err == nil, err
 }
 
+// DispatchesByCard reads every dispatch in one query, keyed by the session
+// it minted: what the board reads so a refresh is not a query per card.
+func (s *Store) DispatchesByCard(ctx context.Context) (map[domain.FeatureID]Dispatch, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+dispatchCols+` FROM dispatches`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[domain.FeatureID]Dispatch{}
+	for rows.Next() {
+		d, err := scanDispatch(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[d.Card] = d
+	}
+	return out, rows.Err()
+}
+
 // Dispatched lists the sessions agent dispatched, oldest first.
 func (s *Store) Dispatched(ctx context.Context, agent domain.FeatureID) ([]Dispatch, error) {
 	rows, err := s.db.QueryContext(ctx,

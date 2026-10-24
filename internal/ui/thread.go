@@ -1133,7 +1133,7 @@ func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
 	}
 	sending := m.consultSending[r.F.ID]
 	// the session's workflow runs, one block each, among its turns
-	blocks := m.runBlocks(s, r, w)
+	blocks := append(m.runBlocks(s, r, w), m.dispatchBlocks(s, r, w)...)
 	withBlocks := func(lines []string) []string {
 		for _, b := range blocks {
 			if len(lines) > 0 {

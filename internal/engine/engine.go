@@ -914,6 +914,9 @@ func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
 	if int(raised) <= f.Budget.Envelope {
 		return nil
 	}
+	if err := e.checkDispatchedRaise(ctx, f, int(raised)); err != nil {
+		return err
+	}
 	f.Budget.Envelope = int(raised)
 	if err := e.cfg.Store.UpdateFeature(ctx, &f); err != nil {
 		return err
@@ -939,6 +942,9 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 		if floor := int(math.Ceil(domain.EnvelopeFloor(f.Spend.CreditEquivalent()))); to < floor {
 			return fmt.Errorf("%s: %s is below the %s floor (spend plus resume headroom)", id, domain.FormatDollars(float64(to)), domain.FormatDollars(float64(floor)))
 		}
+	}
+	if err := e.checkDispatchedRaise(ctx, f, to); err != nil {
+		return err
 	}
 	raised := to == 0 || to > f.Budget.Envelope
 	f.Budget.Envelope = to

@@ -7652,14 +7652,19 @@ schedule; a step that polls a command inside an open run stays deferred
   and allowing it allows exactly those. A new repository is a new
   proposal.
 - **The child's envelope comes out of the agent's.** An open child holds
-  the larger of its envelope and its spend; a closed one, its spend: the
-  rule delegation used (§19.10). A dispatch the agent's pool cannot
-  cover pauses the run for the person's top-up (§24.7a), never mints
-  below its envelope.
-- **The agent drives its children.** When a child's run ends, its report
-  goes to the child and a line to the agent. The agent has
-  `session_status` and `session_send`, which answer only for sessions it
-  dispatched. A child's `ask_user` reaches the person, never the agent.
+  the larger of its envelope *now*, the one recorded at dispatch and its
+  spend; a closed one, its spend: the rule delegation used (§19.10). A
+  dispatch the agent's pool cannot cover pauses the run for the person's
+  top-up (§24.7a), never mints below its envelope. The agent's tree of
+  work never spends past the agent's own envelope, so a person raising a
+  child's envelope is refused when the agent's pool left cannot cover the
+  increase — the refusal names the agent, and the person tops the agent
+  up first. Lowering is always allowed; removing the cap is not.
+- **The agent drives its children, and is woken by them** (§26.8, §26.9).
+  The agent has `session_status` and `session_send`, which answer only for
+  sessions it dispatched, and `session_send` is refused while the child's
+  envelope or the agent's own is spent. A child's `ask_user` and its
+  run's decisions reach the person, never the agent.
 - A dispatched session is a session like any other. It lands on a
   person's read of its diff; nothing about its parent changes that.
 
@@ -7747,9 +7752,21 @@ What was built follows §26. Where it chose, or departs:
   the tick's spent-pool check and the driver's lines agree. A dispatch the
   pool cannot cover pauses the run (`pauseForBudgetLocked`) and leaves the
   step live; a top-up starts it again.
-- **A child's run end is a line, not a turn.** The agent's thread gets
-  `dispatch: session … run N ended …` as an activity line; nothing wakes
-  the agent. Its status and report are `session_status`; `session_send`
+- **A child wakes its agent.** This reverses the first build, where a
+  child's run end was a line and nothing woke the agent. Each of these is
+  the `dispatch: ` activity line *and* a turn into the agent (actor
+  `dispatch:<child>`, `wakeDispatcher`): a dispatched session's run
+  ending (the child, the run, how it ended and the head of its report);
+  a dispatched session with no open run finishing a turn and waiting for
+  input (once per turn, with the head of its last reply; the turn that
+  reads a run's report is not a second wake); and a dispatched session
+  closing. A step's hidden card never wakes anyone. A closed agent, or
+  one whose pool is spent (`sessionPoolLeft`, which counts what its children hold), is not woken: only the line is written. An
+  agent mid-turn has the message queued as any message to a busy session
+  is — never dropped, never an interruption — and one waiting on its own
+  question gets the line alone. Waking sends nothing to the child, so a
+  wake, a `session_send` and a wake again are bounded by the agent's
+  envelope. Its status and report are `session_status`; `session_send`
   is a turn into a child it dispatched, and both refuse any other card.
 - **A planner's revised plan adds no command or dispatch**: what the
   person allowed is the recipe's own.
@@ -7763,6 +7780,32 @@ What was built follows §26. Where it chose, or departs:
 - A schedule's `ok` outcome is written when the run starts; a quiet gate
   overwrites its status with `no-change` after.
 - Nothing limits how many disabled run schedules an agent may propose.
+
+### 26.9 Following a child
+
+A dispatched session is shown as tracked by its agent, and stays a full
+session: its own branch, landed on a person's read of its diff, never a
+hidden child (`IsChild` is false).
+
+- **The block.** In the agent's thread each dispatched session is one
+  item keyed `dispatch:<card>` (`threadfold/dispatches.go`), placed where
+  it was dispatched and delivered on every page. It carries the child's
+  title and repository, its state — *working*, *waiting for input*,
+  *run N <state>*, *waiting for the person*, *envelope spent*, *closed* or
+  *gone* — its open run's steps ended of steps and live step, its spend
+  against its envelope now (whole credits), and the last line of its last
+  reply. Its `Rev` moves only when something it draws does. The inputs
+  are read once (`ui/webdispatch.go`) for both faces; the terminal draws
+  the block in the thread (`ui/dispatchblock.go`; alt+w steps onto it,
+  enter opens the child's card) and the page draws it
+  (`assets/dispatch.js`; a click selects the child).
+- **The board.** An open dispatched session stands directly under its
+  agent, marked `└` and without its "from <agent>" badge, in the agent's
+  group (`ui/boardnest.go`, `assets/rail.js`). A session whose agent is
+  not shown — folded away, closed, or filtered out — keeps its own place
+  and its badge.
+- **The budget** is §26.4's: the child holds its envelope now, and no
+  raise past the agent's pool is accepted.
 
 ## 27. Sessions across repositories
 

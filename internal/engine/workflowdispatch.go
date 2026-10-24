@@ -24,7 +24,7 @@ import (
 const DispatchNotePrefix = "dispatch: "
 
 // agentNote puts a line about a dispatch into the agent's thread. It is
-// never a turn: nothing in the agent is woken by it.
+// only the line: the turn that wakes the agent is wakeDispatcher's.
 func (e *Engine) agentNote(agent domain.FeatureID, line string) {
 	ff := e.Freeform(agent)
 	if ff == nil {
@@ -197,18 +197,19 @@ func (e *Engine) startDispatchedRun(ctx context.Context, agent, child domain.Fea
 	return nil
 }
 
-// noteDispatcher tells the agent that dispatched session, in a line of its
-// thread, that run n of the session ended. It is not a turn.
-func (e *Engine) noteDispatcher(ctx context.Context, session domain.FeatureID, n int, end domain.RunState) {
-	rec, ok, err := e.cfg.Store.DispatchOf(ctx, session)
-	if err != nil || !ok {
+// noteDispatcher tells the agent that dispatched session that run n of
+// the session ended: a line in its thread, and a turn naming the run, how
+// it ended and the head of its report.
+func (e *Engine) noteDispatcher(ctx context.Context, session domain.FeatureID, n int, end domain.RunState, report string) {
+	what := fmt.Sprintf("run %d ended %s", n, end)
+	if _, ok, err := e.cfg.Store.DispatchOf(ctx, session); err != nil || !ok {
 		return
 	}
-	title := string(session)
-	if f, err := e.cfg.Store.GetFeature(ctx, session); err == nil {
-		title = f.Name()
+	e.noteDispatcherEvent(ctx, session, what)
+	if head := headOf(report, 600); head != "" {
+		what += "; its report begins:\n" + head + "\n(session_status has all of it)"
 	}
-	e.agentNote(rec.Agent, fmt.Sprintf("session %s (%s): run %d ended %s", session, title, n, end))
+	e.wakeDispatcher(ctx, session, what)
 }
 
 // dispatchedHeld is what an agent's open children hold of its envelope —
@@ -230,12 +231,55 @@ func (e *Engine) dispatchedHeld(ctx context.Context, agent domain.FeatureID) flo
 			t += float64(d.Envelope)
 			continue
 		}
-		spent := e.SessionPoolSpent(ctx, f)
-		if f.Stage == domain.StageDone {
-			t += spent
-		} else {
-			t += max(float64(d.Envelope), spent)
-		}
+		t += e.heldFor(ctx, d, f)
 	}
 	return t
+}
+
+// heldFor is what one dispatched child holds of its agent's pool: while it
+// is open the larger of its envelope now, the one recorded at dispatch and
+// its spend, so a person raising the child's own envelope cannot let it
+// spend past what the agent holds for it; once closed, what it spent.
+func (e *Engine) heldFor(ctx context.Context, d state.Dispatch, f domain.Feature) float64 {
+	spent := e.SessionPoolSpent(ctx, f)
+	if f.Stage == domain.StageDone {
+		return spent
+	}
+	return max(float64(d.Envelope), float64(f.Budget.Envelope), spent)
+}
+
+// checkDispatchedRaise refuses setting a dispatched child's envelope to
+// "to" when the agent's pool cannot cover what that adds to the child's
+// hold: the agent's tree of work never spends past the agent's own
+// envelope. Lowering is always allowed; removing the cap is not.
+func (e *Engine) checkDispatchedRaise(ctx context.Context, f domain.Feature, to int) error {
+	if e.cfg.Store == nil || f.Stage == domain.StageDone {
+		return nil
+	}
+	d, ok, err := e.cfg.Store.DispatchOf(ctx, f.ID)
+	if err != nil || !ok {
+		return nil
+	}
+	agentCard, err := e.cfg.Store.GetFeature(ctx, d.Agent)
+	if err != nil {
+		return nil
+	}
+	if to == 0 && agentCard.Budget.Envelope <= 0 {
+		return nil
+	}
+	if to == 0 {
+		return fmt.Errorf("%s was dispatched by %s, which holds its envelope: it cannot be left uncapped", f.Name(), agentCard.Name())
+	}
+	next := f
+	next.Budget.Envelope = to
+	inc := e.heldFor(ctx, d, next) - e.heldFor(ctx, d, f)
+	if inc <= 0 {
+		return nil
+	}
+	left, bounded := e.sessionPoolLeft(ctx, agentCard)
+	if !bounded || inc <= left {
+		return nil
+	}
+	return fmt.Errorf("%s dispatched %s, and its pool has %s left, not the %s more this needs: top %s up first",
+		agentCard.Name(), f.Name(), domain.FormatDollars(max(0, left)), domain.FormatDollars(inc), agentCard.Name())
 }
