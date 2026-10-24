@@ -503,7 +503,7 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .composer .mslot{margin-left:auto;display:flex;min-width:0}
 .composer .mslot:empty{display:none}
 .composer .mslot + .send{margin-left:0}
-.mbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:7px;color:var(--fg2);flex-shrink:0;min-width:0;max-width:280px}
+.mbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:7px;color:var(--fg2);flex-shrink:1;min-width:0;max-width:280px}
 .mbtn:hover,.mbtn[aria-expanded="true"]{background:var(--sunk)}
 .mbtn .m{color:var(--fg);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mbtn .a{font-size:11px;color:var(--fg3)}
@@ -530,6 +530,11 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .spop .row{display:flex;gap:6px}
 .spop .fh{margin:0;font-size:12px;color:var(--fg3)}
 .spop .ferr{margin:0;font-size:12px;color:var(--err)}
+/* Send is the bar's one control that never gives way: as the composer
+   narrows (a surface open beside the thread), the enter chip and the
+   model's agent go first, then the model and the hint truncate */
+.composer{container-type:inline-size}
+@container (max-width:560px){.composer .enter kbd,.mbtn .a{display:none}}
 /* on a phone the model beats the enter hint for the bar's width */
 @media (max-width:760px){.composer .bar:has(.mbtn) .enter{display:none}.mbtn{max-width:none;flex:1;justify-content:flex-start}}
 .link-spend{border-radius:6px;padding:2px 6px;margin:-2px -6px}
@@ -579,7 +584,7 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .opt.pick .k{border-style:dashed}
 .opt.picked .k{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .opt.picked .l{font-weight:500}
-.send{margin-left:auto;height:28px;padding:0 12px;border-radius:7px;background:var(--accent);color:var(--accent-fg);font-weight:600;font-size:12.5px;white-space:nowrap;max-width:26ch;overflow:hidden;text-overflow:ellipsis}
+.send{margin-left:auto;flex:none;height:28px;padding:0 12px;border-radius:7px;background:var(--accent);color:var(--accent-fg);font-weight:600;font-size:12.5px;white-space:nowrap;max-width:26ch;overflow:hidden;text-overflow:ellipsis}
 
 /* ---------- beside the thread: the icons and the one surface they open ---------- */
 /* a column of icons, and left of it the one surface an icon opened. The
