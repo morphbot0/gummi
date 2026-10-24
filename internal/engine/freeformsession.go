@@ -379,6 +379,9 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			// the sessions it dispatched
 			if f.Home {
 				watch := agentTools()
+				if e.pool != nil {
+					watch = append(watch, agentRepoListTool())
+				}
 				extra = append(extra, watch...)
 				tools = append(tools, watch...)
 				hints = append(hints, agentWatchHint)

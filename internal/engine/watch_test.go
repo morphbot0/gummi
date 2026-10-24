@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
@@ -529,5 +531,49 @@ func TestAnAgentDrivesOnlyItsOwnDispatches(t *testing.T) {
 	createFeature(t, store, other)
 	if ds, _ := store.Dispatched(ctx, other.ID); len(ds) != 0 {
 		t.Errorf("%+v", ds)
+	}
+}
+
+// An agent is told it may start work in a repository through a dispatch,
+// and its repo_list names the repositories a dispatch may target; it
+// attaches nothing.
+func TestAnAgentLearnsWhereItMayDispatch(t *testing.T) {
+	wf := newWFFake()
+	var mu sync.Mutex
+	var hints []string
+	var tools []string
+	wf.OnNewSession = func(opts agent.SessionOpts) {
+		mu.Lock()
+		defer mu.Unlock()
+		hints = opts.SystemHints
+		for _, td := range opts.Tools {
+			tools = append(tools, td.Name)
+		}
+	}
+	e, _, _, ff := watchEngine(t, wf, 2000)
+	ctx := context.Background()
+
+	mu.Lock()
+	joined := strings.Join(hints, "\n")
+	offered := strings.Join(tools, " ")
+	mu.Unlock()
+	for _, want := range []string{"you dispatch one", "workflow_run and a recipe holding the dispatch"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the hints do not say %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "is the person's to start as a card.") {
+		t.Errorf("the hints still say only the person starts repository work:\n%s", joined)
+	}
+	if !strings.Contains(offered, repoListToolName) || strings.Contains(offered, repoAttachToolName) {
+		t.Errorf("tools offered = %s, want repo_list and no repo_attach", offered)
+	}
+
+	out, err := e.DispatchClientTool(ctx, ff.Session(), repoListToolName, []byte(`{}`))
+	if err != nil || !strings.Contains(out, "repositories a dispatch may name: lib, target") {
+		t.Errorf("repo_list = %q %v", out, err)
+	}
+	if out, _ := e.DispatchClientTool(ctx, ff.Session(), repoAttachToolName, []byte(`{"repo":"lib"}`)); !strings.Contains(out, "not one") {
+		t.Errorf("an agent attached a repository: %q", out)
 	}
 }
