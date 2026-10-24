@@ -102,7 +102,7 @@ function word (r) {
   if (r.status === 'watching') return 'watching'
   if (r.status === 'paused') return 'paused'
   // an idle session says what it holds (the server's word: ready to land,
-  // open comments, no commits yet) rather than its type a second time
+  // open comments, nothing committed yet) rather than its type a second time
   if (r.word) return r.word
   if (r.status === 'done') return r.landed ? 'landed' : 'closed'
   return r.home ? '' : (r.stage === 'open' || r.kind === 'freeform') ? '' : 'idle'

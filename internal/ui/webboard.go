@@ -424,7 +424,7 @@ func (m *Shell) webIdleWord(r featureRow) string {
 	case r.OpenDiffComments > 0:
 		return fmt.Sprintf("%d open comment%s", r.OpenDiffComments, plural(r.OpenDiffComments))
 	case !r.Ahead:
-		return "no commits yet"
+		return "nothing committed yet"
 	case !f.PullRequest.Empty():
 		return "in a pull request"
 	case m.stackLandBlocker(f.ID) != "":

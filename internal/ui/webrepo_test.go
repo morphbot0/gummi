@@ -60,7 +60,7 @@ func TestWebRowSaysWhatAnIdleSessionHolds(t *testing.T) {
 		comments int
 		want     string
 	}{
-		{false, 0, "no commits yet"},
+		{false, 0, "nothing committed yet"},
 		{true, 0, "ready to land"},
 		{true, 1, "1 open comment"},
 	} {

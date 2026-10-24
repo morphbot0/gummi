@@ -181,7 +181,7 @@ function stages (c) {
   // an open session has no stages at all: ticking the workflow's would
   // claim a plan, an implement and a verify it never had. Its type is on
   // the line above, so this says what it holds (the rail's word: ready to
-  // land, open comments, no commits yet), or nothing. Once closed it says
+  // land, open comments, nothing committed yet), or nothing. Once closed it says
   // how it ended.
   if (c.stage === 'open') return c.word ? h('span', { class: 'stages' }, h('span', { class: 'cur st-open', testid: 'card-state' }, c.word)) : null
   if (c.kind === 'freeform') {
