@@ -1,0 +1,87 @@
+# What triage should answer for a session's first request (triage.go),
+# read by TestTriageEval (triage_eval_test.go, `make triage-eval`) against
+# a real model. `want` is `here` or a bundled recipe's name.
+#
+# The line drawn: `here` is a question, a small or local change, a fix
+# whose cause is known, or work still being shaped; `deliver` a change
+# across several parts with tests and docs to write; `investigate` a
+# question answered in a written report; `fix-until-green` checks that
+# already fail, many or of unknown cause, to be made to pass.
+cases:
+  # here
+  - want: here
+    request: "What does the stack package decide, and where is a card's base resolved?"
+  - want: here
+    request: "Fix the typo in the README's install section: 'instal' should be 'install'."
+  - want: here
+    request: "Rename the helper tailRunes to lastRunes everywhere in internal/engine and keep the build green."
+  - want: here
+    request: "Why does the board show a ~ in front of some card costs? Explain it to me."
+  - want: here
+    request: "Bump the golangci-lint version in the CI workflow to v2.5 and make sure make lint still passes."
+  - want: here
+    request: "The doctor command prints the sandbox source twice; drop the duplicate line in cmd/gummi/doctor.go."
+  - want: here
+    request: "Let's think about how we might make the inbox less noisy. What options do we have? Don't change anything yet."
+  - want: here
+    request: "Can you write a commit message for what is staged right now and commit it?"
+  - want: here
+    request: "Change the default idle timeout for a freeform session from 30 to 45 minutes and update the doc comment."
+  - want: here
+    request: "The TestBoardGolden snapshot is out of date after the theme change; regenerate the goldens and check the diff looks right."
+  - want: here
+    request: "Quick one: is modernc sqlite safe to use from several goroutines the way state.Store does?"
+  - want: here
+    request: "TestParseObjectiveArgs broke when I changed the quote handling: parseObjectiveArgs no longer unescapes \\\" — put the unescape back."
+  - want: here
+    request: "What's the cleanest way to add a field to webapi.Card? Just tell me the steps, I'll do it myself."
+
+  - want: here
+    request: "The board feels slow once there are a few hundred cards. Can you take a look?"
+  - want: here
+    request: "Add a --since flag to gummi log that filters a card's commits by date, with a test."
+  - want: here
+    request: "go vet complains about a copied lock in internal/ui/bridge.go; fix it."
+
+  # deliver
+  - want: deliver
+    request: "Add schedules to agents as well as sessions: store a schedule per agent, show it on the board and the web page, let a person edit it from both faces, and cover it with tests."
+  - want: deliver
+    request: "Replace the SSE hub in internal/web with a websocket transport, keeping the event shapes, and update the page's client and the e2e harness to use it."
+  - want: deliver
+    request: "Build a per-workspace spend report: a new gummi report command, a Report tab on the web page, and the same numbers in the TUI's stats view, all reading from one fold with golden tests."
+  - want: deliver
+    request: "Refactor the engine so every one-shot (audit, triage, commit messages) goes through a single runner with metering, timeouts and role fallback, and migrate the existing callers without changing behaviour."
+  - want: deliver
+    request: "Implement multi-repository workspaces end to end: a card picks its repository, worktrees are cut from it, landing pushes to the right one, and the board groups cards by repository. Update DESIGN.md."
+  - want: deliver
+    request: "Add login to the web face so a team can share one board: accounts, sessions, a login page, and per-person attribution on every action, with e2e coverage."
+  - want: deliver
+    request: "Support the Gemini CLI as a fourth agent backend, with the same capabilities table, sandbox handling, profile support and tests the other adapters have."
+
+  - want: deliver
+    request: "The engine package has grown too big. Split it into sensible sub-packages without changing behaviour."
+  - want: deliver
+    request: "Write a design for how stacks should handle a card whose base was force-pushed, then implement it."
+
+  # investigate
+  - want: investigate
+    request: "Research how other agent harnesses (Kiro, Cursor, Aider) steer an agent into a planning workflow, and write up proposals for gummi."
+  - want: investigate
+    request: "Investigate why cards sometimes report a higher spend than their backends' own usage logs, and write a report of what you find with the evidence. Don't fix anything yet."
+  - want: investigate
+    request: "Map every place in the codebase that reads or writes a card's stage, and write a report I can use to plan removing the retired kinds."
+  - want: investigate
+    request: "The web page reconnects every few minutes on mobile. Dig into the SSE keepalive, the service worker and the proxy setup and write up the likely causes."
+  - want: investigate
+    request: "Audit the code paths that spawn agent processes for ways a child could outlive gummi, and give me a written summary with file references."
+
+  # fix-until-green
+  - want: fix-until-green
+    request: "make test is failing on main after the bubbletea upgrade, about a dozen tests in internal/ui. Get them all passing again."
+  - want: fix-until-green
+    request: "CI's lint job is red with forty-odd gofumpt and errcheck findings across the tree; fix them until golangci-lint passes."
+  - want: fix-until-green
+    request: "The race detector fails in internal/engine (go test -race ./internal/engine/). Make it pass without disabling any tests."
+  - want: fix-until-green
+    request: "These e2e specs fail since the composer rewrite: slash.spec.ts, keyboard.spec.ts and focus.spec.ts. Fix the page until they pass."

@@ -158,7 +158,8 @@ running, met, partial) — then `specs-new` (+ New spec), which opens
 `specs-new-form`, `specs-new-title`, `specs-new-start`; the spec shown is
 drawn beneath with the ids below. `spec-start-session` (start the first one
 from the template, on `spec-none`), `spec-session` (its bar), `spec-rev`,
-`spec-ready` (its done-when items), `spec-edit`, `spec-editor`, `spec-save`,
+`spec-ready` (its done-when items), `spec-propose-run` (asks the session
+for a run on the spec: sends `/workflow on spec n`), `spec-edit`, `spec-editor`, `spec-save`,
 `spec-cancel`, `spec-stale` (the spec changed while it was being edited),
 `spec-revisions`, `spec-revision-<n>`; `spec-runs`, the spec's workflow runs
 newest first, one `spec-run-<n>` each (its glyph, recipe, state,

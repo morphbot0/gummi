@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -185,7 +186,23 @@ func TestPermissionOutlivesItsTurn(t *testing.T) {
 // the answer rides a turn (AnswerAs's rerun branch), never a dead call,
 // so nothing is left unanswerable in the attention lane.
 func TestPermissionExpiredRowStaysAnswerable(t *testing.T) {
+	// the held call is asked on the first turn only: the answer's turn
+	// reaches a fresh backend, and a fake that asked again there would open
+	// a second row of its own (a new generation's id) racing the check
 	ag := permissionFake()
+	ask := ag.Responder
+	var mu sync.Mutex
+	turns := 0
+	ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		turns++
+		n := turns
+		mu.Unlock()
+		if n == 1 {
+			return ask(opts, msg)
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "not running it, then"}, {Kind: agent.EventIdle}}
+	}
 	e := newEngine(t, ag)
 	e.cfg.Permission = agent.PermissionGuarded
 	ctx := context.Background()
@@ -209,7 +226,9 @@ func TestPermissionExpiredRowStaysAnswerable(t *testing.T) {
 			t.Errorf("permission answers = %v, want none — the session was gone", answers)
 		}
 	}
-	// the durable row is closed by the answer
+	// the durable row is closed by the answer, read once the answer's
+	// turn has ended
+	waitFreeformIdle(t, e.Freeform("FF-001"))
 	opens, err := e.cfg.Store.OpenDecisions(ctx)
 	if err != nil {
 		t.Fatal(err)

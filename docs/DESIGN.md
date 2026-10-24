@@ -6867,6 +6867,34 @@ call returns at once, saying the run is proposed.
     for the checks to have run; checks that cannot run at all leave the
     run without a baseline.
 
+- **How a run gets asked for.** An agent left to judge for itself,
+  mid-request, whether work is worth a run mostly just starts on it. So
+  the decision has three ways in besides the agent's own, and none of
+  them allows anything: the agent still proposes, and the person still
+  answers.
+  - **The person asks.** `/workflow [recipe] [on spec n] [what for]` is
+    a session command on every face: the transcript keeps the line, and
+    the agent is told to write or update the spec and propose the run,
+    not to do the work. A session spec's **Propose a run** (the web
+    page's Specs tab, `w` in the terminal's spec view) sends
+    `/workflow on spec n`.
+  - **Triage.** A session's first request of at least eight words,
+    from a person, is read before its agent hears it by a tool-less
+    one-shot on the profile's `triage` slot (else `scout`, else
+    `scribe`, else the session's own model), given the request and the
+    recipes' descriptions, which answers `TRIAGE: here` or `TRIAGE:
+    <recipe>`. A recipe reaches the agent as a note ahead of the request
+    and the person as a line on the thread; `here`, an unknown name, a
+    failure or a timeout send the request as it was. Its cost goes on
+    the card. `triage: off` in `config.yaml` turns it off
+    (`engine/triage.go`). `make triage-eval` scores the prompt on a real
+    model against the labelled requests in
+    `engine/testdata/triage-eval.yaml`; add a case there when triage
+    misreads a request.
+  - **The hint.** The session's workflow hint asks for the decision
+    before the first edit of each new piece of work, and names the
+    shapes of work each bundled recipe is for.
+
 ### 25.6 The tree and its snapshots
 
 > *Amended by §27.6 (decision 30): a run's snapshots, step diffs, reader-change flag and Revert run span the session's own tree and every attached repository's.*

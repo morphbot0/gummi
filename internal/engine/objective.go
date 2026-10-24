@@ -406,7 +406,13 @@ func (ff *FreeformSession) runAudit(ctx context.Context, sess *Session) {
 // decision: the profile's auditor when declared, else its scribe — the
 // cheap model — else the session's own.
 func (e *Engine) resolveAuditorRole(profileName string, own config.RoleConfig, ownBackend string) (config.RoleConfig, string) {
-	for _, role := range []agent.Role{agent.RoleAuditor, agent.RoleScribe} {
+	return e.resolveOneShotRole(profileName, own, ownBackend, agent.RoleAuditor, agent.RoleScribe)
+}
+
+// resolveOneShotRole is the first of roles the profile declares, its
+// model and backend as one decision, else the session's own.
+func (e *Engine) resolveOneShotRole(profileName string, own config.RoleConfig, ownBackend string, roles ...agent.Role) (config.RoleConfig, string) {
+	for _, role := range roles {
 		if rc, ok := e.lookupRole(profileName, role); ok {
 			return rc, rc.Backend
 		}

@@ -41,6 +41,12 @@ const (
 	// undeclared auditor falls back to the scribe, the profile's cheap
 	// model, and failing that to the session's own.
 	RoleAuditor Role = "auditor"
+	// RoleTriage reads a session's first request and says whether it is
+	// work for one of the workspace's workflow recipes (engine/triage.go):
+	// a tool-less one-shot. Not a stage role, and a profile need not
+	// declare it: an undeclared triage falls back to the scout, then the
+	// scribe, then the session's own model.
+	RoleTriage Role = "triage"
 )
 
 // Permission is the policy a session applies to tool calls. gummi's

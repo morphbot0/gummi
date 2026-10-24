@@ -171,6 +171,32 @@ func (m *Shell) startNewSpec(title string) tea.Cmd {
 	}
 }
 
+// askForRun asks the session for a workflow run on the spec open: the
+// /workflow line the composer would send, so the agent brings the spec up
+// to date and proposes the run, and the person allows it (DESIGN §25.5).
+func (m *Shell) askForRun() tea.Cmd {
+	sv := m.spec
+	if sv == nil || !hasSessionSpec(sv.f) || sv.n == 0 || sv.f.Stage == domain.StageDone {
+		return nil
+	}
+	if m.engine == nil {
+		m.notice = noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)")}
+		return nil
+	}
+	f, n, eng := sv.f, sv.n, m.engine
+	who := engine.WithActor(context.Background(), m.lineActor())
+	return func() tea.Msg {
+		ff, err := eng.OpenFreeform(context.Background(), f)
+		if err == nil {
+			err = ff.SendTurn(who, engine.WorkflowAskLine(n), nil)
+		}
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: fmt.Sprintf("asked the session to propose a run on spec %d", n)}
+	}
+}
+
 // specStartedMsg is a new spec started from the spec view: the view opens
 // it.
 type specStartedMsg struct {
@@ -588,6 +614,9 @@ func (sv *specView) bindings() []binding {
 	}
 	if hasSessionSpec(sv.f) {
 		bs = append(bs, binding{key: "+", label: "new spec", help: "start a new spec on this session", bar: true})
+		if sv.n > 0 && sv.f.Stage != domain.StageDone {
+			bs = append(bs, binding{key: "w", label: "propose a run", help: "ask the session to propose a workflow run on this spec: it brings the spec up to date and proposes, and you allow it", bar: true})
+		}
 	}
 	if len(sv.specRuns()) > 0 {
 		bs = append(bs, binding{key: "1-9", label: "jump to run", help: "jump to the run the list's row names, in the thread, unfolded whole"})
@@ -618,6 +647,8 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 			return nil
 		}
 		return m.jumpToRun(runs[i-1].N)
+	case "w":
+		return m.askForRun()
 	case "+":
 		if !hasSessionSpec(sv.f) {
 			return nil

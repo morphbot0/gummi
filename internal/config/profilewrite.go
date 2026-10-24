@@ -25,13 +25,14 @@ var RoleSlots = []struct{ Role, Help string }{
 	{"architect", "consult sessions, and planner and contractor steps when they have no slot of their own"},
 	{"planner", "a workflow's planner step"},
 	{"contractor", "a workflow's contractor step: design, interfaces, stubs"},
-	{"scout", "a workflow's scout step: reads, reproduces, maps"},
+	{"scout", "a workflow's scout step: reads, reproduces, maps; a session's triage when it has no slot"},
 	{"tester", "a workflow's tester step"},
 	{"scribe", "a workflow's scribe step, and landing commit messages; an objective's auditor when it has no slot"},
 	{"reviewer", "a workflow's reviewer step"},
 	{"reviewer-alt", "the second reviewer of deliver, so two reviews run on two models; the reviewer when unset"},
 	{"consult", "a consult session"},
 	{"auditor", "judges an objective's progress"},
+	{"triage", "reads a session's first request for whether it is work for a workflow recipe"},
 }
 
 // Backends are the names a role's `backend:` may take, sorted.

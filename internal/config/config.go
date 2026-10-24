@@ -39,6 +39,11 @@ type Config struct {
 	// backend confines the shell at all. See DESIGN §4.4 for what each
 	// layer actually guarantees.
 	Sandbox string `yaml:"sandbox"`
+	// Triage is whether a session's first request is read, before its
+	// agent hears it, for whether it is work for a workflow recipe: "on"
+	// (the default, empty) or "off". The read is one cheap call on the
+	// profile's triage, scout or scribe model, charged to the card.
+	Triage string `yaml:"triage"`
 	// Repo is the git repository root gummi manages, when it is not the
 	// workspace root. Empty = the workspace root (the sibling layout, where
 	// .gummi and .git share a directory). A nested repo is named relative
@@ -261,6 +266,11 @@ func Load(path string) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("%s: sandbox must be \"enforce\", \"warn\", or \"off\", got %q", path, c.Sandbox)
 	}
+	switch c.Triage {
+	case "", "on", "off":
+	default:
+		return Config{}, fmt.Errorf("%s: triage must be \"on\" or \"off\", got %q", path, c.Triage)
+	}
 	for name, p := range c.Env {
 		if err := validateEnvName(path, "env", name); err != nil {
 			return Config{}, err
@@ -328,6 +338,10 @@ func validateCheckTimeout(c domain.Check) error {
 // (agents' tool calls require approval). The default (empty or "allow-all")
 // is not guarded.
 func (c Config) Guarded() bool { return c.Permissions == "guarded" }
+
+// TriageOn reports whether a session's first request is triaged: unless
+// the config says "off".
+func (c Config) TriageOn() bool { return c.Triage != "off" }
 
 // UserConfigPath returns the path to the user-level gummi config file:
 // $XDG_CONFIG_HOME/gummi/config.yaml when XDG_CONFIG_HOME is set and
@@ -417,6 +431,16 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["sandbox"] = userPath
 	} else {
 		sources["sandbox"] = "default"
+	}
+
+	if ws.Triage != "" {
+		merged.Triage = ws.Triage
+		sources["triage"] = workspacePath
+	} else if user.Triage != "" {
+		merged.Triage = user.Triage
+		sources["triage"] = userPath
+	} else {
+		sources["triage"] = "default"
 	}
 
 	if ws.Repo != "" {

@@ -27,7 +27,10 @@ import (
 //     is replaced by that summary and the backend restarted on it;
 //   - /handoff: a turn that asks the agent for a handoff on every backend,
 //     after which the conversation is emptied and the handoff sent to a
-//     fresh backend as its first turn.
+//     fresh backend as its first turn;
+//   - /workflow: a turn that asks the agent to propose a workflow run
+//     (DESIGN §25.5) rather than do the work — the person's way of
+//     asking for one without saying how.
 var (
 	handoffCommand = ProjectCommand{
 		Name:        "handoff",
@@ -70,6 +73,12 @@ var (
 		Description: "take an attached repository off this session: /detach <repo> — refused while its branch holds commits that have not landed or its tree has changes",
 		builtin:     true,
 	}
+	workflowCommand = ProjectCommand{
+		Name: "workflow",
+		Description: "have the agent propose a workflow run instead of doing the work: /workflow [recipe] [on spec n] [what for]; " +
+			"alone, the recipe that fits the work so far",
+		builtin: true,
+	}
 	helpCommand = ProjectCommand{
 		Name:        "help",
 		Description: "list the commands this session takes — sends nothing",
@@ -78,7 +87,11 @@ var (
 )
 
 // sessionCommands is every built-in, in the order a menu offers them.
-var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, objectiveCommand, attachCommand, detachCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
+var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, workflowCommand, objectiveCommand, attachCommand, detachCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
+
+// SessionCommands is every session's own commands, the ones a session
+// answers before its backend has found any project file.
+func SessionCommands() []ProjectCommand { return append([]ProjectCommand(nil), sessionCommands...) }
 
 // builtinFor is the built-in msg names, when cmds resolve it to one rather
 // than to a project file, and the arguments after it.
@@ -109,6 +122,29 @@ const handoffPrompt = "Write a handoff for a fresh session of yourself that will
 	"uncommitted), what was tried and did not work, and the next steps in order. Point to files, " +
 	"commits and documents rather than restating them, and leave out secrets. Reply with the handoff " +
 	"only: do not change any files, and do not write it to a file."
+
+// WorkflowAskLine is the /workflow line a face sends for a person asking
+// for a run on the session's spec n: what a spec's "Propose a run" does.
+func WorkflowAskLine(n int) string {
+	return fmt.Sprintf("/%s on spec %d", workflowCommand.Name, n)
+}
+
+// workflowAskPrompt is what the agent is sent for /workflow: the person
+// asks for a run, in the words after the command, and the agent writes
+// the spec and proposes it — it does not start on the work itself.
+func workflowAskPrompt(args string) string {
+	s := "The person asks for a workflow run"
+	if args = strings.TrimSpace(args); args != "" {
+		s += ": \"" + args + "\""
+	} else {
+		s += " for the work in this conversation"
+	}
+	return s + ". Do not do the work yourself in this turn. Pick the recipe — the person may have named one; " +
+		"workflow_recipes lists them — and write the spec it runs against, or bring the one named up to date " +
+		"(spec_start, spec_replace_section): the steps read only the spec, never this conversation. Run its " +
+		"done-when checks so you know which fail, then propose the run with workflow_run. If what the person " +
+		"wants is unclear, ask them with ask_user first."
+}
 
 // handoffOpening heads the turn a handoff is sent as, so the thread reads
 // it as what it is and the fresh session knows where it came from.

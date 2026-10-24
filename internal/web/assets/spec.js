@@ -250,7 +250,8 @@ function renderSpec (pane, entry, ctx) {
     }, 'Sections ', h('span', { 'aria-hidden': 'true' }, '▾')))
   }
   if (s.session) {
-    doc.querySelector('.src').after(sessionBar(s, ctx), specRunsEl(s))
+    // a spec with no runs has no runs row: after() would write a null as text
+    doc.querySelector('.src').after(...[sessionBar(s, ctx), specRunsEl(s)].filter(Boolean))
     doc.append(revisionsEl(s))
   }
   pane.append(h('div', { class: 'spec', testid: 'spec' }, doc))
@@ -272,7 +273,23 @@ function sessionBar (s, ctx) {
       ? `${plural(items.length, 'done-when item')}${checked < items.length ? `, ${items.length - checked} without a check` : ''}`
       : 'no done-when item yet: a workflow run is judged against them'),
     h('span', { class: 'sp' }),
+    ctx.closed || !ctx.specN ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-propose-run', title: 'Ask the session to propose a workflow run on this spec: it brings the spec up to date and proposes, and you allow it', onclick: (e) => askForRun(e.currentTarget, ctx) }, 'Propose a run'),
     ctx.closed ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-edit', onclick: () => { editing.set(keyOf(ctx), { text: s.markdown || '', rev: s.rev }); ctx.rerender() } }, 'Edit'))
+}
+
+// askForRun sends the session the /workflow line for this spec (the
+// TUI's w in its spec view): the agent brings the spec up to date and
+// proposes the run, which comes back as a decision for the person.
+async function askForRun (btn, ctx) {
+  btn.disabled = true
+  try {
+    await post(cardPath(ctx.id, 'send'), { text: `/workflow on spec ${ctx.specN}` })
+    toast(`Asked the session to propose a run on spec ${ctx.specN}`)
+  } catch (err) {
+    toast(err.data?.error || err.message, { err: true })
+  } finally {
+    btn.disabled = false
+  }
 }
 
 // specRunsEl is the spec's runs, newest first (DESIGN §25.9): each run's
