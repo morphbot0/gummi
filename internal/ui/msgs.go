@@ -43,9 +43,9 @@ type featureRow struct {
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	// Ahead: the branch holds commits of its own (worktree.BranchAhead),
 	// read at load with Landed
-	Ahead bool
-	History     []state.TransitionRecord
-	StageSpend  []state.StageSpend // per-stage/model spend rollup (forward-only)
+	Ahead      bool
+	History    []state.TransitionRecord
+	StageSpend []state.StageSpend // per-stage/model spend rollup (forward-only)
 	// BaseBranch is what f actually lands on, resolved once at load
 	// (loadRows) through Shell.baseBranch — the same map lookup shell.go
 	// resolves at attach — so a pure function holding only this row, not a
