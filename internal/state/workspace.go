@@ -173,31 +173,6 @@ func (w Workspace) ProfilesFile() string { return filepath.Join(w.GummiDir(), "p
 // DBFile is the SQLite state store.
 func (w Workspace) DBFile() string { return filepath.Join(w.StateDir(), "gummi.db") }
 
-// PIDFile records the PID of the run/resume process driving card id. It is
-// written after the card's lock is taken and cleared on clean exit, so an
-// external caller — an orchestrating agent that spawned gummi and lost its
-// wrapper — can probe that specific card's liveness (kill -0) even though it
-// can't take the lock (which would fight the live run). Scoped per card,
-// mirroring CardLockFile, so concurrent drives of independent cards never
-// share a write/clear target.
-func (w Workspace) PIDFile(id domain.FeatureID) string {
-	return filepath.Join(w.StateDir(), "locks", fmt.Sprintf("%s.pid", id))
-}
-
-// AgentPGIDFile records the process-group id of the agent backend process
-// currently spawned for card id (BG-002), written when its session starts
-// (Engine.trackAgentPID) and left in place once the session ends — a live
-// group re-signals as dead the moment anyone actually checks it, so leaving
-// a stale entry costs nothing (mirrors PIDFile's own "crash leaves the file
-// behind, the next read reads it as dead" reasoning). ReapOrphanAgent reads
-// it once a subsequent run/resume/clean (re-)acquires the card's lock: that
-// only succeeds once the driver that owned this entry has fully exited (by
-// any means), so any process group still recorded here is provably
-// orphaned, never a live drive's own agent.
-func (w Workspace) AgentPGIDFile(id domain.FeatureID) string {
-	return filepath.Join(w.StateDir(), "locks", fmt.Sprintf("%s.agent.pid", id))
-}
-
 // LiveFile is where the process driving card id mirrors its live agent
 // stream — the transcript deltas, tool calls, and state changes that
 // otherwise never leave that process's memory — one JSON object per line
@@ -220,7 +195,7 @@ func (w Workspace) EventsFile() string { return filepath.Join(w.StateDir(), "eve
 // Belt-and-braces: the launch pass also excludes /.gummi/ wholesale in
 // the repo's info/exclude, which is what covers a workspace predating any
 // line added here.
-const gummiIgnore = `# written by gummi init — machinery, never commit
+const gummiIgnore = `# written by gummi — machinery, never commit
 /worktrees/
 /scratch/
 /state/
@@ -228,13 +203,13 @@ const gummiIgnore = `# written by gummi init — machinery, never commit
 /seq.tmp
 `
 
-// Open returns the Workspace rooted at root, requiring that gummi init
-// has already run there.
+// Open returns the Workspace rooted at root, requiring that a board has
+// already created it there.
 func Open(ws, repo string) (Workspace, error) {
 	w := Workspace{Root: ws, RepoRoot: repo}
 	fi, err := os.Lstat(w.GummiDir())
 	if err != nil {
-		return Workspace{}, fmt.Errorf("no .gummi directory in %s (run `gummi init` first): %w", ws, err)
+		return Workspace{}, fmt.Errorf("no .gummi directory in %s (run `gummi` there first): %w", ws, err)
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
 		return Workspace{}, fmt.Errorf("%s is a symlink; refusing to use a redirected gummi directory", w.GummiDir())

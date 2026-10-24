@@ -117,7 +117,7 @@ test.describe('clean up all', () => {
         for (const name of ['a', 'b']) {
           const id = await ws.seedReady(`Add a keeper helper in ${name}`, { repo: name });
           ids.push(id);
-          await ws.gummiOK(['merge', id, '-m', `feat: add a keeper helper in ${name}`, '--keep-branch']);
+          await ws.land(id, `feat: add a keeper helper in ${name}`, { keepBranch: true });
         }
       },
     },

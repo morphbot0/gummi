@@ -4,7 +4,7 @@ import { shot } from '../fixtures/shots';
 
 // The schedules view against a real `gummi web`: define a heartbeat
 // against a session, see it listed off, enable it through the confirm,
-// fire it now, and delete it — with a mint schedule seeded from the CLI
+// fire it now, and delete it — with a mint schedule seeded beforehand
 // so both kinds are on screen. A definition that cannot fire (a mint
 // naming a repository the board does not configure) is refused with the
 // sentence the board gave.
@@ -12,8 +12,8 @@ import { shot } from '../fixtures/shots';
 test.use({
   seed: {
     run: async (ws) => {
-      // a mint schedule, defined the way the CLI does it, stored off
-      await ws.gummiOK(['schedule', 'add', '--name', 'nightly triage', '--every', '1h', '--prompt', 'triage new issues', '--envelope', '50']);
+      // a mint schedule, stored off
+      await ws.addSchedule({ name: 'nightly triage', kind: 'mint', every: '1h', prompt: 'triage new issues', envelope: 50 });
     },
   },
 });

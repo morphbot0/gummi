@@ -468,8 +468,7 @@ func TestCardActionsForPRLinkUnlinkPullGating(t *testing.T) {
 		landed, hasWT, linked, abroad  bool
 		wantLink, wantUnlink, wantPull bool
 	}{
-		// linking a PR is the CLI's (gummi pr link) and the web page's; the
-		// menu no longer offers it
+		// a retired card is never linked: only a session offers it
 		{"unlinked, worktree, not landed: none", false, true, false, false, false, false, false},
 		{"linked, worktree, not landed: unlink+pull", false, true, true, false, false, true, true},
 		{"linked, landed: unlink+pull still offered (m is what refuses, not these)", true, true, true, false, false, true, true},
@@ -511,6 +510,35 @@ func TestCardActionsForPRActionsExcludedFromForeignSafe(t *testing.T) {
 	for _, id := range []string{"prlink", "prunlink", "prpull"} {
 		if foreignSafeActions[id] {
 			t.Errorf("%q must not be in foreignSafeActions — it writes to the card", id)
+		}
+	}
+}
+
+// A session links a pull request that already exists for its branch from
+// its own menu, on either face; once linked, or landed, it no longer does.
+func TestASessionOffersLinkPRUntilItIsLinked(t *testing.T) {
+	offers := func(r featureRow) bool {
+		in := nextInput{stage: r.F.Stage, kind: r.F.Kind, landed: r.Landed, pullRequest: r.F.PullRequest}
+		for _, a := range cardActionsFor(in, r) {
+			if a.id == "prlink" {
+				return true
+			}
+		}
+		return false
+	}
+	r := freeformRow(208, "rate-limit pairing", true)
+	if !offers(r) {
+		t.Fatal("an unlinked session does not offer link PR")
+	}
+	linked := r
+	linked.F.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 1}
+	landed := r
+	landed.Landed = true
+	agent := freeformRow(209, "an agent", false)
+	agent.F.Home = true
+	for name, row := range map[string]featureRow{"linked": linked, "landed": landed, "home (an agent's)": agent} {
+		if offers(row) {
+			t.Errorf("a %s session offers link PR", name)
 		}
 	}
 }

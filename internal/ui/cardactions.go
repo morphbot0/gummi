@@ -365,6 +365,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"clean", "c", "clean up", r.cleanHelp(), true,
 			needsWT && r.cleanable(),
 		},
+		// a session follows a pull request that already exists for its
+		// branch — one opened on GitHub, or by hand — once it is linked
+		{
+			"prlink", "", "link PR…", "link this session to a GitHub pull request that already exists, by its URL or number, to follow its review and checks", false,
+			freeform && !r.F.Home && !r.F.MainCheckout && !r.Landed && r.F.PullRequest.Empty() && !r.watchOnly(),
+		},
 		// unlinking destroys one row (PullRequestRef), not any diff
 		// annotations already pulled from it — so it is not danger:true;
 		// the confirm names what changes instead.
@@ -378,6 +384,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		{
 			"prcreate", "", "open pull request…", "push the branch and open its pull request on GitHub — you confirm where it goes first", false,
 			publishable(in, r) && r.F.PullRequest.Empty(),
+		},
+		{
+			// a session spanning repositories (DESIGN §27.7): one PR in
+			// each, the descriptions naming one another
+			publishSpanID, "", "open pull requests in every repository…", "push each repository's branch and open a pull request in each, every description naming the others — you confirm each first", false,
+			publishable(in, r) && r.F.PullRequest.Empty() && spansUnlanded(r),
 		},
 		{
 			"push", "", "push to GitHub…", "push the branch's new commits to its remote", false,

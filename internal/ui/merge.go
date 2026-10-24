@@ -119,8 +119,8 @@ func (m *Shell) mergeChecks(f domain.Feature) tea.Cmd {
 		if !f.PullRequest.Empty() {
 			return mergeReadyMsg{
 				f: f,
-				err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or hand the card off to close it and let the PR carry it (`gummi pr unlink %s` to land it locally instead)",
-					f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f), f.ID),
+				err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or hand the card off to close it and let the PR carry it (“unlink PR” in the card's actions lands it locally instead)",
+					f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f)),
 				webErr: fmt.Sprintf("%s is linked to %s#%d (%s) — merge it there and pull %s, or hand the card off to close it and let the PR carry it (“unlink PR” in the card's menu lands it locally instead)",
 					f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f)),
 			}
@@ -337,5 +337,5 @@ type mergeThenDoneMsg struct {
 // looseWorkRefusal is why a freeform card with uncommitted work does not
 // land yet, and the two ways to make it.
 func looseWorkRefusal(f domain.Feature) string {
-	return f.Name() + " has uncommitted work in its worktree — commit it with a message of your own first (the commit action, or `gummi commit " + string(f.ID) + " -m <message>`), or discard it"
+	return f.Name() + " has uncommitted work in its worktree — commit it with a message of your own first (the commit action), or discard it"
 }

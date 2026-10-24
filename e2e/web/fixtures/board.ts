@@ -5,8 +5,9 @@ import type { Workspace } from './workspace';
 /**
  * A board with one card in every state a person meets, for the specs that
  * look at the whole page (visual QA, accessibility, the keyboard walk).
- * `seedBoard` runs before the server starts (the CLI half); `seedLive`
- * after, through the API (what has no CLI verb, or needs a live board).
+ * `seedBoard` runs before the server starts, on the workspace's seeding
+ * board; `seedLive` after, through the test server's API (what needs the
+ * live board).
  */
 export interface Board {
   // a session whose work is committed, ready to land
@@ -29,8 +30,7 @@ export async function seedBoard(ws: Workspace): Promise<Board> {
   const landed = await ws.seedLanded('Add a farewell helper');
   const sessions = await ws.seedSessions(['Add a shrug helper', 'Add a nod helper']);
   const bottom = await ws.seedReady('Add a bow helper');
-  await ws.gummiOK(['stack', 'new', bottom, '--name', 'greetings']);
-  await ws.gummiOK(['stack', 'add', 'greetings', ready]);
+  await ws.stack('greetings', [bottom, ready]);
   return { ready, commented, ask, landed, sessions, stacked: [bottom, ready] };
 }
 

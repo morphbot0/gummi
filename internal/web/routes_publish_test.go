@@ -187,3 +187,63 @@ func TestPublishIsRefusedOnABoardThatDoesNotPublish(t *testing.T) {
 		}
 	}
 }
+
+// A span opens a PR in every repository the session spans; with nothing
+// attached it is the session's own, read and confirmed like any publish.
+func TestPublishSpanOpensAPRInEachConfirmedRepository(t *testing.T) {
+	b, fake, bare := publishBoard(t)
+	ctx := context.Background()
+	tip := gitIn(t, b.wt, "rev-parse", "HEAD")
+
+	var span webapi.PublishSpan
+	if st := b.get("/api/cards/FF-001/publish/span", &span); st != http.StatusOK || span.Error != nil {
+		t.Fatalf("span = %d %+v", st, span.Error)
+	}
+	if len(span.Repos) != 1 || span.Repos[0].Repo != "" || span.Repos[0].Fingerprint == "" || span.Repos[0].Summary == "" || span.Title == "" {
+		t.Fatalf("span = %+v", span)
+	}
+
+	// a confirm that names no repository publishes nothing
+	var refused webapi.PublishSpanResult
+	b.send(http.MethodPost, "/api/cards/FF-001/publish/span", `{"title":"feat: x","repos":[]}`, &refused)
+	if refused.Error == nil || refused.Error.Code != string(publish.CodeNothingToPublish) {
+		t.Fatalf("no repository = %+v", refused)
+	}
+	// nor one with a fingerprint of facts nobody read
+	refused = webapi.PublishSpanResult{}
+	b.send(http.MethodPost, "/api/cards/FF-001/publish/span", `{"title":"feat: x","repos":[{"fingerprint":"stale"}]}`, &refused)
+	if refused.Error != nil || len(refused.Repos) != 1 || refused.Repos[0].Error == nil || refused.Repos[0].Error.Code != string(publish.CodeFactsChanged) {
+		t.Fatalf("a stale fingerprint = %+v", refused)
+	}
+
+	body, _ := json.Marshal(webapi.PublishSpanRequest{Title: "feat: dark mode", Body: "why\n", Repos: []webapi.PublishSpanPick{{Fingerprint: span.Repos[0].Fingerprint}}})
+	var res webapi.PublishSpanResult
+	if st := b.send(http.MethodPost, "/api/cards/FF-001/publish/span", string(body), &res); st != http.StatusOK || res.Error != nil {
+		t.Fatalf("span = %d %+v", st, res.Error)
+	}
+	if len(res.Repos) != 1 || res.Repos[0].Error != nil || res.Repos[0].Result == nil || res.Repos[0].Result.Number != 512 || res.Repos[0].Result.Pushed != tip {
+		t.Fatalf("result = %+v", res.Repos)
+	}
+	if got := gitIn(t, b.root, "--git-dir", bare, "rev-parse", b.f.BranchName()); got != tip {
+		t.Fatalf("the remote has %s, want %s", got, tip)
+	}
+	log, _ := os.ReadFile(filepath.Join(fake, "log"))
+	if !strings.Contains(string(log), "pr create --repo me/widget") {
+		t.Fatalf("gh was called as:\n%s", log)
+	}
+	f, err := b.store.GetFeature(ctx, "FF-001")
+	if err != nil || f.PullRequest.Number != 512 {
+		t.Fatalf("the card links %+v (%v)", f.PullRequest, err)
+	}
+	evs, err := b.store.Events(ctx, "FF-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := false
+	for _, ev := range evs {
+		recorded = recorded || ev.Kind == state.EventPublish
+	}
+	if !recorded {
+		t.Fatal("the thread does not record the span's PR")
+	}
+}

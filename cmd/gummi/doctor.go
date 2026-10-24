@@ -57,9 +57,8 @@ func runDoctor(fl cliFlags) error {
 // doctorNotReadyExit is what `gummi doctor` exits with when a check FAILED
 // — the workspace is not ready to run.
 //
-// It sits above the driver's status codes (internal/driver.Status.ExitCode
-// uses 1-6) precisely so it cannot be mistaken for one: doctor never drives
-// a card, and "not ready" is not "question" or "timeout".
+// It sits above 1-6 so it cannot be mistaken for the status codes the
+// retired command-line driver used: doctor never drives a card.
 //
 // The report itself is the message and has already been printed, in both
 // output shapes, so this carries no stderr line — it rides the same quiet
@@ -195,7 +194,7 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		add("workspace", statusOK, ".gummi workspace present", "")
 	} else {
 		ws = state.Workspace{Root: cwd} // path-only fallback for later checks
-		add("workspace", statusWarn, "no .gummi workspace yet", "created automatically on the first `gummi run` (or `gummi` TUI)")
+		add("workspace", statusWarn, "no .gummi workspace yet", "created automatically the first time `gummi` or `gummi web` opens the board")
 	}
 
 	// 2b. env prerequisites — operator-configured probes reported as
@@ -620,7 +619,7 @@ func skillPackChecks(ctx context.Context, cfg config.Config, ws state.Workspace,
 		checks = append(checks, doctorCheck{
 			Name: "skills:pack", Status: statusWarn,
 			Detail:      "the skill pack at " + pack.Dir + " has no published revision, so no session gets it",
-			Remediation: "run `gummi curator run`, or point " + skillpack.PublishedRef + " at the pack's tip",
+			Remediation: "run the curator from the board (E, or Skills on the web page), or point " + skillpack.PublishedRef + " at the pack's tip",
 		})
 	default:
 		skills, err := pack.Skills(ctx, rev)

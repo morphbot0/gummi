@@ -625,6 +625,10 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; rename it once this turn ends"}
 		}
 		return m.renameSession(r.F.ID, msg), nil
+	case "prlink":
+		// the text box answers the dialog: a URL, a number, or nothing for
+		// the one open pull request of the card's branch
+		return m.submitPRLink(r.F, msg), nil
 	case "commit":
 		if msg == "" {
 			// the menu entry already asks for the message (webActionNeeds),

@@ -3,8 +3,7 @@ package webapi
 import "time"
 
 // Log is GET /api/cards/{id}/log: the card's own commits, oldest first,
-// as branchlog folds them — the same rows the terminal's log tab and
-// `gummi log` draw.
+// as branchlog folds them — the same rows the terminal's log tab draws.
 type Log struct {
 	Base string `json:"base"`
 	// Head is the branch tip the rows end at. A plan sent back carries it

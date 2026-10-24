@@ -321,7 +321,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	eng, _, _, _, err := engineFromEnv(nil, nil, ws)
 	if eng != nil {
 		t.Fatalf("eng = %v, want nil on a guarded/claude mismatch", eng)
 	}
@@ -353,7 +353,7 @@ func TestNewEngineFromEnvBlocksGuardedMismatchNoProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	eng, _, _, _, err := engineFromEnv(nil, nil, ws)
 	if eng != nil {
 		t.Fatalf("eng = %v, want nil on a guarded/claude mismatch", eng)
 	}
@@ -392,7 +392,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	eng, _, _, _, err := engineFromEnv(nil, nil, ws)
 	if err != nil {
 		t.Fatalf("err = %v, want nil for a guarded+opencode pairing", err)
 	}
@@ -419,9 +419,9 @@ func TestAnUncoveredRoleNamesNoOtherVendorsModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	eng, _, _, _, err := engineFromEnv(nil, nil, ws)
 	if err != nil || eng == nil {
-		t.Fatalf("newEngineFromEnv = %v, %v", eng, err)
+		t.Fatalf("engineFromEnv = %v, %v", eng, err)
 	}
 	backend, model := eng.SessionModel(domain.Feature{Kind: domain.KindFreeform})
 	if backend != "claude" || model != "" {
@@ -501,9 +501,9 @@ func TestResolveRootsNested(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(ws, "git", "lxd", ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	gotWS, gotRepo, err := resolveRoots(ws)
+	gotWS, gotRepo, _, err := resolveAllRoots(ws)
 	if err != nil {
-		t.Fatalf("resolveRoots: %v", err)
+		t.Fatalf("resolveAllRoots: %v", err)
 	}
 	if gotWS != ws {
 		t.Errorf("workspace root = %q, want %q", gotWS, ws)
@@ -518,9 +518,9 @@ func TestResolveRootsSiblingDefault(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	gotWS, gotRepo, err := resolveRoots(dir)
+	gotWS, gotRepo, _, err := resolveAllRoots(dir)
 	if err != nil {
-		t.Fatalf("resolveRoots (no config): %v", err)
+		t.Fatalf("resolveAllRoots (no config): %v", err)
 	}
 	if gotWS != dir || gotRepo != dir {
 		t.Errorf("roots = (%q, %q), want both %q", gotWS, gotRepo, dir)
@@ -530,7 +530,7 @@ func TestResolveRootsSiblingDefault(t *testing.T) {
 func TestResolveRootsRejectsEscapingRepo(t *testing.T) {
 	ws := t.TempDir()
 	writeConfig(t, ws, "repo: ../outside\n")
-	if _, _, err := resolveRoots(ws); err == nil {
-		t.Fatal("resolveRoots accepted a repo escaping the workspace")
+	if _, _, _, err := resolveAllRoots(ws); err == nil {
+		t.Fatal("resolveAllRoots accepted a repo escaping the workspace")
 	}
 }

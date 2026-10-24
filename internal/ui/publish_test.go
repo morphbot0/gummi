@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
@@ -449,5 +450,71 @@ func TestTheBarNamesThePublishStepInFlight(t *testing.T) {
 	m.handlePublishStep(step)
 	if len(m.ghWork) != 0 {
 		t.Fatalf("a late step reopened the wait: %v", m.ghWork)
+	}
+}
+
+func TestPublishSpanIsOfferedOnlyWithAnAttachedRepositoryToPublish(t *testing.T) {
+	on := func(r featureRow) nextInput {
+		return nextInput{stage: r.F.Stage, kind: r.F.Kind, landed: r.Landed, publish: true}
+	}
+	offers := func(r featureRow) bool {
+		for _, a := range cardActionsFor(on(r), r) {
+			if a.id == publishSpanID {
+				return true
+			}
+		}
+		return false
+	}
+	plain := freeformRow(208, "rate-limit pairing", true)
+	if offers(plain) {
+		t.Fatal("a session spanning nothing offers a PR in every repository")
+	}
+	spans := plain
+	spans.Repos = []engine.RepoView{{Primary: true}, {Repo: "lib", Branch: "ff/x", Ahead: true}}
+	if !offers(spans) {
+		t.Fatal("a session with an attached repository does not offer a PR in each")
+	}
+	landed := spans
+	landed.Repos = []engine.RepoView{{Primary: true}, {Repo: "lib", Landed: true}}
+	if offers(landed) {
+		t.Fatal("a session whose attached repository landed offers a PR in it")
+	}
+	linked := spans
+	linked.F.PullRequest = domain.PullRequestRef{Repo: "me/widget", Number: 7}
+	if offers(linked) {
+		t.Fatal("a session already linked to a PR offers to open them all")
+	}
+}
+
+func TestThePublishSpanConfirmSendsEveryRepositoryNotRefused(t *testing.T) {
+	var sent []webapi.PublishSpanRequest
+	submit := func(r webapi.PublishSpanRequest) tea.Cmd { sent = append(sent, r); return nil }
+	span := webapi.PublishSpan{Title: "feat: x", Body: "why", Repos: []webapi.PublishSpanRepo{
+		{Label: "widget", Summary: "Push and open a PR.", Fingerprint: "a1"},
+		{Repo: "lib", Label: "lib", Summary: "Push and open a PR.", Fingerprint: "b2", Hook: ".git/hooks/pre-push"},
+		{Repo: "docs", Label: "docs", Error: &webapi.PublishError{Code: "dirty", Text: "the tree has changes"}},
+	}}
+	d := newPublishSpanDialog(domain.Feature{ID: "FF-001"}, span, submit)
+	view := d.View(m0Styles(), 80, 30)
+	if !strings.Contains(view, "docs: left out") || !strings.Contains(view, "pre-push") {
+		t.Fatalf("the confirm does not say what it leaves out and what it runs:\n%s", view)
+	}
+	pressSpan := func(keys ...tea.KeyPressMsg) (closed bool) {
+		for _, k := range keys {
+			closed, _ = d.HandleKey(k)
+		}
+		return closed
+	}
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	if pressSpan(enter) || len(sent) != 0 {
+		t.Fatal("the confirm ran with an unacknowledged pre-push hook")
+	}
+	if !pressSpan(tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}, enter) || len(sent) != 1 {
+		t.Fatalf("acknowledged confirm sent %v", sent)
+	}
+	got := sent[0]
+	if got.Title != "feat: x" || got.Body != "why" || !got.Draft || len(got.Repos) != 2 ||
+		got.Repos[0] != (webapi.PublishSpanPick{Fingerprint: "a1"}) || got.Repos[1] != (webapi.PublishSpanPick{Repo: "lib", Fingerprint: "b2"}) {
+		t.Fatalf("sent %+v", got)
 	}
 }

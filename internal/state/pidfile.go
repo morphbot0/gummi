@@ -3,69 +3,15 @@ package state
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
-
-	"github.com/morphis/gummi/internal/atomicfile"
-	"github.com/morphis/gummi/internal/domain"
 )
-
-// WritePIDFile records pid at path atomically, creating the parent dir if
-// needed. Each card's drive writes its own path (Workspace.PIDFile(id)), so
-// concurrent per-card drives never share a write target; the file is a
-// best-effort hint for an external orphan check, not a unique governor of
-// the workspace.
-func WritePIDFile(path string, pid int) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("preparing pid dir: %w", err)
-	}
-	data := []byte(strconv.Itoa(pid) + "\n")
-	return atomicfile.Write(path, data, 0o600)
-}
-
-// ClearPIDFile removes path, but only if the pid currently recorded there
-// still matches pid. This compare-and-clear guards against a same-card race
-// (e.g. a crash-and-restart under the same id) where a late clear from the
-// older run would otherwise delete the newer run's entry. A missing file, or
-// one that no longer names pid, is not an error — either way there is
-// nothing left for this caller to clear.
-func ClearPIDFile(path string, pid int) error {
-	if ReadPIDFile(path) != pid {
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	return nil
-}
-
-// ReadPIDFile returns the pid recorded at path, or 0 if the file is
-// missing/empty/unparseable — any read failure reads as "no live run
-// recorded" so a caller can treat the absence as authoritative.
-func ReadPIDFile(path string) int {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	s := strings.TrimSpace(string(raw))
-	if s == "" {
-		return 0
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
-		return 0
-	}
-	return n
-}
 
 // ProcessAlive reports whether pid names a live process this uid can
 // signal. kill -0 is the standard liveness probe: it delivers no signal
 // but returns EPERM/ESRCH/OK based on process existence. A pid of 0 is
-// treated as dead (matches ReadPIDFile's "no run recorded" sentinel).
+// treated as dead.
 //
 // A zombie is NOT alive here. kill -0 succeeds on a <defunct> process —
 // the pid entry survives until the parent reaps it — so the bare probe
@@ -111,26 +57,4 @@ func processIsZombie(pid int) bool {
 	}
 	rest := strings.Fields(string(b)[i+1:])
 	return len(rest) > 0 && rest[0] == "Z"
-}
-
-// ReapOrphanAgent kills any agent process group left running behind card
-// id's last driver (BG-002) and clears the record. Call it once the card's
-// lock has been (re-)acquired, before any new work on the card begins:
-// AcquireLock only succeeds once the previous holder's process has fully
-// exited — by clean exit, crash, or SIGKILL — so a pgid still recorded at
-// ws.AgentPGIDFile(id) at that point is provably an orphan, never a live
-// drive's own agent racing this check. A negative pid signals the whole
-// process group (the group leader itself, plus any child it spawned
-// in-group, e.g. claude's own `gummi __mcp` tool child) — see
-// agent.OSProcess. Best-effort like the rest of this package: an already-
-// dead group's kill is a silent no-op (ESRCH), and the record is cleared
-// either way so a stale entry never accumulates.
-func ReapOrphanAgent(ws Workspace, id domain.FeatureID) {
-	path := ws.AgentPGIDFile(id)
-	pgid := ReadPIDFile(path)
-	if pgid == 0 {
-		return
-	}
-	_ = syscall.Kill(-pgid, syscall.SIGKILL)
-	_ = ClearPIDFile(path, pgid)
 }

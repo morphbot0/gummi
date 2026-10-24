@@ -113,3 +113,69 @@ type PublishOffer struct {
 	Unpushed int  `json:"unpushed,omitempty"`
 	Draft    bool `json:"draft,omitempty"`
 }
+
+// PublishSpan is GET /api/cards/{id}/publish/span: a session that spans
+// repositories (DESIGN §27.7) opening one pull request in each, the bodies
+// naming one another. Repos is its own repository first, then every
+// attached one not landed that has commits to publish; one that cannot
+// be published carries its refusal and is left out of the act. Title and
+// Body are what every PR starts from. Error is set when nothing can be
+// read at all.
+type PublishSpan struct {
+	Error *PublishError     `json:"error,omitempty"`
+	Title string            `json:"title,omitempty"`
+	Body  string            `json:"body,omitempty"`
+	Repos []PublishSpanRepo `json:"repos,omitempty"`
+}
+
+// PublishSpanRepo is one repository's side of a span: where its branch
+// goes, the plan in one sentence, and the fingerprint the confirm sends
+// back for it.
+type PublishSpanRepo struct {
+	// Repo is the attached repository's name, "" for the session's own.
+	Repo        string        `json:"repo,omitempty"`
+	Label       string        `json:"label"`
+	Error       *PublishError `json:"error,omitempty"`
+	Summary     string        `json:"summary,omitempty"`
+	Fingerprint string        `json:"fingerprint,omitempty"`
+	Branch      string        `json:"branch,omitempty"`
+	Ahead       int           `json:"ahead,omitempty"`
+	Base        string        `json:"base,omitempty"`
+	BaseRepo    string        `json:"baseRepo,omitempty"`
+	Hook        string        `json:"hook,omitempty"`
+	// DraftWhy says the quality floor opens this repository's PR as a
+	// draft whatever the person chooses.
+	DraftWhy string `json:"draftWhy,omitempty"`
+}
+
+// PublishSpanRequest is POST /api/cards/{id}/publish/span: the words every
+// PR opens with, and the repositories the person confirmed, each with the
+// fingerprint of the facts they read for it.
+type PublishSpanRequest struct {
+	Title string            `json:"title"`
+	Body  string            `json:"body,omitempty"`
+	Draft bool              `json:"draft,omitempty"`
+	Repos []PublishSpanPick `json:"repos"`
+}
+
+// PublishSpanPick is one confirmed repository of a span.
+type PublishSpanPick struct {
+	Repo        string `json:"repo,omitempty"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+// PublishSpanResult is what a span came to: each repository's result or
+// failure, in order — one failing does not stop the others. Error is set
+// when nothing was attempted.
+type PublishSpanResult struct {
+	Error *PublishError        `json:"error,omitempty"`
+	Repos []PublishSpanOutcome `json:"repos,omitempty"`
+}
+
+// PublishSpanOutcome is one repository's part of a span.
+type PublishSpanOutcome struct {
+	Repo   string         `json:"repo,omitempty"`
+	Label  string         `json:"label"`
+	Result *PublishResult `json:"result,omitempty"`
+	Error  *PublishError  `json:"error,omitempty"`
+}

@@ -34,19 +34,6 @@ func binOrDefault(ghBinary string) string {
 	return "gh"
 }
 
-// Available reports whether gh can be run at all: the binary is on PATH (or
-// at the configured ghBinary path). Authentication is gh's own concern — it
-// may come from GH_TOKEN, GITHUB_TOKEN, or a `gh auth login` keyring/config,
-// and an unauthenticated gh surfaces its own error on the first real call,
-// same as internal/engine/bugsource.go's execGH.
-func Available(ghBinary string) error {
-	bin := binOrDefault(ghBinary)
-	if _, err := exec.LookPath(bin); err != nil {
-		return fmt.Errorf("gh CLI not on PATH (looked for %q)", bin)
-	}
-	return nil
-}
-
 // run executes gh with args, in dir when non-empty (letting gh auto-detect
 // --repo from that directory's git remote), returning its stdout. A stderr
 // carried by the process's exit error is surfaced verbatim — the same shape

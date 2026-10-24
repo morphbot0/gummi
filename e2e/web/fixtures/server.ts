@@ -80,7 +80,16 @@ export class GummiServer {
       }
       try {
         const res = await fetch(`${this.url}/api/session`);
-        if (res.ok) return;
+        if (res.ok) {
+          // the pairing code is printed just after the board answers: wait
+          // a moment for it, so freshCode never asks `gummi web pair` for a
+          // second one while this one is still on its way
+          if (!args.includes('--no-pairing')) {
+            const until = Date.now() + 2_000;
+            while (this.code === undefined && Date.now() < until) await sleep(25);
+          }
+          return;
+        }
       } catch {
         /* not listening yet */
       }
@@ -241,11 +250,8 @@ export async function api<T = any>(
 }
 
 /**
- * Create a freeform card through the web API. Freeform cards have no CLI
- * verb (the TUI's form and `POST /api/cards` are the only ways to mint
- * one), so unlike the Workspace seeders this one needs a running, paired
- * server. The body follows the brief's card form; adjust here if the
- * route's field names settle differently.
+ * Create a freeform card through the test server's web API, paired: what
+ * the Workspace seeders do on a board of their own before it starts.
  */
 export async function seedFreeform(request: APIRequestContext, server: GummiServer, title: string, extra: Record<string, unknown> = {}): Promise<string> {
   const r = await api(request, server, 'POST', '/api/cards', { kind: 'freeform', title, ...extra });
