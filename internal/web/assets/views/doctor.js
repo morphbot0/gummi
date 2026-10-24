@@ -39,8 +39,10 @@ registerView('doctor', {
       const checks = r?.checks || []
       const count = (s) => checks.filter(c => c.status === s).length
       body.append(h('div', { class: 'vhead dhead' },
-        r ? h('span', { class: ['verdict', r.ready ? 'ready' : 'not'], testid: 'doctor-ready', data: { ready: String(!!r.ready) } },
-          h('span', { 'aria-hidden': 'true' }, r.ready ? '✓' : '✕'), r.ready ? 'Ready' : 'Not ready') : null,
+        r ? h('span', { class: ['verdict', r.ready ? 'ready' : 'not', r.ready && count('warn') && 'warn'], testid: 'doctor-ready', data: { ready: String(!!r.ready) } },
+          h('span', { 'aria-hidden': 'true' }, r.ready ? '✓' : '✕'),
+          // ready with warnings is not the same as ready: it says so first
+          r.ready ? (count('warn') ? `Ready, with ${count('warn')} warning${count('warn') === 1 ? '' : 's'}` : 'Ready') : 'Not ready') : null,
         r ? h('span', { class: 'tally' },
           [['ok', 'ok'], ['warn', 'warning', 'warnings'], ['fail', 'failing'], ['unknown', 'not probed']]
             .filter(([s]) => count(s)).map(([s, one, many]) => `${count(s)} ${count(s) === 1 || !many ? one : many}`).join(' · ')) : null,
