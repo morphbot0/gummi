@@ -283,6 +283,28 @@ function renderTabs () {
   if (state.sel) $('#pane').setAttribute('aria-labelledby', document.getElementById(`tab-${state.tab}`) ? `tab-${state.tab}` : `tab-${surfaceOf(state.tab)?.tabs[0].name}`)
   else $('#pane').removeAttribute('aria-labelledby')
   if (hadFocus) (list.querySelector(`[data-surface="${hadFocus}"]`) || list.querySelector(`[data-tab="${hadFocus}"]`) || list.querySelector('[aria-selected="true"]'))?.focus()
+  if (phone) {
+    // a phone's row may be wider than the screen: the tab shown is scrolled
+    // into it, and the edge with more tabs past it fades
+    box.onscroll = () => markOverflow(box)
+    requestAnimationFrame(() => {
+      const sel = list.querySelector('[aria-selected="true"]')
+      if (sel) {
+        const b = box.getBoundingClientRect()
+        const r = sel.getBoundingClientRect()
+        if (r.left < b.left) box.scrollLeft -= b.left - r.left + 24
+        else if (r.right > b.right) box.scrollLeft += r.right - b.right + 24
+      }
+      markOverflow(box)
+    })
+  }
+}
+
+// markOverflow says which edges of a scrolling row of tabs have more past
+// them (app.css fades those edges).
+function markOverflow (box) {
+  box.classList.toggle('more-l', box.scrollLeft > 2)
+  box.classList.toggle('more-r', box.scrollLeft + box.clientWidth < box.scrollWidth - 2)
 }
 
 // countOf is the figure a row of tabs shows: the first of them that has
