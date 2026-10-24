@@ -374,6 +374,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			publishable(in, r) && r.F.PullRequest.Empty(),
 		},
 		{
+			// a session spanning repositories (DESIGN §27.7): one PR in
+			// each, the descriptions naming one another
+			publishSpanID, "", "open pull requests in every repository…", "push each repository's branch and open a pull request in each, every description naming the others — you confirm each first", false,
+			publishable(in, r) && r.F.PullRequest.Empty() && spansUnlanded(r),
+		},
+		{
 			"push", "", "push to GitHub…", "push the branch's new commits to its remote", false,
 			publishable(in, r),
 		},

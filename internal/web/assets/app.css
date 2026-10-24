@@ -791,6 +791,7 @@ p.push.none{margin:0}
 /* a wait on GitHub: the dialog reading its facts, an act's steps as it runs
    them, and the board's notice for work this page is not drawing itself */
 .pubwait{display:flex;align-items:center;gap:10px}
+.pubrepos{margin:0;padding:0 0 0 18px;display:flex;flex-direction:column;gap:6px;font-size:13px;overflow-wrap:anywhere}
 .pubsteps{list-style:none;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;gap:6px;font-size:13px}
 .pubsteps[hidden]{display:none}
 .pubsteps li{display:flex;align-items:center;gap:8px;color:var(--fg3);overflow-wrap:anywhere}

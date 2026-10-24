@@ -45,6 +45,8 @@ func (s *Server) docsRoutes() {
 	s.api("POST /api/cards/{id}/pr/pull", func(w http.ResponseWriter, r *http.Request) { s.handlePRPull(w, r, prs) })
 	s.api("GET /api/cards/{id}/publish", s.handlePublishFacts)
 	s.api("POST /api/cards/{id}/publish", func(w http.ResponseWriter, r *http.Request) { s.handlePublish(w, r, prs) })
+	s.api("GET /api/cards/{id}/publish/span", s.handlePublishSpanFacts)
+	s.api("POST /api/cards/{id}/publish/span", func(w http.ResponseWriter, r *http.Request) { s.handlePublishSpan(w, r, prs) })
 	s.api("GET /api/cards/{id}/stats", s.handleStats)
 	s.api("GET /api/cards/{id}/log", s.handleLog)
 	s.api("GET /api/cards/{id}/log/{sha}", s.handleLogCommit)
@@ -652,6 +654,38 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, cache *pr
 	// the act's steps go out as it runs them: a page draws the plan's
 	// steps as a checklist while this request is out
 	res := d.Publish(context.WithoutCancel(r.Context()), req, person(r), s.Publish)
+	cache.drop(id)
+	_ = s.opt.Board.Do(context.Background(), func(m *ui.Shell) tea.Cmd { return m.WebPublished(id) })
+	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: id})
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handlePublishSpanFacts is GET /api/cards/{id}/publish/span: every
+// repository's facts for a session opening a PR in each (DESIGN §27.7).
+func (s *Server) handlePublishSpanFacts(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, d.PublishSpanFacts(r.Context()))
+}
+
+// handlePublishSpan is POST /api/cards/{id}/publish/span: the span the
+// person confirmed, run past the request like any publish.
+func (s *Server) handlePublishSpan(w http.ResponseWriter, r *http.Request, cache *prCache) {
+	var req webapi.PublishSpanRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	s.Publish(webapi.Change{Kind: webapi.ChangeWork, ID: id, Text: "opening pull requests"})
+	res := d.PublishSpan(context.WithoutCancel(r.Context()), req, person(r))
+	s.Publish(webapi.Change{Kind: webapi.ChangeWork, ID: id, Done: true})
 	cache.drop(id)
 	_ = s.opt.Board.Do(context.Background(), func(m *ui.Shell) tea.Cmd { return m.WebPublished(id) })
 	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: id})

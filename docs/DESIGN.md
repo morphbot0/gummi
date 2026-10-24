@@ -7867,9 +7867,13 @@ repository, each body carrying `Related changes in other repositories:`
 with the others' branches and, once opened, their PR URLs; once the last is
 open the earlier ones are edited to name it. Publishing stays a person's
 act: no agent, run, schedule or MCP tool reaches it. A stacked card
-stays refused. The CLI's way in is `gummi pr create <card> --all-repos`,
-which prints each repository's plan and takes one confirm (or `--yes`
-with a `repo=fingerprint` pair for each).
+stays refused. Both faces offer it as the card menu's "open pull
+requests in every repository…" (`ui/publishspan.go`, `GET`/`POST
+/api/cards/{id}/publish/span`): the confirm shows each repository's plan,
+or why it is left out, takes one title and description for every PR, and
+sends back a fingerprint per repository it publishes. A fork's target is
+chosen in the one-repository confirm; a span refuses a fork nobody has
+chosen for.
 
 ### 27.8 Stacks and dispatch
 
@@ -7893,14 +7897,9 @@ landed without a person.
 
 - A stacked card with attachments.
 - Atomic landing across repositories.
-- Handing off, squashing and committing per repository from the verbs
-  (`gummi squash`/`commit` act on the primary; the agent commits an
-  attachment itself with `git -C`).
-- Publishing from the terminal board's and the web page's own dialogs per
-  repository (the CLI's `--all-repos` is the face of §27.7 so far; the
-  engine's `publish.PlanAll`/`DoAll` are what a dialog would call).
-- `gummi squash` and `commit` take no `--repo`; `gummi status --json` does
-  not list a card's repositories yet.
+- Handing off, squashing and committing per repository from the board
+  (they act on the primary; the agent commits an attachment itself with
+  `git -C`).
 - Choosing attached repositories in the terminal's new-session form
   (`/attach` and the card menu do it afterwards; the web page's draft
   has an "also" toggle for each).

@@ -578,6 +578,11 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		// through POST /api/cards/{id}/publish, never through this action
 		a.Needs = webapi.ActionNeedsPublish
 		a.Default = string(publishActs[a.ID])
+	case publishSpanID:
+		// the page's span dialog reads every repository's facts and
+		// confirms through POST /api/cards/{id}/publish/span
+		a.Needs = webapi.ActionNeedsPublish
+		a.Default = publishSpanAct
 	case "delete", "clean", "duplicate", "handoff", "adopt", "prunlink", "goalstop":
 		a.Needs = webapi.ActionNeedsConfirm
 	case "prchecks":
