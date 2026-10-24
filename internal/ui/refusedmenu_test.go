@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/webapi"
 )
 
 // menuIDs is the ids the selected card's menu lists, on both faces: the
@@ -100,5 +101,27 @@ func TestTheHeadSaysWhatHoldsALanding(t *testing.T) {
 	}
 	if why, by := held(); !strings.HasPrefix(why, "lands after ") || by != "stack" {
 		t.Errorf("stacked on an unlanded card: held %q (%s)", why, by)
+	}
+}
+
+// TestThePageNamesTheLandingLand: the page's menu row, dialog and confirm
+// call a landing what the head's button does, Land; its id stays merge. A
+// commit's message opens on the session's title rather than empty.
+func TestThePageNamesTheLandingLand(t *testing.T) {
+	m, _, _ := mergeFixture(t)
+	m.sel = 0
+	var land *webapi.Action
+	for _, a := range m.webActions(m.rows[0]) {
+		if a.ID == "merge" {
+			land = &a
+		}
+	}
+	if land == nil || land.Label != "land" {
+		t.Fatalf("the landing entry = %+v, want labelled land", land)
+	}
+	commit := webapi.Action{ID: "commit"}
+	m.webActionInput(m.rows[0], &commit)
+	if commit.Needs != webapi.ActionNeedsMessage || commit.Default != m.rows[0].F.Title {
+		t.Errorf("commit = needs %q, default %q, want the title %q", commit.Needs, commit.Default, m.rows[0].F.Title)
 	}
 }

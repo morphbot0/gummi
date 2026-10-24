@@ -500,7 +500,7 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
 			if !r.F.MainCheckout {
 				list = append(list,
-					cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " with your message — until you do, the session's work stays uncommitted, and Land commits whatever is left as a final checkpoint"})
+					cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " — the message starts as the session's title; until you commit, Land commits whatever is left as a final checkpoint"})
 			}
 		}
 	}
@@ -518,6 +518,12 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 			continue
 		}
 		act := webapi.Action{ID: a.id, Label: strings.TrimSuffix(a.label, "…"), Key: a.key, Danger: a.danger, Detail: a.why}
+		if a.id == "merge" {
+			// the page calls it what its head's button does — Land — so the
+			// menu row, the dialog and its confirm read as one act; the id
+			// and the terminal's m key stay merge
+			act.Label = "land"
+		}
 		m.webActionInput(r, &act)
 		out = append(out, act)
 	}
@@ -553,8 +559,13 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		if a.ID == "merge" {
 			a.Methods = webLandMethods(r.F)
 		}
-	case "newbug", "commit":
+	case "newbug":
 		a.Needs = webapi.ActionNeedsMessage
+	case "commit":
+		// a commit's message opens on the session's title, to be read and
+		// edited, rather than as an empty box the dialog then refuses
+		a.Needs = webapi.ActionNeedsMessage
+		a.Default = r.F.Title
 	case "envelope":
 		a.Needs = webapi.ActionNeedsNumber
 		a.Default = strconv.Itoa(r.F.Budget.Envelope)

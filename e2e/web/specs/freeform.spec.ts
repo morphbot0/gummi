@@ -261,6 +261,9 @@ test('commit and land say what each commits, and an empty commit message is refu
   // menu, where it is always an entry
   await page.getByTestId('card-actions').click();
   await page.getByTestId('action-commit').click();
+  // the message opens on the session's title; emptied, it is refused
+  await expect(page.getByTestId('action-input')).toHaveValue('Poke at the margins');
+  await page.getByTestId('action-input').fill('');
   await page.getByTestId('action-confirm').click();
   await expect(page.getByTestId('action-error')).toContainText('needs a message');
 });
