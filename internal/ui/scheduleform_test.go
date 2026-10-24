@@ -31,6 +31,9 @@ func scheduleFormBoard(t *testing.T) *Shell {
 	oldInstalled := agentInstalled
 	agentInstalled = func(name string) bool { return name == "claude" }
 	t.Cleanup(func() { agentInstalled = oldInstalled })
+	oldSignedOut := agentSignedOut
+	agentSignedOut = func(string) bool { return false }
+	t.Cleanup(func() { agentSignedOut = oldSignedOut })
 
 	named := namedBackendAgent{Fake: agent.NewFake("ok"), name: "claude"}
 	named.Models = []string{"claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-4-5"}
