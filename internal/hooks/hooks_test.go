@@ -38,10 +38,10 @@ func waitFor(t *testing.T, read func() []byte, what string) []byte {
 
 // recordingHook returns a hook script that appends one line per run —
 // argv[1], GUMMI_EVENT, GUMMI_CARD, the cwd — to out, plus the raw stdin
-// body beside it.
+// body beside it. The body is written first: a test waits for the line,
+// and must then find the body whole, not a file `cat` has only opened.
 func recordingHook(out string) Hook {
-	return Hook{Run: `printf '%s|%s|%s|%s\n' "$1" "$GUMMI_EVENT" "$GUMMI_CARD" "$(pwd)" >> ` + out +
-		`; cat > ` + out + `.json`}
+	return Hook{Run: `cat > ` + out + `.json; printf '%s|%s|%s|%s\n' "$1" "$GUMMI_EVENT" "$GUMMI_CARD" "$(pwd)" >> ` + out}
 }
 
 // mustJSON marshals v or fails the test — payload JSON in a test input is
