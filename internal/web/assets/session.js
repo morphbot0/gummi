@@ -246,16 +246,16 @@ function render () {
       }, repos.map(r => h('option', { value: r, selected: r === d.repo }, r)))))
   }
   const branches = form?.branches || []
-  row.append(h('button', {
-    class: 'dsel dbtn', type: 'button', testid: 'draft-main',
-    title: d.home
-      ? 'An agent'
-      : d.mainCheckout ? 'The session works in the main checkout: no branch, no worktree, its changes left uncommitted' : 'The session works in its own branch worktree',
-    // the row cycles its three answers: own worktree, the main checkout, an
-    // agent. The base stays picked across it: the other two only
-    // set it aside (startSession sends no base with them)
-    onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout && !d.home, home: d.mainCheckout } })
-  }, d.home ? h('b', null, 'agent') : d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
+  // an agent was chosen when the draft opened: it has no worktree to pick
+  if (!d.home) {
+    row.append(h('button', {
+      class: 'dsel dbtn', type: 'button', testid: 'draft-main',
+      title: d.mainCheckout ? 'The session works in the main checkout: no branch, no worktree, its changes left uncommitted' : 'The session works in its own branch worktree',
+      // the base stays picked across it: the main checkout only sets it
+      // aside (startSession sends no base with it)
+      onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout } })
+    }, d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
+  }
   if (!d.mainCheckout && !d.home) {
     row.append(h('label', { class: 'dsel' }, h('span', { class: 'lbl' }, 'from'),
       h('select', {
