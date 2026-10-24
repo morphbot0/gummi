@@ -2426,6 +2426,7 @@ func (e *Engine) pauseForBudgetLocked(ctx context.Context, run *domain.Run, why 
 	}
 	e.stopRunSteps(ctx, run)
 	e.runNote(run.Session, fmt.Sprintf("run %d paused: %s", run.N, why))
+	e.noteDispatcherEvent(ctx, run.Session, fmt.Sprintf("run %d paused, waiting for the person: %s", run.N, why))
 	e.workflowEvent(run.Session)
 	return nil
 }

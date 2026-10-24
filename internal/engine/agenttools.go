@@ -199,7 +199,7 @@ func (e *Engine) sessionStatusText(ctx context.Context, agentCard domain.Feature
 	for _, d := range ds {
 		card, err := e.cfg.Store.GetFeature(ctx, d.Card)
 		if err != nil {
-			lines = append(lines, fmt.Sprintf("%s: gone", d.Card))
+			lines = append(lines, DispatchView{Card: d.Card, Gone: true, Envelope: float64(d.Envelope)}.Line())
 			continue
 		}
 		lines = append(lines, e.dispatchLine(ctx, d, card))
@@ -210,16 +210,7 @@ func (e *Engine) sessionStatusText(ctx context.Context, agentCard domain.Feature
 // dispatchLine is one dispatched session: title, state, its open run and
 // its spend against the envelope carved for it.
 func (e *Engine) dispatchLine(ctx context.Context, d state.Dispatch, card domain.Feature) string {
-	st := "open"
-	if card.Stage == domain.StageDone {
-		st = "closed"
-	}
-	run := "no open run"
-	if r, err := e.cfg.Store.OpenRun(ctx, card.ID); err == nil && r != nil {
-		run = fmt.Sprintf("run %d %s", r.N, r.State)
-	}
-	return fmt.Sprintf("%s %s: %s, %s, spent %s of %s", card.ID, card.Name(), st, run,
-		domain.FormatDollars(e.SessionPoolSpent(ctx, card)), domain.FormatDollars(float64(d.Envelope)))
+	return e.dispatchView(ctx, d, card).Line()
 }
 
 func (e *Engine) sessionSendText(ctx context.Context, agentCard domain.Feature, args json.RawMessage) (string, error) {

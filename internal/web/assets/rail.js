@@ -319,6 +319,8 @@ function rowEl (r, wide) {
     r.severity && r.status === 'todo' ? h('span', null, r.severity) : null,
     r.objective ? h('span', { class: ['badge obj', `obj-${r.objective}`], title: `objective ${r.objective}`, testid: `rail-row-objective-${r.id}` }, `◆ ${r.objective}`) : null,
     r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.map(ref).join(', ')}`) : null,
+    r.dispatchedBy ? h('span', { class: 'dispatched', title: `Dispatched by ${r.dispatchedByTitle || r.dispatchedBy}`, testid: `rail-row-dispatched-by-${r.id}` }, `from ${r.dispatchedByTitle || r.dispatchedBy}`) : null,
+    r.dispatched ? h('span', { class: 'dispatched', title: 'Sessions this agent dispatched that are still open', testid: `rail-row-dispatched-${r.id}` }, `${r.dispatched} dispatched`) : null,
     r.stack && show.includes('stack') ? h('span', { class: ['stackpos', r.stack.stale && 'stale'], title: r.stack.stale ? `${r.stack.name} — its base has moved` : r.stack.name }, `stack ${r.stack.pos + 1}/${r.stack.of}`) : null,
     r.elsewhere ? h('span', { class: 'else', title: 'Another gummi is driving this card' }, 'elsewhere') : null
   ].filter(Boolean)

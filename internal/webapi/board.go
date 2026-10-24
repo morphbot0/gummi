@@ -107,6 +107,12 @@ type Row struct {
 	// pull request's compact badge ("#123 open").
 	Landed bool   `json:"landed,omitempty"`
 	PR     string `json:"pr,omitempty"`
+	// DispatchedBy is the agent (its id) whose run minted this session;
+	// DispatchedByTitle its title. Dispatched is, on an agent, how many of
+	// the sessions it dispatched are still open (DESIGN §26.9).
+	DispatchedBy      string `json:"dispatchedBy,omitempty"`
+	DispatchedByTitle string `json:"dispatchedByTitle,omitempty"`
+	Dispatched        int    `json:"dispatched,omitempty"`
 }
 
 // NeedsKind is why a card is waiting on a person.

@@ -38,9 +38,13 @@ type featureRow struct {
 	// Proposal is DecidingRun's proposal or revised plan as data
 	// (Engine.WorkflowProposal), read at load for the picker to draw:
 	// it asks git whether the tree is dirty. Nil for any other decision.
-	Proposal    *engine.WorkflowProposal
-	HasWorktree bool
-	Landed      bool // branch has merged into main; worktree is cleanup-ready
+	Proposal *engine.WorkflowProposal
+	// DispatchedBy is the agent whose run minted the session, empty for
+	// one no agent dispatched; Dispatched counts an agent's open children.
+	DispatchedBy domain.FeatureID
+	Dispatched   int
+	HasWorktree  bool
+	Landed       bool // branch has merged into main; worktree is cleanup-ready
 	// Ahead: the branch holds commits of its own (worktree.BranchAhead),
 	// read at load with Landed
 	Ahead      bool
@@ -252,6 +256,16 @@ func (m *Shell) loadRows() tea.Msg {
 			openSessions[f.ID] = f.BranchName()
 		}
 	}
+	dispatches, err := m.store.DispatchesByCard(ctx)
+	if err != nil {
+		dispatches = nil // the badges are a nicety; a failed read draws none
+	}
+	openChildren := map[domain.FeatureID]int{}
+	for _, f := range feats {
+		if d, ok := dispatches[f.ID]; ok && f.Stage != domain.StageDone {
+			openChildren[d.Agent]++
+		}
+	}
 	rows := make([]featureRow, 0, len(feats))
 	children := map[domain.FeatureID]domain.Feature{}
 	for _, f := range feats {
@@ -265,7 +279,10 @@ func (m *Shell) loadRows() tea.Msg {
 		if f.Kind == domain.KindGoal {
 			continue
 		}
-		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f)}
+		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f), Dispatched: openChildren[f.ID]}
+		if d, ok := dispatches[f.ID]; ok {
+			row.DispatchedBy = d.Agent
+		}
 		if f.IsFreeform() && f.Stage != domain.StageDone {
 			row.OpenRun, _ = m.store.OpenRun(ctx, f.ID)
 			row.StepAsks = m.stepAsks(ctx, f.ID, row.OpenRun)
