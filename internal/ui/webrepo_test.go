@@ -33,3 +33,18 @@ func TestWebRowCarriesItsRepo(t *testing.T) {
 		t.Errorf("row JSON carries no repo key: %s", raw)
 	}
 }
+
+// TestWebRowNeedsYouWhileARunStepAsks: a step of a session's run waiting
+// inside ask_user puts the session in the needs-you lane with the step's
+// question, not under running: the run waits on the person.
+func TestWebRowNeedsYouWhileARunStepAsks(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	r := row(53, "a session", domain.StageOpen, "thrifty", false)
+	r.F.Kind = domain.KindFreeform
+	r.OpenRun = &domain.Run{N: 1, State: domain.RunRunning}
+	r.StepAsks = "Keep made.txt plain?"
+	got := m.webRow(r)
+	if got.Status != "needs" || got.Needs == nil || !strings.Contains(got.Needs.Question, "Keep made.txt plain?") || got.Needs.Word != "step asks" {
+		t.Fatalf("row = status %q, needs %+v", got.Status, got.Needs)
+	}
+}

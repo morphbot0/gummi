@@ -27,6 +27,11 @@ type featureRow struct {
 	// at load; it holds the session's landing (Engine.RunHolds). Nil when
 	// none is open.
 	OpenRun *domain.Run
+	// StepAsks is the question a step of OpenRun is asking the person
+	// (its agent waits inside ask_user), read at load; "" when no step
+	// asks. The step's card is hidden, so the session's row is where a
+	// person learns the run waits on them.
+	StepAsks string
 	// DecidingRun is the session's run with an open decision for the
 	// person (Engine.WorkflowDecision), read at load; nil when none waits.
 	DecidingRun *domain.Run
@@ -260,6 +265,7 @@ func (m *Shell) loadRows() tea.Msg {
 		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f)}
 		if f.IsFreeform() && f.Stage != domain.StageDone {
 			row.OpenRun, _ = m.store.OpenRun(ctx, f.ID)
+			row.StepAsks = m.stepAsks(ctx, f.ID, row.OpenRun)
 			if m.engine != nil {
 				row.DecidingRun, _ = m.engine.WorkflowDecision(ctx, f.ID)
 				if d := row.DecidingRun; d != nil && d.Pending != nil &&
@@ -922,4 +928,29 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 	_ = rmtree.RemoveAll(m.ws.ScratchFilesDir(f.ID))
 	m.dropSession(f.ID)
 	return nil
+}
+
+// stepAsks is the question a step of the session's open run asks its
+// person: the first step waiting inside ask_user. "" when none does.
+func (m *Shell) stepAsks(ctx context.Context, session domain.FeatureID, run *domain.Run) string {
+	if run == nil || m.engine == nil {
+		return ""
+	}
+	steps, err := m.store.RunSteps(ctx, session, run.N)
+	if err != nil {
+		return ""
+	}
+	for _, st := range steps {
+		if st.State != domain.StepAsking || st.Card == "" {
+			continue
+		}
+		if ff := m.engine.Freeform(st.Card); ff != nil {
+			if s := ff.Session(); s != nil {
+				if ask := s.Snapshot().PendingAsk; ask != nil {
+					return ask.Question
+				}
+			}
+		}
+	}
+	return ""
 }

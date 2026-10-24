@@ -91,6 +91,11 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 		// can act on a raised gate, not on a check still running under it.
 		row.Status = webapi.StatusNeeds
 		row.Needs = webNeeds(it)
+	case r.StepAsks != "":
+		// a step of its run waits on the person: the run is not working
+		// for them, it is waiting on them
+		row.Status = webapi.StatusNeeds
+		row.Needs = &webapi.RowNeeds{Kind: webapi.NeedsQuestion, Color: "info", Question: "workflow step: " + r.StepAsks, Word: "step asks"}
 	case m.cardBusy(r):
 		row.Status = webapi.StatusRunning
 		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r)}

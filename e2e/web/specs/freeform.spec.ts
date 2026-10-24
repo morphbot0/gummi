@@ -289,7 +289,7 @@ test('a question asked in a session is answered in your words', async ({ pairedP
   await page.getByTestId('decision-option-chat').click();
   await expect(page.getByTestId('decision-needs')).toContainText('Type your answer');
   await input.fill('Go up the middle');
-  await expect(page.getByTestId('composer-says')).toHaveText('Chat about this');
+  await expect(page.getByTestId('composer-says')).toHaveText('answers “Chat about this”');
   await page.keyboard.press('Enter');
   // the words answered the question: one answer, no turn, and the agent
   // echoes them back as the tool's result

@@ -95,7 +95,7 @@ func TestTheHeadSaysWhatHoldsALanding(t *testing.T) {
 	}
 	m.rows[0].OpenRun = nil
 	m.stackRows = map[domain.FeatureID]stackRow{
-		"FD-000": {ID: "st", Pos: 1, Of: 2},
+		"FD-000":       {ID: "st", Pos: 1, Of: 2},
 		m.rows[0].F.ID: {ID: "st", Pos: 2, Of: 2},
 	}
 	if why, by := held(); !strings.HasPrefix(why, "lands after ") || by != "stack" {

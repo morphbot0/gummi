@@ -178,7 +178,7 @@ test.describe('an agent’s question', () => {
     await page.getByTestId('decision-option-chat').click();
     await expect(page.getByTestId('decision-needs')).toContainText('Type your answer');
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
-    await expect(page.getByTestId('composer-says')).toHaveText('Chat about this');
+    await expect(page.getByTestId('composer-says')).toHaveText('answers “Chat about this”');
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('thread')).toContainText('Put it beside Greet, in greet.go');
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
@@ -192,7 +192,7 @@ test.describe('an agent’s question', () => {
     await open(page, server, id);
     await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'ask');
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
-    await expect(page.getByTestId('composer-says')).toHaveText('Chat about this');
+    await expect(page.getByTestId('composer-says')).toHaveText('answers “Chat about this”');
     // the other device picks an option
     const d = (await api('GET', `/api/cards/${id}`)).json.decision;
     await api('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: '0', against: d.against.token });
