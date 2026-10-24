@@ -160,7 +160,7 @@ export function draftHead () {
         h('button', { class: 'btn', type: 'button', testid: 'draft-cancel', onclick: cancelDraft }, 'Cancel'))),
     h('div', { class: 'subline' },
       d.home
-        ? h('span', { testid: 'draft-where' }, 'a home of its own · no repository')
+        ? null
         : h('span', null, d.repo || state.board?.repo || 'this repository', d.mainCheckout ? ' · the main checkout' : (d.base ? [' · from ', h('span', { class: 'mono' }, d.base)] : ' · a new worktree')),
       h('span', null, `budget ${budgetWord(d.envelope)}`))
   ]
@@ -173,12 +173,10 @@ export function draftHero () {
   const starters = ['Fix a failing test', 'Explain how this part of the code works', 'Review this branch before I merge it']
   if (d.home) {
     return h('div', { class: 'draft-hero', testid: 'draft-hero' },
-      h('b', null, 'What is this agent for?'),
-      h('p', null, 'An agent is a session with a home of its own instead of a repository. Its home persists across conversations, so it can keep notes and skills there. It is budgeted like any card, and it starts when you send the first message.'))
+      h('b', null, 'What is this agent for?'))
   }
   return h('div', { class: 'draft-hero', testid: 'draft-hero' },
     h('b', null, `What are we working on in ${where}?`),
-    h('p', null, 'A session is one agent in its own worktree, with no stages and no gates. It starts when you send the first message. The model is next to Send, and you can switch it later.'),
     h('div', { class: 'starters' }, starters.map(s => h('button', {
       class: 'btn', type: 'button', testid: 'draft-starter', onclick: () => { ctx.restoreComposer?.(s + ' '); $('#composer-input')?.focus() }
     }, s))))
@@ -251,13 +249,13 @@ function render () {
   row.append(h('button', {
     class: 'dsel dbtn', type: 'button', testid: 'draft-main',
     title: d.home
-      ? 'An agent: it works in a home of its own, in no repository, and keeps what it builds there'
+      ? 'An agent'
       : d.mainCheckout ? 'The session works in the main checkout: no branch, no worktree, its changes left uncommitted' : 'The session works in its own branch worktree',
-    // the row cycles its three answers: own worktree, the main checkout, a
-    // home of its own. The base stays picked across it: the other two only
+    // the row cycles its three answers: own worktree, the main checkout, an
+    // agent. The base stays picked across it: the other two only
     // set it aside (startSession sends no base with them)
     onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout && !d.home, home: d.mainCheckout } })
-  }, d.home ? h('b', null, 'a home of its own') : d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
+  }, d.home ? h('b', null, 'agent') : d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
   if (!d.mainCheckout && !d.home) {
     row.append(h('label', { class: 'dsel' }, h('span', { class: 'lbl' }, 'from'),
       h('select', {

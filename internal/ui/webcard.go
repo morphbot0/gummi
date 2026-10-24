@@ -806,7 +806,7 @@ func (m *Shell) webMessageRoute(r featureRow) (webapi.Route, string) {
 // stays loose.
 func freeformTurnRoute(r featureRow) string {
 	if r.F.Home {
-		return "a turn for this agent — it works in its own home"
+		return "a turn for this agent"
 	}
 	if r.F.MainCheckout {
 		return "a turn for this card's agent — it works in the main checkout, uncommitted"

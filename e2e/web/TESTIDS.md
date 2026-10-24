@@ -120,7 +120,7 @@ branch would be removed).
 | `dock`, `composer`, `composer-input`, `composer-says`, `composer-send` | composer; `composer-says` is the enter line (the server's reading of the line, or the decision's answer) |
 | `composer-model`, `model-picker-btn` | a session's model beside Send (a draft's, or an open session's); absent on a card of the retired kinds |
 | `model-picker`, `model-search`, `model-<agent>-<model>`, `model-typed-<agent>`, `model-recent-<agent>-<model>` | the picker: search or type an id; a suggested model (`default` for the agent's own), a typed id, a recent pair |
-| `composer-draft`, `draft-where` (an agent's draft: where it will run), `draft-repo`, `draft-base`, `draft-budget`, `draft-budget-pop`, `draft-budget-<n>`, `draft-budget-input`, `draft-budget-set`, `draft-budget-error` | a session draft's row above the line: repository, base, budget (`0` is uncapped) |
+| `composer-draft`, `draft-repo`, `draft-base`, `draft-budget`, `draft-budget-pop`, `draft-budget-<n>`, `draft-budget-input`, `draft-budget-set`, `draft-budget-error` | a session draft's row above the line: repository, base, budget (`0` is uncapped) |
 | `draft-hero`, `draft-starter`, `draft-cancel` | a session draft's empty conversation, its starter lines, and leaving the draft |
 | `composer-note` | a line about the last send: handed back mid-turn, or refused |
 

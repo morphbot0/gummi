@@ -115,7 +115,7 @@ const freeformPlaceholderText = "say what to do next — it works in this card's
 // what the work actually is there — loose, until the person commits it.
 // agentPlaceholderText is the same promise for an agent, which has no
 // diff to review and nothing to land.
-const agentPlaceholderText = "say what to do next — it works in its own home"
+const agentPlaceholderText = "say what to do next"
 
 const freeformMainPlaceholderText = "say what to do next — it works in the main checkout, uncommitted; alt+d to review the loose changes"
 

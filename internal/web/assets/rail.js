@@ -405,7 +405,7 @@ function renderFoot (unpair, newSession) {
   // what else can be started, behind the one button's arrow
   const other = h('button', { class: 'split-more', testid: 'rail-new-menu', title: 'New agent, or the full form', 'aria-label': 'New agent, or the full form', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('chevron'))
   other.addEventListener('click', () => openMenu(other, [
-    { label: 'New agent', icon: 'home', testid: 'rail-new-agent', hint: 'A session with a home of its own, in no repository', onClick: () => newSession?.({ home: true }) },
+    { label: 'New agent', icon: 'home', testid: 'rail-new-agent', onClick: () => newSession?.({ home: true }) },
     { label: 'New session…', icon: 'plus', testid: 'rail-new', hint: 'The full form: budget, profile, repository, base', onClick: () => openView('newcard') }
   ], { up: true, testid: 'rail-new-menu-list' }))
   foot.append(
