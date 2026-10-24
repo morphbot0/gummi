@@ -46,6 +46,11 @@ test('triage a busy board', async ({ pairedPage: page, server }, info) => {
   await t.shot('rail-after', 'The cards again: which one is ready to land, which has an open comment, which is stacked?');
   await openCard(t, b.sessions[0]);
   await t.shot('ready-card', 'A session whose work is committed: is "land it" the obvious next step, and what will it do?');
+  if (!t.phone) {
+    await t.press('open the card’s actions with .', '.');
+    await t.shot('actions-by-key', 'The card’s actions from the keyboard: is landing among them, named as the head names it?');
+    await page.keyboard.press('Escape');
+  }
   await toTab(t, 'diff');
   await t.shot('ready-diff', 'Reading what it changed before landing it');
   await toThread(t);
