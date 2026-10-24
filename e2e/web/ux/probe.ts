@@ -86,7 +86,17 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
 
     // text whose contrast against what is behind it is under WCAG AA:
     // 4.5:1, or 3:1 for large text (24px, or 18.66px bold)
-    const rgb = (c: string) => (c.match(/[\d.]+/g) || []).map(Number);
+    // any CSS colour (rgb(), color(srgb …) from color-mix, oklch …) as
+    // 0–255 rgba, read back off a one-pixel canvas
+    const px = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
+    const rgb = (c: string): number[] => {
+      px.clearRect(0, 0, 1, 1);
+      px.fillStyle = '#000';
+      px.fillStyle = c;
+      px.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = px.getImageData(0, 0, 1, 1).data;
+      return [r, g, b, a / 255];
+    };
     const lum = ([r, g, b]: number[]) => {
       const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
       return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
@@ -94,7 +104,7 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
     const backdrop = (el: Element | null): number[] => {
       for (; el; el = el.parentElement) {
         const c = rgb(getComputedStyle(el).backgroundColor);
-        if (c.length >= 3 && (c.length < 4 || c[3] > 0.5)) return c.slice(0, 3);
+        if (c[3] > 0.5) return c.slice(0, 3);
       }
       return rgb(getComputedStyle(document.body).backgroundColor).slice(0, 3);
     };
@@ -106,7 +116,7 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
       if (!own || el.closest('[disabled], [aria-disabled="true"], .xterm, pre, code')) continue;
       const s = getComputedStyle(el);
       const fg = rgb(s.color);
-      if (fg.length >= 4 && fg[3] < 0.5) continue;
+      if (fg[3] < 0.5) continue;
       const a = lum(fg.slice(0, 3)), b = lum(backdrop(el));
       const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
       const size = parseFloat(s.fontSize);
