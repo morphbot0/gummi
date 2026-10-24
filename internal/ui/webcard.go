@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strconv"
@@ -251,10 +252,36 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 		st.card.Decision, st.rev = &dec, od.rev
 	}
 	st.card.Actions = m.webActions(r)
+	st.card.LandHeld, st.card.LandHeldBy = m.webLandHeld(r, st.card.Actions)
 	st.card.Composer = m.webComposer(r, "")
 	st.card.Session = m.webSessionOf(r.F)
 	st.card.Repos = webRepos(r.Repos)
 	return st, true
+}
+
+// webLandHeld is why an open session that would otherwise offer a landing
+// does not right now: its open diff comments, its open workflow run, or
+// the card below it in its stack. Each is a hold a person clears, which
+// the head shows in place of the landing. A turn in flight is not one:
+// the head offers stopping it instead, and it clears by itself.
+func (m *Shell) webLandHeld(r featureRow, acts []webapi.Action) (why, by string) {
+	if !r.F.IsFreeform() || r.F.Stage != domain.StageOpen || r.F.MainCheckout || !r.HasWorktree || r.Landed || !r.F.PullRequest.Empty() || r.watchOnly() {
+		return "", ""
+	}
+	if slices.ContainsFunc(acts, func(a webapi.Action) bool { return a.ID == "merge" }) {
+		return "", ""
+	}
+	switch {
+	case r.OpenDiffComments > 0:
+		n := r.OpenDiffComments
+		return fmt.Sprintf("%d open comment%s", n, plural(n)), "comments"
+	case r.OpenRun != nil:
+		return fmt.Sprintf("run %d is %s", r.OpenRun.N, r.OpenRun.State), "run"
+	}
+	if b := m.stackLandBlocker(r.F.ID); b != "" {
+		return "lands after " + m.cardName(b), "stack"
+	}
+	return "", ""
 }
 
 // WebCard is one card's head as the loop knows it. ok is false for a

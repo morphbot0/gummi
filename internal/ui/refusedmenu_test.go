@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -67,5 +68,37 @@ func TestTheMenuOffersNoOtherAnswerItWouldRefuse(t *testing.T) {
 	row.F.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7"}
 	if has(cardActionsFor(in, row), "merge") {
 		t.Error("a card linked to a pull request lists a local merge, which is refused")
+	}
+}
+
+// TestTheHeadSaysWhatHoldsALanding: where the menu leaves a session's
+// landing out because something a person clears holds it, the web head is
+// told what (webLandHeld) instead of the landing just vanishing; with the
+// landing offered, nothing is held.
+func TestTheHeadSaysWhatHoldsALanding(t *testing.T) {
+	m, _, _ := mergeFixture(t)
+	m.sel = 0
+	m.rows[0].F.Kind, m.rows[0].F.Stage = domain.KindFreeform, domain.StageOpen
+	held := func() (string, string) { return m.webLandHeld(m.rows[0], m.webActions(m.rows[0])) }
+
+	if why, by := held(); why != "" || by != "" {
+		t.Fatalf("a landable session is held: %q (%s)", why, by)
+	}
+	m.rows[0].OpenDiffComments = 2
+	if why, by := held(); why != "2 open comments" || by != "comments" {
+		t.Errorf("open comments: held %q (%s)", why, by)
+	}
+	m.rows[0].OpenDiffComments = 0
+	m.rows[0].OpenRun = &domain.Run{N: 3, State: domain.RunRunning}
+	if why, by := held(); why != "run 3 is running" || by != "run" {
+		t.Errorf("an open run: held %q (%s)", why, by)
+	}
+	m.rows[0].OpenRun = nil
+	m.stackRows = map[domain.FeatureID]stackRow{
+		"FD-000": {ID: "st", Pos: 1, Of: 2},
+		m.rows[0].F.ID: {ID: "st", Pos: 2, Of: 2},
+	}
+	if why, by := held(); !strings.HasPrefix(why, "lands after ") || by != "stack" {
+		t.Errorf("stacked on an unlanded card: held %q (%s)", why, by)
 	}
 }

@@ -23,6 +23,15 @@ type Card struct {
 	// Actions is the card's menu: every non-decision action the TUI offers
 	// on it right now.
 	Actions []Action `json:"actions"`
+	// LandHeld is why an open session's landing is held right now, in a
+	// few words ("1 open comment"), "" when nothing holds it or the card
+	// has no landing of its own. The menu leaves the landing out while it
+	// is held (no door offers what the board would refuse); the head
+	// shows it held instead of letting it vanish. LandHeldBy names what
+	// holds it — "comments", "run" or "stack" — for where the head sends
+	// a person to clear it.
+	LandHeld   string `json:"landHeld,omitempty"`
+	LandHeldBy string `json:"landHeldBy,omitempty"`
 	// Composer says what a line typed into the card's composer would do.
 	Composer Composer `json:"composer"`
 	// Session is the agent and model a session (a freeform card) runs on,

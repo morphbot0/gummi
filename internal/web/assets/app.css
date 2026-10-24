@@ -251,6 +251,8 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,var(--line2))}
 .btn.pri.danger{background:var(--err);border-color:var(--err);color:var(--on-err)}
 .btn.on{border-color:var(--warn);color:var(--warn)}
+.btn.held{border-style:dashed;color:var(--fg3)}
+.btn.held small{font-size:11.5px;color:var(--warn);font-weight:500}
 .subline{display:flex;align-items:center;gap:6px 14px;font-size:12.5px;color:var(--fg3);min-width:0;white-space:nowrap}
 /* nothing spills past the head: what a card waits on or belongs to gives
    way first, its stage and its spend last */
