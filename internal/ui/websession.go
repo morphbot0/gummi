@@ -46,10 +46,11 @@ var agentInstalled = func(name string) bool {
 // a home directory.
 var agentSignedOut = agentcli.SignedOut
 
-// agentSignedOut is false for an agent the engine already holds: it is
-// running, so whatever it needs it has.
+// signedOut is false for an agent the engine already holds (it is running,
+// so whatever it needs it has) and for one not installed here, which a
+// picker still names so a person sees why it cannot be picked.
 func (m *Shell) signedOut(name string) bool {
-	return (m.engine == nil || !m.engine.HasAgent(name)) && agentSignedOut(name)
+	return (m.engine == nil || !m.engine.HasAgent(name)) && agentInstalled(name) && agentSignedOut(name)
 }
 
 // webSessionModels is what a session's model picker offers: every agent a
