@@ -49,6 +49,8 @@ and revert it in one click. Recipes are plain YAML — use the bundled
   the workspace: the same branch in each, landed one repository at a
   time, one pull request each.
 - **Terminal** — the same board as a TUI (`gummi`).
+- **Unattended** — `gummi run --envelope 5 "<prompt>"` runs one session
+  with no one at the keyboard and streams NDJSON, for evals and CI.
 
 ## Get started
 

@@ -137,7 +137,7 @@ func TestRepoOfURL(t *testing.T) {
 // must not import it (DESIGN §22.7, §22.14).
 func TestOnlyPersonFacingCodeImportsPublish(t *testing.T) {
 	root := filepath.Join("..", "..")
-	for _, pkg := range []string{"engine", "mcp", "schedule", "agent", "verify", "spec", "state", "worktree"} {
+	for _, pkg := range []string{"engine", "driver", "mcp", "schedule", "agent", "verify", "spec", "state", "worktree"} {
 		p, err := build.ImportDir(filepath.Join(root, "internal", pkg), 0)
 		if err != nil {
 			t.Fatalf("%s: %v", pkg, err)

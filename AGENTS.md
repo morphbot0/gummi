@@ -11,8 +11,10 @@ branch, and lets a session run a **workflow** — a recipe of
 fresh-context steps working in its own tree — when the work is worth
 one. It orchestrates other agents — it is
 not itself a coding agent. A person drives it from the keyboard in the
-TUI or from a browser through its web face, `gummi web`; there is no
-command-line driver. An agent working *inside* a card reaches gummi's
+TUI or from a browser through its web face, `gummi web`. A script, an
+eval or CI runs one session unattended with `gummi run "<prompt>"`
+(`internal/driver`), which answers on the person's behalf and streams
+NDJSON. An agent working *inside* a card reaches gummi's
 tools only through that card's own session MCP endpoint (§16) — there is
 no board-level agent.
 
@@ -121,12 +123,14 @@ agent/worktree/verify as leaf services.
 | `webapi` | The JSON contract between `internal/web` and its page: types only, golden-tested shapes. Change a shape here first. |
 | `threadfold` | Pure fold of a card's event log into what a thread draws — its sessions, answered decisions, and the structured `Items` the web page renders — in the words the TUI thread uses. An agent's dispatched sessions fold into one item each too (`dispatches.go`: `Options.Dispatches`, keyed `dispatch:<card>`). A session's workflow runs fold into one item each (`runs.go`: `Options.Runs`, `FoldRun`, keyed `run:<n>` with a content-hash `Rev`), an open one carrying its live strip (`runstrip.go`: `RunStrip`). Both faces read it. |
 | `decisions` | Pure rules for a card's open decisions: which one a card shows (`Rank`), its attention lane, how an `ask_user` question is offered as options, a run's decision too (`RunOptions`), and what an answer says. Both faces read it. |
+| `driver` | The unattended session loop behind `gummi run`: mints a session from a prompt, always allows its workflow runs (the envelope the only cap), and drives it to its end with no person present — a question is answered with its recommended option, a parked run resumed, a loop at its max carried on, a revised plan declined, each answer put on the NDJSON stream. Money is never decided: a spent envelope stops it as `exhausted`. Exit statuses are `driver.Status.ExitCode`. |
 | `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to a live session's tools (`--feature <id>`). |
 
 `cmd/gummi` holds `main.go` and the few commands there are: the board (no
-arguments), `web` (with `pair`, `devices` and `unpair`), `doctor`, `version`
-and the hidden `__mcp` shim. Everything else a person does is in the TUI or
-on the web page; do not add a command-line verb for it.
+arguments), `web` (with `pair`, `devices` and `unpair`), `run` (one session,
+unattended), `doctor`, `version` and the hidden `__mcp` shim. Everything else
+a person does is in the TUI or on the web page; do not add a command-line
+verb for it.
 
 **Flags are declared once.** Cobra owns routing, help, completion *and*
 parsing: every flag is declared in `cobra.go`'s `bind*Flags` functions, and a
@@ -184,7 +188,11 @@ Running the real TUI (`bin/gummi`) needs a git repo and, for the default
 backend, an authenticated GitHub Copilot CLI. To drive agents without
 Copilot auth, set `GUMMI_AGENT=headless` with `GUMMI_AGENT_CMD` pointed at
 a BYOK/local endpoint's adapter (`GUMMI_HEADLESS_CREDITS_PER_1K` prices its
-spend into credits). With no usable agent, creating sessions, their
+spend into credits). To try `gummi run` without spending money, point it
+at the scripted agent: `GUMMI_AGENT=headless
+GUMMI_AGENT_CMD=$PWD/scripts/web-e2e-agent.py GUMMI_E2E_FAST=1 bin/gummi run
+--envelope 5 "<prompt>"` in a throwaway repository (a `[keyword]` in the
+prompt picks its scenario). With no usable agent, creating sessions, their
 worktrees and specs still work — the board just stays static. Key env vars are tabled in
 `docs/CONFIGURATION.md`.
 
@@ -252,7 +260,7 @@ worktrees and specs still work — the board just stays static. Key env vars are
   (`internal/credentials`: lent to gummi's own `gh` and push commands,
   never put in an agent's environment). It is optional, detected rather
   than switched on, and absent where `gh`/push access is not set up. No
-  workflow run, schedule, goal or MCP tool may reach the publish code
+  workflow run, schedule, goal, MCP tool or `gummi run` may reach the publish code
   (decision 25, DESIGN §22); a session reaches it only once a person
   allowed it to publish, and only through `agentpublish` (decision 31).
   Stacks (§18) still replay branches locally and print the `git push

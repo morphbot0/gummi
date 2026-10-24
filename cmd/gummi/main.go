@@ -207,16 +207,7 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, lo
 	}
 	return eng, names, func() {
 		_ = eng.Close()
-		// close every distinct agent exactly once (the "" default key
-		// aliases one of the concrete-name entries).
-		seen := map[agent.Agent]struct{}{}
-		for _, a := range agents {
-			if _, ok := seen[a]; ok {
-				continue
-			}
-			seen[a] = struct{}{}
-			_ = a.Close()
-		}
+		closeAgents(agents)
 	}, ""
 }
 

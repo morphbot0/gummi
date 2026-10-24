@@ -20,6 +20,27 @@ var doctorCmd = &cobra.Command{
 	},
 }
 
+// runCmd implements `gummi run "<prompt>"`: one session, driven to its end
+// with no person at the keyboard.
+var runCmd = &cobra.Command{
+	Use:   `run --envelope <dollars> [--profile name] [--repo name] [--base branch] [--ref id] [--timeout d] [--verbose] "<prompt>"`,
+	Short: "Run one session from a prompt, unattended, streaming NDJSON (for evals and CI)",
+	Long: `Run mints a session from the prompt and drives it to its end with no one at
+the keyboard. Its workflow runs are always allowed, the envelope their only
+cap. A question is answered on your behalf with its recommended option and
+the answer is put on the stream; a revised plan is declined and a loop at its
+max carries on. Money is never decided: a spent envelope stops the run.
+
+The stream is NDJSON on stdout. The exit status is 0 when the session is done,
+1 on an error, 2 when a person paused its workflow run from the board, 3 when
+the envelope is spent and 4 on --timeout. The session stays on the board,
+with its branch, for a person to read and land.`,
+	Args: cobra.ArbitraryArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runRun(cmdFlags(cmd), args)
+	},
+}
+
 // webCmd implements `gummi web`: the board in a browser, hosted by this
 // process with the TUI's own model running without a screen.
 var webCmd = &cobra.Command{
@@ -56,6 +77,7 @@ var webUnpairCmd = &cobra.Command{
 
 func init() {
 	bindDoctorFlags(doctorCmd.Flags())
+	bindRunFlags(runCmd.Flags())
 	bindWebFlags(webCmd.Flags())
 	bindWebPairFlags(webPairCmd.Flags())
 	jsonFlag(webDevicesCmd.Flags(), "emit the paired devices as JSON")
@@ -67,6 +89,17 @@ func init() {
 func bindDoctorFlags(fs *pflag.FlagSet) {
 	jsonFlag(fs, "emit the readiness checklist as JSON (the skill's setup path)")
 	fs.Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)")
+}
+
+// bindRunFlags declares `gummi run`'s flags.
+func bindRunFlags(fs *pflag.FlagSet) {
+	fs.String("envelope", "", "the session's budget in dollars, its workflow runs' included (required; falls back to GUMMI_ENVELOPE)")
+	fs.String("profile", "", "the model-role profile the session runs under (default: the workspace's)")
+	fs.String("repo", "", "the configured repository the session works in (default: the workspace's)")
+	fs.String("base", "", "the branch the session's work forks from (default: what the repository has checked out)")
+	fs.String("ref", "", "an external id kept on the session and echoed on the created line (an eval case, a CI job)")
+	fs.Duration("timeout", defaultRunTimeout, "stop when nothing has happened for this long (0: never)")
+	fs.Bool("verbose", false, "add the session's tool-call activity lines to the stream")
 }
 
 // bindWebFlags declares `gummi web`'s flags.

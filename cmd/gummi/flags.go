@@ -20,6 +20,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -47,6 +48,14 @@ func (f cliFlags) Bool(name string) bool {
 	v, err := f.fs.GetBool(name)
 	if err != nil {
 		panic(fmt.Sprintf("reading --%s as a bool: %v", name, err))
+	}
+	return v
+}
+
+func (f cliFlags) Duration(name string) time.Duration {
+	v, err := f.fs.GetDuration(name)
+	if err != nil {
+		panic(fmt.Sprintf("reading --%s as a duration: %v", name, err))
 	}
 	return v
 }

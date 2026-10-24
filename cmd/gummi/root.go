@@ -40,6 +40,7 @@ func init() {
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(webCmd)
 	rootCmd.AddCommand(mcpCmd)
 }
