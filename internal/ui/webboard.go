@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -114,6 +115,9 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 		default:
 			row.Status = webapi.StatusIdle
 		}
+	}
+	if row.Status == webapi.StatusIdle {
+		row.Word = m.webIdleWord(r)
 	}
 	if d := r.DecidingRun; d != nil && row.Status == webapi.StatusNeeds {
 		// worded as the run's: the inbox's generic "the agent has a
@@ -401,4 +405,26 @@ func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsReque
 		return webapi.Settings{}, refused
 	}
 	return b.Settings(ctx)
+}
+
+// webIdleWord is what an idle open session holds, in a few words, for the
+// rail to say in place of its type a second time: whether its work is
+// ready to land, what holds it, or that it has none yet. Read off the row
+// alone (no git on the render path): uncommitted work is not known here.
+func (m *Shell) webIdleWord(r featureRow) string {
+	f := r.F
+	if !f.IsFreeform() || f.Stage != domain.StageOpen || f.Home || f.MainCheckout || !r.HasWorktree {
+		return ""
+	}
+	switch {
+	case r.OpenDiffComments > 0:
+		return fmt.Sprintf("%d open comment%s", r.OpenDiffComments, plural(r.OpenDiffComments))
+	case !r.Ahead:
+		return "no commits yet"
+	case !f.PullRequest.Empty():
+		return "in a pull request"
+	case m.stackLandBlocker(f.ID) != "":
+		return "lands after " + m.cardName(m.stackLandBlocker(f.ID))
+	}
+	return "ready to land"
 }

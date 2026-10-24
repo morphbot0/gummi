@@ -48,3 +48,25 @@ func TestWebRowNeedsYouWhileARunStepAsks(t *testing.T) {
 		t.Fatalf("row = status %q, needs %+v", got.Status, got.Needs)
 	}
 }
+
+// TestWebRowSaysWhatAnIdleSessionHolds: an idle open session's row says
+// what its branch holds — the rail's word in place of its type said twice.
+func TestWebRowSaysWhatAnIdleSessionHolds(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	r := row(54, "a session", domain.StageOpen, "thrifty", false)
+	r.F.Kind, r.HasWorktree = domain.KindFreeform, true
+	for _, c := range []struct {
+		ahead    bool
+		comments int
+		want     string
+	}{
+		{false, 0, "no commits yet"},
+		{true, 0, "ready to land"},
+		{true, 1, "1 open comment"},
+	} {
+		r.Ahead, r.OpenDiffComments = c.ahead, c.comments
+		if got := m.webRow(r); got.Status != "idle" || got.Word != c.want {
+			t.Errorf("ahead %v, %d comments: status %q, word %q, want %q", c.ahead, c.comments, got.Status, got.Word, c.want)
+		}
+	}
+}

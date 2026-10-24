@@ -69,6 +69,10 @@ type Row struct {
 	Needs *RowNeeds `json:"needs,omitempty"`
 	// Running is set while an agent is working on the card.
 	Running *RowRunning `json:"running,omitempty"`
+	// Word is an idle session's state in a few words ("ready to land",
+	// "2 open comments", "no commits yet"), said by the server so the page
+	// tells cards apart without guessing; "" for any other card or status.
+	Word string `json:"word,omitempty"`
 	// Spend is the card's credits so far (live while a session runs);
 	// Envelope its budget, 0 when uncapped.
 	Spend    float64 `json:"spend"`

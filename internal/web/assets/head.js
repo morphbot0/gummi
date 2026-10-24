@@ -177,12 +177,13 @@ export function openActions (line = '') {
 
 function stages (c) {
   // an open session has no stages at all: ticking the workflow's would
-  // claim a plan, an implement and a verify it never had, so it says only
-  // that it is a session. Once closed it still isn't done in the
-  // workflow's sense, but the card needs some word for what happened to it.
-  if (c.stage === 'open') return h('span', { class: 'stages' }, h('span', { class: 'cur st-open' }, '◆ session'))
+  // claim a plan, an implement and a verify it never had. Its type is on
+  // the line above, so this says what it holds (the rail's word: ready to
+  // land, open comments, no commits yet), or nothing. Once closed it says
+  // how it ended.
+  if (c.stage === 'open') return c.word ? h('span', { class: 'stages' }, h('span', { class: 'cur st-open', testid: 'card-state' }, c.word)) : null
   if (c.kind === 'freeform') {
-    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, '◆ session · closed'))
+    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, c.landed ? 'landed' : 'closed'))
   }
   const idx = STAGES.indexOf(c.stage)
   return h('span', { class: 'stages', testid: 'card-stages' }, STAGES.map((s, i) => [

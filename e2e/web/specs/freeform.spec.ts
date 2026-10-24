@@ -74,11 +74,11 @@ test('a landed freeform card claims no stages', async ({ pairedPage: page, serve
   await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage, { timeout: 30_000 }).toBe('done');
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
-  await expect(page.getByTestId('card-stages')).toContainText('session');
+  await expect(page.getByTestId('card-stages')).toContainText('landed');
   await expect(page.getByTestId('card-stages')).not.toContainText('verify');
   await expect(page.getByTestId('stage-verify')).toHaveCount(0);
   if (info.project.name === 'phone') await page.getByTestId('card-back').click();
-  await expect(page.getByTestId(`rail-row-${id}`)).toContainText('session');
+  await expect(page.getByTestId(`rail-row-${id}`)).toContainText('landed');
 });
 
 // A line sent while the agent is mid-turn waits under the conversation

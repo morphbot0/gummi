@@ -41,6 +41,9 @@ type featureRow struct {
 	Proposal    *engine.WorkflowProposal
 	HasWorktree bool
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
+	// Ahead: the branch holds commits of its own (worktree.BranchAhead),
+	// read at load with Landed
+	Ahead bool
 	History     []state.TransitionRecord
 	StageSpend  []state.StageSpend // per-stage/model spend rollup (forward-only)
 	// BaseBranch is what f actually lands on, resolved once at load
@@ -298,7 +301,7 @@ func (m *Shell) loadRows() tea.Msg {
 			// a branch that has merged into main no longer needs its
 			// worktree — flag it so the board can offer cleanup.
 			if ok {
-				row.Landed = m.canHaveLanded(ctx, &f)
+				row.Ahead, row.Landed = m.canHaveLanded(ctx, &f)
 				row.Drift = m.stoppedDrift(ctx, &f, row.Landed)
 			}
 		}
@@ -354,13 +357,17 @@ func (m *Shell) stoppedDrift(ctx context.Context, f *domain.Feature, landed bool
 // by the c/m handlers at run time, so a stale-negative only withholds the
 // cleanup prompt until the next reload. False on any git error, matching
 // the swallow-errors contract of the inline Landed call it replaces.
-func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
+//
+// It answers whether the branch has commits of its own too (ahead), which
+// it asks anyway: the row keeps it for what the board says about an idle
+// session, at no further git spawn.
+func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) (ahead, landed bool) {
 	ahead, err := m.wt.BranchAhead(ctx, f)
 	if err != nil || !ahead {
-		return false
+		return false, false
 	}
-	landed, err := m.wt.Landed(ctx, f)
-	return err == nil && landed
+	landed, err = m.wt.Landed(ctx, f)
+	return true, err == nil && landed
 }
 
 // formResult is what the new-card dialog hands the shell: everything a

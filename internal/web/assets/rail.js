@@ -90,6 +90,7 @@ function quality (r) {
     if (r.needs?.color === 'err') return 'failed'
     return r.needs?.color === 'ok' && r.stage === 'verify' ? 'ready' : 'needs'
   }
+  if (r.status === 'idle' && r.word === 'ready to land') return 'ready'
   if (r.status === 'idle') return r.stage === 'open' || r.kind === 'freeform' ? 'session' : 'idle'
   return r.status
 }
@@ -100,9 +101,11 @@ function word (r) {
   if (r.status === 'running') return r.running?.pausing ? 'pausing' : (r.running?.verb || 'working')
   if (r.status === 'watching') return 'watching'
   if (r.status === 'paused') return 'paused'
-  const session = r.home ? 'agent' : (r.stage === 'open' || r.kind === 'freeform') && 'session'
-  if (r.status === 'done') return [session, r.landed && 'landed'].filter(Boolean).join(' · ')
-  return session || ''
+  // an idle session says what it holds (the server's word: ready to land,
+  // open comments, no commits yet) rather than its type a second time
+  if (r.word) return r.word
+  if (r.status === 'done') return r.landed ? 'landed' : 'closed'
+  return r.home ? '' : (r.stage === 'open' || r.kind === 'freeform') ? '' : 'idle'
 }
 
 // an agent is in no repository: its empty repo is not the default
@@ -328,6 +331,8 @@ function rowEl (r, wide) {
     class: ['row', sel && 'sel', r.status === 'needs' && 'needs'],
     data: { id: r.id, status: r.status, q },
     testid: `rail-row-${r.id}`,
+    // a collapsed rail draws the dot alone: the row still names itself
+    title: [r.title, w].filter(Boolean).join(' — '),
     'aria-current': sel ? 'true' : null,
     type: 'button'
   },
