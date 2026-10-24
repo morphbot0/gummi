@@ -129,7 +129,7 @@ function landButton (c, actions) {
     stack: ['open the stack', () => openView('stacks', { id: c.stack?.id })]
   }[by] || ['', () => {}]
   return h('button', {
-    class: 'btn held hide-s', type: 'button', testid: 'session-land-held', 'aria-disabled': 'true',
+    class: 'btn held hide-s', type: 'button', testid: 'session-land-held',
     title: `Land is held: ${why}${go[0] ? ' — ' + go[0] : ''}`, onclick: go[1]
   }, 'Land', h('small', null, why))
 }
