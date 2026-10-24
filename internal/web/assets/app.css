@@ -1523,3 +1523,5 @@ button.tr-path:disabled{opacity:1;cursor:default}
   .rls-running .pd{animation:none}
   .rb.rb-flash{animation:none;box-shadow:0 0 0 3px var(--accent)}
 }
+.repos .landed{color:var(--ok, inherit)}
+.repotabs{margin:0 0 8px}

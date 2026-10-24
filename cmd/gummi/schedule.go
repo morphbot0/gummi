@@ -117,6 +117,8 @@ func runScheduleList(fl cliFlags, _ []string) error {
 		switch {
 		case sc.Kind == domain.ScheduleHeartbeat:
 			target = " → " + string(sc.Target)
+		case sc.Kind == domain.ScheduleRun:
+			target = fmt.Sprintf(" → %s · S%d", sc.Target, sc.Spec)
 		case sc.Repo != "":
 			target = " · " + sc.Repo
 		}
@@ -128,8 +130,11 @@ func runScheduleList(fl cliFlags, _ []string) error {
 
 // scheduleKindWordCLI is a row's kind as the list prints it.
 func scheduleKindWordCLI(k domain.ScheduleKind) string {
-	if k == domain.ScheduleHeartbeat {
+	switch k {
+	case domain.ScheduleHeartbeat:
 		return "heartbeat"
+	case domain.ScheduleRun:
+		return "run"
 	}
 	return "mint"
 }

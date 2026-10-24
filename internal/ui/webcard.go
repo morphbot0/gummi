@@ -253,6 +253,7 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 	st.card.Actions = m.webActions(r)
 	st.card.Composer = m.webComposer(r, "")
 	st.card.Session = m.webSessionOf(r.F)
+	st.card.Repos = webRepos(r.Repos)
 	return st, true
 }
 
@@ -511,6 +512,11 @@ func webLandMethods(f domain.Feature) []string {
 // webActionInput says what an action's flow will ask for, so the page
 // collects it first: the dialog the TUI opens on the way, as a field.
 func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
+	if strings.HasPrefix(a.ID, landRepoID) {
+		a.Needs = webapi.ActionNeedsMessage
+		a.Methods = webLandMethods(r.F)
+		return
+	}
 	switch a.ID {
 	case "merge", "squash":
 		// the drafted message, when there is one, is the input's default
@@ -530,6 +536,18 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		// the one open pull request for the card's branch
 		a.Needs = webapi.ActionNeedsText
 		a.Detail = "link " + r.F.Name() + " to a GitHub pull request by its URL or number — leave it empty to find the open one for " + r.F.BranchName()
+	case repoAttachID:
+		a.Needs = webapi.ActionNeedsRepo
+		for _, n := range m.repoChoices(r) {
+			a.Choices = append(a.Choices, webapi.Choice{Value: n, Label: n})
+		}
+	case repoDetachID:
+		a.Needs = webapi.ActionNeedsRepo
+		for _, v := range r.Repos {
+			if !v.Primary {
+				a.Choices = append(a.Choices, webapi.Choice{Value: v.Repo, Label: v.Repo})
+			}
+		}
 	case "repo":
 		a.Needs = webapi.ActionNeedsRepo
 		a.Default = r.F.Repo
@@ -829,3 +847,19 @@ func (m *Shell) answerTo(ctx context.Context, id domain.FeatureID, ref string) (
 
 // jsonInto decodes a payload, reporting whether it could.
 func jsonInto(payload string, v any) bool { return json.Unmarshal([]byte(payload), v) == nil }
+
+// webRepos is a session's repositories as the page is told them.
+func webRepos(in []engine.RepoView) []webapi.CardRepo {
+	var out []webapi.CardRepo
+	for _, v := range in {
+		label := v.Repo
+		if label == "" {
+			label = "workspace"
+		}
+		out = append(out, webapi.CardRepo{
+			Repo: v.Repo, Label: label, Primary: v.Primary, Branch: v.Branch, Base: v.Base,
+			Ahead: v.Ahead, Dirty: v.Dirty, Landed: v.Landed,
+		})
+	}
+	return out
+}

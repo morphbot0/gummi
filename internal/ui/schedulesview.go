@@ -22,6 +22,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/schedule"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/workflowrecipe"
 )
 
 // schedulesDialog is the view: the rows, a cursor, and nothing else.
@@ -78,6 +79,12 @@ func (d *schedulesDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		return true, d.m.openScheduleForm(nil)
 	case "enter":
 		if d.cursor < len(d.rows) {
+			if d.rows[d.cursor].Kind == domain.ScheduleRun {
+				// the agent's proposal is what the person read and allowed:
+				// a different recipe is a new proposal, not an edit
+				d.m.notice = noticeMsg{text: "a run schedule is the agent's proposal: enable, run or delete it; a changed recipe is a new proposal", isErr: true}
+				return true, nil
+			}
 			return true, d.m.openScheduleForm(&d.rows[d.cursor])
 		}
 	case "e":
@@ -107,10 +114,14 @@ func (m *Shell) confirmScheduleToggle(sc domain.Schedule) tea.Cmd {
 			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 			return nil
 		}
+		detail := fmt.Sprintf("%s — first fire %s", sc.Cron, scheduleNextWords(sc.NextRun, next, m.now()))
+		if sc.Kind == domain.ScheduleRun {
+			detail += "\nEnabling allows every run it starts:\n" + strings.Join(scheduleRecipeLines(sc), "\n")
+		}
 		m.Overlay.Push(&confirmDialog{
 			id:           "confirm-schedule-enable",
 			question:     fmt.Sprintf("enable %s?", sc.ID),
-			detail:       fmt.Sprintf("%s — first fire %s", sc.Cron, scheduleNextWords(sc.NextRun, next, m.now())),
+			detail:       detail,
 			confirmLabel: "Enable",
 			onConfirm:    func() tea.Cmd { return m.scheduleEnable(sc.ID, next) },
 		})
@@ -230,6 +241,9 @@ func (d *schedulesDialog) View(s *theme.Styles, w, _ int) string {
 		}
 		line := mark + s.CardID.Render(string(r.ID)) + "  " + style.Render(name) + "  " +
 			s.Faint.Render(scheduleKindWord(r.Kind)) + "  " + s.Base.Render(r.Cron) + "  " + state
+		if r.Kind == domain.ScheduleRun {
+			line += "  " + s.Faint.Render(fmt.Sprintf("%s · S%d", r.Target, r.Spec))
+		}
 		if r.Enabled && !r.NextRun.IsZero() {
 			line += "  " + s.Faint.Render(scheduleNextWords(r.NextRun, time.Time{}, d.m.now()))
 		}
@@ -238,16 +252,44 @@ func (d *schedulesDialog) View(s *theme.Styles, w, _ int) string {
 		}
 		b.WriteString(ansi.Truncate(line, w, "…") + "\n")
 	}
+	if d.cursor < len(d.rows) && d.rows[d.cursor].Kind == domain.ScheduleRun {
+		b.WriteString("\n")
+		for _, l := range scheduleRecipeLines(d.rows[d.cursor]) {
+			b.WriteString("   " + s.Faint.Render(ansi.Truncate(sanitize(l), w-4, "…")) + "\n")
+		}
+	}
 	b.WriteString("\n   " + s.Faint.Render("n new · enter edit · j/k select · e on/off · r run now · x delete · esc close"))
 	return closeOutFrame(s, "schedules · "+strconv.Itoa(len(d.rows)), b.String())
 }
 
 // scheduleKindWord is a row's kind as a person reads it.
 func scheduleKindWord(k domain.ScheduleKind) string {
-	if k == domain.ScheduleHeartbeat {
+	switch k {
+	case domain.ScheduleHeartbeat:
 		return "heartbeat"
+	case domain.ScheduleRun:
+		return "run"
 	}
 	return "mint"
+}
+
+// scheduleRecipeLines is what a run schedule's frozen recipe does, as a
+// person reads it before enabling: its steps, each command verbatim and
+// each repository it dispatches into.
+func scheduleRecipeLines(sc domain.Schedule) []string {
+	r, err := workflowrecipe.Parse([]byte(sc.Prompt))
+	if err != nil {
+		return []string{"its recipe does not parse: " + err.Error()}
+	}
+	sum := workflowrecipe.Summarize(r)
+	out := []string{"steps: " + strings.Join(sum.Steps, " → ")}
+	for _, c := range sum.Commands {
+		out = append(out, "runs "+c)
+	}
+	for _, d := range sum.Repos {
+		out = append(out, "dispatches into "+d)
+	}
+	return out
 }
 
 // scheduleNextWords is a row's next fire as a relative phrase: the row

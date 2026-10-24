@@ -425,7 +425,7 @@ func (d *WebDocs) StepDiff(ctx context.Context, card string) (webapi.Diff, error
 	if err != nil {
 		return out, err
 	}
-	out.BaseRev, out.Rev = shortTree(st.StartTree), shortTree(st.EndTree)
+	out.BaseRev, out.Rev = shortTree(domain.PrimaryTree(st.StartTree)), shortTree(domain.PrimaryTree(st.EndTree))
 	for _, f := range diffannot.Parse(diffannot.Lines(patch)) {
 		out.Files = append(out.Files, webDiffFile(f, nil, false))
 	}

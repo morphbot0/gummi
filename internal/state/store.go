@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 	start_index    TEXT NOT NULL DEFAULT '',
 	active_ms      INTEGER NOT NULL DEFAULT 0,
 	resumed_at     TEXT NOT NULL DEFAULT '',
+	schedule_id    TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, n)
 );
 CREATE TABLE IF NOT EXISTS workflow_steps (
@@ -290,7 +291,37 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_detail   TEXT NOT NULL DEFAULT '',
 	last_card     TEXT NOT NULL DEFAULT '',
 	orphan_card   TEXT NOT NULL DEFAULT '',
-	created_at    TEXT NOT NULL
+	created_at    TEXT NOT NULL,
+	spec_n        INTEGER NOT NULL DEFAULT 0
+);
+
+-- The sessions an agent dispatched (DESIGN §26.4): which agent minted
+-- which session, from which run, and the envelope it carved for it. The
+-- agent may read and steer only the sessions named here.
+CREATE TABLE IF NOT EXISTS dispatches (
+	card_id    TEXT PRIMARY KEY,
+	agent_id   TEXT NOT NULL,
+	run_n      INTEGER NOT NULL DEFAULT 0,
+	envelope   INTEGER NOT NULL DEFAULT 0,
+	step_path  TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dispatches_agent ON dispatches(agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS dispatches_step ON dispatches(agent_id, run_n, step_path);
+
+-- The repositories a session has attached beside its primary one
+-- (DESIGN §27): one row per (card, repo). The branch is the card's own
+-- name in that repo; fork_point and landed_sha are what features carries
+-- for the primary tree (the worktree manager keys them as "<card>@<repo>").
+CREATE TABLE IF NOT EXISTS attachments (
+	card       TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	repo       TEXT NOT NULL,
+	base       TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	landed_at  TEXT NOT NULL DEFAULT '',
+	landed_sha TEXT NOT NULL DEFAULT '',
+	fork_point TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (card, repo)
 );
 
 -- One row per (feature, round kind) live loop counter: the collapsed
@@ -962,6 +993,9 @@ var migrations = []string{
 	// face did (DESIGN §20.3). Empty is the terminal, an agent, or a row
 	// written before the column existed.
 	`ALTER TABLE diff_annotations ADD COLUMN author TEXT NOT NULL DEFAULT ''`,
+	// The attached repository a diff comment is about (DESIGN §27); empty
+	// is the session's own, which is every row written before the column.
+	`ALTER TABLE diff_annotations ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
 	// The agent and model a freeform card's session runs on when the
 	// person chose them (DESIGN §19.8). Empty is the profile's implementer,
 	// which is what every row written before the columns existed ran on.
@@ -1034,6 +1068,11 @@ var migrations = []string{
 	// Empty on every row from before.
 	`ALTER TABLE session_messages ADD COLUMN at TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE session_messages ADD COLUMN by_actor TEXT NOT NULL DEFAULT ''`,
+	// The schedule that started a run (DESIGN §26.2), and the agent's spec
+	// a run schedule starts its runs against. Empty and 0 on every row
+	// from before, and on every run a session proposed.
+	`ALTER TABLE workflow_runs ADD COLUMN schedule_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE schedules ADD COLUMN spec_n INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Close releases the database.
@@ -1327,9 +1366,15 @@ func (s *Store) SetForkPoint(ctx context.Context, id domain.FeatureID, sha strin
 	if sha == "" {
 		return fmt.Errorf("setting fork-point for %s: refusing an empty SHA", id)
 	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE features SET fork_point = ? WHERE id = ? AND fork_point = ''`,
-		sha, string(id))
+	var res sql.Result
+	var err error
+	if card, repo, ok := splitAttachKey(id); ok {
+		res, err = s.db.ExecContext(ctx,
+			`UPDATE attachments SET fork_point = ? WHERE card = ? AND repo = ? AND fork_point = ''`, sha, card, repo)
+	} else {
+		res, err = s.db.ExecContext(ctx,
+			`UPDATE features SET fork_point = ? WHERE id = ? AND fork_point = ''`, sha, string(id))
+	}
 	if err != nil {
 		return fmt.Errorf("setting fork-point for %s: %w", id, err)
 	}
@@ -1350,8 +1395,12 @@ func (s *Store) SetForkPoint(ctx context.Context, id domain.FeatureID, sha strin
 // hard-failing.
 func (s *Store) ForkPoint(ctx context.Context, id domain.FeatureID) (string, error) {
 	var sha string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT fork_point FROM features WHERE id = ?`, string(id)).Scan(&sha)
+	var err error
+	if card, repo, ok := splitAttachKey(id); ok {
+		err = s.db.QueryRowContext(ctx, `SELECT fork_point FROM attachments WHERE card = ? AND repo = ?`, card, repo).Scan(&sha)
+	} else {
+		err = s.db.QueryRowContext(ctx, `SELECT fork_point FROM features WHERE id = ?`, string(id)).Scan(&sha)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
@@ -1372,8 +1421,13 @@ func (s *Store) ReanchorForkPoint(ctx context.Context, id domain.FeatureID, sha 
 	if sha == "" {
 		return fmt.Errorf("re-anchoring fork-point for %s: refusing an empty SHA", id)
 	}
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE features SET fork_point = ? WHERE id = ?`, sha, string(id)); err != nil {
+	var err error
+	if card, repo, ok := splitAttachKey(id); ok {
+		_, err = s.db.ExecContext(ctx, `UPDATE attachments SET fork_point = ? WHERE card = ? AND repo = ?`, sha, card, repo)
+	} else {
+		_, err = s.db.ExecContext(ctx, `UPDATE features SET fork_point = ? WHERE id = ?`, sha, string(id))
+	}
+	if err != nil {
 		return fmt.Errorf("re-anchoring fork-point for %s: %w", id, err)
 	}
 	return nil
@@ -1385,8 +1439,13 @@ func (s *Store) ReanchorForkPoint(ctx context.Context, id domain.FeatureID, sha 
 // reads then instead of keeping a now-stale SHA. It never fails when the
 // row exists, regardless of whether a fork was previously recorded.
 func (s *Store) ClearForkPoint(ctx context.Context, id domain.FeatureID) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE features SET fork_point = '' WHERE id = ?`, string(id)); err != nil {
+	var err error
+	if card, repo, ok := splitAttachKey(id); ok {
+		_, err = s.db.ExecContext(ctx, `UPDATE attachments SET fork_point = '' WHERE card = ? AND repo = ?`, card, repo)
+	} else {
+		_, err = s.db.ExecContext(ctx, `UPDATE features SET fork_point = '' WHERE id = ?`, string(id))
+	}
+	if err != nil {
 		return fmt.Errorf("clearing fork-point for %s: %w", id, err)
 	}
 	return nil
@@ -1404,8 +1463,12 @@ func (s *Store) SetLandedSHA(ctx context.Context, id domain.FeatureID, sha strin
 	if sha == "" {
 		return fmt.Errorf("setting landed sha for %s: refusing an empty SHA", id)
 	}
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE features SET landed_sha = ? WHERE id = ?`, sha, string(id))
+	var err error
+	if card, repo, ok := splitAttachKey(id); ok {
+		_, err = s.db.ExecContext(ctx, `UPDATE attachments SET landed_sha = ? WHERE card = ? AND repo = ?`, sha, card, repo)
+	} else {
+		_, err = s.db.ExecContext(ctx, `UPDATE features SET landed_sha = ? WHERE id = ?`, sha, string(id))
+	}
 	if err != nil {
 		return fmt.Errorf("setting landed sha for %s: %w", id, err)
 	}
@@ -1417,8 +1480,12 @@ func (s *Store) SetLandedSHA(ctx context.Context, id domain.FeatureID, sha strin
 // feature without a row reads the same way.
 func (s *Store) LandedSHA(ctx context.Context, id domain.FeatureID) (string, error) {
 	var sha string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT landed_sha FROM features WHERE id = ?`, string(id)).Scan(&sha)
+	var err error
+	if card, repo, ok := splitAttachKey(id); ok {
+		err = s.db.QueryRowContext(ctx, `SELECT landed_sha FROM attachments WHERE card = ? AND repo = ?`, card, repo).Scan(&sha)
+	} else {
+		err = s.db.QueryRowContext(ctx, `SELECT landed_sha FROM features WHERE id = ?`, string(id)).Scan(&sha)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil

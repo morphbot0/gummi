@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -32,6 +33,15 @@ type Ops struct {
 	Out   *Emitter
 	Actor string
 	Fail  func(ctx context.Context, id string, err error) (Outcome, error)
+	// Now stamps a repository's landing; nil reads the clock.
+	Now func() time.Time
+}
+
+func (o *Ops) now() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now()
 }
 
 func (o *Ops) fail(ctx context.Context, id string, err error) (Outcome, error) {
@@ -52,9 +62,21 @@ func (o *Ops) fail(ctx context.Context, id string, err error) (Outcome, error) {
 // validation failure. On success it emits a `merged` event carrying the
 // landed commit's sha and returns StatusDone.
 func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, method domain.LandMethod) (Outcome, error) {
+	return o.MergeRepo(ctx, id, "", message, method)
+}
+
+// MergeRepo lands one repository of a session that spans several: repo
+// names an attached repository, empty the session's own (DESIGN §27).
+// Each lands on its own under the checks every landing crosses — open
+// diff comments, an open workflow run, MayLand — and the card closes
+// once every repository with commits has landed.
+func (o *Ops) MergeRepo(ctx context.Context, id domain.FeatureID, repo, message string, method domain.LandMethod) (Outcome, error) {
 	f, err := o.Store.GetFeature(ctx, id)
 	if err != nil {
 		return o.fail(ctx, string(id), err)
+	}
+	if repo != "" && repo == f.Repo {
+		repo = ""
 	}
 	// Refused before any mutation: a card that may not keep its history
 	// has no merge-commit landing to fall back on.
@@ -75,6 +97,22 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 	wt, err := o.Eng.WorktreesFor(ctx, &f)
 	if err != nil {
 		return o.fail(ctx, string(id), err)
+	}
+	// tf is the card as the repository being landed sees it: the card
+	// itself, or its view of an attached repository.
+	tf := f
+	var att domain.Attachment
+	if repo != "" {
+		if f.HandedOff() {
+			return o.fail(ctx, string(id), fmt.Errorf("%s was handed off: land it from its own repository", id))
+		}
+		tf, wt, att, err = o.Eng.AttachedTree(ctx, f, repo)
+		if err != nil {
+			return o.fail(ctx, string(id), err)
+		}
+		if att.Landed() {
+			return o.fail(ctx, string(id), fmt.Errorf("%s in %s already landed", id, repo))
+		}
 	}
 
 	// A HANDED-OFF card is the one closed card that may still land: hand-off
@@ -97,7 +135,7 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 	}
 	// a card lands either via its linked PR or locally, never both: refuse
 	// before any git mutation, naming the PR and the unlink escape.
-	if !f.PullRequest.Empty() {
+	if repo == "" && !f.PullRequest.Empty() {
 		return o.fail(ctx, string(id),
 			fmt.Errorf("%s is linked to %s#%d (%s); land it via the PR, or run `gummi pr unlink %s` to land it locally instead",
 				id, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, id))
@@ -130,12 +168,12 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 	} else if dirty {
 		return o.fail(ctx, string(id), fmt.Errorf("%s checkout has uncommitted changes — commit or stash them before merging", base))
 	}
-	if landed, err := wt.Landed(ctx, &f); err != nil {
+	if landed, err := wt.Landed(ctx, &tf); err != nil {
 		return o.fail(ctx, string(id), err)
 	} else if landed {
 		return o.fail(ctx, string(id), fmt.Errorf("%s already landed on %s — run `gummi clean %s`", id, base, id))
 	}
-	if ahead, err := wt.BranchAhead(ctx, &f); err != nil {
+	if ahead, err := wt.BranchAhead(ctx, &tf); err != nil {
 		return o.fail(ctx, string(id), err)
 	} else if !ahead {
 		return o.fail(ctx, string(id), fmt.Errorf("%s branch has no commits to land", id))
@@ -153,13 +191,13 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 
 	// loose work is committed by the person, with a message, never under a
 	// canned checkpoint subject: gummi never commits for the agent
-	if dirty, err := wt.Dirty(ctx, &f); err != nil {
+	if dirty, err := wt.Dirty(ctx, &tf); err != nil {
 		return o.fail(ctx, string(id), err)
 	} else if dirty {
 		return o.fail(ctx, string(id), fmt.Errorf("%s has uncommitted work in its worktree — commit it with `gummi commit %s -m <message>` first, or discard it", id, id))
 	}
 
-	sha, err := wt.Land(ctx, &f, message, method)
+	sha, err := wt.Land(ctx, &tf, message, method)
 	if err != nil {
 		var ce *worktree.MergeConflictError
 		if errors.As(err, &ce) {
@@ -175,13 +213,24 @@ func (o *Ops) Merge(ctx context.Context, id domain.FeatureID, message string, me
 			return o.fail(ctx, string(id), fmt.Errorf("landed %s but clearing its hand-off mark failed: %w", id, err))
 		}
 	}
+	if repo != "" {
+		if err := o.Store.MarkAttachmentLanded(ctx, id, repo, sha, o.now().UTC()); err != nil {
+			return o.fail(ctx, string(id), fmt.Errorf("landed %s in %s but recording it failed: %w", id, repo, err))
+		}
+	}
+	// A card that spans repositories closes once every one with commits
+	// has landed; until then it says which have not.
+	var remaining []string
+	if len(o.Eng.RepoViews(ctx, f)) > 0 {
+		remaining, _ = o.Eng.RepoLandings(ctx, f)
+	}
 	// A handed-off card is already at done; any other closes on landing.
-	if f.Stage != domain.StageDone {
+	if f.Stage != domain.StageDone && len(remaining) == 0 {
 		if _, err := o.Store.CloseCard(ctx, id, o.Actor); err != nil {
 			return o.fail(ctx, string(id), fmt.Errorf("landed %s but moving it to done failed: %w", id, err))
 		}
 	}
-	o.Out.Emit(mergedEvent{Event: "merged", ID: string(id), Branch: f.BranchName(), Commit: sha, Method: string(method)})
+	o.Out.Emit(mergedEvent{Event: "merged", ID: string(id), Branch: f.BranchName(), Commit: sha, Method: string(method), Repo: repo, Remaining: remaining})
 	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
@@ -275,6 +324,11 @@ func (o *Ops) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 			del = wt.DeleteClosedBranch
 		}
 		if err := del(ctx, &f); err != nil {
+			return o.fail(ctx, string(id), err)
+		}
+	}
+	if closed {
+		if err := o.Eng.CleanAttachments(ctx, f); err != nil {
 			return o.fail(ctx, string(id), err)
 		}
 	}

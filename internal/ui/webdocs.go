@@ -59,6 +59,9 @@ func invalid(format string, a ...any) error { return &InvalidError{Msg: fmt.Spri
 // WebDocs is one card's documents, as captured from the model.
 type WebDocs struct {
 	f domain.Feature
+	// primary is the card as the board holds it; f is that, or its view of
+	// an attached repository once UseRepo picked one.
+	primary domain.Feature
 	// specN is the session spec the reader acts on (UseSpec); 0 reads 1.
 	specN   int
 	base    string
@@ -101,7 +104,7 @@ func (m *Shell) webDocsFor(r featureRow) (*WebDocs, error) {
 		return nil, ErrDetached
 	}
 	d := &WebDocs{
-		f: r.F, base: m.baseBranch(r.F), store: m.store, pool: m.wt, ws: m.ws,
+		f: r.F, primary: r.F, base: m.baseBranch(r.F), store: m.store, pool: m.wt, ws: m.ws,
 		now: m.now, threads: m.fetchPRReviewThreads,
 		locks: m.locks, busy: m.webCardBusy(r.F.ID) || m.cardBusy(r),
 		publish: webPublish{enabled: m.publishEnabled, checked: m.publishChecked, why: m.publishWhy, gh: m.publishGH, watch: r.watchOnly()},
@@ -500,6 +503,24 @@ func (d *WebDocs) memoryDoc(path string) (webapi.MemoryDoc, error) {
 
 // ----------------------------------------------------------------- files
 
+// UseRepo makes the documents those of an attached repository: its diff,
+// its comments. "" is the session's own.
+func (d *WebDocs) UseRepo(ctx context.Context, name string) error {
+	if name == "" || name == d.primary.Repo {
+		return nil
+	}
+	if d.eng == nil {
+		return invalid("this board has no repositories attached")
+	}
+	view, _, _, err := d.eng.AttachedTree(ctx, d.primary, name)
+	if err != nil {
+		return invalid("%s", err.Error())
+	}
+	d.f = view
+	d.base = d.pool.BaseBranch(ctx, name)
+	return nil
+}
+
 // FilesDir is the card's worktree, the one directory the page may open
 // files from (webapi.Files); ok is false while it has none.
 func (d *WebDocs) FilesDir(ctx context.Context) (string, bool) {
@@ -599,9 +620,20 @@ func (d *WebDocs) Diff(ctx context.Context, since string) (webapi.Diff, error) {
 		added, touched := fresh[f.Path]
 		out.Files = append(out.Files, webDiffFile(f, added, touched))
 	}
-	anns, err := d.store.ListDiffAnnotations(ctx, d.f.ID)
+	all, err := d.store.ListDiffAnnotations(ctx, d.f.ID)
 	if err != nil {
 		return out, err
+	}
+	// a comment belongs to the repository's diff it was written on
+	var anns []domain.DiffAnnotation
+	for _, a := range all {
+		if a.Repo == d.f.TreeRepo {
+			anns = append(anns, a)
+		}
+	}
+	out.Repo = d.f.TreeRepo
+	if d.eng != nil {
+		out.Repos = webRepos(d.eng.RepoViews(ctx, d.primary))
 	}
 	anchors := make([]string, len(anns))
 	for i, a := range anns {
@@ -676,6 +708,7 @@ func (d *WebDocs) AddAnnotation(ctx context.Context, idx int, comment, text, per
 	}
 	ann := newDiffAnnotation(d.f.ID, lines, idx, comment)
 	ann.Author = strings.TrimSpace(person)
+	ann.Repo = d.f.TreeRepo
 	if _, err := d.store.AddDiffAnnotation(ctx, ann, d.now()); err != nil {
 		return webapi.Diff{}, err
 	}

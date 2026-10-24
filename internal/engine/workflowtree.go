@@ -66,39 +66,168 @@ func (e *Engine) sessionTree(ctx context.Context, session domain.FeatureID) (str
 	return dir, nil
 }
 
-// snapshotRun records the session's tree as it is now, as run n reads
-// it: without the ignored paths that were on disk when the run started.
-func (e *Engine) snapshotRun(ctx context.Context, session domain.FeatureID, n int) (string, error) {
+// runTree is one tree a run spans: the session's own (Repo empty) or an
+// attached repository's.
+type runTree struct {
+	Repo string
+	Dir  string
+}
+
+// runTrees lists the trees a run spans: the session's checkout first, then
+// each attached repository whose worktree is on disk.
+func (e *Engine) runTrees(ctx context.Context, session domain.FeatureID) ([]runTree, error) {
 	dir, err := e.sessionTree(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	out := []runTree{{Dir: dir}}
+	f, err := e.cfg.Store.GetFeature(ctx, session)
+	if err != nil {
+		return out, nil //nolint:nilerr // the primary tree alone still works
+	}
+	for _, t := range e.attachedTrees(ctx, f) {
+		if _, err := os.Stat(t.Path); err == nil {
+			out = append(out, runTree{Repo: t.Att.Repo, Dir: t.Path})
+		}
+	}
+	return out, nil
+}
+
+// snapshotTreesWith snapshots every tree the session spans, keeping out
+// what keepOf names for each, and joins them (domain.EncodeTrees).
+func (e *Engine) snapshotTreesWith(ctx context.Context, session domain.FeatureID, keepOf func(runTree) ([]string, error)) (string, error) {
+	trees, err := e.runTrees(ctx, session)
 	if err != nil {
 		return "", err
 	}
-	return worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...)
+	var primary string
+	attached := map[string]string{}
+	for _, t := range trees {
+		keep, err := keepOf(t)
+		if err != nil {
+			return "", err
+		}
+		h, err := worktree.Snapshot(ctx, t.Dir, keep...)
+		if err != nil {
+			return "", err
+		}
+		if t.Repo == "" {
+			primary = h
+		} else {
+			attached[t.Repo] = h
+		}
+	}
+	return domain.EncodeTrees(primary, attached), nil
+}
+
+// snapshotRun records the session's trees as they are now, as run n reads
+// them: without the ignored paths that were on disk when the run started.
+func (e *Engine) snapshotRun(ctx context.Context, session domain.FeatureID, n int) (string, error) {
+	return e.snapshotTreesWith(ctx, session, func(t runTree) ([]string, error) {
+		return e.runKeepOutFor(session, n, t.Repo), nil
+	})
+}
+
+// treeDiff is the difference in one tree between two snapshots.
+type treeDiff struct {
+	runTree
+	Patch string
+	Paths []string
+}
+
+// diffEach diffs every tree the two snapshots both hold. A tree one of
+// them lacks (a repository attached after the run started) is left out.
+func (e *Engine) diffEach(ctx context.Context, session domain.FeatureID, a, b string) ([]treeDiff, error) {
+	trees, err := e.runTrees(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	pa, aa := domain.DecodeTrees(a)
+	pb, ab := domain.DecodeTrees(b)
+	var out []treeDiff
+	for _, t := range trees {
+		from, to := pa, pb
+		if t.Repo != "" {
+			var okA, okB bool
+			from, okA = aa[t.Repo]
+			to, okB = ab[t.Repo]
+			if !okA || !okB {
+				continue
+			}
+		}
+		patch, paths, err := worktree.DiffTrees(ctx, t.Dir, from, to)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, treeDiff{runTree: t, Patch: patch, Paths: paths})
+	}
+	return out, nil
+}
+
+// diffTrees is the diff between two snapshots across every tree: the
+// primary's patch as it always was, then each attached repository's under a
+// "# repo: <name>" line, and every path that differs, an attached one as
+// "<repo>:<path>".
+func (e *Engine) diffTrees(ctx context.Context, session domain.FeatureID, a, b string) (string, []string, error) {
+	each, err := e.diffEach(ctx, session, a, b)
+	if err != nil {
+		return "", nil, err
+	}
+	var patch strings.Builder
+	var paths []string
+	for _, d := range each {
+		if d.Repo == "" {
+			patch.WriteString(d.Patch)
+			paths = append(paths, d.Paths...)
+			continue
+		}
+		if strings.TrimSpace(d.Patch) != "" {
+			fmt.Fprintf(&patch, "# repo: %s\n%s", d.Repo, d.Patch)
+		}
+		for _, p := range d.Paths {
+			paths = append(paths, d.Repo+":"+p)
+		}
+	}
+	return patch.String(), paths, nil
 }
 
 // runIgnoredFile is the file in a run's directory that lists the ignored
 // paths on disk when the run started (worktree.Ignored), NUL-separated.
 const runIgnoredFile = "ignored"
 
-// recordRunIgnored lists the ignored paths in dir now as run n's: they
-// stay out of every snapshot the run takes, so an edit of .gitignore
-// under the run neither shows their contents in its diff nor lets a
-// revert delete them.
-func (e *Engine) recordRunIgnored(ctx context.Context, session domain.FeatureID, n int, dir string) ([]string, error) {
-	paths, err := worktree.Ignored(ctx, dir)
+// recordRunIgnored lists the ignored paths in each tree the session spans
+// now as run n's: they stay out of every snapshot the run takes, so an edit
+// of .gitignore under the run neither shows their contents in its diff nor
+// lets a revert delete them. The primary's go in the file "ignored", an
+// attached repository's in "ignored@<repo>".
+func (e *Engine) recordRunIgnored(ctx context.Context, session domain.FeatureID, n int) error {
+	trees, err := e.runTrees(ctx, session)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if _, err := e.writeRunFile(session, n, runIgnoredFile, strings.Join(paths, "\x00")); err != nil {
-		return nil, err
+	for _, t := range trees {
+		paths, err := worktree.Ignored(ctx, t.Dir)
+		if err != nil {
+			return err
+		}
+		if _, err := e.writeRunFile(session, n, ignoredFileOf(t.Repo), strings.Join(paths, "\x00")); err != nil {
+			return err
+		}
 	}
-	return paths, nil
+	return nil
 }
 
-// runKeepOut is what recordRunIgnored listed for run n, nil for a run
-// that recorded nothing.
-func (e *Engine) runKeepOut(session domain.FeatureID, n int) []string {
-	raw, err := os.ReadFile(filepath.Join(e.RunDir(session, n), runIgnoredFile)) // #nosec G304 -- the run's own directory
+func ignoredFileOf(repo string) string {
+	if repo == "" {
+		return runIgnoredFile
+	}
+	return runIgnoredFile + "@" + repo
+}
+
+// runKeepOutFor is runKeepOut for the tree of an attached repository
+// (the primary's when repo is empty).
+func (e *Engine) runKeepOutFor(session domain.FeatureID, n int, repo string) []string {
+	raw, err := os.ReadFile(filepath.Join(e.RunDir(session, n), ignoredFileOf(repo))) // #nosec G304 -- the run's own directory
 	if err != nil {
 		return nil
 	}
@@ -115,11 +244,7 @@ func (e *Engine) runKeepOut(session domain.FeatureID, n int) []string {
 // tree snapshot) as the file a step's {{run.diff}} names, and returns
 // its path.
 func (e *Engine) writeRunDiff(ctx context.Context, run *domain.Run, stepPath, now string) (string, error) {
-	dir, err := e.sessionTree(ctx, run.Session)
-	if err != nil {
-		return "", err
-	}
-	patch, _, err := worktree.DiffTrees(ctx, dir, run.StartTree, now)
+	patch, _, err := e.diffTrees(ctx, run.Session, run.StartTree, now)
 	if err != nil {
 		return "", err
 	}
@@ -135,25 +260,24 @@ func (e *Engine) StepDiff(ctx context.Context, st domain.RunStep) (string, []str
 	if st.StartTree == "" {
 		return "", nil, nil
 	}
-	dir, err := e.sessionTree(ctx, st.Session)
-	if err != nil {
-		return "", nil, err
-	}
 	end := st.EndTree
 	if end == "" {
-		if end, err = worktree.Snapshot(ctx, dir, e.runKeepOut(st.Session, st.Run)...); err != nil {
+		var err error
+		if end, err = e.snapshotRun(ctx, st.Session, st.Run); err != nil {
 			return "", nil, err
 		}
 	}
-	return e.diffTreesCached(ctx, dir, st.StartTree, end, st.EndTree != "")
+	return e.diffTreesCached(ctx, st.Session, st.StartTree, end, st.EndTree != "")
 }
 
-// diffTreesCached is DiffTrees, kept for two snapshots that are settled
+// diffTreesCached is diffTrees, kept for two snapshots that are settled
 // (keep): a tree hash names its content, so their diff never changes, and
 // a face that reads it again on every refresh need not run git each time.
-func (e *Engine) diffTreesCached(ctx context.Context, dir, a, b string, keep bool) (string, []string, error) {
+// A snapshot spanning attached repositories names each tree's hash, so it
+// keys the cache just as well.
+func (e *Engine) diffTreesCached(ctx context.Context, session domain.FeatureID, a, b string, keep bool) (string, []string, error) {
 	if !keep {
-		return worktree.DiffTrees(ctx, dir, a, b)
+		return e.diffTrees(ctx, session, a, b)
 	}
 	key := a + ".." + b
 	rt := e.wfRT()
@@ -163,7 +287,7 @@ func (e *Engine) diffTreesCached(ctx context.Context, dir, a, b string, keep boo
 	if ok {
 		return hit.patch, hit.paths, nil
 	}
-	patch, paths, err := worktree.DiffTrees(ctx, dir, a, b)
+	patch, paths, err := e.diffTrees(ctx, session, a, b)
 	if err != nil {
 		return "", nil, err
 	}
@@ -195,15 +319,11 @@ func (e *Engine) RunDiff(ctx context.Context, session domain.FeatureID, n int) (
 	if run == nil || run.StartTree == "" {
 		return "", nil, fmt.Errorf("run %d has not started", n)
 	}
-	dir, err := e.sessionTree(ctx, session)
+	now, err := e.snapshotRun(ctx, session, n)
 	if err != nil {
 		return "", nil, err
 	}
-	now, err := worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...)
-	if err != nil {
-		return "", nil, err
-	}
-	return worktree.DiffTrees(ctx, dir, run.StartTree, now)
+	return e.diffTrees(ctx, session, run.StartTree, now)
 }
 
 // --- the done-when checks -------------------------------------------------
@@ -354,15 +474,15 @@ func (e *Engine) WorkflowRevertPreviewTo(ctx context.Context, session domain.Fea
 	if err != nil {
 		return RevertPreview{}, err
 	}
+	now, err := e.snapshotRun(ctx, session, n)
+	if err != nil {
+		return RevertPreview{}, err
+	}
+	_, paths, err := e.diffTrees(ctx, session, base, now)
+	if err != nil {
+		return RevertPreview{}, err
+	}
 	dir, err := e.sessionTree(ctx, session)
-	if err != nil {
-		return RevertPreview{}, err
-	}
-	now, err := worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...)
-	if err != nil {
-		return RevertPreview{}, err
-	}
-	_, paths, err := worktree.DiffTrees(ctx, dir, base, now)
 	if err != nil {
 		return RevertPreview{}, err
 	}
@@ -495,28 +615,47 @@ func (e *Engine) WorkflowRevertTo(ctx context.Context, session domain.FeatureID,
 	if err != nil {
 		return nil, err
 	}
-	keep := e.runKeepOut(session, n)
 	base, when, err := e.revertBase(ctx, run, step)
 	if err != nil {
 		return nil, err
 	}
-	now, err := worktree.Snapshot(ctx, dir, keep...)
+	now, err := e.snapshotRun(ctx, session, n)
 	if err != nil {
 		return nil, err
 	}
 	if now != seen {
 		return nil, errors.New("the tree has changed since the revert was previewed: read what it would put back again")
 	}
-	_, paths, err := worktree.DiffTrees(ctx, dir, base, now)
+	// Each tree goes back to its own snapshot at base. A tree the run did
+	// not start with (a repository attached under it) is left alone: the run
+	// cannot prove what it made there.
+	each, err := e.diffEach(ctx, session, base, now)
 	if err != nil {
 		return nil, err
 	}
-	if err := worktree.RevertTo(ctx, dir, base, paths, keep...); err != nil {
-		return nil, err
+	basePrimary, baseAttached := domain.DecodeTrees(base)
+	var paths, primaryPaths []string
+	for _, d := range each {
+		start := basePrimary
+		if d.Repo != "" {
+			start = baseAttached[d.Repo]
+		}
+		if err := worktree.RevertTo(ctx, d.Dir, start, d.Paths, e.runKeepOutFor(session, n, d.Repo)...); err != nil {
+			return nil, err
+		}
+		for _, p := range d.Paths {
+			if d.Repo != "" {
+				p = d.Repo + ":" + p
+			} else {
+				primaryPaths = append(primaryPaths, p)
+			}
+			paths = append(paths, p)
+		}
 	}
 	// what the run (or anyone since) staged of these paths goes back too,
 	// or the next commit would bring the reverted work back
-	if err := worktree.RestoreIndex(ctx, dir, run.StartIndex, paths); err != nil {
+	// (the index kept at the start is the primary tree's)
+	if err := worktree.RestoreIndex(ctx, dir, run.StartIndex, primaryPaths); err != nil {
 		return nil, fmt.Errorf("the files are put back, but not the index: %w", err)
 	}
 	e.runNote(session, fmt.Sprintf("run %d reverted to %s: %d path%s put back", n, when, len(paths), plural(len(paths))))

@@ -2084,6 +2084,31 @@ Decided in the design interview (2026-07-03):
     landing and the owns check (§24.3–24.6) are retired. Built
     2026-10-22; §25.14 records where the build departed from §25.
 
+29. **An agent may watch on a schedule and dispatch sessions**, decided
+    2026-10-23 (§26), built (§26.8). A schedule may start a run on an agent,
+    and a recipe may hold a `run:` step — a command, no model, whose
+    declared `quietExit` ends the run with nothing but the schedule's
+    `no-change` — and a `dispatch` step that mints a session in a
+    repository the recipe names literally, with an envelope carved from
+    the agent's. An agent may propose such a schedule; the person's one
+    allowance covers the recipe and every recipe its dispatches name,
+    and enables it. This **amends §19.3d** (an agent may run a workflow
+    and dispatch sessions), **§19.9** (an agent may propose a schedule,
+    never enable one) and **§25.13** (a command step is no longer
+    deferred). Decision 28's three rules are unchanged.
+
+30. **A session may span repositories**, decided 2026-10-23 (§27), built
+    (§27.11). A session keeps its primary repository and may attach
+    others from the workspace's pool: the card's branch name is cut in
+    each, in a worktree of its own beside the primary one. The agent
+    attaches freely (`repo_attach`), as may the person, and nothing
+    lands without a person; each repository lands on its own, and the
+    card closes when every repository with commits has. This **amends
+    §19** (a session's repository), **§22** (a PR per repository),
+    **§25.6** (snapshots span the trees), **§26.4** (`repos`) and
+    **§18** (stacks refuse attachments). Decision 28's three rules are
+    unchanged.
+
 Still open:
 
 1. **Copilot SDK maturity** — verify the Go SDK exposes interrupt,
@@ -3557,6 +3582,8 @@ What that needs is small, and additive:
 
 ## 18. Stacks — slicing one piece of work into several landings
 
+> *Amended by §27 (decision 30): a card with attached repositories cannot join a stack, and a stacked card cannot attach one. A stack chains the branches of one repository.*
+
 A **stack** is an ordered chain of cards in one repository whose branches
 fork from one another: the card at the bottom forks from its own base, and
 every card above it forks from the branch of the card below. It exists for
@@ -3727,6 +3754,8 @@ apart regardless of their labels. Research cards are exempt from the whole
 question: they never cut a branch.
 
 ## 19. Freeform cards — a coding agent that happens to be a card
+
+> *Amended by §27 (decision 30): a session's repository (`Feature.Repo`) is its primary one; it may have attached repositories beside it, each with the same branch name in a worktree of its own.*
 
 Every other kind is work gummi conducts through a workflow. A **freeform
 card** (`FF-NNN`, `KindFreeform`) is the one that is not conducted at all:
@@ -3998,6 +4027,11 @@ deferred with §19.7's list. What distills into skills is the curator's
 the workspace's skill pack, never these files.
 
 ### 19.3d Agents — a session with a home of its own
+
+> **Amended by §26 (decision 29).** An agent may run a workflow in its
+> home, and a run's `dispatch` step may mint a session in a repository
+> the allowed recipe names. "Delegation is refused" and the deferred
+> "letting an agent file cards" below are history where §26 applies.
 
 A session may also be minted into **a home of its own** (`Feature.Home`):
 the third "runs in" answer, after a worktree and the main checkout. Such a
@@ -4310,6 +4344,12 @@ backend that emits `EventPermission` and takes the ruling by request id
 now exists (opencode's server), so the dock's work is its own card.
 
 ### 19.9 Schedules and heartbeats
+
+> **Amended by §26 (decision 29).** A third kind, `run`, starts a run on
+> an agent instead of sending a turn, and an agent may *propose* a
+> schedule (`schedule_propose`). Only the person's enable turns it on;
+> "an agent cannot schedule itself" below still holds for enabling,
+> editing and raising one.
 
 Freeform sessions only move when a person types. Two time-driven
 primitives, sharing one cron engine, put them on a clock:
@@ -5044,6 +5084,8 @@ it, per §20.1: neither face decides who may rewrite.
   locked.
 
 ## 22. Publishing — pushing a card's branch and opening its PR
+
+> *Amended by §27.7 (decision 30): a session that spans repositories publishes one branch and one PR per repository, each PR's body naming the others.*
 
 gummi's job used to end at a verified branch, and the last step — push
 it, open the PR, keep the PR current — was a command it printed. That
@@ -6827,6 +6869,8 @@ call returns at once, saying the run is proposed.
 
 ### 25.6 The tree and its snapshots
 
+> *Amended by §27.6 (decision 30): a run's snapshots, step diffs, reader-change flag and Revert run span the session's own tree and every attached repository's.*
+
 - **Steps run in the session's worktree.** A step is a hidden card row,
   child of the session, carrying the run's number and the step's path:
   `build/2/implement` for iteration 2 of `build`. Its agent's working
@@ -7164,7 +7208,9 @@ Review, checks and design are what a recipe chooses, and the bundled
 ### 25.13 Deferred
 
 - **Waiting on a command** without spending model turns, as a step kind
-  (Kiro's `watch` node).
+  (Kiro's `watch` node). *A single command step, `run:`, is decided in
+  §26.3; a step that polls a command inside an open run stays deferred,
+  since long waits belong to a schedule.*
 - **Narrowing a step's tools**, per step: a step has every tool its
   role's session has, and a reading role is told, not caged, to change
   no files.
@@ -7448,3 +7494,422 @@ The build follows §25, with these differences.
   `gummi resume` answers it by resuming.
 - **Revert run puts the index back.** It restored the files only, so a
   file the run had staged came back with the next commit.
+
+## 26. Watches — an agent on a schedule that dispatches sessions
+
+*Decided 2026-10-23 (decision 29); built — §26.8 says where the build departs.* This section amends §19.3d
+(an agent may run a workflow and dispatch sessions), §19.9 (an agent may
+propose a schedule, and a schedule may start a run) and §25.13 (a command
+step is no longer deferred). Where it and those sections disagree, this
+section wins.
+
+A person wants an agent to watch something — an upstream repository's
+releases, say — and, when it changes, to have work done in one of their
+repositories. Before this section none of it connected: an agent could
+not run a workflow, could not file a session and could not schedule
+itself, and every fire of a schedule or a heartbeat was a model turn. An
+hourly heartbeat that runs `curl` spent a turn every hour to learn that
+nothing had changed, and still could not start the work.
+
+A **watch** is not a new kind of thing. It is a schedule on an agent
+that starts a run of a recipe whose first step is a command. The command
+decides, with no model, whether there is anything to do. Only when there
+is does a model run, and the run's `dispatch` step mints a session in a
+repository the person allowed, with work of its own.
+
+```
+schedule ──fire──▶ run on the agent ──▶ run: gate ──quiet exit──▶ ends; row reads no-change
+                                           │ exit 0
+                                           ▼
+                                     dispatch ──▶ new session in repo X, its own run
+                                                        │
+                       the agent reads its status, sends it turns ◀─┘
+                       lands on a person's read of its diff, as a session always has
+```
+
+### 26.1 Why
+
+- **The check is free.** A command answers "has anything changed" as
+  well as a model does, for nothing. A model is spent only on a change.
+- **The agent writes the automation, not each step of it.** The person
+  describes the job once; the agent turns it into a schedule and a
+  recipe and proposes them. Afterwards the agent may read how its fires
+  ran (`cardrun`) and propose a cheaper recipe — a model step that
+  always says "no change" made a command, a step's tier lowered. Each
+  change is a new proposal.
+- **No new concept.** The cron engine, the claim before a fire, the
+  coalescing of missed fires and the envelope as the brake are §19.9's.
+  The steps, their snapshots and the run's report are §25's.
+
+### 26.2 A schedule that starts a run
+
+A third schedule kind, `run`, beside `mint` and `heartbeat`: on its
+cadence, start a run of the schedule's frozen recipe against one of the
+agent's specs, on the agent's own card. It sends no turn.
+
+- The run is on the agent. `WorkflowPropose`'s refusal of a home is
+  lifted: the home is already a git repository (§19.3d), so the run's
+  snapshots and diffs work there unchanged.
+- A fire while the agent's previous run is still open, or the agent is
+  mid-turn, is `skipped-busy`, as a heartbeat's is.
+- An agent whose envelope is spent pauses the schedule
+  (`paused-exhausted`), as a heartbeat's target does.
+
+### 26.3 The `run:` step: a command gate
+
+A step may be a command instead of an agent:
+
+```yaml
+- id: check
+  run: ./check-release.sh        # runs in the run's tree, no model
+  quietExit: 1                   # "nothing to do"
+```
+
+- It has no role, no tier and no prompt. It spends nothing.
+- **Exit 0** continues. The command's standard output is the step's
+  output, so a later step reads it as `{{check.output}}`.
+- **The exit the recipe declares** as `quietExit` ends the run quietly.
+  A plain `test`, `grep -q` or `diff -q` is a gate as it stands.
+- **Any other exit** fails the step, as a `FAILED:` line does (§25.4).
+  A broken command is never mistaken for "nothing to do".
+- gummi keeps no state for the gate. A command that needs to remember
+  the last tag it saw keeps it in a file in the agent's home.
+
+**A quiet run leaves almost nothing behind.** The schedule's row records
+`no-change` as its last status and the time as its last run. There is no
+run row, no thread item and no notification. The schedules view (TUI
+`L`, the web page, `gummi schedule list`) shows when it last checked.
+
+A `run:` step is one check, not a wait. Waiting for days belongs to the
+schedule; a step that polls a command inside an open run stays deferred
+(§25.13).
+
+### 26.4 The `dispatch` step: a session in a named repository
+
+> *Amended by §27.8 (decision 30): a dispatch may also name `repos: [...]`, literals checked like `repo`, which the minted session attaches; every dispatch repository is checked against the pool when a run or schedule is proposed.*
+
+```yaml
+- id: bump
+  dispatch:
+    repo: myrepo                 # literal; never a template
+    title: "Bump foo to {{check.output}}"
+    envelope: 5                  # dollars, as every budget a person types
+    spec: |                      # becomes the new session's spec 1
+      Upstream foo released {{check.output}}. Bump the dependency.
+    recipe: fix-until-green      # frozen into the proposal
+```
+
+- It mints a freeform session in `repo`, through `cardmint`, with an
+  envelope of its own, written in dollars (`5`, `2.50`) and stored in
+  credits like every envelope.
+- With a `recipe`, the new session holds the filled `spec` as its spec 1,
+  and the run starts on it at once. Without a recipe, `dispatch` takes a
+  `prompt` instead of a `spec`, and the filled prompt is the session's
+  opening turn.
+- **Only the repositories the recipe names.** `repo` is a literal, and
+  `Check` refuses a template there. The proposal shows every target,
+  and allowing it allows exactly those. A new repository is a new
+  proposal.
+- **The child's envelope comes out of the agent's.** An open child holds
+  the larger of its envelope and its spend; a closed one, its spend: the
+  rule delegation used (§19.10). A dispatch the agent's pool cannot
+  cover pauses the run for the person's top-up (§24.7a), never mints
+  below its envelope.
+- **The agent drives its children.** When a child's run ends, its report
+  goes to the child and a line to the agent. The agent has
+  `session_status` and `session_send`, which answer only for sessions it
+  dispatched. A child's `ask_user` reaches the person, never the agent.
+- A dispatched session is a session like any other. It lands on a
+  person's read of its diff; nothing about its parent changes that.
+
+### 26.5 The agent proposes; a person allows once
+
+An agent may propose a schedule: `schedule_propose(name, cron or preset,
+timezone?, recipe or recipe_yaml, spec)`. The proposal is a **disabled
+run-schedule row** and a line in the agent's thread. The person reads it
+in the schedules view — the cadence, the recipe's steps, every `run:`
+command verbatim and every repository a `dispatch` targets, with the
+recipe it starts there — and enables it from there.
+
+- **One allowance covers the chain.** The recipe, and every recipe its
+  `dispatch` steps name, are copied into the row (`Schedule.Prompt` holds
+  the YAML, each dispatch's `recipeYAML` the named recipe as it was at
+  proposal). Enabling it allows every run the schedule starts and every
+  run a dispatch starts. A change to any of them is a new proposal.
+- **Allowing is enabling.** The schedule is stored as §19.9 stores any:
+  disabled, and enabled only by the person's enable — that is the
+  allowance, not a decision in the thread. An agent never enables, edits
+  or deletes one; `CreateSchedule` from the tool is hard-wired off. A
+  person's edit to a row forces it off again, and a run row's recipe is
+  not editable: a different recipe is a new proposal.
+- A person may still create the same schedule by hand, from the
+  schedules view, with an agent as its target.
+
+### 26.6 What does not bend
+
+Decision 28's three rules hold, and nothing here relaxes them:
+
+- **A person allows every run** — here, by allowing a standing schedule
+  and the recipes it carries, once, the way "always allow" allows a
+  session's runs.
+- **Money is a ceiling no agent raises.** One pool, the agent's
+  envelope; a child's envelope is carved from it; a spent pool pauses.
+- **A question the run cannot settle reaches the person**, from the
+  agent's run or from any child's.
+
+An agent still never lands, publishes, enables a schedule or raises an
+envelope.
+
+### 26.7 Deferred
+
+- A per-fire history for a schedule, beyond its row's last outcome.
+- A dispatch target chosen at fire time from a list the person allowed.
+- A step that polls a command inside an open run (§25.13).
+
+### 26.8 As built
+
+What was built follows §26. Where it chose, or departs:
+
+- **A quiet exit is the recipe's first step only.** `Check` refuses
+  `quietExit` anywhere else: a run that ended quietly leaves no trace, so
+  no model may have worked before it. A quiet run deletes its row, its
+  steps and its run directory, records `no-change` on the schedule that
+  started it, and sends no turn and leaves no note. The tree is not
+  reverted.
+- **A value filled into a `run:` command is one quoted shell word**
+  (`FillShell`), not wrapped in the delimiters a prompt's are, so an
+  earlier step's output cannot add to the command it is filled into; a
+  template stands as a word of its own, never inside quotes. A
+  dispatch's title, spec and prompt are data and fill plain
+  (`FillPlain`). `{{run.diff}}` is refused in a command.
+- **A command step runs unconfined**, as the person's user in the run's
+  tree (an agent's home), through `sh -c`, killed with its process group
+  after ten minutes. It is not under `internal/sandbox`'s confinement,
+  and it inherits gummi's environment. Its end tree is a snapshot like any step's; it has no card and spends
+  nothing, and a step stored for it carries `run` or `dispatch` where a
+  role would be.
+- **A dispatch's `spec` is the child's whole spec 1**, replacing the
+  template. A recipe a dispatch carries may not itself dispatch, and
+  freezing refuses one that does.
+- **The agent's spec is not frozen into its schedule.** A run schedule
+  names the agent's spec by number, and each run freezes that spec's
+  revision as it starts, so an agent that edits the spec after the person
+  enabled the schedule changes what a model step of the watch reads. A
+  dispatch's spec is frozen in the recipe and cannot drift. Freezing the
+  agent's spec into the row is deferred.
+- **A dispatch needs a bounded agent** — the child's envelope comes out of
+  the agent's own, so an agent with no envelope fails the step — and is
+  **idempotent per step**: `dispatches` keeps the step's path, and a step
+  restarted after it minted resumes from the record.
+- **Pool accounting is one number.** `SessionPoolSpent` of an agent adds
+  what its dispatched sessions hold (`dispatchedHeld`), so the pool left,
+  the tick's spent-pool check and the driver's lines agree. A dispatch the
+  pool cannot cover pauses the run (`pauseForBudgetLocked`) and leaves the
+  step live; a top-up starts it again.
+- **A child's run end is a line, not a turn.** The agent's thread gets
+  `dispatch: session … run N ended …` as an activity line; nothing wakes
+  the agent. Its status and report are `session_status`; `session_send`
+  is a turn into a child it dispatched, and both refuse any other card.
+- **A planner's revised plan adds no command or dispatch**: what the
+  person allowed is the recipe's own.
+- **A dispatch is refused at proposal on a session that is not an agent**
+  (and fails at run time).
+- **The faces:** the schedules view (TUI `L`, the web page,
+  `gummi schedule list`) shows a run row as `run · <agent> · S<n>`, its
+  steps, commands and repositories, and the `no-change` status. A run
+  row has no edit form and no `--kind run`; proposals come from the
+  agent.
+- A schedule's `ok` outcome is written when the run starts; a quiet gate
+  overwrites its status with `no-change` after.
+- Nothing limits how many disabled run schedules an agent may propose.
+
+## 27. Sessions across repositories
+
+*Decided 2026-10-23 (decision 30); built — §27.11 says where the build
+departs.* This section amends §19 (a session's repository), §22 (a PR
+per repository), §25.6 (snapshots span the trees), §26.4 (a dispatch's
+`repos`) and §18 (stacks refuse attachments). Where it and those
+sections disagree, this section wins.
+
+### 27.1 Why
+
+Work often spans repositories: a library change and its consumer. A
+session had exactly one repository, one branch and one worktree, so the
+only way across was a dispatch, which mints a second session with a
+context of its own. The only cross-repository machinery gummi ever had
+was the retired goal (§17.2a): a branch in each repository its cards
+touched, landed once per repository, with no atomicity across them —
+git has no merge that spans repositories.
+
+Rejected: **linked sessions**, one per repository, which splits the
+context the work needs in one head; and a **fully multi-repository
+session** with no primary, which breaks every path that reads
+`Feature.Repo`. Chosen: one session, a primary repository, and
+attachments.
+
+### 27.2 The model
+
+- A session keeps its **primary repository** (`Feature.Repo`): every
+  single-repository path is unchanged, and a card with no attachment
+  behaves exactly as before.
+- It may have **attached repositories**, rows of the `attachments` table
+  (`state/attachments.go`): card, repository name, base, created-at and
+  the landed state per repository. A repository is a name in the pool
+  (`repos:` plus discovered checkouts), never a path.
+- Each attachment is the card's **same branch name** in that repository,
+  in a worktree `.gummi/worktrees/<ID>@<repo>` beside the primary one.
+  The seam is `Feature.TreeRepo` (never stored): `domain.Feature.
+  AttachedView(a)` is the card as the attached repository's manager sees
+  it, and `worktree.Manager.featurePaths` names the tree `<ID>@<repo>` for
+  it. Everything else in `internal/worktree` — `Create`, `Remove`,
+  `Dirty`, `Land`, `Diff`, `BranchAhead` — works on the view unchanged.
+  Fork points and landed commits, which the store keeps per card id, are
+  kept per tree under `<ID>@<repo>` (`Feature.TreeKey`, routed to the
+  `attachments` row).
+- The branch forks from the repository's default base, or the base given
+  at attach (a local branch of that repository).
+
+### 27.3 Attaching and detaching
+
+`Engine.AttachRepo(card, repo, base)` and `DetachRepo(card, repo)`
+(`engine/attach.go`), under the card's lock.
+
+Attach is refused for an agent (its home has no repository), a card that
+is not a session, a main-checkout card, a closed card, a stacked card, an
+empty name, a path, an unknown or ambiguous name, the primary repository
+(compared by root, so an alias cannot slip through), and one already
+attached. The branch is cut first and the row stored second; a failed
+insert removes what was cut.
+
+Detach is refused while the attachment's branch has commits past its base
+that have not landed, or its tree has changes, and while a workflow run is
+open; it then removes the worktree and the branch. A landed attachment
+may be detached. The primary is never detached.
+
+### 27.4 What the agent sees
+
+The session's start adds every attached worktree to
+`SessionOpts.WriteDirs` (claude `--add-dir`, opencode config) and a hint
+naming each repository, path, branch and base. A workflow step's card
+gets the same, through its session. An attach or detach made while the
+backend runs takes effect at its next start: the next turn restarts it
+(`FreeformSession.dirsStale`), replaying the conversation. A backend with
+no directory cage option still gets the hint and works the path with its
+shell.
+
+Every non-child session of a repository has three tools
+(`engine/repotools.go`): `repo_list`, `repo_attach(repo, base?)`,
+`repo_detach(repo)`. The agent attaches **freely, with no decision**:
+cutting a branch is cheap, and nothing lands without the person. An
+agent (a home) has none.
+
+### 27.5 Landing repository by repository
+
+`cardops.Ops.MergeRepo(id, repo, …)` (`Merge` is `MergeRepo` with the
+primary) lands one repository under the checks every landing crosses:
+open diff comments (of the card, whichever repository), an open workflow
+run (`Engine.RunHolds`), `MayLand`. `gummi merge --repo <name>` takes it.
+
+There is **no atomicity** across repositories. The card closes
+(`StageDone`) only when the primary and every attachment that has commits
+have landed: an attachment with no commits is skipped, one with
+uncommitted changes holds the card open. The `merged` event names the
+`repo` and lists the `remaining` ones. `Clean` takes a closed card's
+attached worktrees away, and the branch of each that landed or is empty.
+
+### 27.6 Runs span the trees
+
+A run's `StartTree`/`EndTree` columns keep their shape: a bare hash for a
+session that spans nothing, and for one that does, the primary's hash and
+one `<repo>=<hash>` line per attached tree (`domain.EncodeTrees`). The
+snapshots, the step and run diffs (an attached repository's patch under a
+`# repo: <name>` line, its paths as `<repo>:<path>`), the reader-change
+flag and Revert run walk every tree (`engine/workflowtree.go`). The ignored
+files a run records are per tree (`ignored@<repo>`). A tree attached
+under a run has no start snapshot and is left alone by Revert run: a run
+never deletes what it cannot prove it made. Done-when checks still run in
+the primary tree; a recipe reaches an attachment by the path the step's
+hint names.
+
+### 27.7 Publishing
+
+A person publishes each repository: `publish.PlanAll` resolves and plans
+every tree that has commits, `publish.DoAll` pushes and opens one PR per
+repository, each body carrying `Related changes in other repositories:`
+with the others' branches and, once opened, their PR URLs; once the last is
+open the earlier ones are edited to name it. Publishing stays a person's
+act: no agent, run, schedule or MCP tool reaches it. A stacked card
+stays refused. The CLI's way in is `gummi pr create <card> --all-repos`,
+which prints each repository's plan and takes one confirm (or `--yes`
+with a `repo=fingerprint` pair for each).
+
+### 27.8 Stacks and dispatch
+
+A card with attachments cannot join a stack, and a stacked card cannot
+attach (`state.ErrStackAttachments`). A dispatch step may name `repos:
+[…]` beside `repo`; they are literals, checked like `repo` (no template,
+no path, no duplicate), and the minted session attaches them. Every
+dispatch repository is checked against the pool when a run or schedule is
+proposed (`freezeDispatches`), and again when the step runs.
+
+### 27.9 What does not bend
+
+Decision 28's three rules hold. A person still allows every run; money is
+still one pool, the session's envelope; and a question the run cannot
+settle reaches the person. An open run holds every repository's landing
+and every detach. The agent attaches freely because attaching grants it
+nothing it could not do with a branch: nothing is pushed, published or
+landed without a person.
+
+### 27.10 Deferred
+
+- A stacked card with attachments.
+- Atomic landing across repositories.
+- Handing off, squashing and committing per repository from the verbs
+  (`gummi squash`/`commit` act on the primary; the agent commits an
+  attachment itself with `git -C`).
+- Publishing from the terminal board's and the web page's own dialogs per
+  repository (the CLI's `--all-repos` is the face of §27.7 so far; the
+  engine's `publish.PlanAll`/`DoAll` are what a dialog would call).
+- `gummi squash` and `commit` take no `--repo`; `gummi status --json` does
+  not list a card's repositories yet.
+- Choosing attached repositories in the terminal's new-session form
+  (`/attach` and the card menu do it afterwards; the web page's draft
+  has an "also" toggle for each).
+
+### 27.11 As built
+
+What was built follows §27. Where it chose, or departs:
+
+- **The faces.** Both read one inventory: the card's menu gains `attach
+  repository…`, `detach repository…` and `land <repo>` (`ui/repos.go`),
+  the terminal's thread head lists the repositories with the landed ones
+  marked, and its diff view switches repository with `[`/`]` and lands the
+  one shown with `L`. The web page adds a repository tab strip to the Diff
+  tab (`GET …/diff?repo=<name>`), a "Repositories" mark in the card's head,
+  and an "also" toggle on a new session (`attach` in `POST /api/cards`).
+  `/attach <repo> [base]` and `/detach <repo>` are the composer's commands
+  in both. The shapes are in `internal/webapi` with a golden
+  (`TestSpanningSessionShapes`).
+- **Diff comments belong to a repository.** `diff_annotations.repo` is
+  empty for the session's own; a comment is listed and located on the diff
+  it was written on, and every repository's open comments hold every
+  repository's landing.
+
+- The tree-set encoding rides in the existing snapshot columns: no
+  migration, and rows from before read as the primary alone.
+- Fork points and landed commits for an attached tree live in the
+  `attachments` row, reached through the same store methods by a
+  `<card>@<repo>` key.
+- `repo_list` names ambiguous folder names it will not attach.
+- A dispatch whose attach fails fails its step with the attach sentence;
+  the minted session stays.
+- An attachment whose repository the pool no longer names holds the card
+  open until it lands, its repository comes back, or a person detaches it:
+  gummi cannot read it, so nothing says it holds no unlanded work.
+- A repository name with `=` or whitespace is refused (`RepoNameOK`): the
+  run's tree set is stored as `repo=tree` lines.
+- Attaching or detaching restarts an idle backend with the new set of
+  directories, resuming its own conversation where the backend can.
+- A run's done-when checks run in the primary tree only; a check that
+  needs an attached repository names its path.

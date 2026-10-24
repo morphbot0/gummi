@@ -71,9 +71,16 @@ func (m *Shell) openDiff(f domain.Feature) tea.Cmd {
 		if strings.TrimSpace(diff) == "" {
 			return diffLoadedMsg{f: f, empty: true, drift: drift}
 		}
-		anns, err := m.store.ListDiffAnnotations(ctx, f.ID)
+		all, err := m.store.ListDiffAnnotations(ctx, f.ID)
 		if err != nil {
 			return diffLoadedMsg{err: err}
+		}
+		// a comment belongs to the repository's diff it was written on
+		var anns []domain.DiffAnnotation
+		for _, a := range all {
+			if a.Repo == f.TreeRepo {
+				anns = append(anns, a)
+			}
 		}
 		return diffLoadedMsg{f: f, diff: diff, anns: anns, drift: drift}
 	}
@@ -217,6 +224,7 @@ func (m *Shell) addDiffComment(text string) tea.Cmd {
 		return nil
 	}
 	ann := newDiffAnnotation(dv.f.ID, dv.lines, idx, text)
+	ann.Repo = dv.f.TreeRepo
 	reload := m.reloadDiff()
 	return func() tea.Msg {
 		if _, err := m.store.AddDiffAnnotation(context.Background(), ann, m.now()); err != nil {
@@ -299,6 +307,8 @@ func (dv *diffView) bindings() []binding {
 		{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
 		{key: "D", label: "delete", help: "delete the annotation at the cursor"},
 		{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
+		{key: "[ ]", label: "repository", help: "show the diff of the previous / next repository a session spans", bar: false},
+		{key: "L", label: "land repo", help: "land the attached repository shown (see [ and ])"},
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 	}
@@ -313,6 +323,17 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 		m.diff = nil
 	case "R":
 		return m.requestDiffChanges(dv)
+	case "]", "[":
+		return m.switchDiffRepo(key == "]")
+	case "L":
+		if dv.f.TreeRepo == "" {
+			m.notice = noticeMsg{text: "L lands an attached repository: switch to one with ] first"}
+			return nil
+		}
+		if r, ok := m.rowByID(dv.f.ID); ok {
+			m.diff = nil
+			return m.landRepo(r, dv.f.TreeRepo)
+		}
 	case "j", "down":
 		dv.setCursor(dv.cursor + 1)
 	case "k", "up":

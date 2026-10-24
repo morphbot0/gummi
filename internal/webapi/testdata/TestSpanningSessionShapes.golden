@@ -1,0 +1,101 @@
+{
+  "card": {
+    "id": "FF-004",
+    "kind": "freeform",
+    "type": "Session",
+    "title": "Export across lib and app",
+    "stage": "open",
+    "status": "running",
+    "spend": 0,
+    "envelope": 0,
+    "branch": "ff/export",
+    "decisionsMore": 0,
+    "actions": [
+      {
+        "id": "repo-attach",
+        "label": "attach repository",
+        "needs": "repo",
+        "choices": [
+          {
+            "value": "docs",
+            "label": "docs"
+          }
+        ]
+      },
+      {
+        "id": "repo-detach",
+        "label": "detach repository",
+        "needs": "repo",
+        "choices": [
+          {
+            "value": "lib",
+            "label": "lib"
+          }
+        ]
+      },
+      {
+        "id": "landrepo:lib",
+        "label": "land lib",
+        "needs": "message"
+      }
+    ],
+    "composer": {
+      "says": "",
+      "route": ""
+    },
+    "repos": [
+      {
+        "repo": "app",
+        "label": "app",
+        "primary": true,
+        "branch": "ff/export",
+        "ahead": true
+      },
+      {
+        "repo": "lib",
+        "label": "lib",
+        "branch": "ff/export",
+        "base": "develop",
+        "ahead": true,
+        "landed": true
+      }
+    ]
+  },
+  "diff": {
+    "repo": "lib",
+    "repos": [
+      {
+        "repo": "app",
+        "label": "app",
+        "primary": true,
+        "branch": "ff/export",
+        "ahead": true
+      },
+      {
+        "repo": "lib",
+        "label": "lib",
+        "branch": "ff/export",
+        "base": "develop",
+        "ahead": true,
+        "landed": true
+      }
+    ],
+    "base": "main",
+    "rev": "",
+    "files": [],
+    "annotations": [],
+    "pendingComments": 0
+  },
+  "attach": {
+    "repo": "docs"
+  },
+  "create": {
+    "kind": "freeform",
+    "title": "",
+    "description": "export it",
+    "repo": "app",
+    "attach": [
+      "lib"
+    ]
+  }
+}

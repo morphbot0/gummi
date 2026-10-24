@@ -99,3 +99,33 @@ func TestSessionModelsShape(t *testing.T) {
 		Switch: ActionRequest{Backend: "claude", Model: "claude-sonnet-5-5"},
 	}))
 }
+
+// TestSpanningSessionShapes: a session that spans repositories (DESIGN
+// §27) — the card's repositories, the diff of one of them, the actions that
+// attach, detach and land one, and a new session created with one attached.
+func TestSpanningSessionShapes(t *testing.T) {
+	repos := []CardRepo{
+		{Repo: "app", Label: "app", Primary: true, Branch: "ff/export", Ahead: true},
+		{Repo: "lib", Label: "lib", Branch: "ff/export", Base: "develop", Ahead: true, Landed: true},
+	}
+	golden.RequireEqual(t, marshal(t, struct {
+		Card   Card              `json:"card"`
+		Diff   Diff              `json:"diff"`
+		Attach ActionRequest     `json:"attach"`
+		Create CreateCardRequest `json:"create"`
+	}{
+		Card: Card{
+			Row:    Row{ID: "FF-004", Kind: "freeform", Type: "Session", Title: "Export across lib and app", Stage: "open", Status: StatusRunning},
+			Branch: "ff/export",
+			Actions: []Action{
+				{ID: "repo-attach", Label: "attach repository", Needs: ActionNeedsRepo, Choices: []Choice{{Value: "docs", Label: "docs"}}},
+				{ID: "repo-detach", Label: "detach repository", Needs: ActionNeedsRepo, Choices: []Choice{{Value: "lib", Label: "lib"}}},
+				{ID: "landrepo:lib", Label: "land lib", Needs: ActionNeedsMessage},
+			},
+			Repos: repos,
+		},
+		Diff:   Diff{Base: "main", Repo: "lib", Repos: repos, Files: []DiffFile{}, Annotations: []Annotation{}},
+		Attach: ActionRequest{Repo: "docs"},
+		Create: CreateCardRequest{Kind: "freeform", Description: "export it", Repo: "app", Attach: []string{"lib"}},
+	}))
+}

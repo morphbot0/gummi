@@ -77,12 +77,8 @@ func (e *Engine) RunFiles(ctx context.Context, run domain.Run, steps []domain.Ru
 	if newest == "" || newest == run.StartTree {
 		return nil
 	}
-	dir, err := e.sessionTree(ctx, run.Session)
-	if err != nil {
-		return nil
-	}
 	// both trees are snapshots, settled: their diff is read from git once
-	_, paths, err := e.diffTreesCached(ctx, dir, run.StartTree, newest, true)
+	_, paths, err := e.diffTreesCached(ctx, run.Session, run.StartTree, newest, true)
 	if err != nil {
 		return nil
 	}

@@ -21,12 +21,12 @@ import (
 func (s *Store) AddDiffAnnotation(ctx context.Context, a domain.DiffAnnotation, at time.Time) (int64, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
-		INSERT INTO diff_annotations (feature_id, file, anchor, excerpt, comment, resolved, created_at, source_ref, author)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO diff_annotations (feature_id, file, anchor, excerpt, comment, resolved, created_at, source_ref, author, repo)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (feature_id, source_ref) WHERE source_ref != '' DO NOTHING
 		RETURNING id`,
 		string(a.Feature), a.File, a.Anchor, a.Excerpt, a.Comment, boolToInt(a.Resolved),
-		at.UTC().Format(time.RFC3339Nano), a.SourceRef, a.Author).Scan(&id)
+		at.UTC().Format(time.RFC3339Nano), a.SourceRef, a.Author, a.Repo).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = s.db.QueryRowContext(ctx, `
 			SELECT id FROM diff_annotations WHERE feature_id=? AND source_ref=?`,
@@ -41,7 +41,7 @@ func (s *Store) AddDiffAnnotation(ctx context.Context, a domain.DiffAnnotation, 
 // ListDiffAnnotations returns a feature's diff annotations, oldest first.
 func (s *Store) ListDiffAnnotations(ctx context.Context, id domain.FeatureID) ([]domain.DiffAnnotation, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, feature_id, file, anchor, excerpt, comment, resolved, created_at, source_ref, author
+		SELECT id, feature_id, file, anchor, excerpt, comment, resolved, created_at, source_ref, author, repo
 		FROM diff_annotations WHERE feature_id=? ORDER BY id`, string(id))
 	if err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func (s *Store) ListDiffAnnotations(ctx context.Context, id domain.FeatureID) ([
 		var a domain.DiffAnnotation
 		var fid, created string
 		var resolved int
-		if err := rows.Scan(&a.ID, &fid, &a.File, &a.Anchor, &a.Excerpt, &a.Comment, &resolved, &created, &a.SourceRef, &a.Author); err != nil {
+		if err := rows.Scan(&a.ID, &fid, &a.File, &a.Anchor, &a.Excerpt, &a.Comment, &resolved, &created, &a.SourceRef, &a.Author, &a.Repo); err != nil {
 			return nil, err
 		}
 		a.Feature = domain.FeatureID(fid)

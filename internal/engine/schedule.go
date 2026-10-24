@@ -19,12 +19,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/rmtree"
 	"github.com/morphis/gummi/internal/schedule"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/workflowrecipe"
 )
 
 // ScheduleFire is one schedule's fire, as the board's poll and a forced
@@ -96,6 +99,14 @@ func (e *Engine) fireSchedule(ctx context.Context, s domain.Schedule, now time.T
 	record := func(o domain.ScheduleOutcome) ScheduleFire {
 		o.At = now
 		fire.Outcome = o
+		// a gate quick enough to find nothing before this fire is
+		// recorded has already said so; its no-change stands
+		if s.Kind == domain.ScheduleRun && o.Status == domain.ScheduleOK {
+			if cur, err := e.cfg.Store.Schedule(ctx, s.ID); err == nil &&
+				cur.LastStatus == domain.ScheduleNoChange && !cur.LastRun.Before(now) {
+				return fire
+			}
+		}
 		// The row's history is written even when this process is not the
 		// board: a fire whose outcome could not be recorded still
 		// advanced next_run at the claim, so it will not refire.
@@ -138,6 +149,8 @@ func (e *Engine) fireSchedule(ctx context.Context, s domain.Schedule, now time.T
 	switch s.Kind {
 	case domain.ScheduleHeartbeat:
 		return record(e.fireHeartbeat(ctx, s)), true
+	case domain.ScheduleRun:
+		return record(e.fireRun(ctx, s)), true
 	default:
 		return record(e.fireMint(ctx, s)), true
 	}
@@ -149,32 +162,11 @@ func (e *Engine) fireSchedule(ctx context.Context, s domain.Schedule, now time.T
 // conversation no longer exists has nothing to reassess and will never
 // have it back on its own.
 func (e *Engine) fireHeartbeat(ctx context.Context, s domain.Schedule) domain.ScheduleOutcome {
-	closed := func(detail string) domain.ScheduleOutcome {
-		return domain.ScheduleOutcome{
-			Status:  domain.ScheduleDisabledTargetClosed,
-			Detail:  detail,
-			Disable: true,
-		}
-	}
-	target, err := e.cfg.Store.GetFeature(ctx, s.Target)
-	if errors.Is(err, state.ErrNotFound) {
-		return closed(fmt.Sprintf("%s is gone — the heartbeat has nothing to send to", s.Target))
-	}
-	if err != nil {
-		return domain.ScheduleOutcome{Status: domain.ScheduleFailed, Detail: err.Error()}
-	}
-	if !target.IsFreeform() || target.Stage == domain.StageDone {
-		return closed(fmt.Sprintf("%s is closed — the heartbeat has nothing to send to", s.Target))
-	}
-	// The envelope is the brake, and it is the card's own: an exhausted
-	// target pauses the schedule (never raises anything) and says so.
-	if target.Budget.Envelope > 0 &&
-		target.Budget.Remaining(target.Spend.CreditEquivalent()) <= 0 {
-		return domain.ScheduleOutcome{
-			Status:  domain.SchedulePausedExhausted,
-			Detail:  fmt.Sprintf("%s has spent its budget of %s; raise it to carry on", target.ID, domain.FormatDollars(float64(target.Budget.Envelope))),
-			Disable: true,
-		}
+	target, out := e.scheduleTarget(ctx, s, "the heartbeat has nothing to send to", func(f domain.Feature) float64 {
+		return f.Spend.CreditEquivalent()
+	})
+	if out != nil {
+		return *out
 	}
 	// A fire against a target whose session is working right now is
 	// skipped, not queued: the turn would land in a conversation that has
@@ -195,6 +187,115 @@ func (e *Engine) fireHeartbeat(ctx context.Context, s domain.Schedule) domain.Sc
 		return domain.ScheduleOutcome{Status: domain.ScheduleFailed, Detail: err.Error()}
 	}
 	return domain.ScheduleOutcome{Status: domain.ScheduleOK}
+}
+
+// scheduleTarget reads the card a heartbeat or a run schedule acts on and
+// refuses it, as the outcome the fire records, when it cannot be acted on:
+// gone or closed (the schedule turns off, because what it was for has no
+// conversation left), or with its envelope spent by spent (the schedule
+// pauses, and nothing is raised).
+func (e *Engine) scheduleTarget(ctx context.Context, s domain.Schedule, gone string, spent func(domain.Feature) float64) (domain.Feature, *domain.ScheduleOutcome) {
+	closed := func(detail string) (domain.Feature, *domain.ScheduleOutcome) {
+		return domain.Feature{}, &domain.ScheduleOutcome{
+			Status:  domain.ScheduleDisabledTargetClosed,
+			Detail:  detail,
+			Disable: true,
+		}
+	}
+	target, err := e.cfg.Store.GetFeature(ctx, s.Target)
+	if errors.Is(err, state.ErrNotFound) {
+		return closed(fmt.Sprintf("%s is gone — %s", s.Target, gone))
+	}
+	if err != nil {
+		return domain.Feature{}, &domain.ScheduleOutcome{Status: domain.ScheduleFailed, Detail: err.Error()}
+	}
+	if !target.IsFreeform() || target.Stage == domain.StageDone {
+		return closed(fmt.Sprintf("%s is closed — %s", s.Target, gone))
+	}
+	// The envelope is the brake, and it is the card's own: an exhausted
+	// target pauses the schedule (never raises anything) and says so.
+	if target.Budget.Envelope > 0 && target.Budget.Remaining(spent(target)) <= 0 {
+		return domain.Feature{}, &domain.ScheduleOutcome{
+			Status:  domain.SchedulePausedExhausted,
+			Detail:  fmt.Sprintf("%s has spent its budget of %s; raise it to carry on", target.ID, domain.FormatDollars(float64(target.Budget.Envelope))),
+			Disable: true,
+		}
+	}
+	return target, nil
+}
+
+// fireRun starts a run of the schedule's frozen recipe on its agent,
+// against the agent's spec (DESIGN §26.2), already allowed: the person
+// allowed it by enabling the schedule. It sends no turn and leaves no
+// note — a run whose command gate finds nothing to do must leave nothing
+// behind — and the tick starts the run's steps.
+func (e *Engine) fireRun(ctx context.Context, s domain.Schedule) domain.ScheduleOutcome {
+	failed := func(err error) domain.ScheduleOutcome {
+		return domain.ScheduleOutcome{Status: domain.ScheduleFailed, Detail: err.Error()}
+	}
+	target, out := e.scheduleTarget(ctx, s, "the schedule has no agent to run on", func(f domain.Feature) float64 {
+		// What its open children hold frees when they close, so it
+		// never pauses the schedule: only the agent's own spend does.
+		if f.Home {
+			return e.SessionPoolSpent(ctx, f) - e.dispatchedHeld(ctx, f.ID)
+		}
+		return e.SessionPoolSpent(ctx, f)
+	})
+	if out != nil {
+		return *out
+	}
+	if !target.Home {
+		return domain.ScheduleOutcome{
+			Status:  domain.ScheduleDisabledTargetClosed,
+			Detail:  fmt.Sprintf("%s is not an agent — a run schedule starts runs on an agent", target.ID),
+			Disable: true,
+		}
+	}
+	busy := func(detail string) domain.ScheduleOutcome {
+		return domain.ScheduleOutcome{Status: domain.ScheduleSkippedBusy, Detail: detail}
+	}
+	if ff := e.Freeform(target.ID); ff != nil && ff.Busy() {
+		return busy(fmt.Sprintf("%s is mid-turn; the fire is skipped, not queued", target.ID))
+	}
+	if target.Budget.Envelope > 0 && target.Budget.Remaining(e.SessionPoolSpent(ctx, target)) <= 0 {
+		return busy(fmt.Sprintf("%s's envelope is held by its open sessions; the fire is skipped until they close", target.ID))
+	}
+	recipe, err := workflowrecipe.Parse([]byte(s.Prompt))
+	if err != nil {
+		return failed(fmt.Errorf("its recipe: %w", err))
+	}
+	if problems, _ := workflowrecipe.Check(recipe); len(problems) > 0 {
+		return failed(fmt.Errorf("its recipe cannot run: %s", strings.Join(problems, "; ")))
+	}
+	if _, ok, err := e.cfg.Store.SessionSpec(ctx, target.ID, s.Spec); err != nil || !ok {
+		return failed(fmt.Errorf("%s has no spec %d", target.ID, s.Spec))
+	}
+	unlock := e.lockRuns(target.ID)
+	defer unlock()
+	runs, err := e.cfg.Store.SessionRuns(ctx, target.ID)
+	if err != nil {
+		return failed(err)
+	}
+	for _, r := range runs {
+		if r.State.Open() || r.State == domain.RunProposed || r.State == domain.RunQueued {
+			return busy(fmt.Sprintf("run %d of %s is still going; the fire is skipped, not queued", r.N, target.ID))
+		}
+	}
+	run := &domain.Run{
+		Session: target.ID, RecipeName: recipe.Name, Recipe: recipe, RecipeYAML: s.Prompt,
+		Spec: s.Spec, State: domain.RunProposed, Schedule: s.ID, CreatedAt: e.now(),
+	}
+	if err := e.cfg.Store.CreateRun(ctx, run); err != nil {
+		return failed(err)
+	}
+	_, _ = e.writeRunFile(target.ID, run.N, "recipe.yaml", s.Prompt)
+	if err := e.startRunLocked(ctx, run); err != nil {
+		_ = e.cfg.Store.DeleteRun(ctx, target.ID, run.N)
+		_ = rmtree.RemoveAll(e.RunDir(target.ID, run.N))
+		return failed(err)
+	}
+	e.workflowEvent(target.ID)
+	return domain.ScheduleOutcome{Status: domain.ScheduleOK, Detail: fmt.Sprintf("run %d started", run.N)}
 }
 
 // fireMint mints one freeform card and kicks it off with the schedule's

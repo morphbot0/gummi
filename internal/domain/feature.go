@@ -408,6 +408,10 @@ type Feature struct {
 	// value. It is metadata for routing git operations; it never feeds a
 	// branch, worktree, or spec path.
 	Repo string
+	// TreeRepo is set only on the view AttachedView builds of a card for
+	// a repository attached to it (DESIGN §27): the worktree manager names
+	// that tree <ID>@<repo>. Never stored, never serialised.
+	TreeRepo string `json:"-"`
 	// Base is the git branch this card's work forks from and lands on,
 	// chosen at creation and changeable until the card cuts a worktree.
 	//
@@ -896,6 +900,9 @@ func (f *Feature) ArtifactFile(root string) (string, bool) {
 // Validate checks the invariants every stored feature must satisfy.
 func (f *Feature) Validate() error {
 	if _, err := ParseFeatureID(string(f.ID)); err != nil {
+		return err
+	}
+	if err := f.validateTreeRepo(); err != nil {
 		return err
 	}
 	if f.Kind != "" && !f.Kind.Valid() {

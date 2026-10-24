@@ -25,4 +25,7 @@ type DiffAnnotation struct {
 	// §20.3); empty for the terminal, an agent, or a pulled review thread
 	// (which names its reviewer in its body).
 	Author string
+	// Repo names the attached repository the comment is about (DESIGN
+	// §27); empty is the session's own repository.
+	Repo string
 }

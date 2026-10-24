@@ -49,6 +49,9 @@ type featureRow struct {
 	// does, so a sentence built from it is never missing a word.
 	BaseBranch       string
 	OpenDiffComments int // unresolved diff annotations
+	// Repos are the repositories a session spans, its own first; nil for
+	// a card with nothing attached (DESIGN §27).
+	Repos []engine.RepoView
 	// Foreign is the live session another gummi process is running on this
 	// card (a headless run/resume, a second board), resolved at load from
 	// the card's live file. The board cannot drive a card someone else
@@ -294,6 +297,9 @@ func (m *Shell) loadRows() tea.Msg {
 			}
 		}
 		row.OpenDiffComments = m.openDiffComments(f.ID)
+		if m.engine != nil && spansRepos(f) {
+			row.Repos = m.engine.RepoViews(ctx, f)
+		}
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
 		if hasSessionSpec(f) {
 			if path, ok := m.store.SessionSpecFile(ctx, m.wt.Root(), f.ID, 1); ok {

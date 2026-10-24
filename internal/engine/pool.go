@@ -26,7 +26,11 @@ func (e *Engine) sessionPoolLeft(ctx context.Context, sess domain.Feature) (floa
 // an old database spent. It is the session's spend wherever a reader
 // reports one against its envelope (the driver's done and exhausted lines).
 func (e *Engine) SessionPoolSpent(ctx context.Context, sess domain.Feature) float64 {
-	return sess.Spend.CreditEquivalent() + e.legacyCrewsSpent(ctx, sess.ID) + e.sessionRunsSpent(ctx, sess.ID)
+	t := sess.Spend.CreditEquivalent() + e.legacyCrewsSpent(ctx, sess.ID) + e.sessionRunsSpent(ctx, sess.ID)
+	if sess.Home {
+		t += e.dispatchedHeld(ctx, sess.ID)
+	}
+	return t
 }
 
 // legacyCrewsSpent is what the crews a session ran before workflows

@@ -353,6 +353,10 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleSpecList(s, tc)
 	case workflowRecipesToolName, workflowRunToolName, workflowStatusToolName, workflowSteerToolName, workflowStopToolName:
 		e.handleWorkflowTool(s, tc)
+	case scheduleProposeToolName, sessionStatusToolName, sessionSendToolName:
+		e.handleAgentTool(s, tc)
+	case repoListToolName, repoAttachToolName, repoDetachToolName:
+		e.handleRepoTool(s, tc)
 	case skillReadTool, skillManageTool:
 		e.handleSkillTool(s, tc)
 	default:

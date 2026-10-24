@@ -77,7 +77,9 @@ covers.
 Any other message sent to a live session (a steer, a consult, a freeform
 turn) gets a short acknowledgement quoting it; a freeform card's turn
 also edits a file so its diff is non-empty. A freeform turn
-containing [watch] starts a Monitor watch it leaves open, one containing
+containing [watch] starts a Monitor watch it leaves open, a line
+[call <tool> <json args>] calls that gummi tool and says what it answered,
+one containing
 [ask] asks the person which way with ask_user and says back what they
 answered, one containing [spec] writes the session's spec before its edit,
 and one containing [tasks-done] completes its checklist.
@@ -693,6 +695,16 @@ def freeform_turn(turn, text):
     if "[workflow" in text:
         workflow_session(turn, text)
         return
+    calls = CALL_RE.findall(text)
+    if calls:
+        # [call <tool> <json args>] lines: each calls one of the session's
+        # gummi tools in order and says back what it answered, so a test
+        # can drive repo_attach, schedule_propose and the rest
+        said = []
+        for name, args in calls:
+            said.append("%s: %s" % (name, call_tool(name, args=json.loads(args)).strip()))
+        turn.say("\n\n".join(said))
+        return
     if "[watch]" in text:
         # a Monitor watch the turn leaves open: no result comes for it, so
         # the card reads as watching once the turn is over
@@ -783,6 +795,8 @@ WORKFLOW_DONE_WHEN = """```gummi-done-when
 
 # the step brief's head: "You are step build/1/implement of workflow run 1
 # (the deliver recipe) in gummi: a implementer. ..."
+# A [call <tool> <json>] line, one tool call each (freeform_turn).
+CALL_RE = re.compile(r"^\[call (\w+) (\{.*\})\]$", re.M)
 STEP_RE = re.compile(r"You are step (\S+) of workflow run (\d+) \(([^)]*)\) in gummi: an? (\w+)\.")
 
 # STEP is the step this process answers for, once its brief has arrived: a
@@ -1049,7 +1063,7 @@ def detect(frame):
     if "Task: Rebase onto" in hints:
         # the rebase-resolve pass borrows the card's stage; it is its own job
         ctx["stage"] = "rebase"
-    elif "a freeform card" in hints:
+    elif "a freeform card" in hints or "an agent: a long-lived session" in hints:
         ctx["stage"] = "open"
     elif re.search(r"^(Stage: Plan critique|Research critique)", hints, re.M):
         ctx["stage"] = "critique"

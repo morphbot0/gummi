@@ -92,6 +92,10 @@ func (s *Store) CreateStack(ctx context.Context, st *domain.Stack, at time.Time)
 	return nil
 }
 
+// ErrStackAttachments refuses a card that has repositories attached to
+// join a stack: a stack chains one repository's branches (DESIGN §27).
+var ErrStackAttachments = errors.New("it has attached repositories; detach them before stacking it")
+
 // StartStack creates a stack with bottom at its foot, named name — or,
 // when name is empty, after the bottom card's slug, which is the only name
 // that means anything at the moment a stack is born. The id comes from the
@@ -106,6 +110,11 @@ func (s *Store) StartStack(ctx context.Context, bottom domain.FeatureID, name st
 	f, err := s.GetFeature(ctx, bottom)
 	if err != nil {
 		return domain.Stack{}, err
+	}
+	if atts, err := s.ListAttachments(ctx, bottom); err != nil {
+		return domain.Stack{}, err
+	} else if len(atts) > 0 {
+		return domain.Stack{}, fmt.Errorf("starting a stack on %s: %w", f.ID, ErrStackAttachments)
 	}
 	if f.StackID != "" {
 		return domain.Stack{}, fmt.Errorf("%s is already in stack %s", f.ID, f.StackID)
@@ -267,6 +276,13 @@ func (s *Store) AddToStack(ctx context.Context, id domain.StackID, card domain.F
 		if f.StackID == "" {
 			if err := freeformStackable(f); err != nil {
 				return fmt.Errorf("adding %s to %s: %w", card, id, err)
+			}
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM attachments WHERE card = ?`, string(card)).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return fmt.Errorf("adding %s to %s: %w", card, id, ErrStackAttachments)
 			}
 		}
 		if f.Repo != st.Repo {

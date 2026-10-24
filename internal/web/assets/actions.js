@@ -40,7 +40,7 @@ function goLabel (a) { return GO[a.id] || cap(a.label) }
 // — the merge, and "next stage" where it lands (the server words that row
 // as the landing and marks it dangerous).
 function isLandingEntry (card, a) {
-  return a.id === 'merge' || a.id === 'squash' || (a.id === 'advance' && card.stage === 'verify' && !!a.danger)
+  return a.id === 'merge' || a.id === 'squash' || a.id.startsWith('landrepo:') || (a.id === 'advance' && card.stage === 'verify' && !!a.danger)
 }
 
 export async function runAction (card, a) {

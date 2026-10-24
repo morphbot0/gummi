@@ -65,7 +65,7 @@ func (m *Manager) RebaseOnto(ctx context.Context, f *domain.Feature, oldBase str
 		return err
 	}
 	if _, statErr := os.Stat(p); statErr != nil {
-		return m.forkStore.ClearForkPoint(ctx, f.ID)
+		return m.forkStore.ClearForkPoint(ctx, forkKey(f))
 	}
 	// The card's OWN base, not the checkout's HEAD: a stacked card's base
 	// is the branch of the card below it, and targeting the checkout's
@@ -90,7 +90,7 @@ func (m *Manager) RebaseOnto(ctx context.Context, f *domain.Feature, oldBase str
 		}
 		return &RebaseConflictError{Files: conflicts}
 	}
-	return m.forkStore.ReanchorForkPoint(ctx, f.ID, head)
+	return m.forkStore.ReanchorForkPoint(ctx, forkKey(f), head)
 }
 
 // Ahead counts the commits branch carries that base does not, measured

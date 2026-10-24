@@ -29,6 +29,11 @@ function noteRead (id, rev) {
   storage.set(`readRev:${id}`, rev)
 }
 
+// A session that spans repositories (DESIGN §27) reads one repository's
+// diff at a time: the repository shown, per card ("" is its own).
+const repoOf = new Map() // card id -> attached repository shown
+const repoQ = (id, joiner = '?') => (repoOf.get(id) ? `${joiner}repo=${encodeURIComponent(repoOf.get(id))}` : '')
+
 export const diffTab = {
   name: 'diff',
   // an agent has no branch: nothing to diff, log or publish
@@ -37,7 +42,8 @@ export const diffTab = {
   key: 'g d',
   fetch: (id) => {
     const since = sinceOn.has(id) ? baseline.get(id) : null
-    return get(cardPath(id, 'diff') + (since ? `?since=${encodeURIComponent(since)}` : ''))
+    const q = [since ? `since=${encodeURIComponent(since)}` : '', repoOf.get(id) ? `repo=${encodeURIComponent(repoOf.get(id))}` : ''].filter(Boolean)
+    return get(cardPath(id, 'diff') + (q.length ? '?' + q.join('&') : ''))
   },
   empty: (d) => !d || !d.files?.length,
   count: (d) => d?.files?.length || 0,
@@ -95,6 +101,7 @@ function render (pane, entry, ctx) {
   // the gate, so it is drawn above the files where it can be resolved:
   // an orphaned anchor degrades, it never vanishes
   const loose = anns.filter(a => a.idx < 0 && !paths.has(a.file))
+  if (d?.repos?.length > 1) pane.append(repoTabs(d, ctx))
   if (!d || !d.files?.length) {
     if (d?.drift) pane.append(driftBar(d, ctx))
     pane.append(h('div', { class: 'empty', testid: 'diff-none' }, h('b', null, 'No code yet'),
@@ -126,6 +133,10 @@ function render (pane, entry, ctx) {
   // view as the diff scrolls: they are what a reader acts on from anywhere
   const top = h('div', { class: 'dtop' })
   pane.append(top)
+  if (d.repo) {
+    const land = (ctx.card?.actions || []).find(a => a.id === `landrepo:${d.repo}`)
+    if (land && !ctx.closed) top.append(h('button', { class: 'btn', type: 'button', testid: 'diff-land-repo', title: land.detail || land.label, onclick: () => runAction(ctx.card, land) }, `Land ${d.repo}`))
+  }
   top.append(h('div', { class: 'diffhead', testid: 'diff-head' },
     h('span', null, 'against ', h('span', { class: 'mono' }, d.base || '—')),
     h('span', null, 'at ', h('span', { class: 'mono', testid: 'diff-rev' }, String(d.rev || '').slice(0, 7))),
@@ -323,7 +334,7 @@ function editBox (ctx, a) {
     const btn = e.currentTarget
     btn.disabled = true
     try {
-      const d = await patch(cardPath(ctx.id, `diff/annotations/${a.id}`), { comment })
+      const d = await patch(cardPath(ctx.id, `diff/annotations/${a.id}`) + repoQ(ctx.id), { comment })
       edits.delete(a.id)
       toast('Comment changed')
       ctx.swap(d && d.files ? d : null)
@@ -346,7 +357,7 @@ function editBox (ctx, a) {
 async function act (ctx, a, what) {
   try {
     const path = cardPath(ctx.id, `diff/annotations/${a.id}`)
-    const res = what === 'delete' ? await del(path) : await post(path + '/resolve', { resolved: what !== 'reopen' })
+    const res = what === 'delete' ? await del(path + repoQ(ctx.id)) : await post(path + '/resolve' + repoQ(ctx.id), { resolved: what !== 'reopen' })
     if (what === 'delete') editsOf(ctx.id).delete(a.id)
     toast({ delete: 'Comment deleted', resolve: 'Comment resolved', reopen: 'Comment reopened' }[what])
     ctx.swap(res && res.files ? res : null)
@@ -379,7 +390,7 @@ function commentBox (ln, ctx, saved) {
     const btn = e.currentTarget
     btn.disabled = true
     try {
-      const d = await post(cardPath(ctx.id, 'diff/annotations'), { idx: ln.idx, comment, text: ln.text })
+      const d = await post(cardPath(ctx.id, 'diff/annotations') + repoQ(ctx.id), { idx: ln.idx, comment, text: ln.text })
       drafts.delete(ln.idx)
       toast(ctx.card?.decision ? 'Comment added. It goes with your next answer.' : 'Comment added')
       ctx.swap(d && d.files ? d : null)
@@ -399,6 +410,21 @@ function commentBox (ln, ctx, saved) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) box.querySelector('[data-testid="annotation-save"]').click()
   })
   return box
+}
+
+// repoTabs is the switcher of a session that spans repositories: one tab
+// for each, its own first, with a mark on the ones that have landed.
+function repoTabs (d, ctx) {
+  const shown = d.repo || ''
+  return h('div', { class: 'seg repotabs', role: 'group', 'aria-label': 'Repository', testid: 'diff-repos' },
+    ...d.repos.map(r => {
+      const name = r.primary ? '' : r.repo
+      return h('button', {
+        type: 'button', class: shown === name && 'on', testid: `diff-repo-${r.label}`, 'aria-pressed': String(shown === name),
+        title: `${r.label} · ${r.branch}${r.landed ? ' · landed' : r.ahead ? ' · has commits' : ''}`,
+        onclick: () => { if (name) repoOf.set(ctx.id, name); else repoOf.delete(ctx.id); ctx.swap(null) }
+      }, r.label + (r.landed ? ' ✓' : ''))
+    }))
 }
 
 // driftBar says a card's base no longer carries the commit it forked

@@ -36,6 +36,15 @@ func TestScheduleShapes(t *testing.T) {
 			Target: "FF-007",
 			Cron:   "0 * * * *", Prompt: "check CI, keep going",
 			Enabled: false,
+		}, {
+			ID: "watch-foo", Name: "watch foo", Kind: "run", Target: "FF-003", Spec: 1,
+			Cron: "0 * * * *", Prompt: "name: watch\n",
+			Recipe: &ScheduleRecipe{
+				Steps:    []string{"check · run", "bump · dispatch"},
+				Commands: []string{"check: ./check-release.sh"},
+				Repos:    []string{"myrepo · envelope 5 · fix-until-green"},
+			},
+			LastRun: scheduleAt, LastStatus: "no-change", LastDetail: "nothing to do",
 		}}},
 		Create: ScheduleRequest{
 			Name: "nightly triage", Kind: "mint", Repo: "gummi", Every: "1h",

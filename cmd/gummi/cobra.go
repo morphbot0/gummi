@@ -517,6 +517,7 @@ func bindHandoffFlags(fs *pflag.FlagSet) { keepBranchFlag(fs) }
 func bindMergeFlags(fs *pflag.FlagSet) {
 	fs.StringP("message", "m", "", "landing commit message (required for a squash; - reads from stdin)")
 	fs.Bool("no-squash", false, "land as a merge commit keeping the branch's commits (default: one squash commit); -m is optional and git's merge message is used without it")
+	fs.String("repo", "", "land this attached repository of a session that spans several (default: the session's own); the card closes once every repository with commits has landed")
 	keepBranchFlag(fs)
 }
 
@@ -630,6 +631,7 @@ func bindPublishFlags(cmd *cobra.Command, fs *pflag.FlagSet) {
 	case prCreateCmd, prUpdateCmd:
 		if cmd == prCreateCmd {
 			fs.String("repo", "", "open the PR in this repository (`owner/name`): a fork's own or its parent's, remembered once the PR opens")
+			fs.Bool("all-repos", false, "a session that spans repositories: push and open one PR per repository that has commits, each body naming the others (--yes then takes repo=fingerprint pairs, comma-separated)")
 		}
 		fs.String("title", "", "the PR's title (create: default from the card and its commits)")
 		fs.String("body-file", "", "read the PR's body from this file, or - for stdin")

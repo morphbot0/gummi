@@ -1,0 +1,119 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+)
+
+const (
+	repoListToolName   = "repo_list"
+	repoAttachToolName = "repo_attach"
+	repoDetachToolName = "repo_detach"
+)
+
+// repoTools is a session's way to span repositories (DESIGN §27). It
+// attaches freely: cutting a branch is cheap and nothing lands without the
+// person.
+func repoTools() []agent.ToolDef {
+	return []agent.ToolDef{
+		mkTool(repoListToolName,
+			"List the repositories in the workspace's pool, this session's own repository and the ones attached to it, "+
+				"with each attachment's worktree path, branch and base.", map[string]any{}),
+		mkTool(repoAttachToolName,
+			"Attach another repository of the workspace to this session when the work spans it: gummi cuts this session's "+
+				"branch name there, from the repository's default base or the base you give, in a worktree beside this one. "+
+				"A repository is named, never given as a path. You edit and commit there with git -C <path>; the backend "+
+				"opens the new directory at its next start. Nothing lands without the person.",
+			map[string]any{
+				"repo": str("A repository's name, as repo_list gives it."),
+				"base": str("A branch of that repository to fork from, if not its default."),
+			}, "repo"),
+		mkTool(repoDetachToolName,
+			"Detach an attached repository: removes its worktree and branch. Refused while that branch holds commits "+
+				"that have not landed or its tree holds changes. This session's own repository is never detached.",
+			map[string]any{"repo": str("The attached repository's name.")}, "repo"),
+	}
+}
+
+const sessionRepoHint = `This session may span repositories (gummi's DESIGN §27). repo_list shows the repositories there are and any attached to you; repo_attach cuts this session's branch in another one, in a worktree beside yours, and repo_detach drops an empty one. Commit in each repository's worktree; each lands on its own, on the person's read of its diff.`
+
+func (e *Engine) handleRepoTool(s *Session, tc *agent.ToolCall) {
+	f := s.Feature
+	if !isSession(f) || f.Home {
+		e.resolveNow(s, tc.ID, tc.Name+" is a repository session's tool: this card is not one")
+		return
+	}
+	ctx := context.Background()
+	var a struct {
+		Repo string `json:"repo"`
+		Base string `json:"base"`
+	}
+	_ = json.Unmarshal(tc.Args, &a)
+	var out string
+	var err error
+	switch tc.Name {
+	case repoListToolName:
+		out = e.repoListText(ctx, f)
+	case repoAttachToolName:
+		var att domain.Attachment
+		if att, err = e.AttachRepo(ctx, f.ID, a.Repo, a.Base); err == nil {
+			v := f.AttachedView(att)
+			path := ""
+			for _, t := range e.attachedTrees(ctx, f) {
+				if t.Att.Repo == att.Repo {
+					path = t.Path
+				}
+			}
+			out = fmt.Sprintf("attached %s: worktree %s on branch %s. Your backend opens it at its next start; until then reach it with git -C %s and the shell.",
+				att.Repo, path, v.BranchName(), path)
+		}
+	case repoDetachToolName:
+		if err = e.DetachRepo(ctx, f.ID, a.Repo); err == nil {
+			out = "detached " + a.Repo
+		}
+	}
+	if err != nil {
+		out = "error: " + err.Error()
+	}
+	e.resolveNow(s, tc.ID, out)
+}
+
+func (e *Engine) repoListText(ctx context.Context, f domain.Feature) string {
+	var b strings.Builder
+	own := f.Repo
+	if own == "" {
+		own = "(the workspace's default)"
+	}
+	fmt.Fprintf(&b, "this session's repository: %s, branch %s\n", own, f.BranchName())
+	attached := map[string]bool{}
+	for _, t := range e.attachedTrees(ctx, f) {
+		attached[t.Att.Repo] = true
+		base := t.Att.Base
+		if base == "" {
+			base = "default base"
+		}
+		landed := ""
+		if t.Att.Landed() {
+			landed = ", landed"
+		}
+		fmt.Fprintf(&b, "attached: %s: %s (branch %s, from %s%s)\n", t.Att.Repo, t.Path, t.View.BranchName(), base, landed)
+	}
+	var free []string
+	for _, n := range e.repoNames() {
+		if n != f.Repo && !attached[n] {
+			free = append(free, n)
+		}
+	}
+	fmt.Fprintf(&b, "available to attach: %s\n", strings.Join(free, ", "))
+	if e.pool != nil {
+		for name := range e.pool.Ambiguous() {
+			fmt.Fprintf(&b, "ambiguous (not attachable until pinned under repos: in config): %s\n", name)
+		}
+	}
+	return b.String()
+}

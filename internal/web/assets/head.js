@@ -77,6 +77,8 @@ function render () {
       stages(c),
       c.home ? h('span', { class: 'home', testid: 'card-home' }, h('i', { 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'mono' }, c.home)) : null,
       c.home ? h('span', null, 'no repository') : null,
+      state.card?.repos?.length > 1 ? h('span', { class: 'repos', testid: 'card-repos', title: 'The repositories this session spans' },
+        state.card.repos.map((r, i) => [i ? ' · ' : '', h('span', { class: ['mono', r.landed && 'landed'], title: `${r.branch}${r.landed ? ' · landed' : r.ahead ? ' · has commits' : ''}` }, r.label + (r.landed ? ' ✓' : ''))])) : null,
       h('span', { class: 'sp' }),
       c.pr ? h('span', { class: 'mono', testid: 'card-pr' }, c.pr) : null,
       c.elsewhere ? h('span', null, 'driven by another gummi') : null,

@@ -37,11 +37,15 @@ const (
 	// ScheduleHeartbeat sends the stored prompt as a turn into one
 	// existing freeform session, whose id is Target.
 	ScheduleHeartbeat ScheduleKind = "heartbeat"
+	// ScheduleRun starts a run of the stored recipe (Prompt holds its
+	// YAML) on one agent, Target, against its spec Spec, and sends no
+	// turn (DESIGN §26.2).
+	ScheduleRun ScheduleKind = "run"
 )
 
-// Valid reports whether the kind is one of the two.
+// Valid reports whether the kind is one of the three.
 func (k ScheduleKind) Valid() bool {
-	return k == ScheduleMint || k == ScheduleHeartbeat
+	return k == ScheduleMint || k == ScheduleHeartbeat || k == ScheduleRun
 }
 
 // ScheduleStatus is the last fire's outcome, as the store's one row of
@@ -56,6 +60,9 @@ const (
 	SchedulePausedExhausted      ScheduleStatus = "paused-exhausted"
 	ScheduleDisabledTargetClosed ScheduleStatus = "disabled-target-closed"
 	ScheduleFailed               ScheduleStatus = "failed"
+	// ScheduleNoChange is a run whose command gate said there was nothing
+	// to do (DESIGN §26.3): no run row, no thread item, no notification.
+	ScheduleNoChange ScheduleStatus = "no-change"
 )
 
 // Disables reports whether an outcome with this status turns the schedule
@@ -102,8 +109,11 @@ type Schedule struct {
 	// this type cannot, because the cron package imports this one.
 	Cron     string
 	Timezone string // IANA name; empty means local
-	// Prompt is the mint's opening turn or the heartbeat's recurring turn.
+	// Prompt is the mint's opening turn or the heartbeat's recurring turn;
+	// on a run schedule, the frozen recipe's YAML.
 	Prompt string
+	// Spec is the run schedule's spec on its agent; 0 on the other kinds.
+	Spec int
 	// Backend and Model are the mint's session backend and model (the
 	// same pair a hand-minted freeform card can name); empty is the
 	// profile's implementer. A heartbeat spends its target's session and
@@ -151,7 +161,7 @@ func (s *Schedule) Validate() error {
 		return fmt.Errorf("schedule %s name is %d chars, max %d", s.ID, len(s.Name), maxScheduleNameLen)
 	}
 	if !s.Kind.Valid() {
-		return fmt.Errorf("schedule %s has kind %q: want %q or %q", s.ID, s.Kind, ScheduleMint, ScheduleHeartbeat)
+		return fmt.Errorf("schedule %s has kind %q: want %q, %q or %q", s.ID, s.Kind, ScheduleMint, ScheduleHeartbeat, ScheduleRun)
 	}
 	if strings.TrimSpace(s.Cron) == "" {
 		return fmt.Errorf("schedule %s has no cron", s.ID)
@@ -182,6 +192,16 @@ func (s *Schedule) Validate() error {
 		if s.Envelope != 0 {
 			return fmt.Errorf("schedule %s: a heartbeat has no envelope; %s's is the brake", s.ID, s.Target)
 		}
+	case ScheduleRun:
+		if !isFreeformID(s.Target) {
+			return fmt.Errorf("schedule %s: a run schedule names the agent its runs start on", s.ID)
+		}
+		if s.Spec < 1 {
+			return fmt.Errorf("schedule %s: a run schedule names the agent's spec its runs are judged against", s.ID)
+		}
+		if s.Repo != "" || s.Backend != "" || s.Model != "" || s.Envelope != 0 {
+			return fmt.Errorf("schedule %s: a run schedule spends its agent's envelope and names no repository, backend, model or envelope", s.ID)
+		}
 	case ScheduleMint:
 		if s.Target != "" {
 			return fmt.Errorf("schedule %s: a mint mints fresh cards and names no target", s.ID)
@@ -197,11 +217,11 @@ func (s *Schedule) Validate() error {
 // id is safe to print in a notice and carries no path separators.
 var scheduleIDRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-// lastStatusKnown reports whether v is one of the five recorded statuses.
+// lastStatusKnown reports whether v is one of the recorded statuses.
 func lastStatusKnown(v ScheduleStatus) bool {
 	switch v {
 	case ScheduleOK, ScheduleSkippedBusy, SchedulePausedExhausted,
-		ScheduleDisabledTargetClosed, ScheduleFailed:
+		ScheduleDisabledTargetClosed, ScheduleFailed, ScheduleNoChange:
 		return true
 	}
 	return false

@@ -94,6 +94,9 @@ type nextInput struct {
 	// switch to another agent or model needs a backend to start, and
 	// without one the row would only ever refuse what it offered.
 	agentWired bool
+	// otherRepos is whether the workspace has more than one repository,
+	// which is what makes attaching one to a session an offer at all.
+	otherRepos bool
 
 	openDiffComments int // unresolved diff annotations (hold a landing)
 
@@ -263,6 +266,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	// a session's model switch needs an agent to start, and a board with
 	// no engine has none to start (cardactions.go's model row).
 	in.agentWired = m.engine != nil
+	in.otherRepos = m.engine != nil && len(m.repoNames) > 0
 	if r.Drift != nil {
 		in.drifted, in.driftForkedFrom, in.driftMissingBase = true, r.Drift.ForkedFrom, r.Drift.MissingBase
 	}

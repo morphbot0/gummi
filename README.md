@@ -24,7 +24,9 @@ a PR — it lands only when you say so.
 
 An agent is a session with a home of its own instead of a repository —
 a standing assistant for research, triage or ops. Sessions and agents
-can come back on a schedule or a heartbeat.
+can come back on a schedule or a heartbeat, and an agent can **watch**:
+a schedule you allow runs a cheap command check, and only when it finds
+something does a model start work in a repository you named.
 
 ## Dynamic workflows
 
@@ -43,6 +45,9 @@ and revert it in one click. Recipes are plain YAML — use the bundled
   earns it, a cheap one elsewhere.
 - **Anywhere** — loopback or your tailnet (`gummi web --tailscale`),
   with push notifications.
+- **Across repositories** — a session may attach other repositories of
+  the workspace: the same branch in each, landed one repository at a
+  time, one pull request each.
 - **Terminal and headless** — the same board as a TUI (`gummi`), or
   driven from scripts, CI or another agent (`gummi run`).
 

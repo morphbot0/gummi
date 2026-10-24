@@ -454,14 +454,24 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	switch {
 	case !isSession(sess):
 		return nil, fmt.Errorf("%s cannot run a workflow: only a session can", session)
-	case sess.Home:
-		return nil, fmt.Errorf("%s is an agent: its home is no tree a workflow runs in", session)
 	case sess.Stage == domain.StageDone:
 		return nil, fmt.Errorf("%s is closed", session)
 	}
 	recipe, name, text, err := e.loadRecipe(req)
 	if err != nil {
 		return nil, err
+	}
+	if len(dispatchesOf(recipe)) > 0 && !sess.Home {
+		return nil, fmt.Errorf("%s is not an agent: only an agent's recipe dispatches sessions", session)
+	}
+	if changed, err := e.freezeDispatches(&recipe); err != nil {
+		return nil, err
+	} else if changed {
+		b, err := workflowrecipe.Marshal(recipe)
+		if err != nil {
+			return nil, err
+		}
+		text = string(b)
 	}
 	problems, warnings := workflowrecipe.Check(recipe)
 	if len(problems) > 0 {
@@ -622,6 +632,7 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 	fmt.Fprintf(&b, "Run the %s workflow on spec S%d%s? It is judged against revision %d of the spec, frozen now: "+
 		"a later edit reaches the run as a note.\n\nSteps:\n", recipeLabel(run), run.Spec, title, run.SpecRev)
 	e.writeRecipeTree(&b, sess.Profile, run.Recipe.Steps, "")
+	writeAllowance(&b, run.Recipe)
 	if len(warnings) > 0 {
 		b.WriteString("\nWarnings:\n- " + strings.Join(warnings, "\n- ") + "\n")
 	}
@@ -654,6 +665,14 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 // model it runs on under profile.
 func (e *Engine) writeRecipeTree(b *strings.Builder, profile string, es []domain.Entry, indent string) {
 	stepLine := func(s domain.Step, mark string) {
+		switch {
+		case s.Run != "":
+			fmt.Fprintf(b, "%s- %s%s · run\n", indent, mark, s.ID)
+			return
+		case s.Dispatch != nil:
+			fmt.Fprintf(b, "%s- %s%s · dispatch → %s\n", indent, mark, s.ID, s.Dispatch.Repo)
+			return
+		}
 		fmt.Fprintf(b, "%s- %s%s · %s · %s\n", indent, mark, s.ID, s.Role, e.stepModelWords(profile, s.Role, s.Slot))
 	}
 	for _, en := range es {
@@ -775,11 +794,10 @@ func (e *Engine) startRunLocked(ctx context.Context, run *domain.Run) error {
 	if err != nil {
 		return err
 	}
-	ignored, err := e.recordRunIgnored(ctx, run.Session, run.N, dir)
-	if err != nil {
+	if err := e.recordRunIgnored(ctx, run.Session, run.N); err != nil {
 		return fmt.Errorf("listing the tree's ignored files: %w", err)
 	}
-	tree, err := worktree.Snapshot(ctx, dir, ignored...)
+	tree, err := e.snapshotRun(ctx, run.Session, run.N)
 	if err != nil {
 		return fmt.Errorf("snapshotting the tree: %w", err)
 	}
@@ -1743,7 +1761,7 @@ func (e *Engine) newStepLocked(ctx context.Context, run *domain.Run, a workflowp
 		return fmt.Errorf("the recipe has no step %s", a.Step)
 	}
 	inst := domain.RunStep{
-		Session: run.Session, Run: run.N, Path: a.Path, StepID: a.Step, Role: def.Role, Slot: def.Slot,
+		Session: run.Session, Run: run.N, Path: a.Path, StepID: a.Step, Role: domain.WorkflowRole(def.Kind()), Slot: def.Slot,
 		State: domain.StepRunning, StartedAt: e.now(),
 	}
 	if _, exists := have[a.Path]; exists {
@@ -1989,7 +2007,8 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	endTree := ""
 	if err != nil {
 		treeErr = err
-	} else if endTree, err = worktree.Snapshot(ctx, dir, e.runKeepOut(session, n)...); err != nil {
+	} else if endTree, err = e.snapshotRun(ctx, session, n); err != nil {
+		// every tree the run spans: the primary and each attachment's
 		treeErr, endTree = err, ""
 	}
 	if treeErr != nil && end == domain.RunDone {
@@ -2015,7 +2034,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	}
 	var paths []string
 	if endTree != "" {
-		_, paths, _ = worktree.DiffTrees(ctx, dir, run.StartTree, endTree)
+		_, paths, _ = e.diffTrees(ctx, session, run.StartTree, endTree)
 	}
 	var commits []string
 	if run.StartHead != "" && dir != "" {
@@ -2047,6 +2066,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	_, _ = e.writeRunFile(session, n, "report.md", report)
 	e.writeRunReport(ctx, cur)
 	e.runNote(session, fmt.Sprintf("run %d ended %s", n, end))
+	e.noteDispatcher(ctx, session, n, end)
 	msg := fmt.Sprintf("Workflow run %d has reported. Read the report and the diff it left in the tree, tell the person what it means, "+
 		"and commit what you keep — gummi commits nothing.\n\n%s", n, report)
 	_ = e.sendSessionTurn(WithActor(ctx, state.ActorWorkflow), session, msg)

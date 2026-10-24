@@ -105,6 +105,11 @@ type SpecResolveRequest struct {
 // Diff is GET /api/cards/{id}/diff: the card's branch against its base,
 // with the review comments anchored in it.
 type Diff struct {
+	// Repo is the attached repository this diff is of; absent for the
+	// session's own. Repos lists the session's repositories when it
+	// spans several (the page draws a tab for each), its own first.
+	Repo  string     `json:"repo,omitempty"`
+	Repos []CardRepo `json:"repos,omitempty"`
 	// Base is the branch the card is measured against; BaseRev is the
 	// commit the diff starts from (its merge-base with the branch).
 	Base    string `json:"base"`
