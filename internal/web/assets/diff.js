@@ -112,7 +112,7 @@ function render (pane, entry, ctx) {
   if (d?.repos?.length > 1) pane.append(repoTabs(d, ctx))
   if (!d || !d.files?.length) {
     if (d?.drift) pane.append(driftBar(d, ctx))
-    pane.append(h('div', { class: 'empty', testid: 'diff-none' }, h('b', null, 'No code yet'),
+    pane.append(h('div', { class: 'empty', testid: 'diff-none' }, h('b', null, ctx.card?.stage === 'done' ? 'Nothing left to diff' : 'No code yet'),
       d?.why || (ctx.card?.stage === 'plan' || ctx.card?.stage === 'todo'
         ? 'The plan stage only writes the spec. Code arrives with implement.'
         : 'This card has no changes against its base.')))

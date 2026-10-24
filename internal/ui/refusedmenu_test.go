@@ -125,3 +125,16 @@ func TestThePageNamesTheLandingLand(t *testing.T) {
 		t.Errorf("commit = needs %q, default %q, want the title %q", commit.Needs, commit.Default, m.rows[0].F.Title)
 	}
 }
+
+// TestAClosedSessionSaysItsWorktreeIsGone: a closed session's surfaces say
+// its worktree went with it, not that its first turn will make one.
+func TestAClosedSessionSaysItsWorktreeIsGone(t *testing.T) {
+	f := domain.Feature{ID: "FF-030", Title: "Add a farewell helper", Kind: domain.KindFreeform, Stage: domain.StageDone}
+	if got := noWorktreeYet(f); !strings.Contains(got, "is closed and its worktree is gone") {
+		t.Errorf("closed: %q", got)
+	}
+	f.Stage = domain.StageOpen
+	if got := noWorktreeYet(f); !strings.Contains(got, "first turn creates it") {
+		t.Errorf("open: %q", got)
+	}
+}

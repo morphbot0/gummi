@@ -16,6 +16,11 @@ func noWorktreeYet(f domain.Feature) string {
 	if f.Kind == domain.KindResearch {
 		return f.Name() + " is research and carries no branch — its work is the document"
 	}
+	if f.IsFreeform() && f.Stage == domain.StageDone {
+		// closed: its worktree went with it, and what it landed is on the
+		// base's own history now
+		return f.Name() + " is closed and its worktree is gone — what it landed is in the base branch's history"
+	}
 	if f.IsFreeform() {
 		return f.Name() + " has no worktree yet (its first turn creates it)"
 	}
