@@ -397,6 +397,9 @@ function foldResolutions (notes) {
 // leaves for the agents; they read quieter than a person's.
 function noteEl (n, ctx) {
   const prompt = n.author === 'gummi'
+  // a template's prompt is a hint for whoever fills the section in, not a
+  // note anyone wrote: it is shown as one, without the %% marker's syntax
+  if (prompt && !n.resolution) return h('div', { class: 'note prompt hint', testid: 'spec-prompt' }, h('span', { class: 'tx' }, n.text))
   const r = n.resolution
   const why = r ? String(r.text || '').trim().replace(RESOLVED, '').trim() : ''
   return h('div', { class: ['note', n.resolved && 'resolved', prompt && 'prompt'], testid: prompt ? 'spec-prompt' : 'spec-note' },

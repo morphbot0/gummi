@@ -1158,6 +1158,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .tools pre.tool-out{margin:4px 0 2px;padding:6px 8px;background:var(--sunk);border-radius:6px;color:var(--err);white-space:pre-wrap;font-size:11.5px}
 .note.prompt{border-left-color:var(--line2);background:var(--sunk);color:var(--fg3)}
 .note.prompt b{color:var(--fg3)}
+.note.prompt.hint{background:none;border-left-style:dashed;font-style:italic}
 .ln.since .m{box-shadow:inset 2px 0 0 var(--accent)}
 .files .since{color:var(--accent);font-size:10.5px;margin-left:6px}
 .fstatus{font-family:var(--ui);font-size:11px;color:var(--fg3);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
