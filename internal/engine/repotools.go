@@ -40,15 +40,27 @@ func repoTools() []agent.ToolDef {
 	}
 }
 
+// agentRepoListTool is an agent's repo_list: it attaches nothing, and names
+// the repositories a dispatch step of its may target (DESIGN §26.4).
+func agentRepoListTool() agent.ToolDef {
+	return mkTool(repoListToolName,
+		"List the repositories in the workspace's pool: the names a dispatch step of your recipe may give as repo or repos. "+
+			"Your home is in none of them.", map[string]any{})
+}
+
 const sessionRepoHint = `This session may span repositories (gummi's DESIGN §27). repo_list shows the repositories there are and any attached to you; repo_attach cuts this session's branch in another one, in a worktree beside yours, and repo_detach drops an empty one. Commit in each repository's worktree; each lands on its own, on the person's read of its diff.`
 
 func (e *Engine) handleRepoTool(s *Session, tc *agent.ToolCall) {
 	f := s.Feature
+	ctx := context.Background()
+	if f.Home && !f.IsChild() && tc.Name == repoListToolName {
+		e.resolveNow(s, tc.ID, e.agentRepoListText())
+		return
+	}
 	if !isSession(f) || f.Home {
 		e.resolveNow(s, tc.ID, tc.Name+" is a repository session's tool: this card is not one")
 		return
 	}
-	ctx := context.Background()
 	var a struct {
 		Repo string `json:"repo"`
 		Base string `json:"base"`
@@ -81,6 +93,19 @@ func (e *Engine) handleRepoTool(s *Session, tc *agent.ToolCall) {
 		out = "error: " + err.Error()
 	}
 	e.resolveNow(s, tc.ID, out)
+}
+
+func (e *Engine) agentRepoListText() string {
+	names := e.repoNames()
+	if len(names) == 0 {
+		return "the workspace's pool holds no named repository: a dispatch has nowhere to go"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "repositories a dispatch may name: %s\n", strings.Join(names, ", "))
+	for name := range e.pool.Ambiguous() {
+		fmt.Fprintf(&b, "ambiguous (not a dispatch target until pinned under repos: in config): %s\n", name)
+	}
+	return b.String()
 }
 
 func (e *Engine) repoListText(ctx context.Context, f domain.Feature) string {
