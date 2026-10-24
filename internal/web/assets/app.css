@@ -1204,6 +1204,10 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .msg.mine .bubble .body{margin:0;white-space:pre-wrap}
 .msg.mine .bubble .body.clamped{max-height:15em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent)}
 .msg.mine .bubble .more{display:block;margin-top:4px;font-size:12px;color:var(--accent)}
+/* the person's diff comments as their session got them: one line, what
+   the agent was sent a click away */
+.msg.review summary{cursor:pointer;font-weight:500}
+.msg.review details[open] summary{margin-bottom:6px}
 .msg.mine .who{font-size:11.5px;justify-content:flex-end}
 .msg.mine .who b{color:var(--fg3);font-weight:500}
 .msg.mine .who .rewind{margin-left:0}

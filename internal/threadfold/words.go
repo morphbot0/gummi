@@ -340,6 +340,8 @@ func TurnBy(by string) string {
 		return "crew"
 	case state.ActorWorkflow:
 		return "workflow"
+	case state.ActorReview:
+		return "review"
 	}
 	return state.PersonName(by)
 }

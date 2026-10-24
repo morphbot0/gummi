@@ -48,8 +48,9 @@ export const diffTab = {
   empty: (d) => !d || !d.files?.length,
   count: (d) => d?.files?.length || 0,
   // hold keeps the diff a person is reading when the branch moved: the
-  // panel shows a banner and swaps only when asked
-  hold: (old, fresh) => !!old && !!old.files?.length && !!fresh && old.rev !== fresh.rev,
+  // panel shows a banner and swaps only when asked — unless the move was
+  // the reader's own (a commit from this page), which they expect to see
+  hold: (old, fresh) => !ownMove.delete(state.sel) && !!old && !!old.files?.length && !!fresh && old.rev !== fresh.rev,
   render
 }
 
@@ -88,6 +89,13 @@ function editsOf (id) { if (!edits.has(id)) edits.set(id, new Map()); return edi
 // "show in diff"): the file, and the new-side line in it when known.
 let want = null
 let lit = null // the place last shown, marked until a moment has passed
+// ownMove marks the cards whose branch this page is about to move itself
+// (a commit, a squash, a rebase): the next diff that arrives for one
+// replaces the one shown instead of waiting behind "Show it".
+const ownMove = new Set()
+export function expectMove (id) { ownMove.add(id) }
+export function unexpectMove (id) { ownMove.delete(id) }
+
 export function reveal (id, path, line) { want = { id, path, line: line || 0 } }
 
 function render (pane, entry, ctx) {

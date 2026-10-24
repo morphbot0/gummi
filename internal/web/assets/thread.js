@@ -410,6 +410,7 @@ function copyButton (text, title, testid) {
 // run sent (its report, DESIGN §25.7) — or an old crew — is gummi's, never
 // the person's: it is drawn on the other side, headed as the workflow.
 function you (it) {
+  if (it.by === 'review') return reviewSent(it)
   const run = it.by === 'workflow' || it.by === 'crew'
   const who = it.by || 'you'
   const text = String(it.text || '')
@@ -438,6 +439,22 @@ function you (it) {
       it.time ? h('span', { class: 'mono' }, clock(it.time)) : null,
       copyButton(text, 'Copy message', 'bubble-copy'),
       it.rewind ? h('button', { type: 'button', class: 'rewind', testid: 'turn-rewind', title: 'Take the conversation back to before this message and edit it. The branch keeps its commits.', onclick: it.rewind }, 'rewind') : null))
+}
+
+// reviewSent is the person's diff comments as their session got them
+// (Request changes): the person's act, said as one line — how many
+// comments went — with what the agent was sent a click away, since its
+// words are gummi's instruction to the agent, not the person's.
+function reviewSent (it) {
+  const text = String(it.text || '')
+  const n = text.split('\n').filter(l => /^- /.test(l)).length
+  return h('div', { class: 'msg mine review', testid: 'thread-review' },
+    h('details', { class: 'bubble' },
+      h('summary', null, `Asked for changes on ${n} diff comment${n === 1 ? '' : 's'}`),
+      h('div', { class: 'body' }, md(text))),
+    h('div', { class: 'who' },
+      h('b', { title: 'sent from the diff' }, 'you'),
+      it.time ? h('span', { class: 'mono' }, clock(it.time)) : null))
 }
 
 // attachmentThumbs renders a you turn's images as thumbnails linking to

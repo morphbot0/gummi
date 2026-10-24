@@ -12,6 +12,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // diffViewRender draws the diff surface into the main pane.
@@ -243,7 +244,9 @@ func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		if err := ff.Send(ctx, turn); err != nil {
+		// sent as the review's, not typed by the person: a thread draws it
+		// as the comments sent rather than as their words
+		if err := ff.Send(engine.WithActor(ctx, state.ActorReview), turn); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to its session", f.Name(), n, plural(n)), reload: true}
