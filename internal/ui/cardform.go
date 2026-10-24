@@ -972,7 +972,7 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 	if from := d.forkFrom(); from != "" {
 		out += s.Faint.Render(" · from ") + from
 	}
-	if d.mainCheckout {
+	if d.mainCheckout && !d.home {
 		out += " · in " + d.whereChoices()[d.whereIdx()]
 	}
 	return cardLabel(s, "becomes") + out
@@ -990,7 +990,7 @@ func (d *cardForm) runsLine(s *theme.Styles) string {
 	if st := d.stackSummary(); st != "" {
 		out += " · " + st
 	}
-	if d.mainCheckout {
+	if d.mainCheckout && !d.home {
 		out += " · in " + d.whereChoices()[d.whereIdx()]
 	}
 	if d.base != "" {
@@ -1392,10 +1392,10 @@ func (d *cardForm) baseIdx() int {
 
 // whereChoices is the "runs in" row's cells: the card's own worktree,
 // which is what nearly every session wants and what every card minted
-// before the choice existed got, then the main checkout, then a home of
-// its own — an agent, in no repository at all.
+// before the choice existed got, then the main checkout, then an agent,
+// in no repository at all.
 func (d *cardForm) whereChoices() []string {
-	return []string{"its own worktree", "the main checkout", "a home of its own"}
+	return []string{"its own worktree", "the main checkout", "an agent"}
 }
 
 // whereIdx is the selected cell of whereChoices.

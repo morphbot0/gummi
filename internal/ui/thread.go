@@ -745,7 +745,7 @@ func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 			branch = "main checkout"
 		}
 		if f.Home {
-			pill, branch = s.StagePill(f.Stage).Render("agent"), "its own home"
+			pill, branch = s.StagePill(f.Stage).Render("agent"), ""
 		}
 		if branch != "" {
 			if full := pill + s.Faint.Render(" · "+branch); width <= 0 || ansi.StringWidth(full) <= width {
@@ -1221,7 +1221,7 @@ func (m *Shell) freeformAbsentLines(s *theme.Styles, r featureRow, w int) []stri
 		}
 	}
 	if r.F.Home {
-		said = []string{"type below to start — it works in a home of its own, in no repository"}
+		said = []string{"type below to start"}
 	}
 	out := make([]string, 0, len(said))
 	for _, l := range said {
