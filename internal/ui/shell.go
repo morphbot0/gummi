@@ -211,8 +211,14 @@ type Shell struct {
 	// wf is what the terminal holds of the open session's workflow runs
 	// (runblock.go), and stepv a step opened over its thread
 	// (stepview.go), nil when none is.
-	wf    runState
-	stepv *stepView
+	wf runState
+	// dispatches are the open agent's dispatched sessions, as last folded
+	// (dispatchblock.go).
+	dispatches map[domain.FeatureID][]foldedDispatch
+	// nestedRows are the sessions the last board frame drew under their
+	// agent (boardnest.go).
+	nestedRows map[domain.FeatureID]bool
+	stepv      *stepView
 	// sizedFor is how many landed rows worktreeSizeText was measured
 	// against, so a reload that did not change the set does not re-walk
 	// every worktree on disk. -1 until the first measurement.
@@ -1472,6 +1478,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.updateRuns(msg); ok {
 		return m, cmd
 	}
+	if m.updateDispatches(msg) {
+		return m, nil
+	}
 	if cmd, ok := m.updateStack(msg); ok {
 		return m, cmd
 	}
@@ -1556,7 +1565,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cardOpen {
 			// a run's decision, its state and its spend all move with the
 			// rows: its blocks are read again beside them
-			cmds = append(cmds, m.loadRuns(m.selectedID()))
+			cmds = append(cmds, m.loadRuns(m.selectedID()), m.loadDispatches(m.selectedID()))
 		}
 		if n := landedRows(m.rows); n != m.sizedFor {
 			m.sizedFor = n
@@ -2030,7 +2039,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// just signal "re-render from Snapshot" — so keep listening, plus
 		// any automatic review-loop follow-up and, when the event means
 		// the open card's event log grew, a reload of it.
-		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev), m.openRunsChanged(msg.ev), m.measureToday())
+		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev), m.openRunsChanged(msg.ev), m.openDispatchesChanged(msg.ev), m.measureToday())
 
 	case engineClosedMsg:
 		// the agent backend shut down unexpectedly. There is no pane left
@@ -2732,6 +2741,13 @@ func (m *Shell) jumpSel(n int) {
 // displayOrder lists row indices in board display order: grouped by
 // super-state, chronological within each.
 func (m *Shell) displayOrder() []int {
+	order, _ := m.displayOrderNested()
+	return order
+}
+
+// displayOrderNested is displayOrder with the open sessions an agent
+// dispatched moved under it (nestDispatched), and which rows those are.
+func (m *Shell) displayOrderNested() ([]int, map[int]int) {
 	var order []int
 	for _, super := range domain.SuperStates {
 		var idxs []int
@@ -2750,7 +2766,7 @@ func (m *Shell) displayOrder() []int {
 		}
 		order = append(order, idxs...)
 	}
-	return order
+	return m.nestDispatched(order)
 }
 
 // selectedID names the card the cursor is on, or "" when the board has

@@ -1,0 +1,21 @@
+{
+  "key": "dispatch:FF-7",
+  "seq": 12,
+  "t": "dispatch",
+  "time": "2026-09-27T09:12:00Z",
+  "stage": "open",
+  "dispatch": {
+    "card": "FF-7",
+    "title": "Bump lib",
+    "repo": "target",
+    "state": "run 2 running",
+    "run": 2,
+    "done": 1,
+    "of": 3,
+    "step": "build/1/implement",
+    "spent": 32,
+    "envelope": 400,
+    "last": "tests pass",
+    "rev": "00ab"
+  }
+}

@@ -166,7 +166,7 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 		spend = nil
 	}
 	ins, said := d.runFold(ctx)
-	items := threadfold.Items(evs, threadfold.Options{Spend: spend, Runs: ins, Said: said})
+	items := threadfold.Items(evs, threadfold.Options{Spend: spend, Runs: ins, Said: said, Dispatches: d.dispatchInputs(ctx)})
 	var last int64
 	for _, it := range items {
 		last = max(last, it.Seq)
@@ -192,7 +192,7 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 	for _, it := range groupActivity(converted) {
 		// a run's block changes without an event: every page carries it
 		// (threadfold.Since), and the page redraws it by its Rev
-		if it.Seq > after || it.T == webapi.ItemRun {
+		if it.Seq > after || it.T == webapi.ItemRun || it.T == webapi.ItemDispatch {
 			out.Items = append(out.Items, it)
 		}
 	}
@@ -251,6 +251,7 @@ func webItem(it threadfold.Item, cmds map[string]string) webapi.Item {
 		}
 	}
 	out.Run = webRunBlock(it.Run)
+	out.Dispatch = webDispatchBlock(it.Dispatch)
 	return out
 }
 

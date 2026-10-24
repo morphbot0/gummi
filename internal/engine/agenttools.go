@@ -47,12 +47,12 @@ func agentTools() []agent.ToolDef {
 				"Given a card, that one in full. Answers only for sessions you dispatched.",
 			map[string]any{"card": str("A dispatched session's id.")}),
 		mkTool(sessionSendToolName,
-			"Send a turn into a session this agent dispatched. Refused for any other card, and for one that is closed or has spent its envelope.",
+			"Send a turn into a session this agent dispatched. Refused for any other card, for one that is closed or has spent its envelope, and while your own envelope is spent.",
 			map[string]any{"card": str("A dispatched session's id."), "text": str("The message.")}, "card", "text"),
 	}
 }
 
-const agentWatchHint = `This card is an agent, and may start work in the person's repositories (gummi's DESIGN §26): not by writing into one, but by a dispatch step in a workflow run of yours, which mints a session in a repository the recipe names (a literal, one repo_list gives), with an envelope and a spec or prompt of its own, and may start a recipe there. A run of yours is your own tree, your home; its dispatch step's session works in its repository's tree. For work now, propose the run with workflow_run and a recipe holding the dispatch (written out as recipe_yaml; the workflow-recipes skill shows the dispatch step); the person allows it, and allowing it allows exactly the repositories it names. For work on a change you watch for, propose a schedule. A watch is a schedule that starts a run of a recipe on you, against one of your specs; its first step is a run: command gate that decides, with no model, whether anything changed (quietExit is the exit that says nothing did), and only then does a dispatch step mint a session in a repository the person allowed, with an envelope of its own. schedule_propose stores the schedule off; the person enables it from the schedules view, and that is the allowance — you never enable, edit or delete one. Everything a dispatched session spends, and its envelope while it is open, comes out of your own envelope. session_status and session_send answer only for the sessions you dispatched. A child's questions go to the person, not to you; read its report with session_status.`
+const agentWatchHint = `This card is an agent, and may start work in the person's repositories (gummi's DESIGN §26): not by writing into one, but by a dispatch step in a workflow run of yours, which mints a session in a repository the recipe names (a literal, one repo_list gives), with an envelope and a spec or prompt of its own, and may start a recipe there. A run of yours is your own tree, your home; its dispatch step's session works in its repository's tree. For work now, propose the run with workflow_run and a recipe holding the dispatch (written out as recipe_yaml; the workflow-recipes skill shows the dispatch step); the person allows it, and allowing it allows exactly the repositories it names. For work on a change you watch for, propose a schedule. A watch is a schedule that starts a run of a recipe on you, against one of your specs; its first step is a run: command gate that decides, with no model, whether anything changed (quietExit is the exit that says nothing did), and only then does a dispatch step mint a session in a repository the person allowed, with an envelope of its own. schedule_propose stores the schedule off; the person enables it from the schedules view, and that is the allowance — you never enable, edit or delete one. Everything a dispatched session spends, and its envelope while it is open, comes out of your own envelope. session_status and session_send answer only for the sessions you dispatched. You are woken by a turn when a session you dispatched has a run end, when it finishes a turn with no run open and waits for input, and when it closes; the turn names the session, the run and the head of its report or reply, and you are not woken while your own envelope is spent or after you are closed. Read the whole of it with session_status and hand it its next piece of work with session_send. A child's own questions and its runs' decisions go to the person, never to you.`
 
 // handleAgentTool serves the agent's tools.
 func (e *Engine) handleAgentTool(s *Session, tc *agent.ToolCall) {
@@ -219,7 +219,7 @@ func (e *Engine) sessionSendText(ctx context.Context, agentCard domain.Feature, 
 		Text string `json:"text"`
 	}
 	_ = json.Unmarshal(args, &a)
-	d, card, err := e.ownedDispatch(ctx, agentCard, a.Card)
+	_, card, err := e.ownedDispatch(ctx, agentCard, a.Card)
 	if err != nil {
 		return "", err
 	}
@@ -230,7 +230,13 @@ func (e *Engine) sessionSendText(ctx context.Context, agentCard domain.Feature, 
 	case card.Stage == domain.StageDone:
 		return "", fmt.Errorf("%s is closed", card.ID)
 	case card.Budget.Envelope > 0 && float64(card.Budget.Envelope)-e.SessionPoolSpent(ctx, card) <= 0:
-		return "", fmt.Errorf("%s has spent its envelope of %s", card.ID, domain.FormatDollars(float64(d.Envelope)))
+		return "", fmt.Errorf("%s has spent its envelope of %s", card.ID, domain.FormatDollars(float64(card.Budget.Envelope)))
+	}
+	if fresh, err := e.cfg.Store.GetFeature(ctx, agentCard.ID); err == nil {
+		agentCard = fresh
+	}
+	if left, bounded := e.sessionPoolLeft(ctx, agentCard); bounded && left <= 0 {
+		return "", fmt.Errorf("your own envelope of %s is spent: ask the person to top it up", domain.FormatDollars(float64(agentCard.Budget.Envelope)))
 	}
 	if err := e.sendSessionTurn(WithActor(ctx, "agent:"+string(agentCard.ID)), card.ID, text); err != nil {
 		return "", err

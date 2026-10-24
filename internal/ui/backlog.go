@@ -43,7 +43,7 @@ func (m *Shell) openCard() tea.Cmd {
 	m.loadThreadDraft(r.F.ID)
 	m.focusThreadInput()
 	m.leaveRuns()
-	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadRuns(r.F.ID))
+	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadRuns(r.F.ID), m.loadDispatches(r.F.ID))
 }
 
 // closeCard returns to the backlog list, stopping a live watch tail —
@@ -165,7 +165,7 @@ func (m *Shell) arriveOnCard() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadRuns(r.F.ID))
+	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadRuns(r.F.ID), m.loadDispatches(r.F.ID))
 }
 
 // actionsOwnArrows reports whether the card's action list owns ↑↓ and
@@ -250,8 +250,16 @@ func (m *Shell) backlogEntries() []backlogEntry {
 	var out []backlogEntry
 	var last boardGroup
 	splitDone := m.archiveCount() > 0
-	for i, idx := range m.displayOrder() {
-		if group := m.groupOf(m.rows[idx], splitDone); i == 0 || group != last {
+	order, nested := m.displayOrderNested()
+	m.nestedRows = map[domain.FeatureID]bool{}
+	for i, idx := range order {
+		groupRow := m.rows[idx]
+		if parent, ok := nested[idx]; ok {
+			// a session under its agent stands in its agent's group
+			groupRow = m.rows[parent]
+			m.nestedRows[m.rows[idx].F.ID] = true
+		}
+		if group := m.groupOf(groupRow, splitDone); i == 0 || group != last {
 			if i > 0 {
 				out = append(out, backlogEntry{})
 			}

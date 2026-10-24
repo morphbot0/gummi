@@ -1452,6 +1452,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 			break
 		}
 		ff.drainQueue(sess)
+		e.dispatchTurnEnded(ff, sess)
 	case agent.EventError:
 		sess.setError(ev.Err)
 		if ev.Err != nil {

@@ -156,6 +156,19 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .group.needs h3{color:var(--accent)}
 .row{width:100%;text-align:left;display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:1px 8px;padding:7px 8px;border-radius:8px;align-items:center;position:relative}
 .row:hover{background:var(--sunk)}
+.row.nested{margin-left:14px;width:calc(100% - 14px)}
+.row.nested::before{content:"└";position:absolute;left:-12px;top:7px;color:var(--fg4)}
+.dispatch-block{display:grid;gap:3px;width:100%;text-align:left;padding:8px 10px;margin:6px 0;border:1px solid var(--line,var(--fg4));border-left-width:3px;border-radius:8px;background:var(--sunk)}
+.dispatch-block:hover{background:var(--band)}
+.dispatch-block .db-head{display:flex;gap:8px;align-items:baseline}
+.dispatch-block .db-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dispatch-block .db-repo,.dispatch-block .db-facts,.dispatch-block .db-last{color:var(--fg3)}
+.dispatch-block .db-facts{display:flex;justify-content:space-between;gap:8px}
+.dispatch-block .db-last{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dispatch-block .db-state{font-weight:600}
+.dispatch-block.st-run{border-left-color:var(--q-run)}
+.dispatch-block.st-warn{border-left-color:var(--q-needs)}
+.dispatch-block.st-ok{border-left-color:var(--q-ready)}
 .row.sel{background:var(--band)}
 /* the dot is the card's status and nothing else: its stage is in words beside it */
 .row .dot{width:10px;height:10px;border-radius:50%;justify-self:center;border:1.5px solid var(--fg4)}

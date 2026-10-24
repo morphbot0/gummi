@@ -2066,7 +2066,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	_, _ = e.writeRunFile(session, n, "report.md", report)
 	e.writeRunReport(ctx, cur)
 	e.runNote(session, fmt.Sprintf("run %d ended %s", n, end))
-	e.noteDispatcher(ctx, session, n, end)
+	e.noteDispatcher(ctx, session, n, end, report)
 	msg := fmt.Sprintf("Workflow run %d has reported. Read the report and the diff it left in the tree, tell the person what it means, "+
 		"and commit what you keep — gummi commits nothing.\n\n%s", n, report)
 	_ = e.sendSessionTurn(WithActor(ctx, state.ActorWorkflow), session, msg)

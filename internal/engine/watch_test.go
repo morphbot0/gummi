@@ -299,7 +299,7 @@ func TestADispatchMintsASessionInItsRepo(t *testing.T) {
 	if wf.count("work") != 1 {
 		t.Errorf("the child's step ran %d times", wf.count("work"))
 	}
-	// the agent's thread says so, and the child's run end is a line, not a turn
+	// the agent's thread says so
 	lines := ""
 	for range 200 {
 		lines = ""
@@ -314,11 +314,6 @@ func TestADispatchMintsASessionInItsRepo(t *testing.T) {
 	if !strings.Contains(lines, DispatchNotePrefix+"run 1 dispatched session "+string(child.ID)) ||
 		!strings.Contains(lines, DispatchNotePrefix+"session "+string(child.ID)) {
 		t.Errorf("the agent's thread:\n%s", lines)
-	}
-	for _, turn := range wf.sessionTurns() {
-		if strings.Contains(turn, "Bump to") && strings.Contains(turn, "ended") {
-			t.Errorf("the agent was sent a turn: %q", turn)
-		}
 	}
 	// the child's envelope is held against the agent's
 	agentCard, _ := store.GetFeature(ctx, f.ID)

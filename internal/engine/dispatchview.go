@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -23,6 +25,10 @@ type DispatchView struct {
 	Spent, Envelope float64
 	// Exhausted is a spent envelope: the session waits for a top-up.
 	Exhausted bool
+	// Current is the session's own envelope now, which a person may have
+	// raised or lowered since the dispatch; At is when it was dispatched.
+	Current float64
+	At      time.Time
 	// Asking is a run decision waiting for the person.
 	Asking bool
 }
@@ -51,6 +57,7 @@ func (e *Engine) dispatchView(ctx context.Context, d state.Dispatch, card domain
 	v := DispatchView{
 		Card: card.ID, Title: card.Name(), Closed: card.Stage == domain.StageDone,
 		Run: "no open run", Spent: e.SessionPoolSpent(ctx, card), Envelope: float64(d.Envelope),
+		Current: float64(card.Budget.Envelope), At: d.CreatedAt,
 	}
 	if r, err := e.cfg.Store.OpenRun(ctx, card.ID); err == nil && r != nil {
 		v.Run = fmt.Sprintf("run %d %s", r.N, r.State)
@@ -78,7 +85,7 @@ func (e *Engine) DispatchViews(ctx context.Context, agent domain.FeatureID) []Di
 	for _, d := range ds {
 		card, err := e.cfg.Store.GetFeature(ctx, d.Card)
 		if err != nil {
-			out = append(out, DispatchView{Card: d.Card, Gone: true, Envelope: float64(d.Envelope)})
+			out = append(out, DispatchView{Card: d.Card, Gone: true, Envelope: float64(d.Envelope), At: d.CreatedAt})
 			continue
 		}
 		out = append(out, e.dispatchView(ctx, d, card))
@@ -100,7 +107,8 @@ func (e *Engine) DispatchedBy(ctx context.Context, card domain.FeatureID) (domai
 }
 
 // noteDispatcherEvent tells the agent that dispatched card, in a line of its
-// thread, what happened to it. It is a note, never a turn, and costs a card
+// thread, what happened to it. It is only the line (wakeDispatcher adds the
+// turn), and costs a card
 // no agent dispatched one indexed read.
 func (e *Engine) noteDispatcherEvent(ctx context.Context, card domain.FeatureID, what string) {
 	if e.cfg.Store == nil {
@@ -127,4 +135,22 @@ func (e *Engine) NoteDispatcherClosed(ctx context.Context, card domain.FeatureID
 		}
 	}
 	e.noteDispatcherEvent(ctx, card, what)
+	e.wakeDispatcher(ctx, card, what)
+}
+
+// LastReply is the last thing the session said, open or ended: what a face
+// shows of a dispatched session beside its state.
+func (e *Engine) LastReply(card domain.FeatureID) string {
+	var tr []Message
+	if ff := e.Freeform(card); ff != nil {
+		tr = ff.Snapshot().Transcript
+	} else if snap, ok := e.FreeformHistory(card); ok {
+		tr = snap.Transcript
+	}
+	for i := len(tr) - 1; i >= 0; i-- {
+		if tr[i].Author == AuthorAssistant && strings.TrimSpace(tr[i].Content) != "" {
+			return tr[i].Content
+		}
+	}
+	return ""
 }
