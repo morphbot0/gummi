@@ -938,7 +938,9 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 }
 
 // stepAsks is the question a step of the session's open run asks its
-// person: the first step waiting inside ask_user. "" when none does.
+// person: the first live step whose agent waits inside ask_user. "" when
+// none does. It asks the step's session rather than the step's stored
+// state, which the run's tick marks asking only after the question is up.
 func (m *Shell) stepAsks(ctx context.Context, session domain.FeatureID, run *domain.Run) string {
 	if run == nil || m.engine == nil {
 		return ""
@@ -948,7 +950,7 @@ func (m *Shell) stepAsks(ctx context.Context, session domain.FeatureID, run *dom
 		return ""
 	}
 	for _, st := range steps {
-		if st.State != domain.StepAsking || st.Card == "" {
+		if !st.State.Live() || st.Card == "" {
 			continue
 		}
 		if ff := m.engine.Freeform(st.Card); ff != nil {

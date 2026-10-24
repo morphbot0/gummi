@@ -70,3 +70,15 @@ func TestWebRowSaysWhatAnIdleSessionHolds(t *testing.T) {
 		}
 	}
 }
+
+// TestWebRowRunsWhileItsRunWorks: a session whose own turn is over but
+// whose workflow run is working reads as running, not idle.
+func TestWebRowRunsWhileItsRunWorks(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	r := row(55, "a session", domain.StageOpen, "thrifty", false)
+	r.F.Kind, r.HasWorktree = domain.KindFreeform, true
+	r.OpenRun = &domain.Run{N: 2, State: domain.RunRunning}
+	if got := m.webRow(r); got.Status != "running" || got.Running == nil || got.Running.Verb != "run 2 working" {
+		t.Fatalf("row = status %q, running %+v", got.Status, got.Running)
+	}
+}

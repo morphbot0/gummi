@@ -1337,6 +1337,11 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			q = "the workflow run asks: " + d.Question
 		}
 		m.raiseAttention(ev.Feature, attnQuestion, q)
+		if _, step := m.children[ev.Feature]; step {
+			// a run step's card is hidden: its question is its session's to
+			// show, which only a reload of the rows reads (stepAsks)
+			return m.loadRows
+		}
 	case engine.EventAnnotations:
 		// the agent resolved a diff comment — refresh an open diff surface
 		// so its open-count and gutter markers burn down live. The row's

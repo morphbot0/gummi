@@ -64,12 +64,14 @@ function render () {
   menuBtn?.addEventListener('click', () => openActions())
   // the session's next step is the head's one filled button: commit what
   // is loose, then land it — or, while landing is held, the hold itself.
-  // None while a decision waits: answering it is the next step, and the
-  // decision has its own buttons. The next step never folds into the menu
-  // and shows on a phone too; the title gives way first.
+  // None while something waits on the person (a decision, a run step's
+  // question: answering is the next step, with buttons of its own) or the
+  // card is working. The next step never folds into the menu and shows on
+  // a phone too; the title gives way first.
   const commit = commitButton(c, actions)
   const land = landButton(c, actions)
-  const next = state.card?.decision ? null : (commit || land)
+  const waits = !!state.card?.decision || c.status === 'needs' || c.status === 'running'
+  const next = waits ? null : (commit || land)
   if (next) {
     next.classList.remove('hide-s')
     if (!next.classList.contains('held')) next.classList.add('pri')

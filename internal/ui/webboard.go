@@ -100,6 +100,10 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 	case m.cardBusy(r):
 		row.Status = webapi.StatusRunning
 		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r)}
+	case r.OpenRun != nil && r.OpenRun.State == domain.RunRunning && r.DecidingRun == nil:
+		// its own turn is over, but its run's steps are working in its tree
+		row.Status = webapi.StatusRunning
+		row.Running = &webapi.RowRunning{Verb: fmt.Sprintf("run %d working", r.OpenRun.N)}
 	case m.freeformWatching(r):
 		row.Status = webapi.StatusWatching
 	case r.DecidingRun != nil:
