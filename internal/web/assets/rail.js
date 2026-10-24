@@ -284,7 +284,7 @@ function renderRail () {
   if (!box.querySelector('.row')) {
     box.append(h('div', { class: 'empty', testid: 'rail-empty' }, all.length
       ? h('span', null, 'No cards match.', h('br'), h('button', { class: 'link clear-filters', type: 'button', testid: 'rail-empty-clear' }, 'Clear filters'))
-      : h('span', null, h('b', null, 'No cards yet'), h('br'), 'Start with New session, or New card for work that walks the stages.')))
+      : h('span', null, h('b', null, 'No cards yet'), h('br'), 'Start a session: say what you want done, and an agent works on it in a branch of its own.')))
   }
   // a board that changed under a resting pointer keeps that row's card up
   const still = hovered && box.querySelector(`.row[data-id="${CSS.escape(hovered)}"]`)
