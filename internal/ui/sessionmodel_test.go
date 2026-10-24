@@ -35,6 +35,9 @@ func sessionPickerBoard(t *testing.T) (*Shell, featureRow) {
 	oldInstalled := agentInstalled
 	agentInstalled = func(name string) bool { return name == "claude" }
 	t.Cleanup(func() { agentInstalled = oldInstalled })
+	oldSignedOut := agentSignedOut
+	agentSignedOut = func(string) bool { return false }
+	t.Cleanup(func() { agentSignedOut = oldSignedOut })
 	named := namedBackendAgent{Fake: agent.NewFake("ok"), name: "claude"}
 	named.Models = []string{"claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-4-5"}
 	profiles := config.Profiles{Default: "alpha", Profiles: map[string]config.Profile{
@@ -439,4 +442,18 @@ func equalStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+func TestTheSessionPickersLeaveOutASignedOutAgent(t *testing.T) {
+	m, _ := sessionPickerBoard(t)
+	agentInstalled = func(string) bool { return true }
+	agentSignedOut = func(name string) bool { return name == "copilot" }
+	for _, a := range m.webSessionModels().Agents {
+		if a.Name == "copilot" {
+			t.Fatal("the picker offers copilot, which is signed out")
+		}
+	}
+	if msg := m.checkSessionPick("copilot", "gpt-5"); !strings.Contains(msg, "not signed in") {
+		t.Fatalf("pick refusal = %q", msg)
+	}
 }

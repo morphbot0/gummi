@@ -42,6 +42,9 @@ func (m *Shell) openCardModelPicker() tea.Cmd {
 	cur, _ := m.engine.SessionModel(r.F)
 	var rows []command
 	for _, name := range engine.SessionBackends {
+		if name != cur && m.signedOut(name) {
+			continue
+		}
 		installed := m.engine.HasAgent(name) || agentInstalled(name)
 		label := name
 		if name == cur {

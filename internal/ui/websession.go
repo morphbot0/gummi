@@ -40,6 +40,19 @@ var agentInstalled = func(name string) bool {
 	return false
 }
 
+// agentSignedOut reports whether the agent is installed here but holds no
+// credentials (agentcli.SignedOut), which a picker leaves out altogether: a
+// session started on it would only fail. A var so a test can decide without
+// a home directory.
+var agentSignedOut = agentcli.SignedOut
+
+// signedOut is false for an agent the engine already holds (it is running,
+// so whatever it needs it has) and for one not installed here, which a
+// picker still names so a person sees why it cannot be picked.
+func (m *Shell) signedOut(name string) bool {
+	return (m.engine == nil || !m.engine.HasAgent(name)) && agentInstalled(name) && agentSignedOut(name)
+}
+
 // webSessionModels is what a session's model picker offers: every agent a
 // session can run on with the models the workspace's profiles already run
 // there, the pairs sessions on this board run on now, and what a new
@@ -55,6 +68,9 @@ func (m *Shell) webSessionModels() webapi.SessionModels {
 		out.Default = webapi.SessionModel{Backend: b, Model: model}
 	}
 	for _, name := range engine.SessionBackends {
+		if m.signedOut(name) && name != out.Default.Backend {
+			continue
+		}
 		needs, hint, pattern := engine.SessionModelRule(name)
 		caps, _ := agent.CapabilitiesFor(name)
 		out.Agents = append(out.Agents, webapi.SessionAgent{
@@ -161,6 +177,9 @@ func (m *Shell) checkSessionPick(backend, model string) string {
 	if (m.engine == nil || !m.engine.HasAgent(backend)) && !agentInstalled(backend) {
 		return backend + " is not installed on this host"
 	}
+	if m.signedOut(backend) {
+		return backend + " is not signed in on this host"
+	}
 	return ""
 }
 
@@ -256,7 +275,7 @@ func (b *Bridge) WarmModelCatalogs() {
 	}
 	var names []string
 	for _, name := range engine.SessionBackends {
-		if eng.HasAgent(name) || agentInstalled(name) {
+		if eng.HasAgent(name) || (agentInstalled(name) && !agentSignedOut(name)) {
 			names = append(names, name)
 		}
 	}

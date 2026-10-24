@@ -161,6 +161,9 @@ func newScheduleForm(m *Shell, edit *domain.Schedule) *scheduleForm {
 	}
 	d.backends = append(d.backends, scheduleBackendRow{name: "", installed: true})
 	for _, name := range engine.SessionBackends {
+		if m.signedOut(name) {
+			continue
+		}
 		installed := (m.engine != nil && m.engine.HasAgent(name)) || agentInstalled(name)
 		row := scheduleBackendRow{name: name, installed: installed}
 		for _, a := range cat.Agents {
