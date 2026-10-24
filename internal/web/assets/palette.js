@@ -89,7 +89,7 @@ export function keysHelp () {
       k('g', 'd'), h('span', null, 'Changes · files'),
       k('g', 'l'), h('span', null, 'Changes · commits'),
       k('g', 'p'), h('span', null, 'Changes · pull request'),
-      k('g', 'r'), h('span', null, 'Run'),
+      k('g', 'r'), h('span', null, 'Cost'),
       k('g', 't'), h('span', null, 'Terminal (a board served with --terminal)'),
       h('h3', null, 'Open decision'),
       k('1–9'), h('span', null, 'Pick an answer — in an empty composer too, so to start a message with a digit type something before it'),

@@ -32,7 +32,9 @@ const SURFACES = [
   { name: 'memory', label: 'Memory', icon: 'memory', tabs: [memoryTab] },
   { name: 'spec', label: 'Specs', icon: 'doc', tabs: [specTab] },
   { name: 'changes', label: 'Changes', icon: 'branch', tabs: [diffTab, logTab, treeTab, prTab], as: { diff: 'Files', log: 'Commits', tree: 'Working tree', pr: 'Pull request' } },
-  { name: 'run', label: 'Run', icon: 'fleet', tabs: [statsTab] },
+  // what the card cost and how it ran — named for what a person opens it
+  // to read, not "Run", which a session's workflow runs mean already
+  { name: 'run', label: 'Cost', icon: 'fleet', tabs: [statsTab] },
   { name: 'terminal', label: 'Terminal', icon: 'terminal', tabs: [terminalTab] },
   // a workflow step opened from its run's block (DESIGN §25.10): there only
   // while one is open

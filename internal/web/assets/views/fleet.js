@@ -147,6 +147,9 @@ registerView('fleet', {
     }
 
     function byStage (r) {
+      // sessions all spend at one stage, open: a split with one bucket is
+      // not drawn
+      if ((r.byStage || []).filter(b => b.credits > 0).length < 2) return null
       const list = [...(r.byStage || [])].sort((a, b) => rank(a.name) - rank(b.name))
       return h('section', { class: 'fsec', testid: 'fleet-by-stage', 'aria-label': 'Credits by stage' },
         h('h3', null, 'By stage'),

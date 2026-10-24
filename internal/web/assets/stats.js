@@ -148,6 +148,9 @@ function moneyBars (m) {
 // moneyBy is the breakdown last asked for: it holds across cards
 let moneyBy = 'stage'
 
+// manyBuckets: a split has something to compare — two buckets that spent.
+export const manyBuckets = (list) => (list || []).filter(b => b.credits > 0).length > 1
+
 function bucketBars (list, total, colorOf, testid) {
   if (!list || !list.length) return null
   const max = Math.max(...list.map(b => b.credits || 0), 0.0001)
@@ -327,7 +330,8 @@ function session (pane, s, ctx) {
   const models = (m.byModel || []).filter(b => b.credits > 0)
   const max = Math.max(...models.map(b => b.credits), 0.1)
   const bars = [
-    bucketBars((m.byStage || []).filter(b => b.credits > 0), m.credits, (name) => stageVar(name), 'stats-bars-stage'),
+    // a session has one stage, open: a split by stage says only 100% of it
+    manyBuckets(m.byStage) ? bucketBars(m.byStage.filter(b => b.credits > 0), m.credits, (name) => stageVar(name), 'stats-bars-stage') : null,
     bucketBars((m.byRole || []).filter(b => b.credits > 0), m.credits, null, 'stats-bars-role')
   ].filter(Boolean)
   pane.append(h('div', { class: 'sect', testid: 'stats' },

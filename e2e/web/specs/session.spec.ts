@@ -125,7 +125,8 @@ test('the session stats tab draws its spend, bars and envelope', async ({ paired
   await page.goto(`${server.url}/#${id}/stats`);
   await showTab(page, 'stats');
   await expect(page.getByTestId('stats-spent')).toContainText('$0.03');
-  await expect(page.getByTestId('stats-bars')).toContainText('open');
+  // one stage, open: no split by stage, which would say only 100% of it
+  await expect(page.getByTestId('stats-bars-stage')).toHaveCount(0);
   await expect(page.getByTestId('stats-bars')).toContainText('session');
   await expect(page.getByTestId('stats-table')).toContainText('e2e-implementer');
   await expect(page.getByTestId('stats-envelope')).toContainText('granted $5.00 · spent $0.03 · 1% used');
