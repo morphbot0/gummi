@@ -62,15 +62,30 @@ function render () {
     ? h('button', { class: 'iconbtn', id: 'card-actions', testid: 'card-actions', title: 'Card actions', 'aria-label': 'Card actions', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('more'))
     : null
   menuBtn?.addEventListener('click', () => openActions())
+  // the session's next step is the head's one filled button: commit what
+  // is loose, then land it — or, while landing is held, the hold itself.
+  // None while something waits on the person (a decision, a run step's
+  // question: answering is the next step, with buttons of its own) or the
+  // card is working. The next step never folds into the menu and shows on
+  // a phone too; the title gives way first.
+  const commit = commitButton(c, actions)
+  const land = landButton(c, actions)
+  const waits = !!state.card?.decision || c.status === 'needs' || c.status === 'running'
+  const next = waits ? null : (commit || land)
+  if (next) {
+    next.classList.remove('hide-s')
+    if (!next.classList.contains('held')) next.classList.add('pri')
+  }
+  const fold = (rank, btn) => btn === next ? btn : foldAt(rank, btn)
   append(el, [
     h('div', { class: 'head-row' },
       h('span', { class: ['kind', c.home && 'ag'], testid: 'card-kind', data: { kind: kindTag(c) } }, typeName(c) || kindTag(c)),
       h('span', { class: 'cid', testid: 'card-id', title: c.id, data: { id: c.id } }, ref(c.id)),
       h('h1', { testid: 'card-title', title: c.title }, c.title),
       h('div', { class: 'head-actions' },
-        foldAt(1, commitButton(c, actions)),
-        foldAt(2, publishButton(c, actions)),
-        foldAt(3, landButton(c, actions)),
+        fold(1, commit),
+        fold(2, publishButton(c, actions)),
+        fold(3, land),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, data: { fold: '2' }, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
         menuBtn)),
     h('div', { class: 'subline' },
@@ -99,11 +114,26 @@ function foldAt (rank, btn) {
 // landButton is an open session's landing, in its head: a session pins no
 // decision while it is idle (DESIGN §19.8), so its way onto the base is
 // here, as its merge action — which shows the drafted message first.
+//
+// A landing something holds (open diff comments, a run, the card below in
+// its stack) is not offered — the board would refuse it — but it does not
+// vanish either: the head says what holds it and goes there.
 function landButton (c, actions) {
   if (!c.session || c.stage !== 'open') return null
   const merge = actions.find(a => a.id === 'merge')
-  if (!merge) return null
-  return h('button', { class: 'btn pri hide-s', type: 'button', testid: 'session-land', title: merge.detail || 'Land this session’s branch', onclick: () => runAction(state.card, merge) }, 'Land…')
+  if (merge) return h('button', { class: 'btn hide-s', type: 'button', testid: 'session-land', title: merge.detail || 'Land this session’s branch', onclick: () => runAction(state.card, merge) }, 'Land…')
+  const why = state.card?.landHeld
+  if (!why) return null
+  const by = state.card.landHeldBy
+  const go = {
+    comments: ['open the diff to resolve them', () => ctx.setTab?.('diff')],
+    run: ['go to the run', () => document.getElementById('run-above')?.click()],
+    stack: ['open the stack', () => openView('stacks', { id: c.stack?.id })]
+  }[by] || ['', () => {}]
+  return h('button', {
+    class: 'btn held hide-s', type: 'button', testid: 'session-land-held',
+    title: `Land is held: ${why}${go[0] ? ' — ' + go[0] : ''}`, onclick: go[1]
+  }, 'Land', h('small', null, why))
 }
 
 // publishButton opens the card's pull request (DESIGN §22): shown where
@@ -149,12 +179,13 @@ export function openActions (line = '') {
 
 function stages (c) {
   // an open session has no stages at all: ticking the workflow's would
-  // claim a plan, an implement and a verify it never had, so it says only
-  // that it is a session. Once closed it still isn't done in the
-  // workflow's sense, but the card needs some word for what happened to it.
-  if (c.stage === 'open') return h('span', { class: 'stages' }, h('span', { class: 'cur st-open' }, '◆ session'))
+  // claim a plan, an implement and a verify it never had. Its type is on
+  // the line above, so this says what it holds (the rail's word: ready to
+  // land, open comments, nothing committed yet), or nothing. Once closed it says
+  // how it ended.
+  if (c.stage === 'open') return c.word ? h('span', { class: 'stages' }, h('span', { class: 'cur st-open', testid: 'card-state' }, c.word)) : null
   if (c.kind === 'freeform') {
-    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, '◆ session · closed'))
+    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, c.landed ? 'landed' : 'closed'))
   }
   const idx = STAGES.indexOf(c.stage)
   return h('span', { class: 'stages', testid: 'card-stages' }, STAGES.map((s, i) => [

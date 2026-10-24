@@ -16,7 +16,7 @@
 import { $, h, clear, clock, dur, cr, ROLE, decisionWord, decisionColor, plural, ref, cardName } from './dom.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
-import { draftHero } from './session.js?v=__ASSET_V__'
+import { draftHero, newSession } from './session.js?v=__ASSET_V__'
 import { attachmentURL, get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { restoreComposer } from './composer.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -36,6 +36,9 @@ let following = true
 
 export function initThread () {
   on(['thread', 'sel', 'card', 'sessionDraft', 'runFold'], render)
+  // a board opened with nothing selected changes none of those: draw the
+  // empty column once now
+  queueMicrotask(render)
   // a run the live conversation places among its turns leaves the settled
   // items, and one it no longer places comes back to them
   let placed = ''
@@ -133,9 +136,15 @@ function render () {
   }
   const t = state.thread
   const items = threadItems(t)
+  // with nothing open and no draft, there is nobody to write to: the
+  // composer is put away (app.css) and the column offers the first step
+  document.getElementById('app')?.toggleAttribute('data-nothing-open', !state.sel && !state.sessionDraft)
   if (!state.sel && state.sessionDraft) { placeholder(box, draftHero()); return }
   if (!state.sel) {
-    placeholder(box, h('div', { class: 'empty', testid: 'thread-none' }, h('b', null, 'Nothing open'), 'Start a session, or pick a card from the list.'))
+    placeholder(box, h('div', { class: 'empty start', testid: 'thread-none' },
+      h('b', null, 'Nothing open'),
+      'A session is an agent working on a branch of its own while you talk to it. Start one, or pick a card from the list.',
+      h('button', { class: 'btn pri', type: 'button', testid: 'thread-new-session', onclick: () => newSession() }, 'New session')))
     return
   }
   if (!t) { placeholder(box, h('div', { class: 'empty', testid: 'thread-loading' }, h('span', { class: 'spinner' }))); return }
@@ -410,6 +419,7 @@ function copyButton (text, title, testid) {
 // run sent (its report, DESIGN §25.7) — or an old crew — is gummi's, never
 // the person's: it is drawn on the other side, headed as the workflow.
 function you (it) {
+  if (it.by === 'review') return reviewSent(it)
   const run = it.by === 'workflow' || it.by === 'crew'
   const who = it.by || 'you'
   const text = String(it.text || '')
@@ -438,6 +448,22 @@ function you (it) {
       it.time ? h('span', { class: 'mono' }, clock(it.time)) : null,
       copyButton(text, 'Copy message', 'bubble-copy'),
       it.rewind ? h('button', { type: 'button', class: 'rewind', testid: 'turn-rewind', title: 'Take the conversation back to before this message and edit it. The branch keeps its commits.', onclick: it.rewind }, 'rewind') : null))
+}
+
+// reviewSent is the person's diff comments as their session got them
+// (Request changes): the person's act, said as one line — how many
+// comments went — with what the agent was sent a click away, since its
+// words are gummi's instruction to the agent, not the person's.
+function reviewSent (it) {
+  const text = String(it.text || '')
+  const n = text.split('\n').filter(l => /^- /.test(l)).length
+  return h('div', { class: 'msg mine review', testid: 'thread-review' },
+    h('details', { class: 'bubble' },
+      h('summary', null, `Asked for changes on ${n} diff comment${n === 1 ? '' : 's'}`),
+      h('div', { class: 'body' }, md(text))),
+    h('div', { class: 'who' },
+      h('b', { title: 'sent from the diff' }, 'you'),
+      it.time ? h('span', { class: 'mono' }, clock(it.time)) : null))
 }
 
 // attachmentThumbs renders a you turn's images as thumbnails linking to
@@ -960,7 +986,9 @@ function conversation (kind, c, role, stage, inserts = null) {
   flush(!!c.busy && !c.streaming)
   if (inserts?.has(turns.length - off)) out.push(...inserts.get(turns.length - off))
   if (c.streaming) {
-    out.push(h('div', { class: ['msg reply live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
+    // while it is still being written, the text ends in a caret: "Done:"
+    // halfway through is the start of a sentence, not a verdict
+    out.push(h('div', { class: ['msg reply live-msg', stage && `st-${stage}`, c.busy && 'writing'], testid: 'live-streaming' },
       // a message left half-written when its session stopped (paused,
       // parked, failed) says it was cut off, not that it is still coming
       h('div', { class: 'who' }, h('b', null, role), c.busy

@@ -40,9 +40,9 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
   await expect(page.getByTestId('fleet-clock-agent')).toBeVisible();
   await expect(page.getByTestId('fleet-clock-you')).toBeVisible();
 
-  // by stage, in the stage order; by model, biggest first
-  const stages = page.getByTestId('fleet-stage-bars').locator('th');
-  await expect(stages.first()).toHaveText('open');
+  // sessions all spend at one stage, open: no split by stage is drawn;
+  // by model, biggest first
+  await expect(page.getByTestId('fleet-by-stage')).toHaveCount(0);
   await expect(page.getByTestId('fleet-model-bars')).toContainText('e2e-implementer');
 
   // one lane per card; the landed one shows its landing, the asking one
@@ -65,9 +65,9 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
 
   if (!phone) {
     // every mark carries its numbers on hover: value first, then the name
-    await page.getByTestId('fleet-stage-bars').locator('tr').first().hover();
+    await page.getByTestId('fleet-model-bars').locator('tr').first().hover();
     await expect(page.getByTestId('fleet-tip')).toBeVisible();
-    await expect(page.getByTestId('fleet-tip')).toContainText(/\$.*open$/);
+    await expect(page.getByTestId('fleet-tip')).toContainText(/\$.*e2e-implementer$/);
     await landed.locator('.land').hover();
     await expect(page.getByTestId('fleet-tip')).toContainText('landed');
   } else {

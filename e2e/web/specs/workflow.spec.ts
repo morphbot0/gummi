@@ -497,7 +497,7 @@ test.describe('a run that takes a while, under a conversation', () => {
 
 // A step that asks turns the strip amber with its question; Answer opens
 // the step on that question, answered there.
-test('the live strip says a step asks, and Answer opens it on its question', async ({ pairedPage: page, server, api, workspace }, info) => {
+test('the live strip says a step asks, and Answer goes to the question in the run’s block', async ({ pairedPage: page, server, api, workspace }, info) => {
   test.setTimeout(180_000);
   fs.mkdirSync(path.join(workspace.repo, '.gummi', 'workflows'), { recursive: true });
   fs.writeFileSync(path.join(workspace.repo, '.gummi', 'workflows', 'make-and-read.yaml'), RECIPE);
@@ -513,17 +513,17 @@ test('the live strip says a step asks, and Answer opens it on its question', asy
   await expect(strip).toHaveAttribute('data-mood', 'asking', { timeout: 45_000 });
   await expect(strip.getByTestId('run-live-now')).toContainText('make asks:');
   await expect(strip.getByTestId('run-live-now')).toContainText('Keep made.txt plain');
-  await expect(strip.getByTestId('run-live-jump')).toBeVisible();
+  // one way to the question: no second Jump beside Answer
+  await expect(strip.getByTestId('run-live-jump')).toHaveCount(0);
   await shot(page, info, 'workflow-live-strip-asks');
   await strip.getByTestId('run-live-answer').click();
-  const panel = page.getByTestId('step-panel');
-  await expect(panel).toBeVisible();
-  await expect(panel.getByTestId('step-title')).toHaveText('make');
-  const ask = panel.getByTestId('run-question');
+  // the question under the step's row in the block, its first answer focused
+  const ask = page.getByTestId('run-1').getByTestId('run-question');
+  await expect(ask).toBeInViewport();
   await expect(ask).toContainText('Keep made.txt plain');
-  await ask.getByTestId('run-question-option-0').click();
-  await page.getByTestId('step-close').click();
-  await backToThread(page);
+  await expect(ask.getByTestId('run-question-option-0')).toBeFocused();
+  await expect(page.getByTestId('step-panel')).toHaveCount(0);
+  await page.keyboard.press('Enter');
   await expect(page.getByTestId('run-1')).toHaveAttribute('data-state', 'done', { timeout: 90_000 });
   await expect(strip).toHaveCount(0);
 });

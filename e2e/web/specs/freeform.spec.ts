@@ -74,11 +74,11 @@ test('a landed freeform card claims no stages', async ({ pairedPage: page, serve
   await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage, { timeout: 30_000 }).toBe('done');
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
-  await expect(page.getByTestId('card-stages')).toContainText('session');
+  await expect(page.getByTestId('card-stages')).toContainText('landed');
   await expect(page.getByTestId('card-stages')).not.toContainText('verify');
   await expect(page.getByTestId('stage-verify')).toHaveCount(0);
   if (info.project.name === 'phone') await page.getByTestId('card-back').click();
-  await expect(page.getByTestId(`rail-row-${id}`)).toContainText('session');
+  await expect(page.getByTestId(`rail-row-${id}`)).toContainText('landed');
 });
 
 // A line sent while the agent is mid-turn waits under the conversation
@@ -263,6 +263,9 @@ test('commit and land say what each commits, and an empty commit message is refu
   // menu, where it is always an entry
   await page.getByTestId('card-actions').click();
   await page.getByTestId('action-commit').click();
+  // the message opens on the session's title; emptied, it is refused
+  await expect(page.getByTestId('action-input')).toHaveValue('Poke at the margins');
+  await page.getByTestId('action-input').fill('');
   await page.getByTestId('action-confirm').click();
   await expect(page.getByTestId('action-error')).toContainText('needs a message');
 });
@@ -291,7 +294,7 @@ test('a question asked in a session is answered in your words', async ({ pairedP
   await page.getByTestId('decision-option-chat').click();
   await expect(page.getByTestId('decision-needs')).toContainText('Type your answer');
   await input.fill('Go up the middle');
-  await expect(page.getByTestId('composer-says')).toHaveText('Chat about this');
+  await expect(page.getByTestId('composer-says')).toHaveText('answers “Chat about this”');
   await page.keyboard.press('Enter');
   // the words answered the question: one answer, no turn, and the agent
   // echoes them back as the tool's result

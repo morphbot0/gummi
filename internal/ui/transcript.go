@@ -129,6 +129,9 @@ func transcriptLinesWith(s *theme.Styles, snap engine.Snapshot, w int, showOutpu
 			case "crew":
 				// an old crew reporting back, never the person's
 				label = s.Faint.Render("crew · report")
+			case "review":
+				// the person's diff comments, as gummi worded them for the agent
+				label = s.KeyHint.Render("you") + s.Faint.Render(" · diff comments")
 			}
 			// EVERY answer to an ask carries its outcome, not just the
 			// happy one. The suffix used to appear only for a clean

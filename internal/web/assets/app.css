@@ -251,6 +251,9 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,var(--line2))}
 .btn.pri.danger{background:var(--err);border-color:var(--err);color:var(--on-err)}
 .btn.on{border-color:var(--warn);color:var(--warn)}
+.btn.held{border-style:dashed;color:var(--fg3)}
+.btn.held small{font-size:11.5px;color:var(--warn);font-weight:500;max-width:22ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn.held{min-width:0}
 .subline{display:flex;align-items:center;gap:6px 14px;font-size:12.5px;color:var(--fg3);min-width:0;white-space:nowrap}
 /* nothing spills past the head: what a card waits on or belongs to gives
    way first, its stage and its spend last */
@@ -510,7 +513,7 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .composer .mslot{margin-left:auto;display:flex;min-width:0}
 .composer .mslot:empty{display:none}
 .composer .mslot + .send{margin-left:0}
-.mbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:7px;color:var(--fg2);flex-shrink:0;min-width:0;max-width:280px}
+.mbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:7px;color:var(--fg2);flex-shrink:1;min-width:0;max-width:280px}
 .mbtn:hover,.mbtn[aria-expanded="true"]{background:var(--sunk)}
 .mbtn .m{color:var(--fg);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mbtn .a{font-size:11px;color:var(--fg3)}
@@ -537,6 +540,11 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .spop .row{display:flex;gap:6px}
 .spop .fh{margin:0;font-size:12px;color:var(--fg3)}
 .spop .ferr{margin:0;font-size:12px;color:var(--err)}
+/* Send is the bar's one control that never gives way: as the composer
+   narrows (a surface open beside the thread), the enter chip and the
+   model's agent go first, then the model and the hint truncate */
+.composer{container-type:inline-size}
+@container (max-width:560px){.composer .enter kbd,.mbtn .a{display:none}}
 /* on a phone the model beats the enter hint for the bar's width */
 @media (max-width:760px){.composer .bar:has(.mbtn) .enter{display:none}.mbtn{max-width:none;flex:1;justify-content:flex-start}}
 .link-spend{border-radius:6px;padding:2px 6px;margin:-2px -6px}
@@ -586,7 +594,7 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .opt.pick .k{border-style:dashed}
 .opt.picked .k{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .opt.picked .l{font-weight:500}
-.send{margin-left:auto;height:28px;padding:0 12px;border-radius:7px;background:var(--accent);color:var(--accent-fg);font-weight:600;font-size:12.5px;white-space:nowrap;max-width:26ch;overflow:hidden;text-overflow:ellipsis}
+.send{margin-left:auto;flex:none;height:28px;padding:0 12px;border-radius:7px;background:var(--accent);color:var(--accent-fg);font-weight:600;font-size:12.5px;white-space:nowrap;max-width:26ch;overflow:hidden;text-overflow:ellipsis}
 
 /* ---------- beside the thread: the icons and the one surface they open ---------- */
 /* a column of icons, and left of it the one surface an icon opened. The
@@ -892,7 +900,10 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .keys h3:first-child{margin-top:0}
 /* under the top bar at the right, clear of the thread and of what is
    docked at its foot */
-.toasts{position:fixed;right:16px;top:52px;display:flex;flex-direction:column;gap:6px;align-items:flex-end;z-index:60;max-width:min(680px,calc(100% - 32px));pointer-events:none}
+.toasts{position:fixed;right:16px;bottom:var(--toast-bottom,16px);display:flex;flex-direction:column;gap:6px;align-items:flex-end;z-index:60;max-width:min(680px,calc(100% - 32px));pointer-events:none}
+/* a notice stands low at the right, just above the line of what is docked
+   (toast.js sets --toast-bottom): clear of the head's buttons and the
+   surface's tabs it used to cover, and of the composer */
 .toast{background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;box-shadow:var(--shadow);pointer-events:none;white-space:pre-line;overflow-wrap:anywhere}
 .toast.err{background:var(--err);color:var(--on-err)}
 .toast.multi{white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;width:min(680px,calc(100vw - 32px))}
@@ -1016,7 +1027,13 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   .mcard .head{grid-column:2;padding:10px 12px 8px 0;border-bottom:0;min-width:0}
   .mcard .tabs{grid-column:1 / -1;flex-direction:row;width:auto;padding:0;border-left:0;border-top:1px solid var(--line);background:none}
   .mcard .tablist{flex-direction:row;align-items:stretch;gap:0;flex:1}
-  .mcard .tab{flex:1;width:auto;height:40px;border-radius:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 10px;font-size:13.5px;color:var(--fg2);border-bottom:2px solid transparent}
+  .mcard .tab{flex:1 0 auto;width:auto;height:44px;border-radius:0;display:flex;align-items:center;justify-content:center;gap:5px;padding:0 9px;font-size:13.5px;color:var(--fg2);border-bottom:2px solid transparent}
+  /* more tabs than the screen is wide: the row scrolls, and an edge with
+     more past it fades (panel.js markOverflow) */
+  .mcard .tabs{scrollbar-width:none}
+  .mcard .tabs.more-r{-webkit-mask-image:linear-gradient(to right,#000 82%,transparent);mask-image:linear-gradient(to right,#000 82%,transparent)}
+  .mcard .tabs.more-l{-webkit-mask-image:linear-gradient(to left,#000 82%,transparent);mask-image:linear-gradient(to left,#000 82%,transparent)}
+  .mcard .tabs.more-l.more-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 14%,#000 86%,transparent);mask-image:linear-gradient(to right,transparent,#000 14%,#000 86%,transparent)}
   .mcard .tab svg.i{display:none}
   .mcard .tab.dim{color:var(--fg3)}
   .mcard .tab.on{background:none;color:var(--accent);border-bottom-color:var(--accent);font-weight:500}
@@ -1094,7 +1111,6 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
      the thread's fold lines and the inline links (padding widens what an
      inline link takes a tap on without moving the line it sits in) */
   .stages button{min-height:28px}
-  .tools summary,.sg > summary{min-height:32px}
   .center .link,.dock .link,.mdec .link,.mcard .link{border-bottom:0;text-decoration:underline dotted;text-underline-offset:3px;padding:5px 0}
 }
 /* typing on a phone: the keyboard has half the screen, so everything but
@@ -1151,6 +1167,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .tools pre.tool-out{margin:4px 0 2px;padding:6px 8px;background:var(--sunk);border-radius:6px;color:var(--err);white-space:pre-wrap;font-size:11.5px}
 .note.prompt{border-left-color:var(--line2);background:var(--sunk);color:var(--fg3)}
 .note.prompt b{color:var(--fg3)}
+.note.prompt.hint{background:none;border-left-style:dashed;font-style:italic}
 .ln.since .m{box-shadow:inset 2px 0 0 var(--accent)}
 .files .since{color:var(--accent);font-size:10.5px;margin-left:6px}
 .fstatus{font-family:var(--ui);font-size:11px;color:var(--fg3);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
@@ -1206,6 +1223,18 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .msg.mine .bubble .body{margin:0;white-space:pre-wrap}
 .msg.mine .bubble .body.clamped{max-height:15em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent)}
 .msg.mine .bubble .more{display:block;margin-top:4px;font-size:12px;color:var(--accent)}
+/* nothing open and no draft: no composer to write into, and the column's
+   empty state offers the first step */
+.app[data-nothing-open] .dock{display:none}
+/* a reply still being written ends in a caret */
+.live-msg.writing .body > :last-child::after{content:'';display:inline-block;width:.5em;height:1em;margin-left:2px;vertical-align:text-bottom;background:var(--accent);opacity:.7;animation:caret 1s steps(2) infinite}
+@keyframes caret{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.live-msg.writing .body > :last-child::after{animation:none}}
+.thread .empty.start .btn{margin-top:12px}
+/* the person's diff comments as their session got them: one line, what
+   the agent was sent a click away */
+.msg.review summary{cursor:pointer;font-weight:500}
+.msg.review details[open] summary{margin-bottom:6px}
 .msg.mine .who{font-size:11.5px;justify-content:flex-end}
 .msg.mine .who b{color:var(--fg3);font-weight:500}
 .msg.mine .who .rewind{margin-left:0}
@@ -1534,3 +1563,21 @@ button.tr-path:disabled{opacity:1;cursor:default}
 }
 .repos .landed{color:var(--ok, inherit)}
 .repotabs{margin:0 0 8px}
+
+/* a phone is pressed with a thumb: what it presses is at least 44px each
+   way (WCAG 2.5.5), the board's status pills 40px. The visible chrome
+   stays as drawn where it can; the hit area grows around it. */
+@media (max-width:760px){
+  .iconbtn,.mback{min-width:44px;min-height:44px}
+  .btn,.send,.mbtn,.seg button,.wraptgl{min-height:44px}
+  .pill{min-height:40px}
+  .tools summary,.sg > summary,.memdoc > summary{min-height:44px}
+  .msg .copy,.msg .who .rewind{min-height:44px;min-width:44px;display:inline-flex;align-items:center;justify-content:center}
+  .dfile input[type="checkbox"],.diffbox input[type="checkbox"],input[type="checkbox"]{width:22px;height:22px}
+  label:has(> input[type="checkbox"]){min-height:44px;display:inline-flex;align-items:center;gap:8px}
+  .search input{min-height:40px}
+  .link-spend{min-height:44px;display:inline-flex;align-items:center}
+  /* the chip under the title says what holds it: the button keeps the
+     title its room */
+  .btn.held small{display:none}
+}

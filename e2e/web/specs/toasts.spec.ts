@@ -1,13 +1,14 @@
 import { expect, showTab, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
-// A notice stands under the top bar at the right, clear of what is docked
-// at the bottom, whatever the dock holds while the notice is up.
+// A notice stands low at the right, just above what is docked at the
+// bottom — clear of the head's buttons and the surface's tabs at the top,
+// and of the composer — whatever the dock holds while the notice is up.
 
 let id: string;
 test.use({ seed: { run: async (ws) => { id = await ws.seedReady('Add a noticed helper'); } } });
 
-test('a notice stands top right, clear of the dock', async ({ pairedPage: page }, info) => {
+test('a notice stands low at the right, clear of the dock and the head', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name === 'phone', 'the phone docks a folded decision bar');
   await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   await showTab(page, 'diff');
@@ -25,6 +26,8 @@ test('a notice stands top right, clear of the dock', async ({ pairedPage: page }
   const at = (await toast.boundingBox())!;
   const top = (await page.locator('.top').boundingBox())!;
   expect(at.y, 'under the top bar').toBeGreaterThanOrEqual(top.y + top.height);
+  const head = (await page.getByTestId('card-head').boundingBox())!;
+  expect(at.y, 'below the card head').toBeGreaterThanOrEqual(head.y + head.height);
   expect(at.x + at.width, 'at the right').toBeGreaterThan(page.viewportSize()!.width - 40);
   await shot(page, info, 'toast-above-dock');
 

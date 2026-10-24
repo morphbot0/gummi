@@ -316,12 +316,11 @@ function renderSays () {
   // so it keeps the command's own wording even before the server has
   // classified it
   if (d && (!state.draft.trim() || (!c && !state.draft.trim().startsWith('/')) || c?.route === 'answer')) {
-    says.textContent = enterSays(d)
-    // the button names the answer enter gives, so the line beside it need
-    // not say it a second time (it stays for a screen reader)
-    const names = says.textContent === enterSays(d) && says.textContent !== NONE
-    btn.textContent = names ? says.textContent : 'Answer'
-    box.classList.toggle('said', names)
+    // the button is always Send — what it sends is the line beside it,
+    // which names the answer enter gives
+    const label = enterSays(d)
+    says.textContent = label === NONE ? label : `answers “${label}”`
+    btn.textContent = 'Send'
     return
   }
   btn.textContent = 'Send'

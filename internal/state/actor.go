@@ -50,6 +50,13 @@ const ActorObjective = "objective"
 // them, and a thread draws them as the crew's.
 const ActorCrew = "crew"
 
+// ActorReview is the actor of the turn that carries a person's diff
+// comments to their session (Request changes): the person's act, but the
+// words are gummi's instruction to the agent — the comments, their ids
+// and the tool that resolves them — so a thread draws it as the comments
+// sent, not as a line the person typed.
+const ActorReview = "review"
+
 // ActorWorkflow is the actor of the turns a workflow run sends (DESIGN
 // §25): a step's brief and steers, and the report its session gets. A
 // thread draws them as the workflow's.

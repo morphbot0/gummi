@@ -24,6 +24,7 @@ import { state, set } from './store.js?v=__ASSET_V__'
 import { openModelPicker } from './session.js?v=__ASSET_V__'
 import { openPublish } from './publish.js?v=__ASSET_V__'
 import { pushAfterControl, openBasePush } from './pushbase.js?v=__ASSET_V__'
+import { expectMove, unexpectMove } from './diff.js?v=__ASSET_V__'
 
 const NOUN = { message: 'Message', number: 'Dollars', profile: 'Profile', repo: 'Repository', text: 'Value' }
 
@@ -354,7 +355,16 @@ async function send (id, a, body) {
   // refuses one that carries none while a decision is pinned
   const d = state.sel === id ? state.card?.decision : null
   if (d?.against?.token && !body.against) body = { ...body, against: d.against.token }
-  const res = await post(cardPath(id, `actions/${encodeURIComponent(a.id)}`), body)
+  // a move of the branch this page makes is one its reader expects to see
+  const moves = ['commit', 'squash', 'rebase'].includes(a.id)
+  if (moves) expectMove(id)
+  let res
+  try {
+    res = await post(cardPath(id, `actions/${encodeURIComponent(a.id)}`), body)
+  } catch (err) {
+    if (moves) unexpectMove(id)
+    throw err
+  }
   // what the action changed is read again, documents included
   if (res && res.id === state.sel) set({ card: res, cardRev: (state.cardRev || 0) + 1 })
   if (res?.ok && !res.id) {

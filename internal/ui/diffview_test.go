@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // diffWorkspace creates a session with a worktree that has an uncommitted
@@ -350,6 +351,13 @@ func TestDiffRequestChangesSendsToTheSession(t *testing.T) {
 		t.Fatalf("request-changes did not close the diff surface (notice %q)", m.notice.text)
 	}
 	waitForTurn(t, eng, "FF-001", "extract this into a helper")
+	// the turn is the review's, so a thread draws it as the comments sent
+	// and not as a line the person typed
+	for _, msg := range eng.Freeform("FF-001").Snapshot().Transcript {
+		if strings.Contains(msg.Content, "extract this into a helper") && threadfold.TurnBy(msg.By) != "review" {
+			t.Errorf("the comments went as %q, want the review's", msg.By)
+		}
+	}
 }
 
 // An open diff comment holds the landing until it is resolved.

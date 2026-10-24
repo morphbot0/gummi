@@ -321,7 +321,10 @@ worktrees and specs still work — the board just stays static. Key env vars are
   answer differs from the TUI's, the fix belongs in the shared code
   (`threadfold`, `decisions`, the Shell), and `TestWebDecisionsMatchThePicker`
   is the test that should have caught it. Browser tests live in `e2e/web`
-  (`scripts/web-e2e.sh`, Playwright).
+  (`scripts/web-e2e.sh`, Playwright). A UX review is `scripts/web-ux.sh`: a
+  Playwright tour of the page's journeys, photographed and probed into
+  `e2e/web/ux-out/` (not a test, not in CI); `e2e/web/ux/ux-review.yaml`
+  is the workflow recipe that runs it and reads the screens.
 - "what did this card cost / how did it run" → `internal/cardrun`, then its
   three readers (`internal/ui/statsview.go`, `cmd/gummi/statusstats.go`,
   `internal/ui/week.go`). The derivation lives in one place on purpose: two

@@ -916,7 +916,10 @@ function liveActs (r, l) {
       }
       return [jump(true), l.card ? btn('run-live-open', `Open ${l.who}`, () => openStep(l.card)) : null]
     case 'asking':
-      return [btn('run-live-answer', 'Answer', () => openStep(l.card), true), jump(false)]
+      // the question is answered in one place, under its row in the run's
+      // block: Answer goes there and puts the first answer under the
+      // keyboard, rather than opening the step as a second place to answer
+      return [btn('run-live-answer', 'Answer ↑', () => answerInBlock(r.n), true)]
     case 'budget': {
       // the run's own question is the top-up: Top up… answers it with an
       // amount, read when pressed; with none open, the card's budget is
@@ -1006,6 +1009,13 @@ const flashing = new Map()
 
 // jumpToRun scrolls the thread to run n's block and flashes it; unfold
 // unfolds a run folded to its line whole first (a spec's list of runs).
+// answerInBlock brings run n's block on screen and focuses the first
+// answer of the question asked under its row.
+function answerInBlock (n) {
+  jumpToRun(n, { unfold: true })
+  setTimeout(() => document.querySelector(`#thread [data-testid="run-${n}"] [data-testid="run-question-option-0"]`)?.focus({ preventScroll: true }), 350)
+}
+
 export function jumpToRun (n, { unfold = false } = {}) {
   if (isMobile() && state.view !== 'thread') set({ view: 'thread' })
   if (unfold && runFolds.get(`${state.sel} ${n}`) !== false) setFold(n, false)

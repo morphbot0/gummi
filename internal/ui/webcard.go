@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strconv"
@@ -251,10 +252,36 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 		st.card.Decision, st.rev = &dec, od.rev
 	}
 	st.card.Actions = m.webActions(r)
+	st.card.LandHeld, st.card.LandHeldBy = m.webLandHeld(r, st.card.Actions)
 	st.card.Composer = m.webComposer(r, "")
 	st.card.Session = m.webSessionOf(r.F)
 	st.card.Repos = webRepos(r.Repos)
 	return st, true
+}
+
+// webLandHeld is why an open session that would otherwise offer a landing
+// does not right now: its open diff comments, its open workflow run, or
+// the card below it in its stack. Each is a hold a person clears, which
+// the head shows in place of the landing. A turn in flight is not one:
+// the head offers stopping it instead, and it clears by itself.
+func (m *Shell) webLandHeld(r featureRow, acts []webapi.Action) (why, by string) {
+	if !r.F.IsFreeform() || r.F.Stage != domain.StageOpen || r.F.MainCheckout || !r.HasWorktree || r.Landed || !r.F.PullRequest.Empty() || r.watchOnly() {
+		return "", ""
+	}
+	if slices.ContainsFunc(acts, func(a webapi.Action) bool { return a.ID == "merge" }) {
+		return "", ""
+	}
+	switch {
+	case r.OpenDiffComments > 0:
+		n := r.OpenDiffComments
+		return fmt.Sprintf("%d open comment%s", n, plural(n)), "comments"
+	case r.OpenRun != nil:
+		return fmt.Sprintf("run %d is %s", r.OpenRun.N, r.OpenRun.State), "run"
+	}
+	if b := m.stackLandBlocker(r.F.ID); b != "" {
+		return "lands after " + m.cardName(b), "stack"
+	}
+	return "", ""
 }
 
 // WebCard is one card's head as the loop knows it. ok is false for a
@@ -473,7 +500,7 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
 			if !r.F.MainCheckout {
 				list = append(list,
-					cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " with your message — until you do, the session's work stays uncommitted, and Land commits whatever is left as a final checkpoint"})
+					cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " — the message starts as the session's title; until you commit, Land commits whatever is left as a final checkpoint"})
 			}
 		}
 	}
@@ -491,6 +518,12 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 			continue
 		}
 		act := webapi.Action{ID: a.id, Label: strings.TrimSuffix(a.label, "…"), Key: a.key, Danger: a.danger, Detail: a.why}
+		if a.id == "merge" {
+			// the page calls it what its head's button does — Land — so the
+			// menu row, the dialog and its confirm read as one act; the id
+			// and the terminal's m key stay merge
+			act.Label = "land"
+		}
 		m.webActionInput(r, &act)
 		out = append(out, act)
 	}
@@ -526,8 +559,13 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		if a.ID == "merge" {
 			a.Methods = webLandMethods(r.F)
 		}
-	case "newbug", "commit":
+	case "newbug":
 		a.Needs = webapi.ActionNeedsMessage
+	case "commit":
+		// a commit's message opens on the session's title, to be read and
+		// edited, rather than as an empty box the dialog then refuses
+		a.Needs = webapi.ActionNeedsMessage
+		a.Default = r.F.Title
 	case "envelope":
 		a.Needs = webapi.ActionNeedsNumber
 		a.Default = strconv.Itoa(r.F.Budget.Envelope)
