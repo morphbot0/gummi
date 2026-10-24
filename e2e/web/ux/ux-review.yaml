@@ -1,0 +1,140 @@
+name: ux-review
+description: Tour gummi web with Playwright, read the screens through four lenses, rank the findings
+steps:
+  - id: tour
+    run: scripts/web-ux.sh
+  - id: lenses
+    parallel:
+      join: allSettled
+      steps:
+        - id: flow
+          role: reviewer
+          prompt: |
+            You review gummi web's UX through one lens: FLOW AND NEXT ACTION.
+
+            The UX tour just ran. Read e2e/web/ux-out/INDEX.md first, then each
+            journey's journey.json and its screenshots (open the PNGs and look
+            at them; the intent line of each step says what the person is
+            trying to do there). Journeys ran at desktop, laptop and phone.
+
+            For every step ask: does the person know where they are, what
+            state the card is in, and what to do next? Is there exactly one
+            obvious primary action, and is it the right one for that state?
+            Where does a journey dead-end, need a guess, or offer an action
+            that will be refused? A journey's "blocked" line is either a
+            missing or hidden control (a finding) or a tour selector gone
+            stale (say which, and do not count it as a finding).
+
+            Change nothing. Write your findings as one list, most severe first,
+            each on one line:
+            - [S1|S2|S3] <title> — screen: <path under ux-out> — <what the person meets and why it hurts> — fix: <the change> — code: <the file under internal/web/assets or internal/ui most likely to change>
+            S1 blocks or misleads a person on a core loop; S2 slows or confuses;
+            S3 is polish. At most 15 findings; merge duplicates across viewports.
+
+            {{spec}}
+        - id: efficiency
+          role: reviewer
+          prompt: |
+            You review gummi web's UX through one lens: EFFICIENCY.
+
+            The UX tour just ran. Read e2e/web/ux-out/INDEX.md first (each
+            step names the actions spent so far), then each journey's
+            journey.json and its screenshots.
+
+            Find where a person spends clicks, keys, scrolling or attention a
+            better page would save: steps that could be one, things that must
+            be reopened on every card (panels and tabs that do not follow the
+            card's state), confirmations that add nothing, phone paths that
+            cost far more than desktop ones, tasks with no keyboard path (read
+            internal/web/assets/keys.js for what exists). Compare the action
+            counts across viewports for the same journey.
+
+            Change nothing. Write your findings as one list, most severe first,
+            each on one line:
+            - [S1|S2|S3] <title> — screen: <path under ux-out> — <the cost today, in actions where you can count it> — fix: <the change and what it saves> — code: <the file most likely to change>
+            At most 15 findings; merge duplicates across viewports.
+
+            {{spec}}
+        - id: copy
+          role: reviewer
+          prompt: |
+            You review gummi web's UX through one lens: WORDS AND CLARITY.
+
+            The UX tour just ran. Read e2e/web/ux-out/INDEX.md, then each
+            journey's journey.json: every step's probe carries the words the
+            person reads (text.head, text.dock, text.dialog, text.surface,
+            text.pane, text.toasts). Check the screenshots where the words
+            alone do not tell you enough.
+
+            Find words that mislead or cost a person thought: jargon and
+            internal terms (stage, gate, envelope, tool names, ids), the same
+            thing named two ways (card or session, budget or envelope), labels
+            repeated side by side, a status that says the opposite of the
+            state ("Done" while working), apologies and long hedges, buttons
+            whose label is not the act they do, text meant for the agent shown
+            to the person. Read AGENTS.md's rule on how a card is named.
+
+            Change nothing. Write your findings as one list, most severe first,
+            each on one line:
+            - [S1|S2|S3] <title> — screen: <path under ux-out> — "<the words today>" — fix: "<the words you propose>" — code: <the file most likely to change>
+            At most 20 findings.
+
+            {{spec}}
+        - id: layout
+          role: reviewer
+          prompt: |
+            You review gummi web's UX through one lens: LAYOUT, SIZES AND ACCESS.
+
+            The UX tour just ran. Read the end of e2e/web/ux-out/INDEX.md
+            ("What the probe found, across every screen": cut-off text, small
+            targets, unnamed and covered controls, leaks), then look at the
+            screenshots it points to, at desktop (1440), laptop (1024) and
+            phone (390), light and dark (the surfaces journeys).
+
+            Judge which probe findings a person would notice and which are
+            noise. Add what the probe cannot see: crowding, hierarchy that
+            puts the wrong thing first, a three-column page squeezed at laptop
+            width, a phone screen whose key control is below the fold or
+            behind a menu, contrast that fails in one theme, things that jump.
+
+            Change nothing. Write your findings as one list, most severe first,
+            each on one line:
+            - [S1|S2|S3] <title> — screen: <path under ux-out> — <what is wrong, at which size> — fix: <the change> — code: <the file, usually internal/web/assets/app.css or a view's .css>
+            At most 15 findings; merge duplicates across viewports.
+
+            {{spec}}
+  - id: report
+    role: scribe
+    prompt: |
+      Write gummi web's UX review from four reviewers' findings, each
+      through one lens. Merge findings that are the same problem seen
+      through two lenses; drop any a reviewer marked as a stale tour
+      selector; keep the screen path on each.
+
+      Write it to e2e/web/ux-out/REPORT.md (gitignored, beside the screens
+      it cites) as:
+      1. The five changes that would most improve the experience, each a
+         short paragraph: the problem, the evidence (screens), the change.
+      2. Every finding in one table: severity, title, lens(es), screen,
+         fix, code.
+      3. What the tour did not reach (blocked journeys, surfaces no
+         journey visits) and should next time.
+
+      Then give the same report as your final message.
+
+      ## Flow and next action
+      {{flow.output}}
+
+      ## Efficiency
+      {{efficiency.output}}
+
+      ## Words and clarity
+      {{copy.output}}
+
+      ## Layout, sizes and access
+      {{layout.output}}
+
+      {{spec}}
+
+      End with one line per done-when item of the spec: MET: DW-n, or
+      UNMET: DW-n <why>.

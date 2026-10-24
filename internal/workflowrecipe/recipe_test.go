@@ -441,3 +441,22 @@ func TestLoadPrefersTheWorkspace(t *testing.T) {
 		t.Errorf("List = %v, want %v", got, want)
 	}
 }
+
+// The UX review recipe lives beside the tour it runs (e2e/web/ux), outside
+// gummi's bundle: this holds it to the grammar it is handed over in.
+func TestTheUXReviewRecipeChecks(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "e2e", "web", "ux", "ux-review.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems, warnings := Check(r); len(problems)+len(warnings) > 0 {
+		t.Fatalf("problems %q, warnings %q", problems, warnings)
+	}
+	if r.Name != "ux-review" || len(r.Steps) != 3 || r.Steps[1].Parallel == nil || len(r.Steps[1].Parallel.Steps) != 4 {
+		t.Fatalf("recipe = %+v", r)
+	}
+}

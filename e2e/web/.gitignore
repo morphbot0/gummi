@@ -3,3 +3,5 @@ report/
 test-results/
 .cache/
 screens/
+ux-out/
+test-results-ux/
