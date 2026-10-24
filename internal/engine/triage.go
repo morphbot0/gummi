@@ -160,11 +160,7 @@ func (ff *FreeformSession) nameFromTriage(ctx context.Context, sess *Session, f 
 	if err != nil || n.Title == f.Title {
 		return ""
 	}
-	body := fmt.Sprintf("Titled %q, on branch %s.", n.Title, n.Branch)
-	if n.Kept != "" {
-		body = fmt.Sprintf("Titled %q. Its branch stays %s: %s.", n.Title, n.Branch, n.Kept)
-	}
-	sess.appendToolDone("gummi named this session", true, body)
+	sess.appendToolDone("gummi named this session", true, nameReport(n))
 	ff.engine.persist(sess)
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
 	if n.Branch == before {

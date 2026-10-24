@@ -564,6 +564,9 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 				a.Default = o.Text
 			}
 		}
+	case "rename":
+		a.Needs = webapi.ActionNeedsText
+		a.Default = r.F.Title
 	case "heartbeat":
 		// the page opens its own schedule form for this card; the
 		// definition is written through /api/schedules, not this action

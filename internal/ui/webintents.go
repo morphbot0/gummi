@@ -617,6 +617,14 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			return nil, refuse(WebBadRequest, "say what done looks like, or pause, resume, stop or clear")
 		}
 		return m.objectiveSession(r.F.ID, msg), nil
+	case "rename":
+		if msg == "" {
+			return nil, refuse(WebBadRequest, "give the session a title")
+		}
+		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() {
+			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; rename it once this turn ends"}
+		}
+		return m.renameSession(r.F.ID, msg), nil
 	case "commit":
 		if msg == "" {
 			// the menu entry already asks for the message (webActionNeeds),

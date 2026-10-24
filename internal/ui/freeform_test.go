@@ -579,3 +579,14 @@ func TestAQuestionOnAFreeformCardTakesTheLine(t *testing.T) {
 		t.Errorf("the web composer says %v %q, want an answer in the person's words", got, says)
 	}
 }
+
+// TestRenameHandsTheComposerTheSessionsTitle: the action list's rename
+// is the session's own /rename, written on the composer with the title
+// there to edit.
+func TestRenameHandsTheComposerTheSessionsTitle(t *testing.T) {
+	m := freeformShell(t, 120, 34, true)
+	m.runCardAction(cardAction{id: "rename", label: "rename…"})
+	if got := m.threadInput.Value(); got != "/rename drop the leaked pty fd" {
+		t.Fatalf("the composer reads %q", got)
+	}
+}

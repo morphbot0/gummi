@@ -6894,7 +6894,12 @@ call returns at once, saying the run is proposed.
     agent hears the request (`engine/sessionname.go`), keeping the
     opening words as its one-liner. A branch that was pushed, is in a
     stack or has repositories attached keeps its name; the title
-    changes regardless. `triage: off` in `config.yaml` turns it off
+    changes regardless. A person renames a session the same way with
+    `/rename <title>` in the composer, or the **rename…** row of its
+    menu (the TUI puts `/rename <title>` in the composer, the web page
+    asks for the title); `/rename` alone says its name and branch, and
+    a rename waits while a turn or a workflow run writes the tree.
+    `triage: off` in `config.yaml` turns it off
     (`engine/triage.go`). `make triage-eval` scores the prompt on a real
     model against the labelled requests in
     `engine/testdata/triage-eval.yaml`; add a case there when triage

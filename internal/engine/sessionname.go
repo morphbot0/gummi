@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -129,6 +130,63 @@ func (e *Engine) freeBranchSlug(ctx context.Context, f *domain.Feature, slug str
 		}
 	}
 	return "", nil
+}
+
+// RenameCommand runs /rename's arguments on a card's session: what a
+// face's menu sends without going through the composer.
+func (e *Engine) RenameCommand(ctx context.Context, id domain.FeatureID, args string) error {
+	ff, err := e.objectiveSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	return ff.runRenameCommand(ctx, args)
+}
+
+// runRenameCommand answers /rename: alone, the session's name and
+// branch; with a title, the session renamed to it. A rename waits for
+// the tree to be still — a turn or a workflow run may be committing on
+// the branch it moves.
+func (ff *FreeformSession) runRenameCommand(ctx context.Context, args string) error {
+	e := ff.engine
+	sess, err := ff.ensureSession(ctx)
+	if err != nil {
+		return err
+	}
+	f, err := e.feature(ctx, ff.id)
+	if err != nil {
+		return err
+	}
+	out := nameReport(SessionName{Title: f.Title, Branch: f.BranchName()})
+	if args = strings.TrimSpace(args); args != "" {
+		if sess.Busy() {
+			return fmt.Errorf("%s is mid-turn; rename it once this turn ends: %w", f.Name(), agent.ErrBusy)
+		}
+		if r, err := e.cfg.Store.OpenRun(ctx, ff.id); err != nil {
+			return err
+		} else if r != nil {
+			return fmt.Errorf("%s has workflow run %d %s in its tree; rename it once the run ends", f.Name(), r.N, r.State)
+		}
+		n, err := e.RenameSession(ctx, ff.id, args)
+		if err != nil {
+			return err
+		}
+		out = nameReport(n)
+	}
+	sess.appendToolDone("gummi /"+renameCommand.Name, true, out)
+	e.persist(sess)
+	e.send(Event{Feature: ff.id, Kind: EventUpdated})
+	return nil
+}
+
+// nameReport is the thread's line for a session's name.
+func nameReport(n SessionName) string {
+	switch {
+	case n.Branch == "":
+		return fmt.Sprintf("Titled %q.", n.Title)
+	case n.Kept != "":
+		return fmt.Sprintf("Titled %q. Its branch stays %s: %s.", n.Title, n.Branch, n.Kept)
+	}
+	return fmt.Sprintf("Titled %q, on branch %s.", n.Title, n.Branch)
 }
 
 // renameNote is what the agent is told ahead of its first turn when

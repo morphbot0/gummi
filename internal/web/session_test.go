@@ -221,3 +221,32 @@ func TestASessionIsCommittedFromItsMenu(t *testing.T) {
 		t.Error("a clean worktree still offers a commit")
 	}
 }
+
+// A person renames a session from its menu: the title is the field's
+// default, and the branch takes the new title's words.
+func TestASessionIsRenamedFromItsMenu(t *testing.T) {
+	h := newCardBoard(t, namedFake{Fake: agent.NewFake("done"), name: "opencode"})
+	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Retry the sync", Backend: "opencode", Model: "openai/gpt-5"})
+	waitTranscript(t, h, s.ID, "done")
+	for deadline := time.Now().Add(10 * time.Second); h.eng.Freeform(domain.FeatureID(s.ID)).Busy(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the opening turn never ended")
+		}
+	}
+	i := slices.IndexFunc(h.card(s.ID).Actions, func(a webapi.Action) bool { return a.ID == "rename" })
+	if i < 0 {
+		t.Fatalf("a session offers no rename: %+v", h.card(s.ID).Actions)
+	}
+	if a := h.card(s.ID).Actions[i]; a.Needs != webapi.ActionNeedsText || a.Default != "Retry the sync" {
+		t.Fatalf("rename asks for %q with %q", a.Needs, a.Default)
+	}
+	h.action(s.ID, "rename", webapi.ActionRequest{Message: "Retry sync on timeout"})
+	for deadline := time.Now().Add(10 * time.Second); h.feature(s.ID).Title != "Retry sync on timeout"; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the session is still %q", h.feature(s.ID).Title)
+		}
+	}
+	if f := h.feature(s.ID); f.BranchName() != "ff/retry-sync-timeout" {
+		t.Errorf("the branch is %s", f.BranchName())
+	}
+}

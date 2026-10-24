@@ -293,6 +293,7 @@ function fieldFor (card, a, need) {
     return { el: h('label', { class: 'field' }, label, sel), value: () => ({ [key]: sel.value }), focus: () => sel.focus() }
   }
   if (a.id === 'prlink') clear(label).append('Pull request')
+  if (a.id === 'rename') clear(label).append('Title')
   const inp = h('input', {
     id: 'action-input', testid: 'action-input', value: def, autocomplete: 'off', spellcheck: 'false',
     placeholder: a.id === 'prlink' ? 'https://github.com/owner/repo/pull/7, or 7' : null

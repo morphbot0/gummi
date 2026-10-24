@@ -350,6 +350,15 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		m.threadInput.CursorEnd()
 		m.focusThreadInput()
 		return nil
+	case "rename":
+		// the composer is where a session is renamed: its own /rename
+		// command, with the title it has to edit
+		if r, ok := m.selected(); ok {
+			m.threadInput.SetValue("/rename " + r.F.Title)
+			m.threadInput.CursorEnd()
+			m.focusThreadInput()
+		}
+		return nil
 	case "heartbeat":
 		// the freeform card's recurring turn (cardactions.go): the
 		// schedule dialog, already a heartbeat aimed at this card
