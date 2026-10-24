@@ -1,5 +1,6 @@
-// toast.js — short notices under the top bar at the right (on a phone, at
-// the bottom of the screen): the server's own
+// toast.js — short notices low at the right, just above the line of what
+// is docked (on a phone, centred there), clear of the head's buttons and
+// the surface's tabs: the server's own
 // (the TUI's status band, over SSE) and the page's answers to what a person
 // just did. A failure stays a little longer and reads in the error colour.
 //
@@ -14,7 +15,10 @@
 
 import { h } from './dom.js?v=__ASSET_V__'
 
+// how many notices stand at once: one on a phone, where three stacked
+// cover most of what the person is reading
 const MAX = 3
+const max = () => matchMedia('(max-width:760px)').matches ? 1 : MAX
 
 // A refusal the page already shows where it happened (the decision's note)
 // is not said a second time in a toast: the server broadcasts the same
@@ -32,10 +36,9 @@ export function hush (text, ms = 15000) {
   for (const el of [...(box?.children || [])]) if (norm(el.dataset.text) === k) el.remove()
 }
 
-// place is for a phone, whose notices stand at the bottom (app.css reads
-// --toast-bottom there alone): just above whatever is docked — the
-// decision and composer, the decision bar — so a notice never covers the
-// composer or Send, nor the tabs at the top.
+// place stands the notices just above whatever is docked — the decision
+// and composer, a phone's decision bar — so a notice never covers the
+// composer or Send, nor the head and the tabs at the top.
 function place (box) {
   const vh = window.visualViewport?.height || window.innerHeight
   const tops = ['.dock', '#mdec']
@@ -152,7 +155,7 @@ function show (text, opts, ack) {
   box.append(el)
   // an overflow evicts the oldest notice that will go on its own first;
   // one waiting for its command to be copied goes only when all are
-  while (box.children.length > MAX) {
+  while (box.children.length > max()) {
     // a wait still out (work.js) is not a notice that has been read
     const drop = [...box.children].find(c => !c.classList.contains('sticky') && !c.classList.contains('work')) || box.firstChild
     drop.remove()

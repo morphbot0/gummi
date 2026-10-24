@@ -890,7 +890,10 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .keys h3:first-child{margin-top:0}
 /* under the top bar at the right, clear of the thread and of what is
    docked at its foot */
-.toasts{position:fixed;right:16px;top:52px;display:flex;flex-direction:column;gap:6px;align-items:flex-end;z-index:60;max-width:min(680px,calc(100% - 32px));pointer-events:none}
+.toasts{position:fixed;right:16px;bottom:var(--toast-bottom,16px);display:flex;flex-direction:column;gap:6px;align-items:flex-end;z-index:60;max-width:min(680px,calc(100% - 32px));pointer-events:none}
+/* a notice stands low at the right, just above the line of what is docked
+   (toast.js sets --toast-bottom): clear of the head's buttons and the
+   surface's tabs it used to cover, and of the composer */
 .toast{background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;box-shadow:var(--shadow);pointer-events:none;white-space:pre-line;overflow-wrap:anywhere}
 .toast.err{background:var(--err);color:var(--on-err)}
 .toast.multi{white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;width:min(680px,calc(100vw - 32px))}
