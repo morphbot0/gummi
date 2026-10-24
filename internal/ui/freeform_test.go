@@ -214,7 +214,7 @@ func TestCreatingAFreeformCardMintsItOutsideTheGraph(t *testing.T) {
 	if f.Stage != domain.StageOpen {
 		t.Errorf("stage = %q, want %q — a freeform card starts outside the graph", f.Stage, domain.StageOpen)
 	}
-	if got := f.BranchName(); got != "ff/drop-the-leaked-pty-fd" {
+	if got := f.BranchName(); got != "ff/drop-leaked-pty-fd" {
 		t.Errorf("branch = %q", got)
 	}
 	// No artifact was seeded: its thread is the record.

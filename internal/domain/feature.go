@@ -1180,11 +1180,7 @@ func Slugify(title string) (string, error) {
 	s := strings.ToLower(strings.TrimSpace(title))
 	s = foldMarks(s)
 	s = nonSlugRune.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if len(s) > maxSlugLen {
-		s = s[:maxSlugLen]
-		s = strings.Trim(s, "-")
-	}
+	s = cutSlug(strings.Trim(s, "-"), maxSlugLen)
 	if s == "" {
 		if !strings.ContainsFunc(title, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) {
 			return "", fmt.Errorf("title %q yields an empty slug; use at least one letter or digit", title)
@@ -1193,6 +1189,63 @@ func Slugify(title string) (string, error) {
 		return "card-" + hex.EncodeToString(sum[:4]), nil
 	}
 	return s, nil
+}
+
+// cutSlug cuts s to max bytes, at the last dash when the cut would land
+// inside a word and that dash keeps at least half of s, so a branch does
+// not end on half a word ("…-the-sentenc").
+func cutSlug(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := s[:max]
+	if s[max] != '-' {
+		if i := strings.LastIndexByte(cut, '-'); i > max/2 {
+			cut = cut[:i]
+		}
+	}
+	return strings.Trim(cut, "-")
+}
+
+// maxBranchWords bounds how many of a title's words a card's branch keeps.
+const maxBranchWords = 6
+
+// branchFiller are the words a sentence carries and a branch name does
+// without: articles, pronouns, auxiliaries, question words, politeness
+// and the small prepositions. A negation is never filler.
+var branchFiller = func() map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(`a an the this that these those
+		i im ive id me my we our us you your they them their it its
+		is are was were be been being am do does did can could would should will shall may might must
+		please how what why when where which who whether there here so just also really some any
+		let lets want wanted wanna need needs like to of as and or but if then than into at by with on in for`) {
+		m[w] = true
+	}
+	return m
+}()
+
+// BranchSlug is the slug a session's branch is named by: its title's
+// words without branchFiller, at most maxBranchWords of them, cut on a
+// word boundary. "Can we make the board load faster?" is
+// make-board-load-faster. A title that is nothing but filler, or has no
+// Latin letters, slugs as Slugify has it.
+func BranchSlug(title string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(title))
+	s = foldMarks(strings.NewReplacer("'", "", "’", "").Replace(s))
+	var kept []string
+	for _, w := range nonSlugRune.Split(s, -1) {
+		if w == "" || branchFiller[w] {
+			continue
+		}
+		if kept = append(kept, w); len(kept) == maxBranchWords {
+			break
+		}
+	}
+	if len(kept) == 0 {
+		return Slugify(title)
+	}
+	return cutSlug(strings.Join(kept, "-"), maxSlugLen), nil
 }
 
 // markFolds are the Latin letters with marks (and the ligatures) a title
@@ -1227,9 +1280,7 @@ func foldMarks(s string) string { return markFolds.Replace(s) }
 func SlugVariant(slug string, n int) (string, error) {
 	suffix := "-" + strconv.Itoa(n)
 	base := slug
-	if len(base)+len(suffix) > maxSlugLen {
-		base = strings.Trim(base[:maxSlugLen-len(suffix)], "-")
-	}
+	base = cutSlug(base, maxSlugLen-len(suffix))
 	out := base + suffix
 	if err := ValidateSlug(out); err != nil {
 		return "", err

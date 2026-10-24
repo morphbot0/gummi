@@ -29,8 +29,8 @@ func TestMintAFreeformCard(t *testing.T) {
 	if !strings.HasPrefix(string(f.ID), "FF-") {
 		t.Errorf("id = %s, want an FF- id", f.ID)
 	}
-	if got := f.BranchName(); got != "ff/drop-the-leaked-pty-fd" {
-		t.Errorf("branch = %q, want ff/drop-the-leaked-pty-fd", got)
+	if got := f.BranchName(); got != "ff/drop-leaked-pty-fd" {
+		t.Errorf("branch = %q, want ff/drop-leaked-pty-fd", got)
 	}
 	if f.Budget.Envelope != 400 {
 		t.Errorf("envelope = %d, want the one floor a freeform card keeps", f.Budget.Envelope)

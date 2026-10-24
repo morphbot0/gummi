@@ -93,7 +93,7 @@ func TestCreateFeatureDerivesTitle(t *testing.T) {
 	if f.OneLiner != strings.Join(strings.Fields(long), " ") {
 		t.Errorf("one-liner lost the full description: %q", f.OneLiner)
 	}
-	if f.Slug != "add-a-healthz-endpoint" {
+	if f.Slug != "add-healthz-endpoint" {
 		t.Errorf("slug = %q, want it derived from the concise title", f.Slug)
 	}
 }

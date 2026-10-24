@@ -145,7 +145,7 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 // MintFeatureNum so a bad --repo never burns a sequence number.
 func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input) (domain.Feature, error) {
 	title, oneLiner, _ := domain.SplitFreeform(in.Description)
-	slug, err := domain.Slugify(title)
+	slug, err := domain.BranchSlug(title)
 	if err != nil {
 		return domain.Feature{}, err
 	}
