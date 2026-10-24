@@ -493,9 +493,18 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 /* a session's composer: the draft's repository, base and budget above the
    line, and the model picker beside Send (session.js) */
 .draftrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px 0}
-.draftrow .dsel{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-radius:7px;border:1px solid var(--line);background:var(--sunk);font-size:12.5px;color:var(--fg2)}
-.draftrow .dsel select{border:0;background:var(--sunk);outline:0;font-size:12.5px;color:var(--fg);max-width:220px}
-.draftrow .dsel .lbl,.draftrow .dnote-s{font-size:12px;color:var(--fg3)}
+/* a chip is one line whatever it holds: the row wraps between chips, never
+   inside one, and a long name is cut rather than stretching the chip */
+.draftrow .dsel{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-radius:7px;border:1px solid var(--line);background:var(--sunk);font-size:12.5px;color:var(--fg2);white-space:nowrap;flex:0 0 auto;max-width:100%;min-width:0}
+.draftrow .dsel select{border:0;background:var(--sunk);outline:0;font-size:12.5px;color:var(--fg);max-width:220px;min-width:0;text-overflow:ellipsis}
+.draftrow .dsel .lbl{font-size:12px;color:var(--fg3)}
+.draftrow .dsel .cut{max-width:160px;overflow:hidden;text-overflow:ellipsis}
+.apop{width:min(320px,calc(100vw - 16px))}
+.apop .alist{display:flex;flex-direction:column;max-height:min(260px,40vh);overflow-y:auto;overscroll-behavior:contain;margin:0 -4px}
+.apop .aitem{display:flex;align-items:center;gap:8px;padding:4px;border-radius:6px;font-size:12.5px;color:var(--fg);cursor:pointer;min-width:0}
+.apop .aitem:hover{background:var(--sunk)}
+.apop .aitem[hidden]{display:none}
+.apop .aitem span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .draftrow .dbtn:hover{border-color:var(--fg4)}
 .draftrow .dbtn b{color:var(--fg);font-weight:600}
 .composer .mslot{margin-left:auto;display:flex;min-width:0}
