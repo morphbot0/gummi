@@ -263,21 +263,21 @@ function render () {
         onchange: (e) => set({ sessionDraft: { ...state.sessionDraft, base: e.target.value } })
       }, h('option', { value: '', selected: !d.base }, 'the default branch'), branches.map(b => h('option', { value: b, selected: b === d.base }, b)))))
     // repositories to attach beside the session's own: the same branch is
-    // cut in each (DESIGN §27)
+    // cut in each (DESIGN §27). One chip, its list in a popover: a
+    // workspace of many repositories would otherwise flood the row
     const others = (form?.repos || []).filter(r => r !== d.repo)
     if (others.length) {
-      row.append(h('span', { class: 'dsel', role: 'group', 'aria-label': 'Also attach repositories', testid: 'draft-attach' },
-        h('span', { class: 'lbl' }, 'also'),
-        ...others.map(r => h('button', {
-          type: 'button', class: ['dbtn', (d.attach || []).includes(r) && 'on'], testid: `draft-attach-${r}`, 'aria-pressed': String((d.attach || []).includes(r)),
-          title: `Attach ${r}: the session’s branch is cut there too`,
-          onclick: () => {
-            const cur = state.sessionDraft.attach || []
-            set({ sessionDraft: { ...state.sessionDraft, attach: cur.includes(r) ? cur.filter(x => x !== r) : [...cur, r] } })
-          }
-        }, r))))
+      const picked = attachedOf(d)
+      row.append(h('button', {
+        class: 'dsel dbtn', type: 'button', testid: 'draft-attach', 'aria-haspopup': 'dialog',
+        title: picked.length ? `Also attached: ${picked.join(', ')}` : 'Attach other repositories: the session’s branch is cut there too',
+        // pinned to the row, not the chip: every tick redraws the row's
+        // chips, and a popover held to a replaced one would lose its place
+        onclick: () => (popKind() === 'attach' ? closePop() : openAttach(row))
+      }, h('span', { class: 'lbl' }, 'also'), picked.length
+        ? [h('b', { class: 'cut' }, picked[0]), picked.length > 1 ? h('span', { class: 'lbl' }, `+${picked.length - 1}`) : null]
+        : 'attach…'))
     }
-    row.append(h('span', { class: 'dnote-s' }, 'new worktree'))
   }
   const bud = h('button', {
     class: 'dsel dbtn', type: 'button', testid: 'draft-budget', 'aria-haspopup': 'dialog',
@@ -287,6 +287,46 @@ function render () {
 }
 
 // ---- popovers ----
+
+// attachedOf is the draft's attached repositories, less its own: a repo
+// picked before the person switched the draft onto it is not "also".
+function attachedOf (d) {
+  return (d.attach || []).filter(r => r !== d.repo)
+}
+
+// openAttach lists the other repositories to cut the session's branch in.
+// A tick applies at once and the list stays open, so several are picked in
+// one go; the filter is there for a workspace of dozens.
+function openAttach (anchor) {
+  const others = (form?.repos || []).filter(r => r !== state.sessionDraft.repo)
+  const list = h('div', { class: 'alist', role: 'group', 'aria-label': 'Repositories to attach' })
+  const items = others.map(r => {
+    const box = h('input', {
+      type: 'checkbox', testid: `draft-attach-${r}`, checked: attachedOf(state.sessionDraft).includes(r),
+      onchange: () => {
+        const cur = attachedOf(state.sessionDraft)
+        set({ sessionDraft: { ...state.sessionDraft, attach: box.checked ? [...cur, r] : cur.filter(x => x !== r) } })
+      }
+    })
+    const el = h('label', { class: 'aitem' }, box, h('span', { class: 'mono' }, r))
+    list.append(el)
+    return { r, el }
+  })
+  const filter = h('input', {
+    class: 'inp', type: 'text', placeholder: 'Filter repositories', 'aria-label': 'Filter repositories', testid: 'draft-attach-filter',
+    oninput: () => {
+      const q = filter.value.trim().toLowerCase()
+      for (const it of items) it.el.hidden = !!q && !it.r.toLowerCase().includes(q)
+    }
+  })
+  const el = h('div', { class: 'spop apop', role: 'dialog', 'aria-label': 'Also attach repositories', testid: 'draft-attach-pop' },
+    h('div', { class: 'fl' }, 'Also attach'),
+    others.length > 6 ? filter : null,
+    list,
+    h('p', { class: 'fh' }, 'The session’s branch is cut in each, in a worktree beside its own.'))
+  openPop('attach', anchor, el, { alignLeft: true })
+  if (others.length > 6) filter.focus()
+}
 
 function openBudget (anchor) {
   const d = state.sessionDraft
