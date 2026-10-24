@@ -200,6 +200,20 @@ func (m *Shell) commitSession(id domain.FeatureID, message string) tea.Cmd {
 	}
 }
 
+// renameSession runs a session's /rename command from the web page's
+// menu: the same command the composer takes, its line on the thread.
+func (m *Shell) renameSession(id domain.FeatureID, title string) tea.Cmd {
+	eng := m.engine
+	was := m.cardName(id)
+	return func() tea.Msg {
+		if err := eng.RenameCommand(context.Background(), id, title); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+		}
+		f := domain.Feature{Title: domain.DeriveTitle(title)}
+		return noticeMsg{text: sanitize(was + " is now " + f.Name()), reload: true, id: id}
+	}
+}
+
 // objectiveSession runs a session's /objective command from the web
 // page's menu and strip: the same command the composer takes.
 func (m *Shell) objectiveSession(id domain.FeatureID, args string) tea.Cmd {

@@ -214,7 +214,7 @@ func TestCreatingAFreeformCardMintsItOutsideTheGraph(t *testing.T) {
 	if f.Stage != domain.StageOpen {
 		t.Errorf("stage = %q, want %q — a freeform card starts outside the graph", f.Stage, domain.StageOpen)
 	}
-	if got := f.BranchName(); got != "ff/drop-the-leaked-pty-fd" {
+	if got := f.BranchName(); got != "ff/drop-leaked-pty-fd" {
 		t.Errorf("branch = %q", got)
 	}
 	// No artifact was seeded: its thread is the record.
@@ -577,5 +577,16 @@ func TestAQuestionOnAFreeformCardTakesTheLine(t *testing.T) {
 	c := m.classifyThreadLine(r, "Go up the middle", asking)
 	if got, says := m.webLineRoute(r, "Go up the middle", c); got != webapi.RouteAnswer || says != "answers the question above, in your words" {
 		t.Errorf("the web composer says %v %q, want an answer in the person's words", got, says)
+	}
+}
+
+// TestRenameHandsTheComposerTheSessionsTitle: the action list's rename
+// is the session's own /rename, written on the composer with the title
+// there to edit.
+func TestRenameHandsTheComposerTheSessionsTitle(t *testing.T) {
+	m := freeformShell(t, 120, 34, true)
+	m.runCardAction(cardAction{id: "rename", label: "rename…"})
+	if got := m.threadInput.Value(); got != "/rename drop the leaked pty fd" {
+		t.Fatalf("the composer reads %q", got)
 	}
 }

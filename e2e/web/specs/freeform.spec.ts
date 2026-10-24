@@ -199,11 +199,13 @@ test('a project command is offered while its name is typed', async ({ pairedPage
   // the session's own commands, then the repository's command files, then
   // the card's own words
   await expect(offer.getByRole('option')).toHaveText([
+    /\/rename\s*retitle this session/,
     /\/retry\s*take back your last message/,
     /\/release\s*Cut a release\./,
     /\/review\s*review the diff/,
     /\/rebase\s*rebase branch onto main \(conflicts go to an agent\)/,
   ]);
+  await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Tab');

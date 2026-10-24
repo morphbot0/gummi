@@ -7,12 +7,21 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // triageSession opens a freeform session, with triage on or off, whose
 // triage one-shot answers verdict, recording every line the working
 // agent was sent and every prompt triage got.
 func triageSession(t *testing.T, on bool, verdict string) (ff *FreeformSession, worked, triaged func() []string) {
+	t.Helper()
+	ff, _, worked, triaged = triageSessionTitled(t, on, verdict, "add spec states")
+	return ff, worked, triaged
+}
+
+// triageSessionTitled is triageSession on a card titled title, handing
+// back its engine too.
+func triageSessionTitled(t *testing.T, on bool, verdict, title string) (ff *FreeformSession, e *Engine, worked, triaged func() []string) {
 	t.Helper()
 	var mu sync.Mutex
 	var work, asks []string
@@ -27,9 +36,9 @@ func triageSession(t *testing.T, on bool, verdict string) (ff *FreeformSession, 
 		return []agent.Event{{Kind: agent.EventMessage, Text: "on it"}, {Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Triage: on})
+	e = New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Triage: on})
 	t.Cleanup(func() { e.Close() })
-	f := freeformCard(1, "add spec states")
+	f := freeformCard(1, title)
 	createFeature(t, store, f)
 	ff, err := e.OpenFreeform(context.Background(), f)
 	if err != nil {
@@ -38,7 +47,7 @@ func triageSession(t *testing.T, on bool, verdict string) (ff *FreeformSession, 
 	snap := func(p *[]string) func() []string {
 		return func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), *p...) }
 	}
-	return ff, snap(&work), snap(&asks)
+	return ff, e, snap(&work), snap(&asks)
 }
 
 const bigAsk = "add a state to every session spec, store it, and show it on the board, the web page and the CLI"
@@ -131,6 +140,57 @@ func TestTheWorkflowCommandAsksForAProposal(t *testing.T) {
 	}
 	if tr := transcriptOf(ff); !strings.Contains(tr, "user:/workflow on spec 2|") {
 		t.Fatalf("the thread reads %s", tr)
+	}
+}
+
+// TestTriageNamesTheSession: a session titled with its first request is
+// renamed after triage's NAME line before its agent hears that request,
+// and its branch moves to the name's words; the agent is told its new
+// branch and the thread says so. A title anyone chose stays.
+func TestTriageNamesTheSession(t *testing.T) {
+	ctx := context.Background()
+	ff, e, worked, _ := triageSessionTitled(t, true, "TRIAGE: here — small\nNAME: Session spec states", domain.DeriveTitle(bigAsk))
+	say(t, ff, bigAsk)
+	f, err := e.feature(ctx, ff.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Title != "Session spec states" || f.BranchName() != "ff/session-spec-states" || f.OneLiner != bigAsk {
+		t.Fatalf("the session is %q on %s (one-liner %q)", f.Title, f.BranchName(), f.OneLiner)
+	}
+	was := freeformCard(1, domain.DeriveTitle(bigAsk))
+	wt, _ := e.mgr(ctx, &f)
+	if !wt.HasBranch(ctx, "ff/session-spec-states") || wt.HasBranch(ctx, was.BranchName()) {
+		t.Fatal("the branch did not move")
+	}
+	if w := worked(); len(w) != 1 || !strings.HasPrefix(w[0], `(gummi named this session "Session spec states": its branch is now ff/session-spec-states`) {
+		t.Fatalf("the agent was sent %q", w)
+	}
+	if tr := transcriptOf(ff); !strings.Contains(tr, "|tool:gummi named this session|") {
+		t.Fatalf("the thread reads %s", tr)
+	}
+
+	ff2, e2, worked2, _ := triageSessionTitled(t, true, "TRIAGE: here — small\nNAME: Session spec states", "add spec states")
+	say(t, ff2, bigAsk)
+	if f, _ := e2.feature(ctx, ff2.id); f.Title != "add spec states" {
+		t.Fatalf("a chosen title was replaced by %q", f.Title)
+	}
+	if w := worked2(); len(w) != 1 || w[0] != bigAsk {
+		t.Fatalf("the agent was sent %q", w)
+	}
+}
+
+func TestParseTriageName(t *testing.T) {
+	for reply, want := range map[string]string{
+		"TRIAGE: here — x\nNAME: Better session names": "Better session names",
+		"**NAME: \"Better  session names.\"**":         "Better session names",
+		"TRIAGE: here — x":                             "",
+		"NAME: ":                                       "",
+		"NAME: " + strings.Repeat("word ", 20):         "",
+	} {
+		if got := parseTriageName(reply); got != want {
+			t.Errorf("parseTriageName(%q) = %q, want %q", reply, got, want)
+		}
 	}
 }
 

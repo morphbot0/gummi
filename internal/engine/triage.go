@@ -7,8 +7,12 @@ package engine
 // only job is the question answers it. When the answer is a recipe, the
 // agent is told so ahead of the request and the thread says so to the
 // person. It decides nothing: the agent still proposes the run, and the
-// person still allows it (decision 28). Best effort — a triage that
-// fails or runs out of time sends the request as it was.
+// person still allows it (decision 28). The same one-shot names the
+// session: a session minted from a sentence is titled with its first
+// one, and triage's NAME line retitles it, and moves its branch to the
+// words, before anyone outside this repository knows the old name
+// (sessionname.go). Best effort — a triage that fails or runs out of
+// time sends the request as it was, under the name it was minted with.
 
 import (
 	"context"
@@ -69,8 +73,9 @@ func (ff *FreeformSession) wantsTriage(ctx context.Context, sess *Session, cmds 
 
 // triage reads msg against the workspace's recipes and returns the note
 // the agent is sent ahead of it: "" when the request is the session's own
-// work, or when the triage could not answer. When it names a recipe the
-// thread gets a line saying so. Its cost goes on the card.
+// work under the name it has, or when the triage could not answer. When
+// it names a recipe, or renames the session, the thread gets a line
+// saying so. Its cost goes on the card.
 func (ff *FreeformSession) triage(ctx context.Context, sess *Session, msg string) string {
 	e := ff.engine
 	all, err := e.WorkflowRecipes()
@@ -122,16 +127,46 @@ func (ff *FreeformSession) triage(ctx context.Context, sess *Session, msg string
 	if err != nil {
 		return ""
 	}
+	var notes []string
+	if note := ff.nameFromTriage(ctx, sess, f, msg, reply); note != "" {
+		notes = append(notes, note)
+	}
 	name, why, ok := parseTriage(reply, recipes)
-	if !ok || name == triageHere {
+	if ok && name != triageHere {
+		sess.appendToolDone("gummi triage: work for the "+name+" workflow", true, fmt.Sprintf(
+			"This reads as work for the %s workflow (%s). The agent was told so: it may propose the run, and you allow it or not.",
+			name, why))
+		e.persist(sess)
+		e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+		notes = append(notes, triageNote(name, why))
+	}
+	return strings.Join(notes, "\n\n")
+}
+
+// nameFromTriage renames the session after the NAME line triage gave,
+// when its title is still the one its mint took from this request — a
+// title anyone chose since is kept. It returns the note the agent hears
+// when its branch moved, and "" otherwise.
+func (ff *FreeformSession) nameFromTriage(ctx context.Context, sess *Session, f domain.Feature, msg, reply string) string {
+	title := parseTriageName(reply)
+	if title == "" {
 		return ""
 	}
-	sess.appendToolDone("gummi triage: work for the "+name+" workflow", true, fmt.Sprintf(
-		"This reads as work for the %s workflow (%s). The agent was told so: it may propose the run, and you allow it or not.",
-		name, why))
-	e.persist(sess)
-	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
-	return triageNote(name, why)
+	if derived, _, _ := domain.SplitFreeform(msg); derived != f.Title {
+		return ""
+	}
+	before := f.BranchName()
+	n, err := ff.engine.RenameSession(ctx, ff.id, title)
+	if err != nil || n.Title == f.Title {
+		return ""
+	}
+	sess.appendToolDone("gummi named this session", true, nameReport(n))
+	ff.engine.persist(sess)
+	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+	if n.Branch == before {
+		return ""
+	}
+	return renameNote(n)
 }
 
 func triagePrompt(msg string, recipes []WorkflowRecipe) string {
@@ -152,9 +187,13 @@ func triagePrompt(msg string, recipes []WorkflowRecipe) string {
 		"and docs to write (deliver); a question to answer with a written report (investigate); checks that " +
 		"already fail and need to pass (fix-until-green); any other recipe by its description.\n" +
 		"Name a recipe only when the request itself shows the work is that size; do not guess what it may grow into.\n\n")
-	b.WriteString("Answer with exactly one line, in one of these forms:\n" +
+	b.WriteString("Answer with exactly two lines. The first is in one of these forms:\n" +
 		"TRIAGE: " + triageHere + " — <why, in a few words>\n" +
 		"TRIAGE: <recipe name> — <why, in a few words>\n\n")
+	b.WriteString("The second names the session the way a person titles a pull request: two to six " +
+		"words naming the work itself, not the sentence that asked for it, with no ticket numbers, quotes or " +
+		"trailing punctuation:\n" +
+		"NAME: <the name>\n\n")
 	b.WriteString("The request:\n<<<\n" + tailRunes(strings.TrimSpace(msg), triageRequestMax) + "\n>>>")
 	return b.String()
 }
@@ -189,6 +228,27 @@ func parseTriage(reply string, recipes []WorkflowRecipe) (name, why string, ok b
 		return "", "", false
 	}
 	return "", "", false
+}
+
+// triageNameMax bounds the name triage may give: longer than this is a
+// sentence again, and the name the mint gave stands.
+const triageNameMax = 60
+
+// parseTriageName reads the one-shot's NAME line: "" when there is none,
+// or it is empty or runs long.
+func parseTriageName(reply string) string {
+	for _, line := range strings.Split(reply, "\n") {
+		rest, found := strings.CutPrefix(strings.TrimLeft(strings.TrimSpace(line), "*`"), "NAME:")
+		if !found {
+			continue
+		}
+		name := strings.Join(strings.Fields(strings.Trim(strings.TrimSpace(rest), "*`'\"“”.")), " ")
+		if name == "" || len(name) > triageNameMax {
+			return ""
+		}
+		return name
+	}
+	return ""
 }
 
 // triageNote is what the agent reads ahead of the request triage sent to

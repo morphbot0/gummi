@@ -420,7 +420,7 @@ type ActionRequest struct {
 // options is never independent.
 var DecisionIndependentActions = []string{
 	"profile", "envelope", "repo", "prlink", "prunlink", "prpull",
-	"duplicate", "delete", "clean", "model", "commit", "repo-attach", "repo-detach",
+	"duplicate", "delete", "clean", "model", "commit", "rename", "repo-attach", "repo-detach",
 }
 
 // CardRepo is one repository of a session that spans several: where its

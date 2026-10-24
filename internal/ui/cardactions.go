@@ -348,6 +348,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
 		},
 		{
+			// keyless, like objective: the TUI hands it to the composer as
+			// /rename and the web page asks for the title (sessionname.go)
+			"rename", "", "rename…", "retitle the session — its branch takes the title's words too, unless it has been pushed", false,
+			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly() && !r.F.IsChild(),
+		},
+		{
 			// keyless, like heartbeat: the session keeps going on its own
 			// until an auditor finds the objective met (DESIGN §19.11). The
 			// TUI hands it to the composer as /objective; the web page asks

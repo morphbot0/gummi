@@ -78,7 +78,10 @@ func TestSlugify(t *testing.T) {
 		{"Café résumé", "cafe-resume", false},
 		{"Übergröße prüfen", "ubergrosse-prufen", false},
 		{"¿¡…!?", "", true},
-		{strings.Repeat("very long title ", 10), "very-long-title-very-long-title-very-lon", false},
+		// cut on a word boundary, never inside a word
+		{strings.Repeat("very long title ", 10), "very-long-title-very-long-title-very", false},
+		// one word longer than the cap has no boundary to cut at
+		{strings.Repeat("x", 50), strings.Repeat("x", 40), false},
 	}
 	for _, c := range cases {
 		got, err := Slugify(c.title)
@@ -472,6 +475,40 @@ func TestBranchNameCollidesOnEqualSlugs(t *testing.T) {
 	c := Feature{ID: "FD-009", Num: 9, Kind: KindFeature, Slug: "flaky-login", BranchScheme: BranchSchemeKind}
 	if a.BranchName() == c.BranchName() {
 		t.Error("a bug and a feature with the same slug should not share a branch")
+	}
+}
+
+// A session's branch names the work, not the sentence that asked for it:
+// filler goes, the words are capped, and nothing ends on half a word.
+func TestBranchSlug(t *testing.T) {
+	cases := []struct{ title, want string }{
+		{"Dark mode toggle", "dark-mode-toggle"},
+		{"Can we make the board load faster?", "make-board-load-faster"},
+		{"I want to add a CSV export to the stats tab", "add-csv-export-stats-tab"},
+		{
+			"Creating a new session takes the sentence opening it as the branch name",
+			"creating-new-session-takes-sentence",
+		},
+		{"Don't retry when the token is not valid", "dont-retry-token-not-valid"},
+		{"Fix: auth/session bug #42", "fix-auth-session-bug-42"},
+		{"Café résumé", "cafe-resume"},
+		// nothing but filler, or nothing Latin: Slugify's answer
+		{"What is this?", "what-is-this"},
+		{"日本語のみ", "card-81ae33d4"},
+	}
+	for _, c := range cases {
+		got, err := BranchSlug(c.title)
+		if err != nil || got != c.want {
+			t.Errorf("BranchSlug(%q) = %q, %v; want %q", c.title, got, err, c.want)
+		}
+		if err == nil {
+			if verr := ValidateSlug(got); verr != nil {
+				t.Errorf("BranchSlug(%q) = %q fails validation: %v", c.title, got, verr)
+			}
+		}
+	}
+	if _, err := BranchSlug("!!!"); err == nil {
+		t.Error(`BranchSlug("!!!") named a branch`)
 	}
 }
 

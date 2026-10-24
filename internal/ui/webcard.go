@@ -564,6 +564,9 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 				a.Default = o.Text
 			}
 		}
+	case "rename":
+		a.Needs = webapi.ActionNeedsText
+		a.Default = r.F.Title
 	case "heartbeat":
 		// the page opens its own schedule form for this card; the
 		// definition is written through /api/schedules, not this action
@@ -651,6 +654,11 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 		// completed one is a line for the server to route, not a picker
 		if !strings.ContainsAny(word, " \t\n") {
 			for _, c := range m.cardSlashCompletions(r, word) {
+				// a word the session's own command already offers (/rename,
+				// /objective) is that command: the line runs it, not the row
+				if slices.ContainsFunc(out.Completions, func(o webapi.Completion) bool { return o.Text == c.Text }) {
+					continue
+				}
 				c.Group = "card"
 				out.Completions = append(out.Completions, c)
 			}

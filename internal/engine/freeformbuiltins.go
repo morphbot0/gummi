@@ -63,6 +63,12 @@ var (
 			"/objective pause|resume|stop|clear; alone, where it stands",
 		builtin: true,
 	}
+	renameCommand = ProjectCommand{
+		Name: "rename",
+		Description: "retitle this session: /rename <title> — its branch takes the title's words too, " +
+			"unless it has been pushed; alone, its name and branch",
+		builtin: true,
+	}
 	attachCommand = ProjectCommand{
 		Name:        "attach",
 		Description: "attach another repository of the workspace to this session: /attach <repo> [base] — its branch is cut there too, in a worktree beside this one",
@@ -87,7 +93,7 @@ var (
 )
 
 // sessionCommands is every built-in, in the order a menu offers them.
-var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, workflowCommand, objectiveCommand, attachCommand, detachCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
+var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, workflowCommand, objectiveCommand, renameCommand, attachCommand, detachCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
 
 // SessionCommands is every session's own commands, the ones a session
 // answers before its backend has found any project file.
@@ -157,6 +163,8 @@ func (ff *FreeformSession) runBuiltin(ctx context.Context, c ProjectCommand, arg
 	switch c.Name {
 	case objectiveCommand.Name:
 		return true, ff.runObjectiveCommand(ctx, args)
+	case renameCommand.Name:
+		return true, ff.runRenameCommand(ctx, args)
 	case attachCommand.Name, detachCommand.Name:
 		return true, ff.runRepoCommand(ctx, c.Name, args)
 	case clearCommand.Name:
