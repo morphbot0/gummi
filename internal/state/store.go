@@ -1725,18 +1725,6 @@ func ExcusedChecks(baseline []CheckResult) []string {
 	return out
 }
 
-// ExcusedOn is the commit the excused checks were measured on — the one an
-// excusal is a claim about — or "" when nothing is excused or the baseline
-// predates the record.
-func ExcusedOn(baseline []CheckResult) string {
-	for _, r := range baseline {
-		if !r.OK && r.BaseRev != "" {
-			return r.BaseRev
-		}
-	}
-	return ""
-}
-
 // SetCheckBaseline replaces the feature's whole check baseline in one
 // transaction (delete + insert), so a re-baseline never leaves stale
 // rows behind renamed or removed checks.

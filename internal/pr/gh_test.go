@@ -88,35 +88,6 @@ func TestParsePullRefURL(t *testing.T) {
 	}
 }
 
-func TestAvailableMissingGH(t *testing.T) {
-	t.Setenv("GH_TOKEN", "x")
-	if err := Available(filepath.Join(t.TempDir(), "nonexistent-gh-binary")); err == nil {
-		t.Fatal("Available with a missing binary should error")
-	} else if !strings.Contains(err.Error(), "not on PATH") {
-		t.Errorf("error %q should name gh as the missing piece", err)
-	}
-}
-
-// TestAvailableAcceptsGhAuthLoginUser stands in for the `gh auth login`
-// state: gh is on PATH and authenticated, but neither GH_TOKEN nor
-// GITHUB_TOKEN is set (gh keeps that credential in its own keyring/config,
-// not the environment). Available must not reject this — auth is gh's own
-// concern, surfaced via its own error on the first real call if it's
-// genuinely missing.
-func TestAvailableAcceptsGhAuthLoginUser(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "gh")
-	script := "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then exit 0; fi\nexit 0\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-	if err := Available(bin); err != nil {
-		t.Fatalf("Available with gh authed via `gh auth login` (no env token) = %v, want nil", err)
-	}
-}
-
 const viewJSON = `{"number":42,"url":"https://github.com/o/r/pull/42","headRefOid":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}`
 
 func TestResolveURL(t *testing.T) {

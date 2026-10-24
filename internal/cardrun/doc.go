@@ -14,7 +14,7 @@
 // counters, the check baseline — and returns one Run value holding every
 // figure a surface might want. It renders nothing, reads nothing, and
 // touches no clock: Report is a pure function of its arguments, so the
-// TUI's run tab, `gummi status --json` and the week view all read the
+// TUI's run tab, the web page's stats and the week view all read the
 // same numbers and cannot drift apart on what a card cost. That is the
 // same seam internal/verdict, internal/rounds and internal/gatepolicy
 // already are, for the same reason.

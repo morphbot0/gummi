@@ -13,49 +13,6 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-func TestValidateCommitMessage(t *testing.T) {
-	valid := []string{
-		"feat(ui): sort the board",
-		"fix: handle empty input",
-		"feat(engine,driver,ui): enforce dependency gate at coding-stage entry",
-		"fix(a,b,c): apply several scopes",
-		"docs(core): note the exit contract\n\nA body the caller owns.",
-		"refactor(engine): rename Advance\n\n- long body line is the caller's formatting, never rewritten",
-	}
-	for _, msg := range valid {
-		if err := ValidateCommitMessage(msg); err != nil {
-			t.Errorf("ValidateCommitMessage(%q) = %v, want nil", msg, err)
-		}
-	}
-	invalid := []struct {
-		msg  string
-		want string // substring of the failure reason
-	}{
-		{"", "empty"},
-		{"   \n\t", "empty"},
-		{"just a summary", "Conventional Commits"},
-		{"feat: ", "Conventional Commits"},
-		{"frobnicate(x): not a real type", "not a conventional commits type"},
-		{"feat(x): sum\n\nCo-authored-by: bot <b@e>", "attribution"},
-		{"feat(engine,): sum", "malformed"},
-		{"feat(,engine): sum", "malformed"},
-		{"feat(engine,,ui): sum", "malformed"},
-		{"feat(): sum", "malformed"},
-		{"feat(x): ", "Conventional Commits"},
-		{"feat(x): sum\ndiff --git a/b b/c\n@@ -1 +1 @@", "diff dump"},
-	}
-	for _, tc := range invalid {
-		err := ValidateCommitMessage(tc.msg)
-		if err == nil {
-			t.Errorf("ValidateCommitMessage(%q) accepted, want rejection", tc.msg)
-			continue
-		}
-		if !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("ValidateCommitMessage(%q) = %q, want reason containing %q", tc.msg, err.Error(), tc.want)
-		}
-	}
-}
-
 func TestParseCommitMsg(t *testing.T) {
 	fenced := "```gummi-commit\nfeat(ui): sort the board\n\n- sort by severity\n```"
 	cases := []struct {
@@ -629,13 +586,8 @@ func TestDraftCommitMsgSurfacesDistinctReasons(t *testing.T) {
 }
 
 // TestCommitmsgPromptStatesWhatTheValidatorEnforces pins the prompt to the
-// rules ValidateCommitMessage actually applies. The two used to disagree:
-// the prompt asked only for "type(scope): summary" and then handed the
-// scribe the repo's own recent subjects "as the style to imitate", so a
-// repo writing path-shaped scopes taught the scribe to draft
-// `feat(lxc/list): …` — which the headless landing path then refuses as
-// malformed while the TUI's laxer dialog lands it. A drafter must not be
-// able to satisfy the instructions and fail the gate.
+// conventional-commit rules: a repo writing path-shaped scopes must not
+// teach the scribe to draft `feat(lxc/list): …` through its style section.
 func TestCommitmsgPromptStatesWhatTheValidatorEnforces(t *testing.T) {
 	p := commitmsgPrompt(&worktree.DraftFeed{
 		StyleSubjects: []string{"feat(lxc/list): add a column"},
@@ -671,9 +623,5 @@ func TestCommitmsgPromptTypeListTracksTheValidator(t *testing.T) {
 	}
 	if list != conventionalCommitTypeList() {
 		t.Error("type list is not stable across calls; a map range order leaked into the prompt")
-	}
-	// The example subject the prompt shows must itself pass the validator.
-	if err := ValidateCommitMessage("feat(scope): summary\n\n- bullet one\n"); err != nil {
-		t.Errorf("the prompt's own example subject fails validation: %v", err)
 	}
 }

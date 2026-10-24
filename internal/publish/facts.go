@@ -191,7 +191,7 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 	case errors.Is(terr, worktree.ErrNoRemote):
 		return Facts{}, fail(CodeNoRemote, "this repository has no remote to push to", "")
 	case errors.Is(terr, worktree.ErrRemoteAmbiguous):
-		return Facts{}, fail(CodeRemoteAmbiguous, "this repository has several remotes and none is set as the push remote", "choose one: gummi push --remote <name> remembers it as branch."+fx.Branch+".pushRemote")
+		return Facts{}, fail(CodeRemoteAmbiguous, "this repository has several remotes and none is set as the push remote", "choose one: git config branch."+fx.Branch+".pushRemote <name>")
 	case terr != nil:
 		return Facts{}, AsError(terr)
 	}

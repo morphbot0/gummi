@@ -218,9 +218,9 @@ func (d *schedulesDialog) View(s *theme.Styles, w, _ int) string {
 	}
 	if len(d.rows) == 0 {
 		return closeOutFrame(s, "schedules", s.Base.Render(
-			"no schedules. `n` defines one, or `gummi schedule add` —\n"+
-				"cron mints a freeform card on a cadence, or sends a recurring\n"+
-				"turn into a session. Off until enabled."))
+			"no schedules. `n` defines one — cron mints a freeform card on\n"+
+				"a cadence, or sends a recurring turn into a session. Off until\n"+
+				"enabled."))
 	}
 	b.WriteString("\n")
 	for i, r := range d.rows {

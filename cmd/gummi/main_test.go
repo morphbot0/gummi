@@ -501,9 +501,9 @@ func TestResolveRootsNested(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(ws, "git", "lxd", ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	gotWS, gotRepo, err := resolveRoots(ws)
+	gotWS, gotRepo, _, err := resolveAllRoots(ws)
 	if err != nil {
-		t.Fatalf("resolveRoots: %v", err)
+		t.Fatalf("resolveAllRoots: %v", err)
 	}
 	if gotWS != ws {
 		t.Errorf("workspace root = %q, want %q", gotWS, ws)
@@ -518,9 +518,9 @@ func TestResolveRootsSiblingDefault(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	gotWS, gotRepo, err := resolveRoots(dir)
+	gotWS, gotRepo, _, err := resolveAllRoots(dir)
 	if err != nil {
-		t.Fatalf("resolveRoots (no config): %v", err)
+		t.Fatalf("resolveAllRoots (no config): %v", err)
 	}
 	if gotWS != dir || gotRepo != dir {
 		t.Errorf("roots = (%q, %q), want both %q", gotWS, gotRepo, dir)
@@ -530,7 +530,7 @@ func TestResolveRootsSiblingDefault(t *testing.T) {
 func TestResolveRootsRejectsEscapingRepo(t *testing.T) {
 	ws := t.TempDir()
 	writeConfig(t, ws, "repo: ../outside\n")
-	if _, _, err := resolveRoots(ws); err == nil {
-		t.Fatal("resolveRoots accepted a repo escaping the workspace")
+	if _, _, _, err := resolveAllRoots(ws); err == nil {
+		t.Fatal("resolveAllRoots accepted a repo escaping the workspace")
 	}
 }

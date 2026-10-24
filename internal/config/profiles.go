@@ -250,7 +250,7 @@ func ProfilesTemplateFor(backend string) string {
 	return strings.Replace(ProfilesTemplate, thriftyDefault, t, 1)
 }
 
-// ProfilesTemplate is the starter profiles.yaml written by `gummi init`
+// ProfilesTemplate is the starter profiles.yaml written into a new workspace
 // for the default backends; ProfilesTemplateFor adapts it to the others.
 const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. A feature picks a
 # profile; roles indirect between the fixed workflow and concrete backends,

@@ -684,7 +684,7 @@ func isGitRoot(dir string) bool {
 	return err == nil && (fi.IsDir() || !fi.IsDir())
 }
 
-// Template is the starter config.yaml written by `gummi init`.
+// Template is the starter config.yaml written into a new workspace.
 const Template = `# gummi configuration. See docs/DESIGN.md.
 #
 # Verify-stage check commands are not configured here: gummi discovers

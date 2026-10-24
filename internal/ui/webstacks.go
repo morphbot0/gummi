@@ -208,7 +208,7 @@ func (b *Bridge) CreateStack(ctx context.Context, req webapi.StackRequest) (WebO
 	})
 }
 
-// AddToStack is POST /api/stacks/{id}/cards: `gummi stack add`.
+// AddToStack is POST /api/stacks/{id}/cards.
 func (b *Bridge) AddToStack(ctx context.Context, id string, req webapi.StackRequest) (WebOutcome, error) {
 	card := webID(req.Card)
 	if card == "" {
@@ -227,7 +227,7 @@ func (b *Bridge) AddToStack(ctx context.Context, id string, req webapi.StackRequ
 	})
 }
 
-// MoveInStack is POST /api/stacks/{id}/move: `gummi stack mv`.
+// MoveInStack is POST /api/stacks/{id}/move.
 func (b *Bridge) MoveInStack(ctx context.Context, id string, req webapi.StackRequest) (WebOutcome, error) {
 	card := webID(req.Card)
 	if card == "" || req.Pos == nil {
@@ -249,7 +249,7 @@ func (b *Bridge) MoveInStack(ctx context.Context, id string, req webapi.StackReq
 	})
 }
 
-// RemoveFromStack is DELETE /api/stacks/{id}/cards/{card}: `gummi stack rm`.
+// RemoveFromStack is DELETE /api/stacks/{id}/cards/{card}.
 func (b *Bridge) RemoveFromStack(ctx context.Context, id, cardID string) (WebOutcome, error) {
 	card := webID(cardID)
 	return b.stackWrite(ctx, func(ctx context.Context, store *state.Store) (domain.StackID, string, error) {

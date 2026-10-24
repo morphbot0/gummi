@@ -1,7 +1,7 @@
 // Package publish is the one seam through which gummi pushes a card's
 // branch and opens, updates or readies its GitHub pull request (DESIGN §22,
-// decision 25). Every face — the TUI, the web page and `gummi push` /
-// `gummi pr` — calls it; none decides anything itself.
+// decision 25). Both faces — the TUI and the web page — call it; neither
+// decides anything itself.
 //
 // It has the shape branchlog has: a pure part (Refusal, Floor, the Facts a
 // person confirms and their Fingerprint) and an Env that runs the git and gh

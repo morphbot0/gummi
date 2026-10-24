@@ -11,7 +11,6 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -84,13 +83,11 @@ type cardStatusItem struct {
 	// took two booleans to name one fact.
 	// "is the card closed" is stage == "done".
 	Ending           domain.Ending `json:"ending,omitempty"`
-	Running          bool          `json:"running"`
 	OpenDiffComments int           `json:"open_diff_comments"`
 }
 
-// cardStatus answers card_status: the same snapshot `gummi status` prints,
-// minus the pull-request line (PullRequestRef.StatusPayload lives behind
-// cmd/gummi's JSON view).
+// cardStatus answers card_status: a JSON snapshot of the card's stage, branch,
+// spend and open diff comments.
 func (e *Engine) cardStatus(ctx context.Context, args json.RawMessage) (string, error) {
 	var a cardIDArgs
 	if err := json.Unmarshal(args, &a); err != nil || a.ID == "" {
@@ -115,7 +112,6 @@ func (e *Engine) cardStatus(ctx context.Context, args json.RawMessage) (string, 
 		SpendCredits: f.Spend.Credits, Envelope: f.Budget.Envelope,
 		Verified:         !f.VerifiedAt.IsZero(),
 		Ending:           f.Ending(bs == "landed"),
-		Running:          state.ProcessAlive(state.ReadPIDFile(e.cfg.Workspace.PIDFile(f.ID))),
 		OpenDiffComments: diffOpen,
 	}
 	b, err := json.Marshal(item)
@@ -187,7 +183,7 @@ func consultStatusTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: cardStatusToolName,
 		Description: "Read-only snapshot of this card: stage, branch state, spend/budget, " +
-			"verified/done/running flags, and open gate blockers (unanswered spec questions, " +
+			"verified/done flags, and open gate blockers (unanswered spec questions, " +
 			"unresolved diff comments). Returns a JSON object. Always answers for the one card " +
 			"this conversation is bound to — there is no id to name a different one.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},

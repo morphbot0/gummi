@@ -53,21 +53,21 @@ func (s *Server) stackWrite(w http.ResponseWriter, r *http.Request, write func(w
 	s.answer(w, out)
 }
 
-// handleCreateStack is POST /api/stacks: `gummi stack new`.
+// handleCreateStack is POST /api/stacks.
 func (s *Server) handleCreateStack(w http.ResponseWriter, r *http.Request) {
 	s.stackWrite(w, r, func(req webapi.StackRequest) (ui.WebOutcome, error) {
 		return s.opt.Board.CreateStack(r.Context(), req)
 	})
 }
 
-// handleStackAdd is POST /api/stacks/{id}/cards: `gummi stack add`.
+// handleStackAdd is POST /api/stacks/{id}/cards.
 func (s *Server) handleStackAdd(w http.ResponseWriter, r *http.Request) {
 	s.stackWrite(w, r, func(req webapi.StackRequest) (ui.WebOutcome, error) {
 		return s.opt.Board.AddToStack(r.Context(), r.PathValue("id"), req)
 	})
 }
 
-// handleStackMove is POST /api/stacks/{id}/move: `gummi stack mv`.
+// handleStackMove is POST /api/stacks/{id}/move.
 func (s *Server) handleStackMove(w http.ResponseWriter, r *http.Request) {
 	s.stackWrite(w, r, func(req webapi.StackRequest) (ui.WebOutcome, error) {
 		return s.opt.Board.MoveInStack(r.Context(), r.PathValue("id"), req)
@@ -81,7 +81,7 @@ func (s *Server) handleStackRename(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleStackRemove is DELETE /api/stacks/{id}/cards/{card}: `gummi stack rm`.
+// handleStackRemove is DELETE /api/stacks/{id}/cards/{card}.
 func (s *Server) handleStackRemove(w http.ResponseWriter, r *http.Request) {
 	out, err := s.opt.Board.RemoveFromStack(r.Context(), r.PathValue("id"), r.PathValue("card"))
 	if err != nil {
@@ -101,7 +101,7 @@ func (s *Server) handleDeleteStack(w http.ResponseWriter, r *http.Request) {
 	s.answer(w, out)
 }
 
-// handleRestack is POST /api/stacks/{id}/restack: `gummi stack restack`.
+// handleRestack is POST /api/stacks/{id}/restack.
 func (s *Server) handleRestack(w http.ResponseWriter, r *http.Request) {
 	res, err := s.opt.Board.Restack(r.Context(), r.PathValue("id"))
 	if err != nil {

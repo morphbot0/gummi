@@ -463,7 +463,6 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		return errors.New("engine is closed")
 	}
 	sess.setState(StateInteractive)
-	e.trackAgentPID(ff.id, agentSess)
 	e.flushEnvNotices(sess)
 
 	ff.mu.Lock()

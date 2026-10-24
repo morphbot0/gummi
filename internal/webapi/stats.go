@@ -3,8 +3,8 @@ package webapi
 import "time"
 
 // CardStats is GET /api/cards/{id}/stats: the card's run as cardrun
-// reports it — the same fold the TUI's run tab and `status --stats` read,
-// so the three cannot disagree about what a card cost.
+// reports it — the same fold the TUI's run tab reads,
+// so the two cannot disagree about what a card cost.
 type CardStats struct {
 	ID       string        `json:"id"`
 	Title    string        `json:"title"`

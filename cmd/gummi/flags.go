@@ -4,10 +4,8 @@ package main
 //
 // Every verb's flags are declared here, on the cobra command's own
 // pflag.FlagSet, and a command body reads them back through cliFlags. That
-// single site is the point: cobra owns routing, help, completion AND
-// parsing, and `gummi skill` generates its command grammar from the same
-// tree, so what --help advertises, what the parser accepts, and what the
-// skill documents cannot disagree.
+// single site is the point: cobra owns routing, help AND parsing, so
+// what --help advertises and what the parser accepts cannot disagree.
 //
 // They used to disagree. Each verb declared its flags twice — once as
 // pflag for cobra, once as a stdlib flag.FlagSet inside runXxx — and cobra

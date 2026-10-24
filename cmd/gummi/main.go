@@ -191,9 +191,8 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, lo
 		return nil, nil, nil, why
 	}
 	// The board drives cards for as long as it is open, so it takes each
-	// card's lock the way a headless command does — before the first
-	// session, so a `gummi run` for the same card is refused rather than
-	// racing it (and vice versa).
+	// card's lock before the first session, so a second board (or
+	// `gummi web`) on the same card is refused rather than racing it.
 	eng.UseCardLocks(locks)
 	// reload any sessions from a previous run so the board shows where
 	// each feature left off.
@@ -487,8 +486,8 @@ func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
 // entry added, after launch is reachable without a restart.
 //
 // Every pool resolves a card's base from the store (engine.BaseLookup), the
-// ones no engine is built over included: `gummi log` and `gummi diff` read
-// a card cut from another branch against that branch, as the board does.
+// ones no engine is built over included, so a card cut from another branch
+// is read against that branch everywhere.
 func newPool(ctx context.Context, ws, defaultRoot string, named []worktree.NamedRepo, store *state.Store, exclude bool) (*worktree.Pool, error) {
 	pool, err := worktree.NewPool(ctx, ws, defaultRoot, named, store, exclude)
 	if err != nil {
@@ -601,8 +600,8 @@ func findGummiRoot(dir string) (root string, ok bool) {
 // default managed repo root, and the ordered list of named repositories from
 // cwd. The workspace root is the nearest ancestor of cwd (cwd included) that
 // already has a .gummi directory, falling back to cwd itself when none
-// exists yet — the pre-init state that `gummi init` and other callers that
-// tolerate an absent workspace rely on. The repo roots come from
+// exists yet — the state the first board and doctor, which tolerate an
+// absent workspace, rely on. The repo roots come from
 // config.yaml's `repo:`, `repos:` and `discover:` keys, defaulting to the
 // workspace root — or to the checkouts under it when it is not one itself.
 // A configured root that escapes the workspace, or that is not a git
@@ -617,12 +616,4 @@ func resolveAllRoots(cwd string) (ws, defaultRoot string, named []worktree.Named
 		return "", "", nil, err
 	}
 	return ws, set.Default, toNamedRepos(set.Named), nil
-}
-
-// resolveRoots resolves the workspace root and the default managed repo
-// root. Most call sites that only ever touch the default repository use this
-// convenience; multi-repo call sites use resolveAllRoots.
-func resolveRoots(cwd string) (ws, repo string, err error) {
-	ws, repo, _, err = resolveAllRoots(cwd)
-	return ws, repo, err
 }

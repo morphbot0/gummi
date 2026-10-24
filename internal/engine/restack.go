@@ -34,7 +34,7 @@ type RestackResult struct {
 
 // Restack walks one stack to a fixed point: StackTick until nothing is
 // left to replay, a replay conflicts, or the policy says to wait. It is
-// the forced walk `gummi stack restack` and the web face ask for; the
+// the forced walk the web face asks for; the
 // board's own ticks do the same work one step at a time.
 func (e *Engine) Restack(ctx context.Context, id domain.StackID) (RestackResult, error) {
 	out := RestackResult{Stack: id}

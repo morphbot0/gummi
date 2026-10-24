@@ -1,7 +1,7 @@
 // Package branchlog is the pure read model behind a card's log: its own
 // commits as rows a surface draws, and the one rule for whether they may
-// be rewritten. The TUI's log tab, the web page's, and `gummi log` all
-// read it, so no two of them can disagree about what a commit is or
+// be rewritten. The TUI's log tab and the web page's both
+// read it, so the two can disagree about what a commit is or
 // whether the card's history is still the card's to change.
 //
 // Nothing here runs git: a caller gathers worktree.LogEntry (Manager.Log)

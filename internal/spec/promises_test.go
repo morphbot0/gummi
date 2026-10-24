@@ -1,7 +1,6 @@
 package spec
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -65,21 +64,8 @@ func TestInvariantVerdictsReadBackByID(t *testing.T) {
 	}
 }
 
-func TestUnprovenFilesKeepTheirReason(t *testing.T) {
-	got := UnprovenFiles(promiseDoc)
-	if len(got) != 2 {
-		t.Fatalf("got %d unproven files, want 2: %+v", len(got), got)
-	}
-	if got[0].Path != "lxd/images.go" || got[0].Reason == "" {
-		t.Errorf("first unproven file = %+v", got[0])
-	}
-	if got[1].Path != "lxd/instances_get.go" || got[1].Reason != "" {
-		t.Errorf("a reasonless declaration was mangled: %+v", got[1])
-	}
-}
-
 func TestPromisesOfAnEmptyDocument(t *testing.T) {
-	if len(Invariants("")) != 0 || len(Goldens("")) != 0 || len(UnprovenFiles("")) != 0 {
+	if len(Invariants("")) != 0 || len(Goldens("")) != 0 {
 		t.Error("an empty artifact made promises")
 	}
 	if len(InvariantVerdicts("")) != 0 {
@@ -120,39 +106,6 @@ func TestNoClaimsTableMeansNoPromises(t *testing.T) {
 	}
 }
 
-// TestUnprovenNoneIsNotAFile locks the shape verify actually writes when
-// every changed file was exercised. The instruction asks for one
-// `UNPROVEN: <path> — <why>` line per unproven file; a stage with none
-// answers it rather than skipping it, and "UNPROVEN: none" reached the
-// `done` event as unproven_files:["none"] — one unproven file, named
-// "none", on a card that had none. Observed on the lxd autopilot drive.
-func TestUnprovenNoneIsNotAFile(t *testing.T) {
-	for _, in := range []string{
-		"UNPROVEN: none",
-		"UNPROVEN: none — every changed file is covered by the units tests",
-		"- **UNPROVEN**: N/A",
-		"UNPROVEN: nothing",
-	} {
-		if got := UnprovenFiles(in); len(got) != 0 {
-			t.Errorf("UnprovenFiles(%q) = %+v, want none — the word is the stage "+
-				"saying there are no unproven files", in, got)
-		}
-	}
-	// A real path still lands, and so does a file that merely looks like one.
-	for _, c := range []struct{ in, want string }{
-		{
-			"UNPROVEN: doc/reference/instance_units.md — prose, no check reads it",
-			"doc/reference/instance_units.md",
-		},
-		{"UNPROVEN: none.go — no test builds it", "none.go"},
-	} {
-		got := UnprovenFiles(c.in)
-		if len(got) != 1 || got[0].Path != c.want {
-			t.Errorf("UnprovenFiles(%q) = %+v, want one file %q", c.in, got, c.want)
-		}
-	}
-}
-
 // The audit that produced these (F-14, F-18) stopped at the three parsers
 // goal mode happened to exercise. These two are the same mechanism — a
 // model writes prose, one regex is the whole path — and were still
@@ -183,31 +136,6 @@ func TestInvariantVerdictIsReadHoweverAModelWritesIt(t *testing.T) {
 	} {
 		if m := invariantVerdictRe.FindStringSubmatch(line); m != nil {
 			t.Errorf("read a verdict from prose: %q -> %q", line, m[2])
-		}
-	}
-}
-
-// The path must keep its hyphens. `[^\s—-]+` stopped at the first ASCII
-// hyphen, so a hyphenated path was recorded as a shorter one that usually
-// also exists — a wrong answer, not a miss, in the parser whose job is
-// recording what verification did not cover.
-func TestUnprovenKeepsHyphenatedPaths(t *testing.T) {
-	for _, tc := range []struct{ line, path, why string }{
-		{"UNPROVEN: internal/engine/goal.go — no toolchain", "internal/engine/goal.go", "no toolchain"},
-		{"UNPROVEN: internal/goal-policy/run.go — no toolchain", "internal/goal-policy/run.go", "no toolchain"},
-		{"UNPROVEN: lxd/network/driver-ovn.go — needs a cluster", "lxd/network/driver-ovn.go", "needs a cluster"},
-		{"- **UNPROVEN**: a/b-c/d-e.go", "a/b-c/d-e.go", ""},
-	} {
-		m := unprovenRe.FindStringSubmatch(tc.line)
-		if m == nil {
-			t.Errorf("no path read from %q", tc.line)
-			continue
-		}
-		if m[1] != tc.path {
-			t.Errorf("%q recorded the path %q, want %q", tc.line, m[1], tc.path)
-		}
-		if strings.TrimSpace(m[2]) != tc.why {
-			t.Errorf("%q recorded the reason %q, want %q", tc.line, m[2], tc.why)
 		}
 	}
 }
