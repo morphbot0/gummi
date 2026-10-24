@@ -1583,8 +1583,18 @@ button.tr-path:disabled{opacity:1;cursor:default}
    stays as drawn where it can; the hit area grows around it. */
 @media (max-width:760px){
   .iconbtn,.mback{min-width:44px;min-height:44px}
-  .btn,.send,.mbtn,.seg button,.wraptgl{min-height:44px}
-  .pill{min-height:40px}
+  .mbtn{min-height:44px}
+  /* a control with a border or a fill is drawn 36px (the pill 32px) and
+     an invisible edge above and below takes the press to 44px (40px) */
+  .btn,.seg button,.wraptgl{min-height:36px;position:relative}
+  .pill{min-height:32px;position:relative}
+  .btn::after,.seg button::after,.wraptgl::after,.pill::after{content:"";position:absolute;inset:-4px 0}
+  .seg{overflow:visible}
+  .seg button:first-child{border-radius:6px 0 0 6px}
+  .seg button:last-child{border-radius:0 6px 6px 0}
+  /* the send button clips its words, and its edge with them: a clear
+     border is the edge instead */
+  .send{height:44px;border:4px solid transparent;background-clip:padding-box;border-radius:11px;padding:0 8px}
   .tools summary,.sg > summary,.memdoc > summary{min-height:44px}
   .msg .copy,.msg .who .rewind{min-height:44px;min-width:44px;display:inline-flex;align-items:center;justify-content:center}
   .dfile input[type="checkbox"],.diffbox input[type="checkbox"],input[type="checkbox"]{width:22px;height:22px}
