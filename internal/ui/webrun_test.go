@@ -333,12 +333,19 @@ func TestTheTreeTabWaitsWhileAStepWorksInTheTree(t *testing.T) {
 	// the report reaches the session as a turn of its own, sent after the
 	// run ends: wait for that turn to arrive and be answered, or a write
 	// can land while the session is busy with it and be refused, rightly.
+	// Answered is the agent's reply after the report, not the report
+	// alone: the report is in the transcript a moment before the turn
+	// starts, and an idle session then is one about to be busy.
 	waitUntilTrue(t, "the session answered the report", func() bool {
 		if ff.Busy() {
 			return false
 		}
+		reported := false
 		for _, msg := range ff.Snapshot().Transcript {
-			if strings.Contains(msg.Content, "Run 1 (") {
+			switch {
+			case strings.Contains(msg.Content, "Run 1 ("):
+				reported = true
+			case reported && msg.Author == engine.AuthorAssistant:
 				return true
 			}
 		}

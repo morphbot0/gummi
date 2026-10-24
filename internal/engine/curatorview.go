@@ -14,8 +14,7 @@ import (
 )
 
 // CuratorView is the one read of the skill pack and its curator that
-// every face draws (DESIGN §23): the TUI's curator view, the web page's
-// and `gummi curator status`. A face never derives any of it itself.
+// every face draws (DESIGN §23): the TUI's curator view and the web page's. A face never derives any of it itself.
 type CuratorView struct {
 	// Config is nil when no curator is configured; the pack is still
 	// delivered and a person may still revert and pin.

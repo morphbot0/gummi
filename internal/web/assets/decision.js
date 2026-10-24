@@ -726,17 +726,8 @@ function refused (id, err, body, label, tookWords, danger) {
   // note behind it is a note nobody sees, and the dialog is the way to
   // retry (send bare again) or land on a message written here.
   if (landing) { landing.failed(err.message); ctx.refresh(id); return }
-  note(pageWords(err.message), { tone: 'err', testid: 'decision-error' })
+  note(err.message, { tone: 'err', testid: 'decision-error' })
   ctx.refresh(id)
-}
-
-// pageWords points a refusal's terminal command at the page's own way to
-// do the same, where the card's menu has it: a PR-linked card's landing
-// refusal names `gummi pr unlink`, which is the menu's "unlink PR" here.
-function pageWords (text) {
-  const unlink = state.card?.actions?.find(a => a.id === 'prunlink')
-  if (!unlink) return text
-  return String(text).replace(/\(?`gummi pr unlink [^`]+` to land it locally instead\)?/, `(“${unlink.label}” in the card’s menu lands it locally instead)`)
 }
 
 // unchoose drops the highlight after an answer the board refused because

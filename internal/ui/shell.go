@@ -1740,6 +1740,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handlePublishFacts(msg)
 		return m, nil
 
+	case publishSpanFactsMsg:
+		m.handlePublishSpanFacts(msg)
+		return m, nil
+
 	case publishStepMsg:
 		return m, m.handlePublishStep(msg)
 

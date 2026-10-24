@@ -79,12 +79,17 @@ func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.code
 // on first run.
 func run(args []string) error {
 	// everything this process starts — an agent backend and its shell
-	// above all — inherits the marker the publish verbs refuse under
+	// above all — inherits the marker
 	_ = os.Setenv(spawnedMarker, "1")
 	resetFlags(rootCmd)
 	rootCmd.SetArgs(args)
 	return rootCmd.Execute()
 }
+
+// spawnedMarker is set in the environment of everything a gummi process
+// starts — agent backends and their shells included — so a session's own
+// tools can tell they run under gummi.
+const spawnedMarker = "GUMMI_SPAWNED"
 
 // wireHooks loads the layered hooks config and installs the dispatcher on
 // the store (committed card events) and the pool (squash-merge landings).
@@ -186,9 +191,8 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, lo
 		return nil, nil, nil, why
 	}
 	// The board drives cards for as long as it is open, so it takes each
-	// card's lock the way a headless command does — before the first
-	// session, so a `gummi run` for the same card is refused rather than
-	// racing it (and vice versa).
+	// card's lock before the first session, so a second board (or
+	// `gummi web`) on the same card is refused rather than racing it.
 	eng.UseCardLocks(locks)
 	// reload any sessions from a previous run so the board shows where
 	// each feature left off.
@@ -210,25 +214,15 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, lo
 	}, ""
 }
 
-// newEngineFromEnv constructs the orchestrator and its agents from the
-// environment, without restoring prior sessions. buildEngine wraps it for
-// the board (adding Restore + a combined cleanup); one-shot commands use
-// it directly and own the agents' lifetimes. Returns
-// (nil, nil, nil) when no agent can be started.
-// The returned error is non-nil only when permissions: guarded is paired
-// with a backend that can't honor it (agent.GuardedSupport) — every other
-// nil-eng path (buildAgents failure, zero agents configured) keeps
-// returning a nil error, so callers that already have their own generic
-// "no coding agent is configured" message for those cases are unaffected.
-func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, map[string]agent.Agent, []string, error) {
-	eng, agents, names, _, err := engineFromEnv(store, pool, ws)
-	return eng, agents, names, err
-}
-
-// engineFromEnv is newEngineFromEnv, plus why: on a nil engine with a
-// nil error, what kept every agent from starting. It is a string rather
-// than a second error because it is not one to its callers — a board
-// with no agent is a static board, which is allowed.
+// engineFromEnv constructs the orchestrator and its agents from the
+// environment, without restoring prior sessions; buildEngine wraps it for
+// the board (adding Restore + a combined cleanup). On a nil engine with a
+// nil error, why says what kept every agent from starting: a string rather
+// than a second error because it is not one to its callers — a board with
+// no agent is a static board, which is allowed.
+// The error is non-nil only when permissions: guarded is paired with a
+// backend that can't honor it (agent.GuardedSupport); every other
+// nil-engine path keeps returning a nil error.
 func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (_ *engine.Engine, _ map[string]agent.Agent, _ []string, why string, _ error) {
 	// per-role model routing from .gummi/profiles.yaml (falls back to
 	// the single env model when absent or a role isn't covered)
@@ -492,8 +486,8 @@ func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
 // entry added, after launch is reachable without a restart.
 //
 // Every pool resolves a card's base from the store (engine.BaseLookup), the
-// ones no engine is built over included: `gummi log` and `gummi diff` read
-// a card cut from another branch against that branch, as the board does.
+// ones no engine is built over included, so a card cut from another branch
+// is read against that branch everywhere.
 func newPool(ctx context.Context, ws, defaultRoot string, named []worktree.NamedRepo, store *state.Store, exclude bool) (*worktree.Pool, error) {
 	pool, err := worktree.NewPool(ctx, ws, defaultRoot, named, store, exclude)
 	if err != nil {
@@ -606,8 +600,8 @@ func findGummiRoot(dir string) (root string, ok bool) {
 // default managed repo root, and the ordered list of named repositories from
 // cwd. The workspace root is the nearest ancestor of cwd (cwd included) that
 // already has a .gummi directory, falling back to cwd itself when none
-// exists yet — the pre-init state that `gummi init` and other callers that
-// tolerate an absent workspace rely on. The repo roots come from
+// exists yet — the state the first board and doctor, which tolerate an
+// absent workspace, rely on. The repo roots come from
 // config.yaml's `repo:`, `repos:` and `discover:` keys, defaulting to the
 // workspace root — or to the checkouts under it when it is not one itself.
 // A configured root that escapes the workspace, or that is not a git
@@ -622,12 +616,4 @@ func resolveAllRoots(cwd string) (ws, defaultRoot string, named []worktree.Named
 		return "", "", nil, err
 	}
 	return ws, set.Default, toNamedRepos(set.Named), nil
-}
-
-// resolveRoots resolves the workspace root and the default managed repo
-// root. Most call sites that only ever touch the default repository use this
-// convenience; multi-repo call sites use resolveAllRoots.
-func resolveRoots(cwd string) (ws, repo string, err error) {
-	ws, repo, _, err = resolveAllRoots(cwd)
-	return ws, repo, err
 }

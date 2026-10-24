@@ -19,7 +19,7 @@ type Source interface {
 
 // Gather reads everything Report needs for one card. It is the one place
 // that says what a card's run is folded from, shared by every surface
-// that reports one — the TUI's run tab, `status --stats` and the web
+// that reports one — the TUI's run tab, the week view and the web
 // face — so they cannot drift into reporting the same card from
 // different inputs.
 //

@@ -1,5 +1,5 @@
 // stats.js — the Stats tab: the card's run as cardrun folds it (the same
-// fold as the TUI's run tab and `gummi status --stats`): what it cost,
+// fold as the TUI's run tab): what it cost,
 // where it went, how much was rework, where the hours went, what the card
 // did with its hands and settled with its judgment, and every pass.
 //
@@ -61,8 +61,7 @@ function render (pane, entry, ctx) {
     clockSection(c),
     handsSection(s),
     judgmentSection(s),
-    envelopeLine(s),
-    h('p', { class: 'foot-note' }, 'The same numbers as ', h('span', { class: 'mono' }, `gummi status --stats ${ctx.id}`), '.')])
+    envelopeLine(s)])
   pane.append(sect)
 }
 
@@ -350,8 +349,7 @@ function session (pane, s, ctx) {
     bars.length
       ? h('section', { class: 'sblock', testid: 'stats-bars', 'aria-label': 'Where the money went' }, h('h3', { class: 'shead' }, 'Where it went'), bars)
       : null,
-    envelopeLine(s),
-    h('p', { class: 'foot-note' }, 'The same numbers as ', h('span', { class: 'mono' }, `gummi status --stats ${ctx.id}`), '.')))
+    envelopeLine(s)))
 }
 
 function tile (v, unit, k, testid) {

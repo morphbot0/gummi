@@ -382,6 +382,10 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.openPublish(r, publishActs[a.id], "")
 		}
+	case publishSpanID:
+		if r, ok := m.selected(); ok {
+			return m.openPublishSpan(r)
+		}
 	case "prunlink":
 		if r, ok := m.selected(); ok {
 			return m.confirmPRUnlink(r.F)

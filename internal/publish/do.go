@@ -215,7 +215,7 @@ func PlanFor(fx Facts, req Request) (Plan, *Error) {
 			return p, e
 		case fx.BaseRepo == "":
 			return p, fail(CodeBaseUnchosen, fx.HeadRepo+" is a fork: the pull request can open in "+strings.Join(fx.BaseRepos, " or "),
-				"choose one (`gummi pr create --repo <owner/name>`); it is remembered for this repository")
+				"choose one; it is remembered for this repository")
 		case strings.TrimSpace(req.Title) == "":
 			return p, fail(CodeConfirmationNeeded, "a pull request needs a title", "")
 		}
@@ -422,7 +422,7 @@ func do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 		}
 		res.PR = ref
 		if lerr := link(ctx, ref); lerr != nil {
-			res.LinkErr = fmt.Sprintf("PR #%d was opened (%s) but could not be linked to %s: %v — link it with `gummi pr link %s %d`", ref.Number, ref.URL, fx.Card, lerr, fx.Card, ref.Number)
+			res.LinkErr = fmt.Sprintf("PR #%d was opened (%s) but could not be linked to %s: %v — link it with the card's \"link PR…\" (PR #%d)", ref.Number, ref.URL, fx.Card, lerr, ref.Number)
 		}
 	case ActUpdate:
 		if p.Edit {

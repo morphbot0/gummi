@@ -38,7 +38,8 @@ test('the PR tab sends a failing check and its log to the session', async ({ pai
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   const says = page.getByTestId('composer-says');
   await expect(says).not.toContainText('stop this turn', { timeout: 30_000 });
-  await ws.linkPR(id);
+  const linked = await api('POST', `/api/cards/${id}/actions/prlink`, { message: '7' });
+  expect(linked.ok, linked.text).toBe(true);
   await page.reload();
   await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
 
@@ -50,7 +51,7 @@ test('the PR tab sends a failing check and its log to the session', async ({ pai
   await expect(page.getByTestId('pr-check-0')).toContainText('failing');
   await expect(page.getByTestId('pr-check-0')).toContainText('ci / test');
   await expect(page.getByTestId('pr-check-1')).toContainText('passed');
-  // the link was made from the CLI, so the send arrives with the board's next read
+  // the send arrives with the board's next read of the linked PR
   await expect(page.getByTestId('pr-checks-send')).toBeVisible({ timeout: 15_000 });
   await shot(page, info, 'pr-checks');
 
@@ -84,7 +85,8 @@ test('a pull request with nothing failing offers no send', async ({ pairedPage: 
   await expect(page.getByTestId('card-id')).toHaveAttribute('data-id', id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
-  await ws.linkPR(id);
+  const linked = await api('POST', `/api/cards/${id}/actions/prlink`, { message: '7' });
+  expect(linked.ok, linked.text).toBe(true);
   await page.reload();
   await showTab(page, 'pr');
   await expect(page.getByTestId('pr-checks-summary')).toHaveText('none failing');

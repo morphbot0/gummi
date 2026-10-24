@@ -115,6 +115,9 @@ export const test = base.extend<Fixtures>({
   workspace: async ({ seed, workspaceEnv }, use, testInfo) => {
     const ws = await Workspace.create({ env: workspaceEnv, name: testInfo.project.name });
     if (seed) await seed.run(ws);
+    // the seeding board holds the board's instance lock: the test's server
+    // takes it next
+    await ws.closeSeeder();
     await use(ws);
     if (testInfo.status !== testInfo.expectedStatus) {
       for (const name of ['agent.log', 'gh.log']) {

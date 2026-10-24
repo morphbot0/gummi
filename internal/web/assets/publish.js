@@ -180,6 +180,111 @@ export async function openPublish (card, act, { returnTo = '[data-testid="card-a
   })
 }
 
+// openPublishSpan is a session that spans repositories opening a pull
+// request in each (DESIGN §27.7): a line per repository saying what happens
+// there or why it is left out, one title and description every PR opens
+// with (each also names the others), and one confirm carrying every
+// repository's fingerprint.
+export async function openPublishSpan (card, { returnTo = '[data-testid="card-actions"]', done } = {}) {
+  const title = `Open pull requests · ${cardName(card.id)}`
+  let gone = false
+  const reading = openModal({
+    title,
+    testid: 'publish-dialog',
+    card: card.id,
+    returnTo,
+    onClose: () => { gone = true },
+    body: h('div', { class: 'aform' },
+      h('p', { class: 'aq pubwait', testid: 'publish-reading', role: 'status' }, h('span', { class: 'spinner' }), 'Reading where each repository’s branch goes from GitHub…')),
+    actions: [{ label: 'Cancel', testid: 'publish-cancel' }]
+  })
+  let span
+  try {
+    span = await get(cardPath(card.id, 'publish/span'))
+  } catch (err) {
+    reading.close()
+    toast(err.notBuilt ? 'Publishing from the web is not available on this board' : err.message, { err: !err.notBuilt })
+    return
+  }
+  if (gone) return
+  if (span.error) {
+    openModal({
+      title,
+      testid: 'publish-dialog',
+      card: card.id,
+      returnTo,
+      body: h('div', { class: 'aform' }, h('p', { class: 'aerr', testid: 'publish-refusal', role: 'alert' }, refusal(span.error))),
+      actions: [{ label: 'Close', testid: 'publish-cancel' }]
+    })
+    return
+  }
+  const repos = span.repos || []
+  const going = repos.filter(r => !r.error)
+  const hooks = going.filter(r => r.hook)
+  const error = h('p', { class: 'aerr', testid: 'publish-error', role: 'alert', hidden: true })
+  const titleIn = h('input', { testid: 'publish-title', value: span.title || '', autocomplete: 'off', spellcheck: 'true' })
+  const bodyIn = h('textarea', { testid: 'publish-body', value: span.body || '', rows: 6, spellcheck: 'true' })
+  const draftIn = h('input', { type: 'checkbox', testid: 'publish-draft' })
+  const hookIn = hooks.length ? h('input', { type: 'checkbox', testid: 'publish-hook' }) : null
+  const body = h('div', { class: 'aform' },
+    h('ul', { class: 'pubrepos', testid: 'publish-repos' }, repos.map((r, i) => h('li', { testid: `publish-repo-${i}` },
+      h('b', null, r.label), ' — ',
+      r.error ? h('span', { class: 'aerr' }, 'left out: ', refusal(r.error)) : r.summary,
+      r.draftWhy && !r.error ? h('span', { class: 'sub' }, ` Opens as a draft: ${r.draftWhy}.`) : null))),
+    h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Title'), titleIn),
+    h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Description'), bodyIn),
+    h('p', { class: 'sub' }, 'Each description also names the other repositories’ pull requests.'),
+    h('label', { class: 'pubcheck' }, draftIn, h('span', null, 'Open as drafts')))
+  if (hookIn) {
+    body.append(h('label', { class: 'pubcheck warn' }, hookIn,
+      h('span', null, 'Run these pre-push hooks with my credential', h('span', { class: 'sub mono' }, hooks.map(r => `${r.label}: ${r.hook}`).join(', ')))))
+  }
+  body.append(error)
+  const fail = (text) => { clear(error).append(text); error.hidden = false; return false }
+  const lock = (on) => { for (const el of body.querySelectorAll('input,textarea')) el.disabled = on }
+  openModal({
+    title,
+    testid: 'publish-dialog',
+    card: card.id,
+    returnTo,
+    body,
+    actions: [
+      { label: 'Cancel', testid: 'publish-cancel' },
+      {
+        label: going.length === 1 ? 'Open pull request' : `Open ${going.length} pull requests`,
+        primary: true,
+        testid: 'publish-confirm',
+        onClick: async () => {
+          if (!going.length) return fail('No repository here can be published.')
+          const req = { title: titleIn.value.trim(), body: bodyIn.value, draft: draftIn.checked, repos: going.map(r => ({ repo: r.repo || '', fingerprint: r.fingerprint })) }
+          if (!req.title) { titleIn.focus(); return fail('A pull request needs a title.') }
+          if (hookIn && !hookIn.checked) return fail('Read the pre-push hooks and tick the box to let them run.')
+          error.hidden = true
+          lock(true)
+          const release = hold(card.id)
+          try {
+            const res = await post(cardPath(card.id, 'publish/span'), req)
+            if (res.error) { lock(false); return fail(refusal(res.error)) }
+            const failed = (res.repos || []).filter(o => o.error)
+            for (const o of res.repos || []) {
+              if (o.result) toast(`${o.label}: ${said(o.result)}`, { ack: card.id })
+              if (o.result?.linkError) toast(o.result.linkError, { err: true })
+            }
+            done?.(res)
+            if (failed.length) { lock(false); return fail(failed.map(o => `${o.label}: ${refusal(o.error)}`).join(' · ')) }
+            return true
+          } catch (err) {
+            lock(false)
+            return fail(err.message)
+          } finally {
+            release()
+          }
+        }
+      }
+    ]
+  })
+}
+
 // stepList is the plan's steps as a checklist: hidden until the act starts,
 // then each one done, running (with a clock once it has run a while),
 // failed or still to come. The board names the step it is on; every step

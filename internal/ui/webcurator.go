@@ -262,7 +262,7 @@ func (b *Bridge) SetCurator(ctx context.Context, req *webapi.CuratorConfig) (web
 }
 
 // RunCuratorNow is POST /api/curator/run: the board runs the curator at
-// its next tick, the same request the CLI's `gummi curator run` leaves.
+// its next tick, the same request the TUI's curator view leaves.
 func (b *Bridge) RunCuratorNow(ctx context.Context) (WebOutcome, error) {
 	return b.curatorAct(ctx, func(_ context.Context, eng *engine.Engine) (string, error) {
 		if err := eng.RequestCuratorRun(); err != nil {

@@ -215,7 +215,7 @@ registerView('schedules', {
       if (!rows.length) {
         list.append(h('div', { class: 'empty', testid: 'schedules-empty' },
           h('b', null, 'No schedules yet'),
-          'Define one below, or with `gummi schedule add`. A cron that mints a card every night, or a heartbeat that checks in hourly — off until you switch it on.'))
+          'Define one below. A cron that mints a card every night, or a heartbeat that checks in hourly — off until you switch it on.'))
         return
       }
       for (const sc of rows) list.append(scheduleRow(ctx, sc, v, openForm, load, draw, act))

@@ -40,20 +40,3 @@ func TestCoAuthorHint(t *testing.T) {
 		}
 	}
 }
-
-// The headless landing path lets a configured co-author through and still
-// refuses any other.
-func TestValidateCommitMessageWithCoAuthors(t *testing.T) {
-	msg := "feat(export): add csv\n\n- why\n\nCo-authored-by: Ada Lovelace <ada@example.com>"
-	if err := ValidateCommitMessage(msg); err == nil {
-		t.Fatal("an unconfigured co-author was accepted")
-	}
-	worktree.UseCoAuthors([]string{"Ada Lovelace <ada@example.com>"})
-	t.Cleanup(func() { worktree.UseCoAuthors(nil) })
-	if err := ValidateCommitMessage(msg); err != nil {
-		t.Errorf("the configured co-author was refused: %v", err)
-	}
-	if err := ValidateCommitMessage(msg + "\nCo-authored-by: Claude <noreply@anthropic.com>"); err == nil {
-		t.Error("another co-author beside the configured one was accepted")
-	}
-}

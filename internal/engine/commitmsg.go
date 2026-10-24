@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -367,18 +366,6 @@ var conventionalCommitTypes = map[string]struct{}{
 // conventionalCommitTypeList renders the accepted types for the scribe
 // prompt, sorted so the prompt text is stable across runs (a map's range
 // order is not) and so a cached prefix stays cached.
-//
-// The prompt states the subject rules by DERIVING them from the same
-// values ValidateCommitMessage enforces, rather than restating them in
-// prose that can drift. It has to state them at all because the prompt
-// also hands the scribe "the repo's recent landing subjects as the style
-// to imitate" — and a repo whose own convention writes path-shaped scopes
-// (`feat(lxc/list): …`) will teach the scribe to draft a subject that
-// gummi's own headless landing path then refuses as malformed. The TUI's
-// dialog is deliberately laxer than the validator (see
-// ValidateCommitMessage), so nothing downstream catches it either: the
-// message lands from the board and the same shape is rejected from
-// `gummi merge`.
 func conventionalCommitTypeList() string {
 	types := make([]string, 0, len(conventionalCommitTypes))
 	for t := range conventionalCommitTypes {
@@ -386,76 +373,6 @@ func conventionalCommitTypeList() string {
 	}
 	sort.Strings(types)
 	return strings.Join(types, ", ")
-}
-
-// ccSubjectRe matches a Conventional Commits `type(scope): summary` subject
-// line: a known type (checked separately), an optional parenthesized scope
-// (a single scope name or a comma-separated list of them), a colon+space
-// separator, and a non-empty summary.
-var ccSubjectRe = regexp.MustCompile(`^[a-z]+(\([a-z0-9-]+(,[a-z0-9-]+)*\))?: .+$`)
-
-// ccSubjectScopeRe matches a subject that leads with a parenthesized scope
-// group after the type and pulls out its raw contents. It exists only to
-// report a malformed multi-scope subject as such instead of the generic
-// type(scope): summary line; the contents are gated by validScopeList so a
-// well-formed scope (even one with an empty summary) still falls through
-// to the generic error rather than a misleading "malformed" line.
-var ccSubjectScopeRe = regexp.MustCompile(`^[a-z]+\(([^)]*)\): `)
-
-// scopeElRe matches a single valid scope name in a comma-separated list.
-var scopeElRe = regexp.MustCompile(`^[a-z0-9-]+$`)
-
-// validScopeList reports whether a scope-group's raw contents form a
-// non-empty comma-separated list of [a-z0-9-] names. A well-formed list
-// passes; a trailing/leading/empty element or an empty scope does not.
-func validScopeList(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, el := range strings.Split(s, ",") {
-		if !scopeElRe.MatchString(el) {
-			return false
-		}
-	}
-	return true
-}
-
-// ValidateCommitMessage rejects a commit message that must not reach main's
-// history through the headless landing path. It is deliberately stricter
-// than the TUI's commit-message dialog: headless has no human at the form to
-// catch a malformed message before it lands, so the machine enforces the
-// shape. It rejects an empty message, a non-Conventional-Commits subject
-// (unknown type, missing scope/summary form), a raw diff dump, and any agent
-// attribution — each with a distinct reason. It never rewrites the message:
-// the caller owns body formatting (the scribe's 72-column wrap is not run
-// here), so a message that passes is landed byte-for-byte.
-func ValidateCommitMessage(msg string) error {
-	trimmed := strings.TrimSpace(msg)
-	if trimmed == "" {
-		return errors.New("commit message is empty")
-	}
-	first := trimmed
-	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {
-		first = trimmed[:i]
-	}
-	if !ccSubjectRe.MatchString(first) {
-		if m := ccSubjectScopeRe.FindStringSubmatch(first); m != nil && !validScopeList(m[1]) {
-			return fmt.Errorf("commit message scope %q is malformed: scopes are comma-separated [a-z0-9-] names", m[1])
-		}
-		return fmt.Errorf("commit message subject %q is not Conventional Commits type(scope): summary", first)
-	}
-	typ, _, _ := strings.Cut(first, "(")
-	typ, _, _ = strings.Cut(typ, ":")
-	if _, ok := conventionalCommitTypes[strings.TrimSpace(typ)]; !ok {
-		return fmt.Errorf("commit message type %q is not a conventional commits type", typ)
-	}
-	if isDiffDump(msg) {
-		return errors.New("commit message looks like a raw diff dump")
-	}
-	if match := worktree.MatchesAttribution(msg); match != "" {
-		return fmt.Errorf("commit message carries agent attribution (%q)", match)
-	}
-	return nil
 }
 
 // wrapBodyLines hard-wraps any body line longer than width at the last

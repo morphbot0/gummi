@@ -42,7 +42,7 @@ test.describe('two sessions waiting on their questions', () => {
   test.use({ seed: { run: async (ws) => { ids = [(await ws.seedAsk('Add a wave helper')).id, (await ws.seedAsk('Add a nod helper')).id]; } } });
 
   // the chip names the next card's stop in the rail's words, never a
-  // run's CLI line
+  // command line
   test('the next card waiting is offered where the answer was given', async ({ pairedPage: page, server }, info) => {
     const [a, b] = ids;
     await open(page, server, a);
@@ -81,7 +81,8 @@ test.describe('a session linked to a pull request', () => {
 
 test.describe('an agent’s question', () => {
   // A question's options live only in the process that asked it, so the
-  // card is started from this board rather than seeded by `gummi run`.
+  // card is started from this board rather than seeded on the seeding
+  // board, whose agents stop with it.
   async function ask(api: any, title = '[ask-where] Add a choosy helper'): Promise<string> {
     const c = (await api('POST', '/api/cards', { kind: 'freeform', title })).json;
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');

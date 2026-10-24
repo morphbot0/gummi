@@ -435,11 +435,11 @@ func (e *Engine) TakeCuratorReports() []CuratorRun {
 }
 
 // Digest is the one line a curator run says on the board: its Summary
-// and, where it changed the pack, how to undo it from a shell.
+// and, where it changed the pack, where a person undoes it.
 func (r CuratorRun) Digest() string {
 	line := r.Summary()
 	if r.Changed() {
-		line += " — undo with gummi curator revert " + r.ID
+		line += " — undo it from the skill curator (E on the board, Skills on the web page)"
 	}
 	return line
 }

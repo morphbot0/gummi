@@ -191,7 +191,9 @@ const (
 	ActionNeedsSchedule ActionNeeds = "schedule"
 	// ActionNeedsPublish opens the publish dialog: the page reads the
 	// facts from GET /api/cards/{id}/publish?act= and sends the person's
-	// confirm to POST /api/cards/{id}/publish (DESIGN §22).
+	// confirm to POST /api/cards/{id}/publish (DESIGN §22). Its Default is
+	// the act, or "span" for a session opening a PR in every repository it
+	// spans, read from and confirmed to /api/cards/{id}/publish/span.
 	ActionNeedsPublish ActionNeeds = "publish"
 )
 

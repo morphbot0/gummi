@@ -46,13 +46,6 @@ func (b *Bridge) Schedules(ctx context.Context) (webapi.Schedules, error) {
 	})
 }
 
-// WebSchedule projects one row for the page — and for the CLI's
-// schedule --json output, which shows the same shape rather than a
-// second projection of it.
-func WebSchedule(sc domain.Schedule) webapi.Schedule {
-	return webSchedule(sc)
-}
-
 func webSchedule(sc domain.Schedule) webapi.Schedule {
 	out := webapi.Schedule{
 		ID: string(sc.ID), Name: sc.Name, Kind: string(sc.Kind),

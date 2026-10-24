@@ -6,7 +6,7 @@ import { agentScript, fakeGh, fakeGhData, fakeSsh, gummiBin } from './paths';
 
 /**
  * A throwaway gummi workspace: a git repository holding a tiny Go module,
- * initialised with `gummi init` and configured so every role runs on the
+ * with a .gummi of its own configured so every role runs on the
  * scripted agent (scripts/web-e2e-agent.py) and every `gh` call lands on
  * fixtures/fake-gh.
  *
@@ -20,11 +20,12 @@ import { agentScript, fakeGh, fakeGhData, fakeSsh, gummiBin } from './paths';
  *            server logs
  *   config/  XDG_CONFIG_HOME, so the user's own gummi config never leaks in
  *
- * Seeding helpers drive the real CLI (`gummi run`, `resume`, `merge`) or,
- * where there is no verb, a board of their own (viaBoard), so a seeded card
- * is in exactly the state the product puts it in. They need no web server and are safe to call while
- * one runs (the CLI takes only per-card locks), though a running board
- * picks the change up on its own schedule.
+ * Seeding helpers drive a board of their own through the web API, as the
+ * page does (POST /api/cards, an answer, the commit and merge actions), so a
+ * seeded card is in exactly the state the product puts it in. That board is
+ * started on the first seed and stopped by closeSeeder(), which the
+ * fixtures call before the test's own server starts: the board's instance
+ * lock admits one, so a helper is never called while that server runs.
  */
 export class Workspace {
   readonly root: string;
@@ -32,6 +33,8 @@ export class Workspace {
   readonly logs: string;
   readonly ghData: string;
   readonly env: NodeJS.ProcessEnv;
+  private seeder: Promise<{ server: import('./server').GummiServer; call: Call }> | undefined;
+  private seederConfig = '';
 
   private constructor(root: string, extraEnv: NodeJS.ProcessEnv) {
     this.root = root;
@@ -110,7 +113,8 @@ export class Workspace {
     await this.git('add', '-A');
     await this.git('commit', '-q', '-m', 'init: a tiny module');
 
-    await this.gummiOK(['init']);
+    // the board writes the rest of .gummi the first time it opens
+    await fs.promises.mkdir(path.join(this.repo, '.gummi'), { recursive: true });
     await this.writeGummiFile(
       'config.yaml',
       [
@@ -147,6 +151,7 @@ export class Workspace {
 
   /** Remove the whole workspace. Kept when GUMMI_E2E_KEEP=1, for poking at. */
   async dispose(): Promise<void> {
+    await this.closeSeeder();
     if (process.env.GUMMI_E2E_KEEP === '1') {
       console.log(`[e2e] kept workspace ${this.root}`);
       return;
@@ -182,10 +187,9 @@ export class Workspace {
     return r.stdout;
   }
 
-  /** `gummi status <id> --json`, parsed. */
-  async status(id: string): Promise<CardStatus> {
-    const r = await this.gummiOK(['status', id, '--json']);
-    return JSON.parse(r.stdout) as CardStatus;
+  /** The card as the web API has it (GET /api/cards/{id}), on the seeding board. */
+  async card(id: string): Promise<SeedCard> {
+    return (await this.call('GET', `/api/cards/${id}`)) as SeedCard;
   }
 
   /** The card's worktree under .gummi/worktrees. */
@@ -226,23 +230,19 @@ export class Workspace {
   // ------------------------------------------------------------------
 
   /**
-   * A session started by `gummi run` from title and driven until its first
-   * turn is answered: the scripted agent's turn edits a file, so its diff
-   * is not empty. Returns the session's id.
+   * A session minted from title and driven until its first turn is
+   * answered: the scripted agent's turn edits a file, so its diff is not
+   * empty. Returns the session's id.
    */
   async seedSession(title: string, opts: RunOpts = {}): Promise<string> {
-    const r = await this.drive(['run', ...runFlags(opts), title]);
-    expectEvent(r, 'done');
-    return r.id;
+    const [id] = await this.mint([{ title, ...cardFields(opts) }]);
+    return id;
   }
 
-  /**
-   * A session whose work is committed on its branch — ready to land.
-   * `gummi run`, then `gummi commit` of what its turn left in the tree.
-   */
+  /** A session whose work is committed on its branch — ready to land. */
   async seedReady(title: string, opts: RunOpts = {}): Promise<string> {
     const id = await this.seedSession(title, opts);
-    await this.gummiOK(['commit', id, '-m', commitSubject(title)]);
+    await this.act(id, 'commit', { message: commitSubject(title) });
     return id;
   }
 
@@ -252,71 +252,151 @@ export class Workspace {
    * under the title, so the card keeps the title it was given.
    */
   async seedAsk(title: string, opts: RunOpts = {}): Promise<{ id: string; question: string; options: string[]; decision: string }> {
-    const r = await this.drive(['run', ...runFlags(opts), title.includes('[ask]') ? title : `${title}\n\n[ask]`]);
-    const q = expectEvent(r, 'question');
-    return { id: r.id, question: String(q.q), options: q.options as string[], decision: String(q.decision) };
+    const [id] = await this.mint([{ title, ...(title.includes('[ask]') ? {} : { description: '[ask]' }), ...cardFields(opts) }]);
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      const d = (await this.card(id)).decision;
+      if (d?.kind === 'ask') {
+        return { id, question: d.question, options: d.options.filter((o) => /^\d+$/.test(o.id)).map((o) => o.label), decision: d.ref };
+      }
+      if (Date.now() > deadline) throw new Error(`${id} never asked its question: ${JSON.stringify(d)}`);
+      await sleep(100);
+    }
   }
 
-  /** A ready session landed on main with `gummi merge` (stage done). */
+  /** A ready session landed on main with the merge action (stage done). */
   async seedLanded(title: string, message = commitSubject(title), opts: RunOpts = {}): Promise<string> {
     const id = await this.seedReady(title, opts);
-    await this.gummiOK(['merge', id, '-m', message]);
+    await this.land(id, message, opts);
     return id;
+  }
+
+  /** Land id with the merge action and wait until it is done. */
+  async land(id: string, message: string, opts: { keepBranch?: boolean } = {}): Promise<void> {
+    await this.act(id, 'merge', { message, keepBranch: !!opts.keepBranch });
+    await this.until(id, (c) => c.stage === 'done', 'landed');
   }
 
   /**
    * Sessions (freeform cards), one per title, each with its title as its
-   * opening turn and that turn answered. A session has no CLI verb of its
-   * own yet, so this mints them through a board of its own (viaBoard).
-   * `extra` is sent with each card (e.g. `{ repo: 'lxd' }`).
+   * opening turn and that turn answered. `extra` is sent with each card
+   * (e.g. `{ repo: 'lxd' }`).
    */
   async seedSessions(titles: string[], extra: Record<string, unknown> = {}): Promise<string[]> {
-    return this.viaBoard(titles.map((title) => ({ kind: 'freeform', title, ...extra })));
+    return this.mint(titles.map((title) => ({ title, ...extra })));
+  }
+
+  /** Answer the card's open ask with the option labelled `label`. */
+  async answer(id: string, label: string): Promise<void> {
+    const d = (await this.card(id)).decision;
+    const o = d?.options.find((x) => x.label === label);
+    if (!d || !o) throw new Error(`${id} has no option "${label}" to answer: ${JSON.stringify(d)}`);
+    await this.call('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: o.id, against: d.against.token });
+    await this.until(id, (c) => c.status !== 'running' && c.decision?.ref !== d.ref, 'settled after its answer');
+  }
+
+  /** A stack named name holding cards, bottom first. */
+  async stack(name: string, cards: string[]): Promise<void> {
+    await this.call('POST', '/api/stacks', { name, card: cards[0], cards: cards.slice(1) });
+  }
+
+  /** A schedule, as the schedules view defines one (POST /api/schedules). */
+  async addSchedule(def: Record<string, unknown>): Promise<void> {
+    await this.call('POST', '/api/schedules', def);
+  }
+
+  /** Stop the seeding board, if one is up. */
+  async closeSeeder(): Promise<void> {
+    const s = this.seeder;
+    this.seeder = undefined;
+    if (s) await (await s).server.stop();
+  }
+
+  /** Call the web API on the seeding board; throws on an error status. */
+  async call(method: string, pathname: string, body?: unknown): Promise<any> {
+    const r = await (await this.board()).call(method, pathname, body);
+    if (r.status >= 300) throw new Error(`${method} ${pathname} → ${r.status}: ${r.text}`);
+    return r.json;
   }
 
   /**
-   * Make cards through `POST /api/cards`, as the new-card form does, on a
-   * board started for it on a free port with no pairing; wait for every
-   * card's opening turn (a session's) to settle; stop the board again.
-   * Call it before the test's server starts (a seed's run), never beside
-   * it: the board's instance lock admits one.
+   * The seeding board: one started for it on a free port with no
+   * pairing, kept until closeSeeder().
    */
-  private async viaBoard(cards: Array<Record<string, unknown>>): Promise<string[]> {
-    const { GummiServer } = await import('./server');
-    const server = await GummiServer.start(this, { args: ['--no-pairing'] });
-    try {
-      const call = async (method: string, pathname: string, body?: unknown) => {
-        const res = await fetch(server.url + pathname, {
-          method,
+  private async board(): Promise<{ server: import('./server').GummiServer; call: Call }> {
+    // a board reads config.yaml when it opens: a seed that changed it
+    // (a repos: table) gets a board that has read the change
+    const config = configStamp(this.repo);
+    if (this.seeder && config !== this.seederConfig) await this.closeSeeder();
+    this.seederConfig = config;
+    this.seeder ??= (async () => {
+      const { GummiServer } = await import('./server');
+      const server = await GummiServer.start(this, { args: ['--no-pairing'] });
+      const call: Call = async (m, p, b) => {
+        const res = await fetch(server.url + p, {
+          method: m,
           headers: { Origin: server.url, 'Content-Type': 'application/json' },
-          body: body === undefined ? undefined : JSON.stringify(body),
+          body: b === undefined ? undefined : JSON.stringify(b),
         });
         const text = await res.text();
-        if (!res.ok) throw new Error(`${method} ${pathname} → ${res.status}: ${text}`);
-        return text ? JSON.parse(text) : undefined;
+        let json: any;
+        try {
+          json = text ? JSON.parse(text) : undefined;
+        } catch {
+          json = undefined;
+        }
+        return { status: res.status, json, text };
       };
-      const ids: string[] = [];
-      for (const card of cards) {
-        const c = await call('POST', '/api/cards', card);
-        ids.push(String(c?.id ?? c?.card?.id));
-      }
-      const deadline = Date.now() + 60_000;
-      for (;;) {
-        const rows: Array<{ id: string; status: string }> = (await call('GET', '/api/board')).rows;
-        const busy = ids.filter((id) => rows.find((r) => r.id === id)?.status === 'running');
-        if (busy.length === 0) break;
-        if (Date.now() > deadline) throw new Error(`cards still running their opening turn: ${busy.join(', ')}`);
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      return ids;
-    } finally {
-      await server.stop();
-    }
+      return { server, call };
+    })();
+    return this.seeder;
   }
 
-  /** Answer a stopped session's open question with `gummi resume --answer`. */
-  async answer(id: string, text: string): Promise<DriveResult> {
-    return this.drive(['resume', id, '--answer', text]);
+  /**
+   * Run a card action, saying yes to every confirmation it stops on, as a
+   * person pressing through the page's dialogs would.
+   */
+  async act(id: string, action: string, body: Record<string, unknown> = {}): Promise<void> {
+    const { call } = await this.board();
+    const confirms: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = await call('POST', `/api/cards/${id}/actions/${action}`, { ...body, ...(confirms.length ? { confirm: confirms.join(',') } : {}) });
+      if (r.status === 202 && r.json?.error === 'confirm' && r.json.confirm) {
+        confirms.push(r.json.confirm);
+        continue;
+      }
+      if (r.status >= 300) throw new Error(`${action} on ${id} → ${r.status}: ${r.text}`);
+      return;
+    }
+    throw new Error(`${action} on ${id} kept asking to confirm`);
+  }
+
+  /** Link a card to fake-gh's PR (7 by default) with the card's "link PR…". */
+  async linkPR(id: string, number = 7): Promise<void> {
+    await this.act(id, 'prlink', { message: String(number) });
+    await this.until(id, (c) => !!c.pr || !!c.pullRequest || JSON.stringify(c).includes(`#${number}`), 'linked');
+  }
+
+  /** Mint cards through POST /api/cards and wait for every opening turn to settle. */
+  private async mint(cards: Array<Record<string, unknown>>): Promise<string[]> {
+    const ids: string[] = [];
+    for (const card of cards) {
+      const c = await this.call('POST', '/api/cards', { kind: 'freeform', ...card });
+      ids.push(String(c?.id ?? c?.card?.id));
+    }
+    for (const id of ids) await this.until(id, (c) => c.status !== 'running', 'done with its opening turn', 60_000);
+    return ids;
+  }
+
+  /** Wait until the card reads as ok says. */
+  private async until(id: string, ok: (c: SeedCard) => boolean, what: string, ms = 30_000): Promise<SeedCard> {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const c = await this.card(id);
+      if (ok(c)) return c;
+      if (Date.now() > deadline) throw new Error(`${id} never ${what}: ${JSON.stringify({ stage: c.stage, status: c.status, decision: c.decision })}`);
+      await sleep(100);
+    }
   }
 
   /**
@@ -337,23 +417,6 @@ export class Workspace {
   remotePath(repo = 'e2e/tiny'): string {
     return path.join(this.root, 'remote', `${repo}.git`);
   }
-
-  /** Link a card to fake-gh's PR (7 by default) with `gummi pr link`. */
-  async linkPR(id: string, number = 7): Promise<void> {
-    await this.gummiOK(['pr', 'link', id, String(number)]);
-  }
-
-  /**
-   * Run a driving verb and parse its NDJSON stream. Throws when it printed
-   * nothing parseable (it crashed before driving anything).
-   */
-  async drive(args: string[]): Promise<DriveResult> {
-    const r = await this.gummi(args);
-    const events = parseEvents(r.stdout);
-    const created = events.find((e) => e.event === 'created' || e.event === 'resumed');
-    if (!created) throw new Error(`gummi ${args.join(' ')} exited ${r.code} without a created/resumed event\n${r.stdout}\n${r.stderr}`);
-    return { ...r, id: String(created.id), events };
-  }
 }
 
 // ----------------------------------------------------------------------
@@ -366,76 +429,56 @@ export interface Exec {
   stderr: string;
 }
 
-export type DriverEvent = { event: string; id?: string; stage?: string; [k: string]: unknown };
+type Call = (method: string, pathname: string, body?: unknown) => Promise<{ status: number; json: any; text: string }>;
 
-export interface DriveResult extends Exec {
-  id: string;
-  events: DriverEvent[];
-}
-
-/** Flags every seeding helper forwards to `gummi run`. */
+/** What a seeding helper forwards with the card it mints. */
 export interface RunOpts {
   envelope?: number;
   repo?: string;
   profile?: string;
   base?: string;
-  ref?: string;
+  keepBranch?: boolean;
 }
 
-/** The fields of `gummi status --json` the suite reads (it carries more). */
-export interface CardStatus {
+/** The fields of GET /api/cards/{id} the helpers and the harness read (it carries more). */
+export interface SeedCard {
   id: string;
   kind: string;
   title: string;
   stage: string;
+  status: string;
   branch?: string;
-  branch_state?: string;
-  verified: boolean;
-  running: boolean;
-  spend: { credits: number; envelope: number };
-  escalation?: { kind: string; reason: string; stage: string; at: string };
-  blockers: { open_questions: number; open_diff: number };
+  decision?: { ref: string; kind: string; question: string; options: Array<{ id: string; label: string }>; against: { token: string } };
   [k: string]: unknown;
 }
 
-function runFlags(o: RunOpts): string[] {
-  const f: string[] = [];
-  if (o.envelope !== undefined) f.push('--envelope', String(o.envelope));
-  if (o.profile) f.push('--profile', o.profile);
-  if (o.base) f.push('--base', o.base);
-  if (o.repo) f.push('--repo', o.repo);
-  if (o.ref) f.push('--ref', o.ref);
+function cardFields(o: RunOpts): Record<string, unknown> {
+  const f: Record<string, unknown> = {};
+  if (o.envelope !== undefined) f.envelope = o.envelope;
+  if (o.profile) f.profile = o.profile;
+  if (o.base) f.base = o.base;
+  if (o.repo) f.repo = o.repo;
   return f;
+}
+
+/** config.yaml's size and change time, "" while there is none. */
+function configStamp(repo: string): string {
+  try {
+    const st = fs.statSync(path.join(repo, '.gummi', 'config.yaml'));
+    return `${st.size}:${st.mtimeMs}`;
+  } catch {
+    return '';
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 /** A Conventional Commits subject a landing or commit accepts, from a title. */
 export function commitSubject(title: string): string {
   const words = title.toLowerCase().replace(/\[[^\]]*\]/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
   return `feat: ${words || 'work'}`;
-}
-
-function withKeyword(title: string, keyword: string): string {
-  return title.includes(keyword) ? title : `${keyword} ${title}`;
-}
-
-export function parseEvents(stdout: string): DriverEvent[] {
-  const out: DriverEvent[] = [];
-  for (const line of stdout.split('\n')) {
-    const t = line.trim();
-    if (!t.startsWith('{')) continue;
-    try {
-      out.push(JSON.parse(t) as DriverEvent);
-    } catch {
-      /* not an event line */
-    }
-  }
-  return out;
-}
-
-function expectEvent(r: DriveResult, name: string): DriverEvent {
-  const e = r.events.findLast((ev) => ev.event === name);
-  if (!e) throw new Error(`expected a "${name}" event from ${r.id}, got:\n${r.stdout}\n${r.stderr}`);
-  return e;
 }
 
 function readIfExists(p: string): string {

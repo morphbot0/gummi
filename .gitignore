@@ -1,5 +1,6 @@
 # build output
 /bin/
+/cmd/gummi/gummi
 /dist/
 
 # test and profiling artifacts

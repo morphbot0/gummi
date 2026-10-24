@@ -1,0 +1,65 @@
+{
+  "span": {
+    "title": "feat: dark mode",
+    "body": "why",
+    "repos": [
+      {
+        "label": "widget",
+        "summary": "Push fd-012-dark-mode (2 commits) to me/widget and open a PR into me/widget main.",
+        "fingerprint": "9f2c",
+        "branch": "fd-012-dark-mode",
+        "ahead": 2,
+        "base": "main",
+        "baseRepo": "me/widget",
+        "hook": ".git/hooks/pre-push",
+        "draftWhy": "the tip 0123abc is not verified"
+      },
+      {
+        "repo": "lib",
+        "label": "lib",
+        "error": {
+          "code": "dirty",
+          "text": "the tree has changes",
+          "fix": "commit or discard them"
+        }
+      }
+    ]
+  },
+  "request": {
+    "title": "feat: dark mode",
+    "body": "why",
+    "draft": true,
+    "repos": [
+      {
+        "fingerprint": "9f2c"
+      },
+      {
+        "repo": "lib",
+        "fingerprint": "77aa"
+      }
+    ]
+  },
+  "result": {
+    "repos": [
+      {
+        "label": "widget",
+        "result": {
+          "act": "create",
+          "pushed": "0123abc",
+          "url": "https://github.com/me/widget/pull/12",
+          "number": 12,
+          "draft": true
+        }
+      },
+      {
+        "repo": "lib",
+        "label": "lib",
+        "error": {
+          "code": "facts-changed",
+          "text": "the facts changed",
+          "fix": "read them again"
+        }
+      }
+    ]
+  }
+}

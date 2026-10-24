@@ -115,6 +115,24 @@ func TestPublishShapes(t *testing.T) {
 	}))
 }
 
+func TestPublishSpanShapes(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, struct {
+		Span    PublishSpan        `json:"span"`
+		Request PublishSpanRequest `json:"request"`
+		Result  PublishSpanResult  `json:"result"`
+	}{
+		Span: PublishSpan{Title: "feat: dark mode", Body: "why", Repos: []PublishSpanRepo{
+			{Label: "widget", Summary: "Push fd-012-dark-mode (2 commits) to me/widget and open a PR into me/widget main.", Fingerprint: "9f2c", Branch: "fd-012-dark-mode", Ahead: 2, Base: "main", BaseRepo: "me/widget", Hook: ".git/hooks/pre-push", DraftWhy: "the tip 0123abc is not verified"},
+			{Repo: "lib", Label: "lib", Error: &PublishError{Code: "dirty", Text: "the tree has changes", Fix: "commit or discard them"}},
+		}},
+		Request: PublishSpanRequest{Title: "feat: dark mode", Body: "why", Draft: true, Repos: []PublishSpanPick{{Fingerprint: "9f2c"}, {Repo: "lib", Fingerprint: "77aa"}}},
+		Result: PublishSpanResult{Repos: []PublishSpanOutcome{
+			{Label: "widget", Result: &PublishResult{Act: "create", Pushed: "0123abc", URL: "https://github.com/me/widget/pull/12", Number: 12, Draft: true}},
+			{Repo: "lib", Label: "lib", Error: &PublishError{Code: "facts-changed", Text: "the facts changed", Fix: "read them again"}},
+		}},
+	}))
+}
+
 func TestCardStatsShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, CardStats{
 		ID: "FD-012", Title: "Dark mode", Kind: "feature", Stage: "verify",

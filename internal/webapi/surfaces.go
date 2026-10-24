@@ -72,8 +72,7 @@ type Stacks struct {
 // POST /api/stacks/{id}/cards (Card at Pos), POST /api/stacks/{id}/move
 // (Card to Pos) and POST /api/stacks/{id}/rename (Name). The two
 // removals take no body: DELETE /api/stacks/{id}/cards/{card} takes a
-// card out (`gummi stack rm`), DELETE /api/stacks/{id} deletes an empty
-// stack.
+// card out, DELETE /api/stacks/{id} deletes an empty stack.
 type StackRequest struct {
 	Name  string   `json:"name,omitempty"`
 	Cards []string `json:"cards,omitempty"`
@@ -82,8 +81,8 @@ type StackRequest struct {
 	Pos *int `json:"pos,omitempty"`
 }
 
-// Restack is POST /api/stacks/{id}/restack: the walk to a fixed point
-// `gummi stack restack` forces, and the stack as it left it.
+// Restack is POST /api/stacks/{id}/restack: the forced walk to a fixed
+// point, and the stack as it left it.
 type Restack struct {
 	Stack Stack `json:"stack"`
 	// Replayed are the cards whose branches moved, in order.

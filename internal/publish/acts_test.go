@@ -84,7 +84,7 @@ func TestResolveRefusesAPushTargetItCannotStandBehind(t *testing.T) {
 		says string
 	}{
 		{"no remote", func(w *world) { w.repo.terr = worktree.ErrNoRemote }, CodeNoRemote, "no remote"},
-		{"several remotes", func(w *world) { w.repo.terr = worktree.ErrRemoteAmbiguous }, CodeRemoteAmbiguous, "gummi push --remote"},
+		{"several remotes", func(w *world) { w.repo.terr = worktree.ErrRemoteAmbiguous }, CodeRemoteAmbiguous, "pushRemote <name>"},
 		{"target unreadable", func(w *world) { w.repo.terr = errors.New("git config: boom") }, CodeFailed, "boom"},
 		{"onto the base", func(w *world) { w.repo.target.Branch = "main" }, CodeOntoBase, "onto main"},
 		{"another name", func(w *world) { w.repo.target.Branch = "other" }, CodeOntoBase, "another name than its own"},
@@ -409,7 +409,7 @@ func TestAPRThatOpenedIsNeverReportedAsNotOpened(t *testing.T) {
 		fx, _ := Resolve(ctx, w.env, w.repo, w.in())
 		res, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActCreate, Title: "t", Fingerprint: fx.Fingerprint()},
 			func(context.Context, domain.PullRequestRef) error { return errors.New("database is locked") })
-		if e != nil || res.PR.Number != 512 || !strings.Contains(res.LinkErr, "gummi pr link FF-208 512") {
+		if e != nil || res.PR.Number != 512 || !strings.Contains(res.LinkErr, "link PR…\" (PR #512)") {
 			t.Fatalf("create whose link failed = %+v %v", res, e)
 		}
 	})

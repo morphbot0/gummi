@@ -520,23 +520,6 @@ func (e *Engine) lockCard(id domain.FeatureID) (func(), error) {
 	return e.cfg.CardLocks.Acquire(id)
 }
 
-// trackAgentPID records sess's backing OS process at
-// ws.AgentPGIDFile(id) (BG-002), so a driver that dies without running its
-// own in-process cleanup (SIGKILL, crash, OOM-kill) still leaves behind a
-// durable pointer a later run/resume/clean can use to kill the orphan
-// before touching the card again (state.ReapOrphanAgent). sess implementing
-// agent.OSProcess is optional — an adapter with no real OS process backing
-// its session (or a test fake) simply isn't one, and nothing is recorded.
-func (e *Engine) trackAgentPID(id domain.FeatureID, sess agent.Session) {
-	p, ok := sess.(agent.OSProcess)
-	if !ok {
-		return
-	}
-	if pid := p.Pid(); pid > 0 {
-		_ = state.WritePIDFile(e.cfg.Workspace.AgentPGIDFile(id), pid)
-	}
-}
-
 // scratchFilesDirFor returns the card's scratch-files directory, created
 // best-effort — the shared derivation every session kind that stamps one
 // uses (stage sessions, and the consult and freeform conversations a

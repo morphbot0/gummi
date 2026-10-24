@@ -6,7 +6,7 @@
 //
 // Every caller mints through it: the board's form and the web face's
 // POST /api/cards, a follow-up filed from a finished card, a schedule's
-// fire, and headless `gummi run`. cardmint knows nothing about any of
+// fire, and an agent's dispatch. cardmint knows nothing about any of
 // them; it takes an Input describing exactly the decisions a mint needs
 // and a RequireRepo callback, because "can this card have this
 // repository" is answered by whoever owns the repository pool.

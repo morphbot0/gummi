@@ -22,7 +22,7 @@ import { openModal, openView } from './views.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { state, set } from './store.js?v=__ASSET_V__'
 import { openModelPicker } from './session.js?v=__ASSET_V__'
-import { openPublish } from './publish.js?v=__ASSET_V__'
+import { openPublish, openPublishSpan } from './publish.js?v=__ASSET_V__'
 import { pushAfterControl, openBasePush } from './pushbase.js?v=__ASSET_V__'
 import { expectMove, unexpectMove } from './diff.js?v=__ASSET_V__'
 
@@ -52,7 +52,7 @@ export async function runAction (card, a) {
   // a heartbeat is a schedule: the Schedules view's form, aimed at this card
   if (a.needs === 'schedule') { openView('schedules', { heartbeat: card.id }); return }
   // publishing confirms resolved facts, not a yes: its own dialog (publish.js)
-  if (a.needs === 'publish') { openPublish(card, a.default); return }
+  if (a.needs === 'publish') { a.default === 'span' ? openPublishSpan(card) : openPublish(card, a.default); return }
   if (!a.needs || a.needs === 'confirm') {
     try {
       await send(card.id, a, {})

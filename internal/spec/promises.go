@@ -54,16 +54,6 @@ var (
 	goldenNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
 )
 
-// unprovenRe matches verify's admission line for a file no check covered.
-// The path must not exclude the hyphen. `[^\s—-]+` stops at the first
-// ASCII hyphen, so "UNPROVEN: internal/goal-policy/run.go — why" records
-// the path "internal/goal" — a real file, usually a real directory, and
-// the wrong one. That is not a miss but a wrong answer, in the parser
-// whose job is recording what verification did NOT cover. The separator
-// is an em or en dash, or a spaced hyphen; a hyphen inside a word is part
-// of the word.
-var unprovenRe = regexp.MustCompile(`(?im)^\s*(?:[-*+]\s+)?(?:\*\*)?UNPROVEN(?:\*\*)?\s*:\s*(\S+?)\s*(?:(?:[—–]+|\s-+)\s*(.*))?$`)
-
 // invariantVerdictRe matches verify's answer to one invariant: the id, a
 // colon, and pass or fail.
 // Read the way a model writes it: heading or bullet markers, a
@@ -93,12 +83,6 @@ type Golden struct {
 	Literal string
 	// Text is the whole line, for the message that reports it missing.
 	Text string
-}
-
-// UnprovenFile is one changed file verify says no check exercised.
-type UnprovenFile struct {
-	Path   string
-	Reason string
 }
 
 // claimsHeadingRe matches the `Plan claims` subsection heading at any
@@ -217,44 +201,4 @@ func InvariantVerdicts(content string) map[string]string {
 		out[strings.ToUpper(m[1])] = strings.ToLower(m[2])
 	}
 	return out
-}
-
-// UnprovenFiles returns the files verify declared unproven, in document
-// order, de-duplicated by path (the last reason wins — a later line is a
-// revision of an earlier one).
-//
-// A stage with nothing to declare answers the instruction rather than
-// skipping it: "UNPROVEN: none" was the commonest shape on the lxd
-// autopilot drive, and it reached `done`'s unproven_files as a
-// one-element list whose element was the word "none" — a caller counting
-// the list saw one unproven file on a card that had none. The words that
-// mean "nothing here" are not paths and are dropped.
-func UnprovenFiles(content string) []UnprovenFile {
-	seen := map[string]int{}
-	var out []UnprovenFile
-	for _, m := range unprovenRe.FindAllStringSubmatch(content, -1) {
-		path := strings.Trim(strings.TrimSpace(m[1]), "`\"'")
-		if path == "" || isNothingWord(path) {
-			continue
-		}
-		reason := strings.TrimSpace(m[2])
-		if i, ok := seen[path]; ok {
-			out[i].Reason = reason
-			continue
-		}
-		seen[path] = len(out)
-		out = append(out, UnprovenFile{Path: path, Reason: reason})
-	}
-	return out
-}
-
-// isNothingWord reports whether a declared UNPROVEN path is really the
-// stage saying there were none. Matched on the WHOLE word, so a real file
-// called none.go, or a path with "none" in it, is still a path.
-func isNothingWord(path string) bool {
-	switch strings.ToLower(strings.Trim(path, ".,;:()[]")) {
-	case "none", "n/a", "na", "nil", "nothing", "-", "—":
-		return true
-	}
-	return false
 }
