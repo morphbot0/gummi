@@ -207,13 +207,11 @@ steps:
 
 ## Command and dispatch steps (an agent's recipe)
 
-A step may be gummi's own act instead of a model: `run:` a command, or
-`dispatch:` a session. An agent's scheduled watch is a command gate, then
-a dispatch.
+A step may be gummi's own act, not a model: `run:` a command or
+`dispatch:` a session. An agent's watch is a gate, then a dispatch.
 
 ```yaml
 name: watch-foo
-tier: cheap
 steps:
   - id: check
     run: ./check-release.sh
@@ -228,19 +226,16 @@ steps:
         Upstream foo released {{check.output}}. Bump the dependency.
 ```
 
-- `run` goes through `sh -c` in the run's tree. Exit 0 passes its
-  standard output on as `{{check.output}}`; `quietExit` (1–255, the
-  recipe's first step only) ends the run with no trace; any other exit
-  fails the step. A `{{…}}` in a command is one quoted shell word, never
-  put it inside quotes. It is one check, never a wait.
-- `dispatch` is for an agent only. `repo` is a literal name; `envelope`
-  is dollars, out of the agent's own. With a `recipe` give a `spec` (its spec
-  1) and the run starts at once; without one give a `prompt`, the
-  opening turn. `repos: [lib]` beside `repo` names more repositories of
-  the pool that the minted session attaches (literals, no paths or
-  duplicates).
-- Neither has a role, tier or prompt of its own. A dispatched recipe may
-  not dispatch.
+- `run` goes through `sh -c` in the run's tree. Exit 0 passes stdout on
+  as `{{check.output}}`; `quietExit` (1–255, first step only) ends the
+  run with no trace; any other exit fails it. A `{{…}}` in a command is
+  one quoted word: never put it in quotes. One check, never a wait.
+- `dispatch` is an agent's only. `repo` is a literal; `envelope` is
+  dollars, out of the agent's own. With a `recipe` give a `spec` (the
+  run starts at once), else a `prompt`. `repos: [lib]` attaches more
+  repositories of the pool.
+- Neither has a role, slot or prompt. A dispatched recipe may not
+  dispatch.
 
 ## Before you propose
 
