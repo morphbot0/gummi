@@ -54,7 +54,16 @@ test('a session from nothing to landed', async ({ pairedPage: page, server }, in
   await t.shot('commit-dialog', 'Committing: what is asked, and is the message prefilled sensibly?');
   await t.maybe('write a commit message', () => page.getByTestId('action-dialog').locator('textarea').fill('feat: add a farewell helper', { timeout: 5_000 }));
   await t.maybe('confirm the commit', () => page.getByTestId('action-confirm').click({ timeout: 5_000 }));
-  await t.shot('committed', 'Committed: is landing now the obvious next step?');
+  await t.shot('committed', 'Committed: is landing now the obvious next step — or, with the comment still open, is it clear what holds it?');
+  // an open comment holds the landing: the head says so and goes to it
+  const held = page.getByTestId('session-land-held');
+  if (await held.isVisible()) {
+    await t.click('press the held Land to see what holds it', held);
+    await t.shot('held', 'What holds the landing, where the person can clear it');
+    await t.click('resolve the comment', page.locator('[data-testid^="annotation-resolve-"]').first());
+    await toThread(t);
+    await t.wait('the landing is offered again', () => expect(page.getByTestId('session-land-held')).toHaveCount(0, { timeout: 15_000 }));
+  }
   await cardAction(t, 'merge', 'session-land');
   await t.shot('land-dialog', 'Landing: what it will do, and what holds it (an unresolved comment)?');
   await t.maybe('confirm the landing', () => page.getByTestId('action-confirm').click({ timeout: 5_000 }));

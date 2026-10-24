@@ -40,7 +40,7 @@ for (const project of fs.existsSync(out) ? fs.readdirSync(out) : []) {
 }
 journeys.sort((a, b) => a.journey.localeCompare(b.journey) || a.project.localeCompare(b.project));
 
-const KINDS = ['clipped', 'smallTargets', 'unnamed', 'covered', 'leaks'];
+const KINDS = ['clipped', 'smallTargets', 'unnamed', 'covered', 'lowContrast', 'leaks'];
 const seen = Object.fromEntries(KINDS.map((k) => [k, new Map()]));
 const lines = ['# gummi web — UX tour', '', `${journeys.length} journeys. Screens are under \`ux-out/<project>/<journey>/\`; each step's full probe (with the head, dock and surface text) is in that folder's \`journey.json\`.`, ''];
 
@@ -60,20 +60,20 @@ for (const j of journeys) {
     else lines.push('- primary buttons: none');
     if (p.sideways) lines.push('- the page scrolls sideways');
     for (const k of KINDS) {
-      for (const x of p[k]) {
+      for (const x of p[k] || []) {
         const m = seen[k];
         const e = m.get(x) || { n: 0, where: [] };
         e.n++; if (e.where.length < 4) e.where.push(rel);
         m.set(x, e);
       }
-      if (p[k].length) lines.push(`- ${k}: ${p[k].length}`);
+      if (p[k]?.length) lines.push(`- ${k}: ${p[k].length}`);
     }
     if (s.errors.length) lines.push(`- console errors: ${s.errors.join(' · ')}`);
     lines.push('');
   }
 }
 
-const TITLES = { clipped: 'Text cut off by its box', smallTargets: 'Targets under 24px (44px on a phone)', unnamed: 'Controls with no name', covered: 'Controls covered by something else', leaks: 'Template leaks' };
+const TITLES = { clipped: 'Text cut off by its box', smallTargets: 'Targets under 24px (44px on a phone)', unnamed: 'Controls with no name', covered: 'Controls covered by something else', lowContrast: 'Text under WCAG AA contrast', leaks: 'Template leaks' };
 lines.push('## What the probe found, across every screen', '');
 for (const k of KINDS) {
   const rows = [...seen[k].entries()].sort((a, b) => b[1].n - a[1].n);

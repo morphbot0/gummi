@@ -63,7 +63,8 @@ steps:
             The UX tour just ran. Read e2e/web/ux-out/INDEX.md, then each
             journey's journey.json: every step's probe carries the words the
             person reads (text.head, text.dock, text.dialog, text.surface,
-            text.pane, text.toasts). Check the screenshots where the words
+            text.pane, text.toasts, text.rail, and text.thread — the
+            thread's newest words). Check the screenshots where the words
             alone do not tell you enough.
 
             Find words that mislead or cost a person thought: jargon and
@@ -87,7 +88,8 @@ steps:
 
             The UX tour just ran. Read the end of e2e/web/ux-out/INDEX.md
             ("What the probe found, across every screen": cut-off text, small
-            targets, unnamed and covered controls, leaks), then look at the
+            targets, unnamed and covered controls, text under WCAG AA
+            contrast as measured, leaks), then look at the
             screenshots it points to, at desktop (1440), laptop (1024) and
             phone (390), light and dark (the surfaces journeys).
 

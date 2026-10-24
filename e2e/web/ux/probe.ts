@@ -17,6 +17,7 @@ export interface Probe {
   smallTargets: string[];
   unnamed: string[];
   covered: string[];
+  lowContrast: string[];
   primaries: string[];
   text: Record<string, string>;
 }
@@ -41,6 +42,8 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
     };
 
     const dialogEl = [...document.querySelectorAll('[role="dialog"], dialog[open]')].find(visible) || null;
+    // an open menu covers what is under it on purpose, like a dialog
+    const menuEl = [...document.querySelectorAll('[role="menu"], [role="listbox"]')].find(visible) || null;
     const INTERACTIVE = 'button, a[href], input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [tabindex="0"]';
     const interactive = [...document.querySelectorAll(INTERACTIVE)].filter(visible);
 
@@ -66,7 +69,9 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
       // a resizer is a thin edge by design
       if (!el.matches('[role="separator"]') && (r.width < floor || r.height < floor)) smallTargets.push(`${describe(el)} ${Math.round(r.width)}×${Math.round(r.height)}`);
       const name = (el.getAttribute('aria-label') || el.getAttribute('title') || (el as HTMLElement).innerText || el.getAttribute('aria-labelledby') || (el as HTMLInputElement).placeholder || '').trim();
-      if (!name && !el.matches('input[type="checkbox"], input[type="radio"]') && !el.closest('label')) unnamed.push(describe(el));
+      // a <details> summary is named by its content, which may be an icon
+      // the browser draws itself
+      if (!name && !el.matches('input[type="checkbox"], input[type="radio"], summary') && !el.closest('label')) unnamed.push(describe(el));
       // something else on top of a control's middle (a toast, a pinned bar);
       // with a dialog open everything behind it is covered on purpose
       if (!dialogEl || dialogEl.contains(el)) {
@@ -74,8 +79,41 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
         const y = r.top + r.height / 2;
         if (x >= 0 && y >= 0 && x < vw && y < vh) {
           const top = document.elementFromPoint(x, y);
-          if (top && top !== el && !el.contains(top) && !top.contains(el)) covered.push(`${describe(el)} under ${describe(top)}`);
+          if (top && top !== el && !el.contains(top) && !top.contains(el) && !(menuEl && menuEl.contains(top)) && !el.matches('summary')) covered.push(`${describe(el)} under ${describe(top)}`);
         }
+      }
+    }
+
+    // text whose contrast against what is behind it is under WCAG AA:
+    // 4.5:1, or 3:1 for large text (24px, or 18.66px bold)
+    const rgb = (c: string) => (c.match(/[\d.]+/g) || []).map(Number);
+    const lum = ([r, g, b]: number[]) => {
+      const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const backdrop = (el: Element | null): number[] => {
+      for (; el; el = el.parentElement) {
+        const c = rgb(getComputedStyle(el).backgroundColor);
+        if (c.length >= 3 && (c.length < 4 || c[3] > 0.5)) return c.slice(0, 3);
+      }
+      return rgb(getComputedStyle(document.body).backgroundColor).slice(0, 3);
+    };
+    const lowContrast: string[] = [];
+    const seenText = new Set<string>();
+    for (const el of document.querySelectorAll('body *')) {
+      if (!(el instanceof HTMLElement) || !visible(el) || el.clientWidth <= 2) continue;
+      const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent || '').join('').trim();
+      if (!own || el.closest('[disabled], [aria-disabled="true"], .xterm, pre, code')) continue;
+      const s = getComputedStyle(el);
+      const fg = rgb(s.color);
+      if (fg.length >= 4 && fg[3] < 0.5) continue;
+      const a = lum(fg.slice(0, 3)), b = lum(backdrop(el));
+      const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      const size = parseFloat(s.fontSize);
+      const large = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
+      if (ratio < (large ? 3 : 4.5)) {
+        const key = `${describe(el)} ${ratio.toFixed(1)}:1`;
+        if (!seenText.has(key)) { seenText.add(key); lowContrast.push(key); }
       }
     }
 
@@ -99,6 +137,10 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
     read('pane', '[data-testid="panel-pane"]');
     read('toasts', '[data-testid="toasts"]');
     read('topbar', '[data-testid="topbar"]');
+    read('rail', '[data-testid="rail-cards"]');
+    // the thread's newest words: what the person last read there
+    const thread = document.querySelector('[data-testid="thread-items"]') as HTMLElement | null;
+    if (thread && visible(thread) && thread.innerText.trim()) text.thread = thread.innerText.trim().replace(/\n{2,}/g, '\n').slice(-800);
 
     return {
       viewport: { width: vw, height: vh },
@@ -110,6 +152,7 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
       smallTargets: cap(smallTargets),
       unnamed: cap(unnamed),
       covered: cap(covered),
+      lowContrast: cap(lowContrast),
       primaries,
       text,
     };
