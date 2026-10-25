@@ -448,7 +448,7 @@ function openNote (h2, sec, ctx, saved = null) {
   ta.addEventListener('input', () => { dr.text = ta.value })
   const chips = h('div', { class: 'chips', testid: 'spec-note-chips', hidden: true })
   const file = h('input', {
-    type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: true, hidden: true,
+    type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml', multiple: true, hidden: true,
     onchange: async (e) => {
       const files = [...e.target.files]
       e.target.value = ''

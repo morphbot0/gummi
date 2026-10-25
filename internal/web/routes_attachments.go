@@ -44,7 +44,7 @@ func (s *Server) handlePutAttachment(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, attachment.ErrTooLarge):
 		writeError(w, http.StatusRequestEntityTooLarge, "images are limited to 5 MB")
 	case errors.Is(err, attachment.ErrNotImage):
-		writeError(w, http.StatusUnsupportedMediaType, "only PNG, JPEG, GIF and WebP images are accepted")
+		writeError(w, http.StatusUnsupportedMediaType, "only PNG, JPEG, GIF, WebP and SVG images are accepted")
 	case isMaxBytesError(err):
 		writeError(w, http.StatusRequestEntityTooLarge, "images are limited to 5 MB")
 	default:
@@ -81,6 +81,8 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	w.Header().Set("Content-Type", mediaType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// an SVG opened on its own URL must run nothing; as an <img> it never does
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 	// an id never serves other bytes, but only to a paired browser
 	// cookie: no shared cache may keep a copy for anyone else
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")

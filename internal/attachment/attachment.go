@@ -1,5 +1,6 @@
-// Package attachment is the content-addressed store for images a person
-// attaches through the web page — a card description, a spec note, or a
+// Package attachment is the content-addressed store for images (PNG, JPEG,
+// GIF, WebP, SVG) a person attaches through the web page — a card
+// description, a spec note, or a
 // thread turn. Every accepted image is written once under a workspace's
 // gitignored .gummi/attachments, keyed by the hex sha256 of its bytes, so
 // the same screenshot uploaded twice (or named twice, from the composer
@@ -7,8 +8,10 @@
 package attachment
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -40,6 +43,10 @@ var (
 	ErrUnknown = errors.New("unknown attachment")
 )
 
+// svgMediaType is the one accepted type net/http cannot sniff: an SVG
+// reads as text, so sniffMediaType recognises it by its root element.
+const svgMediaType = "image/svg+xml"
+
 // extByMediaType are the only media types Put accepts, and the extension
 // each is stored under.
 var extByMediaType = map[string]string{
@@ -47,6 +54,7 @@ var extByMediaType = map[string]string{
 	"image/jpeg": "jpg",
 	"image/gif":  "gif",
 	"image/webp": "webp",
+	svgMediaType: "svg",
 }
 
 var idPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -113,7 +121,7 @@ func (s *Store) Put(r io.Reader, name string) (Ref, error) {
 	if len(data) > MaxSize {
 		return Ref{}, ErrTooLarge
 	}
-	mediaType := http.DetectContentType(data)
+	mediaType := sniffMediaType(data)
 	if _, ok := extByMediaType[mediaType]; !ok {
 		return Ref{}, ErrNotImage
 	}
@@ -134,6 +142,35 @@ func (s *Store) Put(r io.Reader, name string) (Ref, error) {
 		return Ref{}, err
 	}
 	return ref, s.writeSidecar(ref, name)
+}
+
+// sniffMediaType is http.DetectContentType plus SVG: a document whose
+// root element is <svg> is image/svg+xml.
+func sniffMediaType(data []byte) string {
+	mediaType := http.DetectContentType(data)
+	if strings.HasPrefix(mediaType, "text/") && isSVG(data) {
+		return svgMediaType
+	}
+	return mediaType
+}
+
+// isSVG reports whether data is an XML document whose root element is svg.
+func isSVG(data []byte) bool {
+	if !bytes.HasPrefix(bytes.TrimSpace(bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))), []byte("<")) {
+		return false
+	}
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	dec.Strict = false
+	dec.CharsetReader = func(_ string, in io.Reader) (io.Reader, error) { return in, nil }
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		if se, ok := tok.(xml.StartElement); ok {
+			return se.Name.Local == "svg"
+		}
+	}
 }
 
 // Path validates id (64 lowercase hex) and returns the absolute path of
