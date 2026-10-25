@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -82,6 +83,21 @@ func UseSigner(path string) {
 	defer mu.Unlock()
 	signer = path
 	applySigning()
+}
+
+// snapRevision matches a path inside one revision of an installed snap.
+var snapRevision = regexp.MustCompile(`^((?:/var/lib/snapd)?/snap/[^/]+/)(?:x?[0-9]+)(/.+)$`)
+
+// StablePath is path as git may keep it for as long as this process runs.
+// A binary run from a snap resolves to its revision's directory, which
+// goes when the snap refreshes while a long-lived gummi (a service) is
+// still running and every commit it signs would fail to find its signer;
+// the snap's "current" link survives a refresh.
+func StablePath(path string) string {
+	if m := snapRevision.FindStringSubmatch(path); m != nil {
+		return m[1] + "current" + m[2]
+	}
+	return path
 }
 
 // signConfig is the git configuration that signs every commit with the

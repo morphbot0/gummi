@@ -274,3 +274,17 @@ func TestReadingTheStoreAgainNeverTearsTheEnvironment(t *testing.T) {
 		}
 	}
 }
+
+func TestStablePathNamesASnapsCurrentLink(t *testing.T) {
+	for in, want := range map[string]string{
+		"/snap/gummi-agent/21/bin/gummi":               "/snap/gummi-agent/current/bin/gummi",
+		"/snap/gummi-agent/x3/bin/gummi":               "/snap/gummi-agent/current/bin/gummi",
+		"/var/lib/snapd/snap/gummi-agent/21/bin/gummi": "/var/lib/snapd/snap/gummi-agent/current/bin/gummi",
+		"/snap/gummi-agent/current/bin/gummi":          "/snap/gummi-agent/current/bin/gummi",
+		"/home/workshop/.local/bin/gummi":              "/home/workshop/.local/bin/gummi",
+	} {
+		if got := StablePath(in); got != want {
+			t.Errorf("StablePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
