@@ -17,10 +17,10 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/github/copilot-sdk/go v1.0.6
 	github.com/rivo/uniseg v0.4.7
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	golang.org/x/crypto v0.54.0
-	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.53.0
 	tailscale.com v1.102.4
@@ -94,6 +94,7 @@ require (
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
