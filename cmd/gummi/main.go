@@ -51,7 +51,7 @@ func main() {
 		os.Exit(credentials.RunSigner(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	if exe, err := os.Executable(); err == nil {
-		credentials.UseSigner(exe)
+		credentials.UseSigner(credentials.StablePath(exe))
 	}
 	if err := run(os.Args[1:]); err != nil {
 		// A driver invocation reports its typed exit via exitError, having
