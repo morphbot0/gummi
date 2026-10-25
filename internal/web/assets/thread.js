@@ -22,7 +22,7 @@ import { restoreComposer } from './composer.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { runBlock, runSig, markStep, setTranscriptDrawer } from './workflow.js?v=__ASSET_V__'
 import { dispatchBlock, dispatchSig } from './dispatch.js?v=__ASSET_V__'
-import { select } from './selection.js?v=__ASSET_V__'
+import { select, shows } from './selection.js?v=__ASSET_V__'
 
 const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
@@ -51,7 +51,7 @@ export function initThread () {
   })
   // a session's workflow runs are drawn among its turns (runsAt), so the
   // live block is drawn again when the thread brings a run that moved
-  on(['live', 'card', 'board', 'thread', 'runFold'], renderLive)
+  on(['live', 'card', 'board', 'thread', 'runFold', 'outgoing'], renderLive)
   on(['step'], () => markStep($('#thread')))
   // a step opened beside the thread is drawn the way a session's
   // conversation is (DESIGN §25.10)
@@ -716,6 +716,13 @@ function renderLive () {
     } else if (r.status === 'running') {
       parts.push(busyLine('live', 'run', `${ROLE[r.stage] || 'agent'} is ${r.running?.verb || 'working'}${pausing ? ' · pauses after this turn' : ''}`, null))
     }
+  }
+  // the line the person just sent, until a live read draws it (or the
+  // server says it went elsewhere): one the server already shows on its
+  // way, or as its newest line, is not drawn twice
+  const o = state.outgoing
+  if (o && o.id === state.sel && !shows(l, o.text)) {
+    parts.push(cached('outgoing', o.text, () => you({ text: o.text, via: 'sending' })))
   }
   const sc = $('#thread')
   reconcile(box, parts)

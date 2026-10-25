@@ -4,7 +4,7 @@
 // event refetches the head and the thread's newer items, a "live" event the
 // live block. It never decides anything about the card; it only fetches.
 
-import { get, cardPath } from './api.js?v=__ASSET_V__'
+import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, shownTab } from './store.js?v=__ASSET_V__'
 import { write as writeHash } from './router.js?v=__ASSET_V__'
 import { isMobile } from './dom.js?v=__ASSET_V__'
@@ -67,7 +67,7 @@ export async function select (id, { tab = null, view = true, named = true } = {}
   const mine = ++picks
   const changed = id !== state.sel
   if (changed) {
-    set({ sel: id, card: null, cardErr: null, thread: null, live: null, hi: 0, showNext: null, mdecOpen: false, decAll: false, gone: null })
+    set({ sel: id, card: null, cardErr: null, thread: null, live: null, outgoing: null, hi: 0, showNext: null, mdecOpen: false, decAll: false, gone: null })
   }
   // on a phone a link that names a tab opens that document, not the
   // thread; a remembered tab only says which document waits behind it
@@ -83,17 +83,21 @@ export async function select (id, { tab = null, view = true, named = true } = {}
   // nor with the surface closed, where a reload would open it
   if (named) writeHash(id, linked ? tab : shownTab())
   const tabBefore = state.tab
-  const card = await loadCard(id)
+  if (changed) focus()
+  // the head, the thread and the live block are read side by side: none
+  // needs another's answer, and on a slow link each wait is a round trip
+  const head = loadCard(id)
+  if (changed) {
+    loadThread(id, true)
+    loadLive(id)
+  }
+  const card = await head
   // the panel follows the decision only when nothing chose a tab while the
   // card loaded: a later select (a link naming its tab) or a person's own
   // click wins over a guess made from a head that was still in flight
   if (changed && !tab && mine === picks && state.tab === tabBefore && card?.decision && card.decision.anchor !== 'thread' && state.sel === id) {
     set({ tab: card.decision.anchor })
     if (named) writeHash(id, shownTab())
-  }
-  if (changed) {
-    loadThread(id, true)
-    loadLive(id)
   }
 }
 
@@ -159,19 +163,109 @@ export function upsert (items, fresh) {
 let liveRoute = true
 let liveBusy = false
 let liveAgain = false
+let liveAsks = 0 // live reads started, for which one an outgoing line waits on
+let pushedAt = 0 // liveAsks when the stream last brought the live block
 export async function loadLive (id = state.sel) {
   if (!id || !liveRoute) { if (!liveRoute) loadThread(id); return }
   if (liveBusy) { liveAgain = true; return }
   liveBusy = true
+  const n = ++liveAsks
   try {
     const l = await get(cardPath(id, 'live'))
-    if (state.sel === id && state.gone !== id) setLive(liveOrNull(l))
+    // a read asked before the stream brought a block is older than it
+    if (n <= pushedAt) return
+    if (state.sel === id && state.gone !== id) {
+      const patch = {}
+      const live = liveOrNull(l)
+      if (!same(live, state.live)) patch.live = live
+      // a read asked after the line was taken draws the line itself (or
+      // nothing, for a line that was no message): the page's stand-in goes
+      // in the same redraw, so the two never show side by side
+      const o = state.outgoing
+      if (o && o.id === id && ((o.ack && n >= o.ack) || (n >= o.from && shows(live, o.text)))) patch.outgoing = null
+      if (Object.keys(patch).length) set(patch)
+    }
   } catch (err) {
     if (err.notBuilt) liveRoute = false
   } finally {
     liveBusy = false
     if (liveAgain) { liveAgain = false; loadLive() }
   }
+}
+
+// The event stream's name (its hello) and the card this page told it it
+// shows: a live change about that card comes with its live block (pushLive)
+// rather than as word to fetch it. A server without the route leaves
+// every live change bare, and the page fetches as it always did.
+let stream = ''
+let focused = ''
+let focusRoute = true
+export function setStream (name) {
+  stream = name || ''
+  focused = ''
+  focus()
+}
+
+function focus () {
+  if (!stream || !focusRoute || focused === (state.sel || '')) return
+  const card = state.sel || ''
+  focused = card
+  post('/api/events/focus', { stream, card }).catch((err) => {
+    if (err.notBuilt) focusRoute = false
+    else if (focused === card) focused = ''
+  })
+}
+
+// pushLive draws the live block a "live" event brought for the open card:
+// the read it stands for is done, and a read still on its way, asked
+// before it, is older and is let go (loadLive).
+export function pushLive (id, l) {
+  if (state.sel !== id || state.gone === id) return
+  pushedAt = liveAsks
+  const patch = {}
+  const live = liveOrNull(l)
+  if (!same(live, state.live)) patch.live = live
+  const o = state.outgoing
+  if (o && o.id === id && shows(live, o.text)) patch.outgoing = null
+  if (Object.keys(patch).length) set(patch)
+}
+
+// outgoing is a line on its way to the open card's session, drawn under
+// the thread from the moment it is sent rather than a round trip later.
+// sendOut puts it there; sendTaken says the server took it — as a message
+// to the agent (keep), so the next live read stands in for it, or as
+// something else, which the live block will never show — and sendFailed
+// takes it back off. A line whose live read never lands goes after a while.
+let outgoingTimer = 0
+export function sendOut (id, text) {
+  clearTimeout(outgoingTimer)
+  set({ outgoing: { id, text, from: liveAsks + 1, ack: 0 } })
+}
+
+// shows says the live block holds text as a line on its way or as its
+// conversation's newest line from the person — the server's own drawing
+// of what the page was standing in for.
+export function shows (l, text) {
+  return ['consult', 'freeform'].some(k => {
+    const c = l?.[k]
+    if (!c) return false
+    if (c.sending === text) return true
+    const mine = (c.turns || []).filter(t => t.author === 'you')
+    return mine.length > 0 && String(mine[mine.length - 1].text || '').trim() === text
+  })
+}
+
+export function sendTaken (keep) {
+  const o = state.outgoing
+  if (!o) return
+  if (!keep || !liveRoute) { set({ outgoing: null }); return }
+  set({ outgoing: { ...o, ack: liveAsks + 1 } })
+  outgoingTimer = setTimeout(() => { if (state.outgoing?.text === o.text) set({ outgoing: null }) }, 10000)
+}
+
+export function sendFailed () {
+  clearTimeout(outgoingTimer)
+  if (state.outgoing) set({ outgoing: null })
 }
 
 // setLive stores the live block unless it is the one already held: a
@@ -244,9 +338,13 @@ export function initSelection () {
   // said to be gone where it was open. The page used to move itself onto
   // another card: a line half-typed for this one was dropped, and enter
   // then answered that other card's decision — a landing, say — which
-  // its reader had never looked at.
+  // its reader had never looked at. Only a card the board has held is
+  // gone: one made a moment ago is opened beside the board's read of it,
+  // and an older read still on its way does not hold it yet.
+  const seen = new Set()
   on('board', () => {
-    if (state.sel && state.board && !rows().some(r => r.id === state.sel) && state.card) {
+    for (const r of rows()) seen.add(r.id)
+    if (state.sel && seen.has(state.sel) && state.board && !rows().some(r => r.id === state.sel) && state.card) {
       set({ card: null, live: null, gone: state.sel, thread: { items: [], lastSeq: 0, gone: true } })
     }
   })

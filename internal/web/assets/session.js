@@ -139,8 +139,9 @@ export async function startSession (text, atts = []) {
   if (atts.length) req.attachments = atts
   const c = await post('/api/cards', req)
   set({ sessionDraft: null })
-  await ctx.refreshBoard?.()
-  await ctx.select(c.id)
+  // the board and the new card are read side by side: on a slow link each
+  // read waited for is a round trip before the session is on screen
+  await Promise.all([ctx.refreshBoard?.(), ctx.select(c.id)])
   toast(`${cardName(c.id)} started on ${pairLabel(c.session || d)}`)
   return c
 }

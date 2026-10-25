@@ -2,7 +2,9 @@
 // invalidations: "board", "card <id>", "live <id>" name a JSON route to
 // refetch; "toast" and "viewers" carry their small values; and "resync"
 // says the server cannot tell what this page missed, so it refetches
-// everything it shows.
+// everything it shows. "hello" opens a stream with its name, by which the
+// page says which card it shows; a "live" event about that card then
+// carries the live block itself (webapi.Change.Live), and is not refetched.
 //
 // While the browser retries the same EventSource it sends Last-Event-ID
 // itself and the server replays what was missed. A stream the page opens
@@ -18,7 +20,7 @@ import { set, state } from './store.js?v=__ASSET_V__'
 
 // a device asking to join is "pairing" (approvals.js); "work" is what the
 // board is waiting on GitHub for (work.js)
-const KINDS = ['board', 'card', 'live', 'toast', 'viewers', 'pairing', 'work']
+const KINDS = ['hello', 'board', 'card', 'live', 'toast', 'viewers', 'pairing', 'work']
 const listeners = new Map()
 
 let es = null

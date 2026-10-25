@@ -1,8 +1,12 @@
 package web
 
 import (
+	"compress/gzip"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -16,6 +20,14 @@ import (
 // It carries invalidations, not state: "board", "card FD-012", "live
 // FD-012". The page refetches the JSON route an event names, so an event
 // lost or coalesced costs at most a fetch, never a wrong screen.
+//
+// One exception buys back a round trip where it is paid most often: a
+// streaming agent's live block. A stream opens with a hello naming it, and
+// its page says which card it shows (POST /api/events/focus); a live
+// change about that card is sent to it with the live block read once at
+// the flush (hub.fill), so a delta is drawn as it arrives, not a fetch
+// later. Every other stream gets the bare invalidation, and the ring keeps
+// only that: a page that resumes refetches, as it always did.
 //
 // Three properties make that hold:
 //
@@ -60,11 +72,20 @@ type sseEvent struct {
 	except string
 }
 
+// streamIDBytes is how much randomness names a stream: a page names it
+// back to set its focus, alongside its device's cookie.
+const streamIDBytes = 12
+
 // client is one connected page.
 type client struct {
 	who   Who
 	since time.Time
-	ch    chan sseEvent
+	// stream names the connection to its page (webapi.StreamHello), and
+	// focus is the card that page shows (webapi.FocusRequest); both under
+	// the hub's lock.
+	stream string
+	focus  string
+	ch     chan sseEvent
 	// gone is closed when the hub drops the client (it fell behind, or the
 	// server is closing).
 	gone chan struct{}
@@ -73,6 +94,11 @@ type client struct {
 type hub struct {
 	now    func() time.Time
 	window time.Duration
+	// fill reads a card's live block for a live change some stream is
+	// focused on; nil sends every live change bare. It runs off the lock,
+	// and flushMu keeps flushes in order while it does.
+	fill    func(id string) *webapi.Live
+	flushMu sync.Mutex
 
 	mu        sync.Mutex
 	closed    bool
@@ -128,21 +154,65 @@ func (h *hub) publishLocked(c webapi.Change) {
 	}
 }
 
-// flush sends every held change, in the order each key first arrived.
+// flush sends every held change, in the order each key first arrived. A
+// live change about a card some stream is focused on is read first, off
+// the lock (fill), and sent to those streams with the block in it.
 func (h *hub) flush() {
+	h.flushMu.Lock()
+	defer h.flushMu.Unlock()
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	batch := h.pending
 	h.pending, h.pendingAt, h.scheduled = nil, map[string]int{}, false
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	var focused []string
+	if h.fill != nil {
+		for _, c := range batch {
+			if c.Kind == webapi.ChangeLive && h.focusedLocked(c.ID) {
+				focused = append(focused, c.ID)
+			}
+		}
+	}
+	h.mu.Unlock()
+
+	full := map[string][]byte{}
+	for _, id := range focused {
+		if live := h.fill(id); live != nil {
+			if data, err := json.Marshal(webapi.Change{Kind: webapi.ChangeLive, ID: id, Live: live}); err == nil {
+				full[id] = data
+			}
+		}
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.closed {
 		return
 	}
 	for _, c := range batch {
-		h.emitLocked(c)
+		var withLive []byte
+		if c.Kind == webapi.ChangeLive {
+			withLive = full[c.ID]
+		}
+		h.emitLocked(c, withLive)
 	}
 }
 
-func (h *hub) emitLocked(c webapi.Change) {
+// focusedLocked says some stream's page shows card id.
+func (h *hub) focusedLocked(id string) bool {
+	for cl := range h.clients {
+		if id != "" && cl.focus == id {
+			return true
+		}
+	}
+	return false
+}
+
+// emitLocked sends c to every stream, and withLive — c with its card's
+// live block in it, when it was read — to those focused on the card.
+func (h *hub) emitLocked(c webapi.Change, withLive []byte) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return
@@ -155,8 +225,12 @@ func (h *hub) emitLocked(c webapi.Change) {
 	}
 	var dropped bool
 	for cl := range h.clients {
+		send := ev
+		if withLive != nil && cl.focus == c.ID {
+			send.data = withLive
+		}
 		select {
-		case cl.ch <- ev:
+		case cl.ch <- send:
 		default:
 			h.dropLocked(cl)
 			dropped = true
@@ -184,13 +258,34 @@ func (h *hub) subscribe(who Who, lastID string) (cl *client, backlog []sseEvent,
 	if h.closed {
 		return nil, nil, false
 	}
-	cl = &client{who: who, since: h.now(), ch: make(chan sseEvent, clientBuffer), gone: make(chan struct{})}
+	cl = &client{who: who, since: h.now(), stream: newStreamID(), ch: make(chan sseEvent, clientBuffer), gone: make(chan struct{})}
 	h.clients[cl] = struct{}{}
 	if lastID != "" {
 		backlog, resync = h.sinceLocked(lastID)
 	}
 	h.publishLocked(webapi.Change{Kind: webapi.ChangeViewers, Viewers: h.viewersLocked()})
 	return cl, backlog, resync
+}
+
+// newStreamID names a stream.
+func newStreamID() string {
+	b := make([]byte, streamIDBytes)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// focus sets the card the page on stream shows; false when device has no
+// such stream open. A page names only its own device's streams.
+func (h *hub) focus(device, stream, card string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for cl := range h.clients {
+		if cl.stream == stream && cl.who.DeviceID == device {
+			cl.focus = card
+			return true
+		}
+	}
+	return false
 }
 
 // head is the id of the last event sent: a read that starts after taking it
@@ -319,11 +414,26 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", noCache)
 	h.Set("X-Accel-Buffering", "no")
+	// Gzipped where the browser takes it: one compressor for the life of
+	// the stream, flushed after every event, so a live block sent again
+	// with a few words more costs about those words.
+	var out io.Writer = w
+	var zw *gzip.Writer
+	if acceptsGzip(r) {
+		h.Add("Vary", "Accept-Encoding")
+		h.Set("Content-Encoding", "gzip")
+		zw = gzip.NewWriter(w)
+		defer func() { _ = zw.Close() }()
+		out = zw
+	}
 	w.WriteHeader(http.StatusOK)
 
 	write := func(format string, args ...any) bool {
 		_ = rc.SetWriteDeadline(time.Now().Add(writeGrace))
-		if _, err := fmt.Fprintf(w, format, args...); err != nil {
+		if _, err := fmt.Fprintf(out, format, args...); err != nil {
+			return false
+		}
+		if zw != nil && zw.Flush() != nil {
 			return false
 		}
 		return rc.Flush() == nil
@@ -346,6 +456,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	if resync && !write("event: %s\ndata: {}\n\n", webapi.EventResync) {
 		return
+	}
+	// the stream's name, for the page to set its focus by
+	if !who.Pending {
+		hello, _ := json.Marshal(webapi.StreamHello{Stream: cl.stream})
+		if !write("event: %s\ndata: %s\n\n", webapi.EventHello, hello) {
+			return
+		}
 	}
 	for _, ev := range backlog {
 		if !send(ev) {

@@ -22,6 +22,7 @@ import { answer, openDecision, wordsOption, highlight, enterSays, sentence, togg
 import { openActions } from './head.js?v=__ASSET_V__'
 import { openView } from './views.js?v=__ASSET_V__'
 import { startSession, draftTakesImages } from './session.js?v=__ASSET_V__'
+import { sendOut, sendTaken, sendFailed } from './selection.js?v=__ASSET_V__'
 
 let classify = true // POST …/composer is answered by this server
 let said = null // { id, text, says, route } for the open card
@@ -403,6 +404,9 @@ async function submit ({ asLine = false, confirm = '' } = {}) {
   const asked = text.startsWith('/') && classify ? current() || await classifyNow(id, state.draft) : null
   sending = true
   renderSays()
+  // a line of words is drawn in the thread as it goes, not a round trip
+  // later; a command never reaches the conversation, so it is not
+  if (!text.startsWith('/')) sendOut(id, text)
   try {
     // sent against the stop the page shows: a line meant for it is not
     // routed at another the card has moved to since (409 "moved")
@@ -411,6 +415,7 @@ async function submit ({ asLine = false, confirm = '' } = {}) {
     if (attachments.length) body.attachments = attachments.map((a) => a.id)
     if (confirm) body.confirm = confirm
     const r = await post(cardPath(id, 'send'), body)
+    sendTaken(['freeform', 'steer', 'consult'].includes(r?.route))
     if (r?.route === 'menu') {
       // the line names something in the card's menu: hand it over — the
       // menu opens on the entries the line names, the composer lets the
@@ -433,6 +438,7 @@ async function submit ({ asLine = false, confirm = '' } = {}) {
     if (where) toast(where)
     ctxRef.refresh?.(id)
   } catch (err) {
+    sendFailed()
     // a line typed since this one failed waits for the person's own enter
     again = false
     const e = err.data || {}
