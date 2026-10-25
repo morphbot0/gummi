@@ -211,3 +211,20 @@ func TestPathValidatesID(t *testing.T) {
 		t.Errorf("err = %v, want ErrUnknown", err)
 	}
 }
+
+func TestPutAcceptsSVGAndRefusesOtherXML(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	svg := `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`
+	ref, err := s.Put(strings.NewReader(svg), "a.svg")
+	if err != nil || ref.MediaType != "image/svg+xml" {
+		t.Fatalf("svg: %v %+v", err, ref)
+	}
+	if got, err := s.Get(ref.ID); err != nil || got.MediaType != "image/svg+xml" {
+		t.Fatalf("get: %v %+v", err, got)
+	}
+	for _, in := range []string{"<html><svg/></html>", "hello <svg>", `<?xml version="1.0"?><note/>`} {
+		if _, err := s.Put(strings.NewReader(in), "x"); !errors.Is(err, ErrNotImage) {
+			t.Fatalf("%q: %v", in, err)
+		}
+	}
+}

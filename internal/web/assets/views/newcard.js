@@ -82,7 +82,7 @@ registerView('newcard', {
       }
       renderChips()
       const file = h('input', {
-        type: 'file', testid: 'newcard-file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: true, hidden: true,
+        type: 'file', testid: 'newcard-file', accept: 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml', multiple: true, hidden: true,
         onchange: async (e) => {
           const files = [...e.target.files]
           e.target.value = ''
