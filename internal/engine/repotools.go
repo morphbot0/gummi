@@ -3,18 +3,41 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 const (
 	repoListToolName   = "repo_list"
 	repoAttachToolName = "repo_attach"
 	repoDetachToolName = "repo_detach"
+	repoFetchToolName  = "repo_fetch"
 )
+
+// repoFetchTimeout bounds one repo_fetch: a remote that never answers must
+// not hold a turn open.
+const repoFetchTimeout = 2 * time.Minute
+
+// repoFetchTool is a session's and an agent's way to bring a repository's
+// remote-tracking refs up to date. It reads the remotes and writes only
+// refs/remotes: no local branch moves, nothing is pushed, and the stored
+// SSH key is lent to the git command, never to the agent (DESIGN §22.2).
+func repoFetchTool() agent.ToolDef {
+	return mkTool(repoFetchToolName,
+		"Fetch a repository of the workspace from its remotes (git fetch --prune) so its remote-tracking branches are current. "+
+			"Only refs/remotes change: no local branch moves and nothing is pushed. The repository is named as repo_list gives it; "+
+			"a session that names none fetches its own. Give remote to fetch just that one.",
+		map[string]any{
+			"repo":   str("A repository's name, as repo_list gives it."),
+			"remote": str("One remote to fetch, if not all of them."),
+		})
+}
 
 // repoTools is a session's way to span repositories (DESIGN §27). It
 // attaches freely: cutting a branch is cheap and nothing lands without the
@@ -37,6 +60,7 @@ func repoTools() []agent.ToolDef {
 			"Detach an attached repository: removes its worktree and branch. Refused while that branch holds commits "+
 				"that have not landed or its tree holds changes. This session's own repository is never detached.",
 			map[string]any{"repo": str("The attached repository's name.")}, "repo"),
+		repoFetchTool(),
 	}
 }
 
@@ -48,11 +72,15 @@ func agentRepoListTool() agent.ToolDef {
 			"Your home is in none of them.", map[string]any{})
 }
 
-const sessionRepoHint = `This session may span repositories (gummi's DESIGN §27). repo_list shows the repositories there are and any attached to you; repo_attach cuts this session's branch in another one, in a worktree beside yours, and repo_detach drops an empty one. Commit in each repository's worktree; each lands on its own, on the person's read of its diff.`
+const sessionRepoHint = `This session may span repositories (gummi's DESIGN §27). repo_list shows the repositories there are and any attached to you; repo_attach cuts this session's branch in another one, in a worktree beside yours, and repo_detach drops an empty one; repo_fetch brings a repository's remote-tracking branches up to date. Commit in each repository's worktree; each lands on its own, on the person's read of its diff.`
 
 func (e *Engine) handleRepoTool(s *Session, tc *agent.ToolCall) {
 	f := s.Feature
 	ctx := context.Background()
+	if tc.Name == repoFetchToolName {
+		e.handleRepoFetch(s, tc)
+		return
+	}
 	if f.Home && !f.IsChild() && tc.Name == repoListToolName {
 		e.resolveNow(s, tc.ID, e.agentRepoListText())
 		return
@@ -141,4 +169,52 @@ func (e *Engine) repoListText(ctx context.Context, f domain.Feature) string {
 		}
 	}
 	return b.String()
+}
+
+func (e *Engine) handleRepoFetch(s *Session, tc *agent.ToolCall) {
+	f := s.Feature
+	var a struct {
+		Repo   string `json:"repo"`
+		Remote string `json:"remote"`
+	}
+	_ = json.Unmarshal(tc.Args, &a)
+	if e.pool == nil {
+		e.resolveNow(s, tc.ID, "error: this workspace has no repositories")
+		return
+	}
+	if a.Repo == "" && !f.Home {
+		a.Repo = f.Repo
+	}
+	if a.Repo == "" && f.Home {
+		e.resolveNow(s, tc.ID, "error: name a repository, as repo_list gives it")
+		return
+	}
+	if !e.pool.Known(a.Repo) {
+		e.resolveNow(s, tc.ID, fmt.Sprintf("error: no repository %s in this workspace", a.Repo))
+		return
+	}
+	mgr, err := e.pool.ManagerForName(context.Background(), a.Repo)
+	if err != nil {
+		e.resolveNow(s, tc.ID, "error: "+err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), repoFetchTimeout)
+	defer cancel()
+	what := a.Repo
+	if what == "" {
+		what = "the default repository"
+	}
+	if a.Remote != "" {
+		err = mgr.FetchRemote(ctx, a.Remote)
+	} else {
+		err = mgr.Fetch(ctx)
+	}
+	switch {
+	case errors.Is(err, worktree.ErrNoRemote):
+		e.resolveNow(s, tc.ID, what+" has no remote to fetch from")
+	case err != nil:
+		e.resolveNow(s, tc.ID, "error: "+mgr.RedactRemotes(ctx, err.Error()))
+	default:
+		e.resolveNow(s, tc.ID, "fetched "+what)
+	}
 }

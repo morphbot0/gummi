@@ -355,7 +355,7 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleWorkflowTool(s, tc)
 	case scheduleProposeToolName, sessionStatusToolName, sessionSendToolName:
 		e.handleAgentTool(s, tc)
-	case repoListToolName, repoAttachToolName, repoDetachToolName:
+	case repoListToolName, repoAttachToolName, repoDetachToolName, repoFetchToolName:
 		e.handleRepoTool(s, tc)
 	case prPushToolName, prOpenToolName, prUpdateToolName, prReadyToolName, prChecksToolName:
 		e.handlePRTool(s, tc)

@@ -478,3 +478,39 @@ func TestAnAttachedCardCannotStack(t *testing.T) {
 		t.Errorf("after detaching: %v", err)
 	}
 }
+
+func TestRepoFetchFetchesFromARemote(t *testing.T) {
+	x := spanEngine(t, agent.NewFake("x"))
+	ctx := context.Background()
+	ff, err := x.e.OpenFreeform(ctx, x.card(t, 1, "span"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := ff.Session()
+	call := func(args string) string {
+		t.Helper()
+		out, err := x.e.DispatchClientTool(ctx, s, "repo_fetch", []byte(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if out := call(`{}`); !strings.Contains(out, "no remote") {
+		t.Errorf("repo_fetch without a remote = %q", out)
+	}
+	if out := call(`{"repo":"nope"}`); !strings.HasPrefix(out, "error") {
+		t.Errorf("an unknown repository was fetched: %q", out)
+	}
+	remote := t.TempDir()
+	for _, args := range [][]string{{"-C", remote, "init", "-q", "--bare"}, {"-C", x.roots["b"], "remote", "add", "origin", remote}} {
+		if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if out := call(`{"repo":"b"}`); out != "fetched b" {
+		t.Errorf("repo_fetch = %q", out)
+	}
+	if out := call(`{"repo":"b","remote":"origin"}`); out != "fetched b" {
+		t.Errorf("repo_fetch of one remote = %q", out)
+	}
+}
