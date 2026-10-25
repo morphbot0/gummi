@@ -8,7 +8,14 @@ ENVFILE=/etc/gummi-web.env
 GUMMI=/snap/gummi-agent/current/bin/gummi
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root: gummi-agent.install-script | sudo bash -ex" >&2; exit 1; }
-[ -r /dev/tty ] || { echo "no terminal to ask questions on" >&2; exit 1; }
+preseed=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--preseed) [ $# -ge 2 ] || { echo "--preseed needs a file" >&2; exit 1; }; preseed=$2; shift 2 ;;
+	--preseed=*) preseed=${1#--preseed=}; shift ;;
+	*) echo "usage: ... | sudo bash -ex -s -- [--preseed file.yaml]" >&2; exit 1 ;;
+	esac
+done
 
 ask() { # ask PROMPT -> succeeds on yes (default no)
 	local a
@@ -16,22 +23,43 @@ ask() { # ask PROMPT -> succeeds on yes (default no)
 	case "$a" in [yY]*) return 0 ;; *) return 1 ;; esac
 }
 
+# truthy VALUE -> succeeds for true/yes/y/on/1
+truthy() { case "$(printf %s "$1" | tr 'A-Z' 'a-z')" in true | yes | y | on | 1) return 0 ;; *) return 1 ;; esac; }
+
 flags=""
 authkey=""
 
-if ask "Enable the in-browser terminal (--terminal)? Every paired device can then run commands as 'workshop'"; then
-	flags="$flags --terminal"
-fi
-
-if ask "Serve the board on your tailnet (--tailscale)?"; then
-	flags="$flags --tailscale"
-	read -r -p "Node name on the tailnet [gummi]: " host </dev/tty >/dev/tty 2>&1 || host=""
-	[ -z "$host" ] || flags="$flags --ts-hostname $host"
-	if ask "Serve HTTPS with a tailnet certificate (--ts-tls; needs MagicDNS and HTTPS enabled)?"; then
-		flags="$flags --ts-tls"
+if [ -n "$preseed" ]; then
+	# A flat YAML map of `key: value` lines (# comments, optional quotes):
+	# terminal, tailscale, ts_hostname, ts_tls, ts_authkey.
+	[ -r "$preseed" ] || { echo "cannot read preseed file $preseed" >&2; exit 1; }
+	pre() { sed -n -E "s/^$1[[:space:]]*:[[:space:]]*(.*[^[:space:]])?[[:space:]]*\$/\1/p" "$preseed" | head -n1 | sed -E "s/[[:space:]]+#.*\$//; s/^(\"(.*)\"|'(.*)')\$/\2\3/"; }
+	for k in $(sed -n -E 's/^([A-Za-z_]+)[[:space:]]*:.*/\1/p' "$preseed"); do
+		case "$k" in terminal | tailscale | ts_hostname | ts_tls | ts_authkey) ;; *) echo "unknown preseed key: $k" >&2; exit 1 ;; esac
+	done
+	if truthy "$(pre terminal)"; then flags="$flags --terminal"; fi
+	if truthy "$(pre tailscale)"; then
+		flags="$flags --tailscale"
+		host=$(pre ts_hostname)
+		[ -z "$host" ] || flags="$flags --ts-hostname $host"
+		if truthy "$(pre ts_tls)"; then flags="$flags --ts-tls"; fi
+		authkey=$(pre ts_authkey)
 	fi
-	read -r -s -p "Tailscale auth key (empty = log in through a link in the service log): " authkey </dev/tty >/dev/tty 2>&1 || authkey=""
-	echo >/dev/tty
+else
+	[ -r /dev/tty ] || { echo "no terminal to ask questions on; use --preseed file.yaml" >&2; exit 1; }
+	if ask "Enable the in-browser terminal (--terminal)? Every paired device can then run commands as 'workshop'"; then
+		flags="$flags --terminal"
+	fi
+	if ask "Serve the board on your tailnet (--tailscale)?"; then
+		flags="$flags --tailscale"
+		read -r -p "Node name on the tailnet [gummi]: " host </dev/tty >/dev/tty 2>&1 || host=""
+		[ -z "$host" ] || flags="$flags --ts-hostname $host"
+		if ask "Serve HTTPS with a tailnet certificate (--ts-tls; needs MagicDNS and HTTPS enabled)?"; then
+			flags="$flags --ts-tls"
+		fi
+		read -r -s -p "Tailscale auth key (empty = log in through a link in the service log): " authkey </dev/tty >/dev/tty 2>&1 || authkey=""
+		echo >/dev/tty
+	fi
 fi
 
 cat >"$UNIT" <<UNIT_EOF

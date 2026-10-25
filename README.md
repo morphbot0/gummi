@@ -78,6 +78,21 @@ the Tailscale node name and auth key. It writes
 0600, holds `TS_AUTHKEY`), then enables and starts the service. Run it
 again to change the answers.
 
+To answer ahead of time instead, for an unattended install, pass a YAML
+file of flat `key: value` lines (`terminal`, `tailscale`, `ts_hostname`,
+`ts_tls`, `ts_authkey`); nothing is asked then:
+
+```sh
+gummi-agent.install-script | sudo bash -ex -s -- --preseed gummi.yaml
+```
+
+```yaml
+terminal: false
+tailscale: true
+ts_hostname: gummi
+ts_authkey: tskey-auth-…
+```
+
 Prefer the terminal? Run `gummi` in the repo; `?` shows every key.
 
 ## Docs
