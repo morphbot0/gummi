@@ -502,7 +502,7 @@ func TestRepoFetchFetchesFromARemote(t *testing.T) {
 		t.Errorf("an unknown repository was fetched: %q", out)
 	}
 	remote := t.TempDir()
-	for _, args := range [][]string{{"-C", remote, "init", "-q", "--bare"}, {"-C", x.roots["b"], "remote", "add", "origin", remote}} {
+	for _, args := range [][]string{{"-C", remote, "init", "-q", "--bare", "--initial-branch=main"}, {"-C", x.roots["b"], "remote", "add", "origin", remote}} {
 		if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -525,7 +525,7 @@ func TestRepoFetchFetchesFromARemote(t *testing.T) {
 	}
 	push("-C", x.roots["b"], "push", "-q", "-u", "origin", "main")
 	clone := t.TempDir()
-	push("clone", "-q", remote, clone)
+	push("clone", "-q", "--branch", "main", remote, clone)
 	push("-C", clone, "-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-q", "--allow-empty", "-m", "more")
 	push("-C", clone, "push", "-q", "origin", "HEAD:main")
 	if out := call(`{"repo":"b"}`); out != "fetched b" {
