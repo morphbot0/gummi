@@ -236,12 +236,12 @@ func (m *Manager) RemoveRemote(ctx context.Context, name string) error {
 	return err
 }
 
-// FetchRemote is Fetch for one remote.
+// FetchRemote is Fetch for one remote, with the stored SSH key lent too.
 func (m *Manager) FetchRemote(ctx context.Context, name string) error {
 	if err := m.knownRemote(ctx, name); err != nil {
 		return err
 	}
-	_, err := runGitEnv(ctx, m.repo, []string{"GIT_TERMINAL_PROMPT=0"}, "fetch", "--prune", "--", name)
+	_, err := remoteGit(ctx, m.repo, "fetch", "--prune", "--", name)
 	return err
 }
 
