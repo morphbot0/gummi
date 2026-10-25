@@ -4884,9 +4884,13 @@ the operator's browser, the workspace's `.gummi/state` or the host's
 loopback.
 
 **The terminal is the one thing here that is more than the board.**
-`gummi web --terminal` adds a Terminal tab to every card with a worktree:
-the operator's own shell, started in that worktree on a pty and drawn in
-the page (`internal/term`, `internal/web/routes_term.go`). It is not the
+`gummi web --terminal` adds a Terminal tab to every open session and to
+any other card with a worktree: the operator's own shell, started in that
+worktree on a pty and drawn in the page (`internal/term`,
+`internal/web/routes_term.go`). A session with no tree on disk yet has
+it made when the shell opens, exactly as its next turn would make it
+(`Engine.WorkDir`); a main-checkout session's shell opens in the checkout
+itself. It is not the
 pty face §20.1 set aside — the board stays a page, and the shell is one
 more pane beside a card's diff — and it is not an agent's surface: no
 session can reach it through §16. But it is not bounded by the workflow

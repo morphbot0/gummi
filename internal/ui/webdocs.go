@@ -528,6 +528,34 @@ func (d *WebDocs) FilesDir(ctx context.Context) (string, bool) {
 	return filesDir(ctx, d.pool, d.f)
 }
 
+// TermDir is where a shell in the card opens (the web face's Terminal
+// tab): its worktree or home when it has one, else the directory an open
+// session's next turn would work in, made now when create is set. Without
+// create a session's directory that is not there yet reads "", nil: one
+// can be made.
+func (d *WebDocs) TermDir(ctx context.Context, create bool) (string, error) {
+	if dir, ok := filesDir(ctx, d.pool, d.f); ok {
+		return dir, nil
+	}
+	if !termMakeable(d.f) {
+		return "", refuse(WebNotFound, d.f.Name()+" has no worktree on the machine hosting the board")
+	}
+	if !create {
+		return "", nil
+	}
+	if d.eng == nil {
+		return "", ErrDetached
+	}
+	return d.eng.WorkDir(ctx, d.f)
+}
+
+// termMakeable is whether a card with no directory on disk may have one
+// made for a shell: an open session, which would make it on its next turn
+// anyway.
+func termMakeable(f domain.Feature) bool {
+	return f.IsFreeform() && !f.IsChild() && f.Stage != domain.StageDone
+}
+
 // filesDir is a card's branch worktree when it exists, or an agent's
 // home. A research card's scratch tree is left out: it is a throwaway
 // checkout, not the card's.

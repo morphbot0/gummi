@@ -130,7 +130,7 @@ branch would be removed).
 |---|---|
 | `panel` | the right landmark |
 | `panel-tabs`, `tab-memory`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats`, `tab-step` | tabs (`aria-selected`; `tab-step` only while a workflow step is open) |
-| `tab-terminal` | the Terminal tab (a board served with `--terminal`, a card with a worktree); a phone reaches it from the card's menu, `action-terminal`, and shows the tab only while it is open |
+| `tab-terminal` | the Terminal tab (a board served with `--terminal`, an open session or a card with a worktree); a phone reaches it from the card's menu, `action-terminal`, and shows the tab only while it is open |
 | `terminal`, `terminal-screen`, `terminal-note`, `terminal-again`, `terminal-off` | the shell (`data-state` = `open` \| `closed`), xterm's screen, the note over it (opening, reconnecting, exited), its retry / new-shell button, and the pane on a card with no worktree |
 | `terminal-end` | end the shell (a second press confirms) |
 | `terminal-keys`, `terminal-key-<id>` | a touch screen's key bar and its keys: `esc`, `tab`, `ctrl`, `alt` (`aria-pressed` while held), `left`, `down`, `up`, `right`, `home`, `end`, `pgup`, `pgdn`, `dash`, `slash`, `pipe`, `tilde` |

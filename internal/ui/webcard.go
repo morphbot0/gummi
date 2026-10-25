@@ -329,6 +329,8 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 		// the server, which holds the key, fills in the URL
 		c.Files = &webapi.Files{Dir: dir}
 	}
+	// the server, which knows whether it serves one, keeps this or drops it
+	c.Terminal = c.Files != nil || termMakeable(st.f)
 	return c, nil
 }
 

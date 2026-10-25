@@ -307,6 +307,11 @@ type Engine struct {
 	// stackLock), so two ticks never replay two members at once.
 	stackLocksMu sync.Mutex
 	stackLocks   map[domain.StackID]*sync.Mutex
+	// treeLocks serializes finding or making a card's working directory
+	// (locateFor's treeLock): a turn and a person's shell (WorkDir) may
+	// both find it missing at once, and only one may make it.
+	treeLocksMu sync.Mutex
+	treeLocks   map[domain.FeatureID]*sync.Mutex
 	// stackReplays holds each stack's latest replay walk (stack.go's
 	// StackReplay), guarded by stackLocksMu: what a tick replayed and the
 	// pushes it now needs, kept so a surface opened after the walk still
@@ -572,9 +577,48 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	return e.locateFor(ctx, f, false)
 }
 
+// WorkDir is the directory a session's next turn works in — its worktree,
+// its home or the main checkout — made now if it has none yet, exactly as
+// that turn would make it. It is where a person's shell starts (the web
+// face's Terminal tab), so a session that has not taken a turn yet still
+// has somewhere to open one. Fork drift is no refusal here: a person's
+// shell is one way to deal with it. Only an open session has one.
+func (e *Engine) WorkDir(ctx context.Context, f domain.Feature) (string, error) {
+	if !f.IsFreeform() || f.IsChild() {
+		return "", fmt.Errorf("%s is not a session: it has no working directory of its own", f.Name())
+	}
+	if f.Stage == domain.StageDone {
+		return "", fmt.Errorf("%s is closed: its working directory is gone", f.Name())
+	}
+	dir, _, err := e.locateFor(ctx, f, true)
+	return dir, err
+}
+
+// treeLock is card id's lock on finding or making its working directory.
+func (e *Engine) treeLock(id domain.FeatureID) *sync.Mutex {
+	e.treeLocksMu.Lock()
+	defer e.treeLocksMu.Unlock()
+	if e.treeLocks == nil {
+		e.treeLocks = map[domain.FeatureID]*sync.Mutex{}
+	}
+	m := e.treeLocks[id]
+	if m == nil {
+		m = &sync.Mutex{}
+		e.treeLocks[id] = m
+	}
+	return m
+}
+
 // locateFor is locate, with allowDrift skipping the fork-drift refusal —
 // for the rebase-resolve pass alone (newAgentSession).
 func (e *Engine) locateFor(ctx context.Context, f domain.Feature, allowDrift bool) (workDir, specPath string, err error) {
+	// Everything below may make the directory — an agent's home, a
+	// session's worktree, one recovered from its branch — and each of
+	// those is a check and then a write. A step's card locates its
+	// session's tree under its own lock, and never the other way round.
+	mu := e.treeLock(f.ID)
+	mu.Lock()
+	defer mu.Unlock()
 	wt, err := e.mgr(ctx, &f)
 	if err != nil {
 		return "", "", err
