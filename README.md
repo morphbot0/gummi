@@ -65,14 +65,15 @@ and gummi needs your repositories, your agents' CLIs and their logins.
 Without snap, `go install github.com/morphis/gummi/cmd/gummi@latest`
 (Go 1.26+).
 
-To keep the web board running as a systemd service (port 7879, as user
-`workshop`, working in `/project`), install the unit from the snap:
+To keep the web board running as a systemd service (port 7879), install the unit from the snap:
 
 ```sh
 gummi-agent.install-script | sudo bash -ex
 ```
 
-It asks whether to enable the in-browser terminal and Tailscale, and for
+The service runs as the user who ran `sudo` (`SUDO_USER`), with that
+user's home as `HOME`, in `/project` (or the home when there is no
+`/project`). It asks whether to enable the in-browser terminal and Tailscale, and for
 the Tailscale node name and auth key. It writes
 `/etc/systemd/system/gummi-web.service` and `/etc/gummi-web.env` (mode
 0600, holds `TS_AUTHKEY`), then enables and starts the service. Run it

@@ -8,6 +8,15 @@ ENVFILE=/etc/gummi-web.env
 GUMMI=/snap/gummi-agent/current/bin/gummi
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root: gummi-agent.install-script | sudo bash -ex" >&2; exit 1; }
+
+# The service runs as the person who ran sudo, with their home.
+user=${SUDO_USER:-}
+{ [ -n "$user" ] && [ "$user" != root ]; } || { echo "run through sudo as the user gummi should serve (SUDO_USER is unset or root)" >&2; exit 1; }
+home=$(getent passwd "$user" | cut -d: -f6)
+group=$(id -gn "$user")
+[ -n "$home" ] && [ -d "$home" ] || { echo "cannot find the home directory of $user" >&2; exit 1; }
+workdir=/project
+[ -d "$workdir" ] || workdir=$home
 preseed=""
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -47,7 +56,7 @@ if [ -n "$preseed" ]; then
 	fi
 else
 	[ -r /dev/tty ] || { echo "no terminal to ask questions on; use --preseed file.yaml" >&2; exit 1; }
-	if ask "Enable the in-browser terminal (--terminal)? Every paired device can then run commands as 'workshop'"; then
+	if ask "Enable the in-browser terminal (--terminal)? Every paired device can then run commands as '$user'"; then
 		flags="$flags --terminal"
 	fi
 	if ask "Serve the board on your tailnet (--tailscale)?"; then
@@ -69,10 +78,11 @@ After=network-online.target
 
 [Service]
 ExecStart=$GUMMI web --addr 0.0.0.0:7879$flags
-Environment="PATH=/home/workshop/.local/bin:/var/lib/workshop/sdk/opencode/bin:/home/workshop/go/bin:/var/lib/workshop/sdk/copilot/bin:/var/lib/workshop/sdk/claude-code/bin:/var/lib/workshop/sdk/claude-code/usr/bin:/home/workshop/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
-WorkingDirectory=/project
-User=workshop
-Group=workshop
+Environment="HOME=$home"
+Environment="PATH=$home/.local/bin:/var/lib/workshop/sdk/opencode/bin:$home/go/bin:/var/lib/workshop/sdk/copilot/bin:/var/lib/workshop/sdk/claude-code/bin:/var/lib/workshop/sdk/claude-code/usr/bin:$home/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+WorkingDirectory=$workdir
+User=$user
+Group=$group
 Restart=on-failure
 RestartSec=30
 EnvironmentFile=/etc/gummi-web.env
