@@ -306,6 +306,7 @@ wait:
 				logf("web: %v", err)
 			}
 			fmt.Printf("gummi web: serving %s\n", tsURL)
+			printQR(os.Stdout, tsURL)
 		case err := <-boardDone:
 			runErr = fmt.Errorf("the board stopped: %w", err)
 			break wait
