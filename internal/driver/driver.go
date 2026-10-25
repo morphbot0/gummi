@@ -91,6 +91,13 @@ type Outcome struct {
 const unattendedAnswer = "No one is attending this session: it runs under `gummi run`, " +
 	"with no person to answer. Decide for yourself and carry on."
 
+// unattendedNote follows an option the drive chose for the person: the
+// choice is gummi's, and nobody is there to do what an option asks of
+// them — paste output, run a command, check a machine.
+const unattendedNote = "\n\n(Chosen by `gummi run` on the person's behalf: no one is attending this " +
+	"session, so nobody can provide information, run commands or check anything for you. Go on from " +
+	"what you can read and run yourself.)"
+
 // workflowPoll is how often the loop ticks the session's run with nothing
 // else happening: a run's steps send EventWorkflow when they settle, and
 // this is the backstop for one whose event was lost — the board's
@@ -287,14 +294,15 @@ func (d *Driver) answerAsk(ctx context.Context, session, card domain.FeatureID, 
 		return nil
 	}
 	answer := engine.RecommendedOption(ask)
+	sent := answer + unattendedNote
 	if answer == "" {
-		answer = unattendedAnswer
+		answer, sent = unattendedAnswer, unattendedAnswer
 	}
 	ev := answeredEvent{Event: "answered", ID: string(session), Kind: "ask", Q: ask.Question, Answer: answer}
 	if step != nil {
 		ev.Kind, ev.Run, ev.Step = "workflow_ask", step.Run, step.Path
 	}
-	if err := d.eng.AnswerCall(ctx, card, ask.CallID, answer, state.ActorAutopilot); err != nil {
+	if err := d.eng.AnswerCall(ctx, card, ask.CallID, sent, state.ActorAutopilot); err != nil {
 		return fmt.Errorf("answering %q: %w", firstLine(ask.Question), err)
 	}
 	d.answered[key] = true
