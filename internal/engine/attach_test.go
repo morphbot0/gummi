@@ -513,4 +513,35 @@ func TestRepoFetchFetchesFromARemote(t *testing.T) {
 	if out := call(`{"repo":"b","remote":"origin"}`); out != "fetched b" {
 		t.Errorf("repo_fetch of one remote = %q", out)
 	}
+	if out, _ := x.e.DispatchClientTool(ctx, s, "repo_list", []byte(`{}`)); !strings.Contains(out, "b (remotes: origin)") {
+		t.Errorf("repo_list does not name the remote: %q", out)
+	}
+	// the remote gains a commit; fetching alone leaves the base where it is
+	push := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	push("-C", x.roots["b"], "push", "-q", "-u", "origin", "main")
+	clone := t.TempDir()
+	push("clone", "-q", remote, clone)
+	push("-C", clone, "-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-q", "--allow-empty", "-m", "more")
+	push("-C", clone, "push", "-q", "origin", "HEAD:main")
+	if out := call(`{"repo":"b"}`); out != "fetched b" {
+		t.Fatalf("repo_fetch = %q", out)
+	}
+	fastForward := func() string {
+		out, err := x.e.DispatchClientTool(ctx, s, "repo_fast_forward", []byte(`{"repo":"b"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if out := fastForward(); !strings.Contains(out, "fast-forwarded") {
+		t.Errorf("repo_fast_forward = %q", out)
+	}
+	if out := fastForward(); !strings.Contains(out, "already up to date") {
+		t.Errorf("a second repo_fast_forward = %q", out)
+	}
 }

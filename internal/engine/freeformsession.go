@@ -385,7 +385,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			if f.Home {
 				watch := agentTools()
 				if e.pool != nil {
-					watch = append(watch, agentRepoListTool(), repoFetchTool())
+					watch = append(watch, agentRepoListTool(), repoFetchTool(), repoFastForwardTool())
 				}
 				extra = append(extra, watch...)
 				tools = append(tools, watch...)
