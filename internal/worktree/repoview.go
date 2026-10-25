@@ -165,12 +165,13 @@ func (m *Manager) leftRight(ctx context.Context, a, b string) (left, right int) 
 // Fetch updates every remote's tracking refs and prunes the ones whose
 // remote branch is gone. A read of the remotes and a write to this
 // repository's own refs/remotes: no local branch moves. A remote that
-// wants a password fails rather than asking a terminal nobody is at.
+// wants a password fails rather than asking a terminal nobody is at. The
+// SSH key a person stored is lent for the fetch, as for a push.
 func (m *Manager) Fetch(ctx context.Context) error {
 	if len(m.Remotes(ctx)) == 0 {
 		return ErrNoRemote
 	}
-	_, err := runGitEnv(ctx, m.repo, []string{"GIT_TERMINAL_PROMPT=0"}, "fetch", "--all", "--prune")
+	_, err := remoteGit(ctx, m.repo, "fetch", "--all", "--prune")
 	return err
 }
 
