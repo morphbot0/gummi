@@ -100,7 +100,7 @@ export async function newSession (opts) {
 // pickedOnly is what a person changed in a draft before its defaults came.
 function pickedOnly (d) {
   const out = {}
-  for (const k of ['repo', 'base', 'backend', 'model']) if (d[k]) out[k] = d[k]
+  for (const k of ['repo', 'base', 'backend', 'model', 'name']) if (d[k]) out[k] = d[k]
   if (d.attach?.length) out.attach = d.attach
   if (d.envelope != null) out.envelope = d.envelope
   if (d.mainCheckout) out.mainCheckout = true
@@ -125,6 +125,7 @@ export async function startSession (text, atts = []) {
     if (d.envelope == null) throw new Error('The board’s default budget did not load. Set a budget beside the composer, then send again.')
   }
   const req = { kind: 'freeform', description: text, backend: d.backend, model: d.model, envelope: d.envelope }
+  if (d.name?.trim()) req.name = d.name.trim()
   // an agent is in no repository: its draft sends neither a repo nor a base
   if (d.home) req.home = true
   else {
@@ -160,11 +161,27 @@ export function draftHead () {
       h('div', { class: 'head-actions' },
         h('button', { class: 'btn', type: 'button', testid: 'draft-cancel', onclick: cancelDraft }, 'Cancel'))),
     h('div', { class: 'subline' },
+      draftName(d),
       d.home
         ? null
         : h('span', null, d.repo || state.board?.repo || 'this repository', d.mainCheckout ? ' · the main checkout' : (d.base ? [' · from ', h('span', { class: 'mono' }, d.base)] : ' · a new worktree')),
       h('span', null, `budget ${budgetWord(d.envelope)}`))
   ]
+}
+
+// draftName is the draft's name field: the session's title, when the
+// person gives it one before it starts; left empty, the first message's
+// first line is the title. What is typed goes onto the draft in place,
+// without a redraw that would take the field's focus from under it.
+function draftName (d) {
+  const what = d.home ? 'agent' : 'session'
+  return h('input', {
+    class: 'inp draft-name', type: 'text', maxlength: '200', value: d.name || '', testid: 'draft-name',
+    placeholder: `Name the ${what} (optional)`, 'aria-label': `Name of the new ${what}`,
+    title: 'Left empty, the first line of your first message is its title',
+    oninput: (e) => { if (state.sessionDraft) state.sessionDraft.name = e.target.value },
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#composer-input')?.focus() } }
+  })
 }
 
 // draftHero is the empty conversation a draft shows.

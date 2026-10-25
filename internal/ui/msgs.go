@@ -398,7 +398,10 @@ func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) (ahead, la
 // mint needs. The description's first line is the card's title, and the
 // whole of it is the session's opening turn.
 type formResult struct {
-	Desc        string
+	Desc string
+	// Name is the title the person gave the session before it started,
+	// "" for the one its description's first line gives.
+	Name        string
 	Profile     string
 	Envelope    *int // nil = the shell's default envelope
 	Repo        string
@@ -462,7 +465,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			repo = ""
 		}
 		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
-			Description: res.Desc, Profile: res.Profile, Envelope: env,
+			Description: res.Desc, Title: res.Name, Profile: res.Profile, Envelope: env,
 			Repo: repo, RequireRepo: m.requireRepo, Base: res.Base,
 			ExternalRef:    res.ExternalRef,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,

@@ -8,9 +8,13 @@ type CreateCardRequest struct {
 	Title string `json:"title"`
 	// Description is the session's opening turn.
 	Description string `json:"description,omitempty"`
-	OneLiner    string `json:"oneLiner,omitempty"`
-	Profile     string `json:"profile,omitempty"`
-	Repo        string `json:"repo,omitempty"`
+	// Name is the session's title when a person gave it one before it
+	// started; empty takes the title from the opening turn's first line.
+	// A named session keeps its name: triage does not retitle it.
+	Name     string `json:"name,omitempty"`
+	OneLiner string `json:"oneLiner,omitempty"`
+	Profile  string `json:"profile,omitempty"`
+	Repo     string `json:"repo,omitempty"`
 	// Base is the branch the card forks from and lands on.
 	Base string `json:"base,omitempty"`
 	// Envelope is the credit budget; nil takes the board's default.

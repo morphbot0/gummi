@@ -43,6 +43,9 @@ type cardForm struct {
 	origins   map[string]repoOrigin
 	originFor func(repo string) repoOrigin
 
+	// name is the session's title when the person gives it one before it
+	// starts; empty, the text's first line is the title.
+	name textinput.Model
 	text textarea.Model
 	env  textinput.Model
 
@@ -169,6 +172,7 @@ func (o repoOrigin) label() string {
 // moment focus reaches it. stops() is the live list; focus always names one of its entries.
 const (
 	cardStopRepo = iota
+	cardStopName
 	cardStopText
 	cardStopRuns
 	cardStopEnvelope
@@ -192,6 +196,10 @@ func newCardForm(profiles, repos []string, hasDefault bool, lastRepo string, def
 	text.ShowLineNumbers = false
 	text.SetWidth(descWidthMin)
 	text.SetHeight(descHeightMin)
+	name := textinput.New()
+	name.Prompt = ""
+	name.CharLimit = 200
+	name.Placeholder = "optional — the first line of the text otherwise"
 	env := textinput.New()
 	env.SetWidth(12)
 	env.CharLimit = 12
@@ -205,7 +213,7 @@ func newCardForm(profiles, repos []string, hasDefault bool, lastRepo string, def
 	}
 	d := &cardForm{
 		repo: repo, origins: map[string]repoOrigin{},
-		text: text, env: env, profiles: profiles,
+		name: name, text: text, env: env, profiles: profiles,
 		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}),
 		onSubmit: onSubmit,
 	}
@@ -222,7 +230,7 @@ func newCardForm(profiles, repos []string, hasDefault bool, lastRepo string, def
 }
 
 // cardPlaceholder is the box's manual, shown only while the box is empty.
-const cardPlaceholder = "Say what you want done. The first line is the title.\n\n" +
+const cardPlaceholder = "Say what you want done. The first line is the title, unless you name it above.\n\n" +
 	"  it starts working in this card's own branch straight away:\n" +
 	"  you read the diff and land it when it's right\n" +
 	"  #123 or an issue link on the first line: alt+g imports it\n" +
@@ -260,7 +268,7 @@ func (d *cardForm) stops() []int {
 	if d.asksRepo() {
 		s = append(s, cardStopRepo)
 	}
-	s = append(s, cardStopText)
+	s = append(s, cardStopName, cardStopText)
 	if d.expanded {
 		s = append(s, cardStopEnvelope, cardStopProfile, cardStopWhere)
 		if len(d.baseCands) > 1 && !d.mainCheckout {
@@ -315,9 +323,12 @@ func (d *cardForm) firstOptionStop() int {
 
 func (d *cardForm) setFocus(f int) {
 	d.focus = f
+	d.name.Blur()
 	d.text.Blur()
 	d.env.Blur()
 	switch f {
+	case cardStopName:
+		d.name.Focus()
 	case cardStopText:
 		d.text.Focus()
 	case cardStopEnvelope:
@@ -419,6 +430,12 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			return d.submit()
 		}
 		return d.fallThrough(key)
+	case cardStopName:
+		if k == "enter" {
+			return d.submit()
+		}
+		d.name, _ = d.name.Update(key)
+		d.errText = ""
 	case cardStopText:
 		if k == "enter" {
 			return d.submit()
@@ -582,9 +599,12 @@ func (d *cardForm) submit() (bool, tea.Cmd) {
 		d.errText = "that is an issue reference — alt+g imports it, or describe the card instead"
 		return false, nil
 	}
-	title, _, _ := domain.SplitFreeform(desc)
-	if _, err := domain.Slugify(title); err != nil {
+	if _, err := domain.Slugify(d.title()); err != nil {
 		d.errText = "the first line needs a letter or digit to make a title"
+		if d.named() != "" {
+			d.errText = "the name needs a letter or digit to make a title"
+			d.setFocus(cardStopName)
+		}
 		return false, nil
 	}
 	// A stack is one repository (DESIGN §18.1), and the repo row can move
@@ -618,7 +638,7 @@ func (d *cardForm) submit() (bool, tea.Cmd) {
 		return false, nil
 	}
 	res := formResult{
-		Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
+		Desc: desc, Name: d.named(), Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.formRepo(),
 		Base: d.base, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
@@ -641,6 +661,9 @@ func (d *cardForm) submit() (bool, tea.Cmd) {
 // while it's focused, newlines intact — and into the budget when that is.
 func (d *cardForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	switch d.focus {
+	case cardStopName:
+		d.name, _ = d.name.Update(msg)
+		d.errText = ""
 	case cardStopText:
 		d.text, _ = d.text.Update(msg)
 		d.errText = ""
@@ -958,8 +981,11 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 	if _, isRef := d.reference(); isRef && d.imported == nil {
 		return cardLabel(s, "becomes") + s.Faint.Render("— import the reference first, or describe the card")
 	}
-	title, _, _ := domain.SplitFreeform(desc)
+	title := d.title()
 	if _, err := domain.Slugify(title); err != nil {
+		if d.named() != "" {
+			return cardLabel(s, "becomes") + s.Error.Render("the name needs a letter or digit to make a title")
+		}
 		return cardLabel(s, "becomes") + s.Error.Render("the first line needs a letter or digit to make a title")
 	}
 	f := domain.Feature{Kind: domain.KindFreeform, Home: d.home}
@@ -976,6 +1002,26 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 		out += " · in " + d.whereChoices()[d.whereIdx()]
 	}
 	return cardLabel(s, "becomes") + out
+}
+
+// named is the name the person typed, "" for none.
+func (d *cardForm) named() string { return strings.TrimSpace(d.name.Value()) }
+
+// title is the card's title as Create would mint it: the name the person
+// gave it, else the text's first line (cardmint.Mint).
+func (d *cardForm) title() string {
+	if n := d.named(); n != "" {
+		return domain.DeriveTitle(n)
+	}
+	title, _, _ := domain.SplitFreeform(strings.TrimSpace(d.text.Value()))
+	return title
+}
+
+// nameRow is the name row: what the person typed, or the placeholder
+// saying it may stay empty.
+func (d *cardForm) nameRow(s *theme.Styles, width int) string {
+	d.name.SetWidth(max(width-cardLabelW-3, choiceMinWidth))
+	return cardLabel(s, "name") + d.name.View()
 }
 
 // runsLine is the collapsed options readout.
@@ -1128,6 +1174,7 @@ func (d *cardForm) layout(s *theme.Styles, textW, h, fold int, hint, spacers boo
 	if from := d.fromLine(s); from != "" {
 		rows = append(rows, foldReadout(from, cardLabelW+2, textW)...)
 	}
+	rows = append(rows, d.nameRow(s, textW))
 
 	// the box always keeps its own blank line above: it is what separates
 	// the fields from the prose, and the two run together without it.
@@ -1165,6 +1212,8 @@ func (d *cardForm) hint() string {
 	switch d.focus {
 	case cardStopRepo:
 		return "←/→ or 1–9 choose a repo · typing goes to the text · tab next · esc cancel"
+	case cardStopName:
+		return "the session's title, or leave it empty for the text's first line · tab next · enter create · esc cancel"
 	case cardStopText:
 		g := ""
 		if d.imported != nil {

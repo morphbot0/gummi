@@ -39,6 +39,10 @@ type Input struct {
 	// title (domain.SplitFreeform), and the whole of it is the session's
 	// opening turn, which the caller sends.
 	Description string
+	// Title is the name a person gave the card before it started; empty
+	// takes it from Description's first line. A titled card keeps the
+	// words it was opened with as its one-liner.
+	Title string
 	// Profile is the model-role profile the card runs under (empty means
 	// the workspace default).
 	Profile string
@@ -145,6 +149,12 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 // MintFeatureNum so a bad --repo never burns a sequence number.
 func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input) (domain.Feature, error) {
 	title, oneLiner, _ := domain.SplitFreeform(in.Description)
+	if named := domain.DeriveTitle(in.Title); named != "" && named != title {
+		if oneLiner == "" {
+			oneLiner = title
+		}
+		title = named
+	}
 	slug, err := domain.BranchSlug(title)
 	if err != nil {
 		return domain.Feature{}, err
