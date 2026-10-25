@@ -230,6 +230,10 @@ func (b *Bridge) AttachmentPath(id string) (path, mediaType string, err error) {
 	return path, ref.MediaType, err
 }
 
+// SetRestartHook gives the board a "restart" command: fn marks the host for
+// a restart and the board quits, so the host starts the same binary again.
+func (m *Shell) SetRestartHook(fn func()) { m.restart = fn }
+
 // SetChangeHook installs the function the Shell calls after it handled
 // anything that can change what a viewer sees. The hook is called on the
 // Update goroutine (and, for the needs-you queue, from whichever goroutine

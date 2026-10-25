@@ -172,6 +172,20 @@ registerView('settings', {
           : null)
     }
 
+    async function restart () {
+      if (!window.confirm('Restart gummi? Running sessions keep their conversation and resume on their next turn.')) return
+      v.saving = true
+      draw()
+      try { await ctx.api.post('/api/restart', {}) } catch (err) { v.err = err; v.saving = false; draw(); return }
+      body.replaceChildren(h('p', { testid: 'settings-restarting' }, 'Restarting… this page reconnects when gummi is back.'))
+    }
+
+    function drawRestart () {
+      return h('div', { class: 'vrow' },
+        h('button', { type: 'button', class: 'btn', testid: 'settings-restart', disabled: v.saving, onclick: restart }, 'Restart gummi'),
+        tip('Stops gummi the way a quit does and starts the same command again, so a new build of the binary and any setting read only at start take effect.', 'settings-restart-tip'))
+    }
+
     function draw () {
       clear(body)
       if (v.err) body.append(errorBox(v.err))
@@ -181,7 +195,7 @@ registerView('settings', {
         tipField('Instance name', 'Shown in this header, the browser tab and the terminal’s status bar. Leave empty for none.', input, 'settings-name-tip'),
         h('div', { class: 'vrow' },
           h('button', { type: 'submit', class: 'btn primary', testid: 'settings-save', disabled: v.saving }, 'Save')))
-      body.append(form, drawIdentity(), drawCoAuthors(), drawCredentials())
+      body.append(form, drawIdentity(), drawCoAuthors(), drawCredentials(), drawRestart())
     }
 
     load()

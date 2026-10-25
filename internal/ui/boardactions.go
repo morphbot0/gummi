@@ -102,6 +102,7 @@ func (m *Shell) globalCommands() []command {
 		{id: "P", name: "profiles", label: "Profiles — the agent and model each role runs on", key: "P", available: true},
 		{id: "settings", name: "settings", label: "Settings — name this gummi instance", key: "", available: true},
 		{id: "?", name: "keys", label: "Show the keys for this surface", key: helpKeyFor(m.cardOpen), available: true},
+		{id: "restart", name: "restart", label: "Restart gummi — start the same binary again", key: "", available: m.restart != nil},
 		{id: "q", name: "quit", label: "Quit gummi", key: "q", available: true},
 	}
 	if m.cardOpen {
@@ -228,6 +229,12 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 	switch id {
 	case "q":
 		return m.quitCmd()
+	case "restart":
+		if m.restart == nil {
+			return nil
+		}
+		m.restart()
+		return tea.Quit
 	case "?":
 		m.Overlay.Push(m.helpOverlay())
 		return nil
