@@ -23,6 +23,9 @@ import (
 // derived filesystem state the board displays.
 type featureRow struct {
 	F domain.Feature
+	// AgentPublish is whether a person allowed the session to publish its
+	// own branch (DESIGN §22.14), read at load for every card at once.
+	AgentPublish bool
 	// OpenRun is the session's open workflow run (running or paused), read
 	// at load; it holds the session's landing (Engine.RunHolds). Nil when
 	// none is open.
@@ -266,6 +269,10 @@ func (m *Shell) loadRows() tea.Msg {
 			openChildren[d.Agent]++
 		}
 	}
+	publishers, err := m.store.AgentPublishers(ctx)
+	if err != nil {
+		publishers = nil // the menu's label is all it feeds; a failed read says off
+	}
 	rows := make([]featureRow, 0, len(feats))
 	children := map[domain.FeatureID]domain.Feature{}
 	for _, f := range feats {
@@ -279,7 +286,7 @@ func (m *Shell) loadRows() tea.Msg {
 		if f.Kind == domain.KindGoal {
 			continue
 		}
-		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f), Dispatched: openChildren[f.ID]}
+		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f), Dispatched: openChildren[f.ID], AgentPublish: publishers[f.ID]}
 		if d, ok := dispatches[f.ID]; ok {
 			row.DispatchedBy = d.Agent
 		}

@@ -26,6 +26,10 @@ type Env struct {
 	Dir      string
 	GH       string
 	Progress func(Step, StepState)
+	// Recheck, when set, runs after Do's second Resolve and before its
+	// first act, so a check made before the network calls is made again
+	// as close to the push as Do can put it. Its refusal ends the act.
+	Recheck func(context.Context) *Error
 }
 
 func (e Env) ghBin() string {

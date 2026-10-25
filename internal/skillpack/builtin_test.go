@@ -51,7 +51,7 @@ func builtinSkill(t *testing.T, name string) (Meta, string) {
 // the limits a pack skill keeps.
 func TestGummisOwnSkillsReadAsSkills(t *testing.T) {
 	names := BuiltinNames()
-	if !slices.Equal(names, []string{"workflow-recipes", "workflows"}) {
+	if !slices.Equal(names, []string{"publishing-prs", "workflow-recipes", "workflows"}) {
 		t.Fatalf("built-in skills %v", names)
 	}
 	for _, n := range names {

@@ -5,7 +5,7 @@
 // that fits the card now; each one opens the publish dialog (publish.js).
 
 import { h, $, append, busy, clock, plural } from './dom.js?v=__ASSET_V__'
-import { get, post, cardPath } from './api.js?v=__ASSET_V__'
+import { get, post, put, cardPath } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
@@ -39,6 +39,7 @@ function render (pane, entry, ctx) {
         ? h('button', { class: 'btn', type: 'button', testid: 'pr-link', onclick: () => runAction(ctx.card, link) }, create ? 'Link an existing one' : 'Link a pull request')
         : null,
       publishWhy(p?.publish),
+      agentSwitch(p?.publish, ctx),
       pushBox(p?.pushCommand, ctx, p?.publish)))
     return
   }
@@ -52,6 +53,7 @@ function render (pane, entry, ctx) {
         p.url ? h('a', { href: safeUrl(p.url), target: '_blank', rel: 'noopener noreferrer' }, 'open on GitHub') : null),
       p.error ? h('div', { class: 'badc' }, p.error) : null,
       publishStrip(p.publish, ctx),
+      agentSwitch(p.publish, ctx),
       h('div', { class: 'prmeta' },
         p.fetched ? h('span', { testid: 'pr-fetched' }, `read from GitHub ${clock(p.fetched)}`) : null,
         p.headSha ? h('span', { class: 'mono' }, `head ${p.headSha.slice(0, 7)}`) : null,
@@ -125,6 +127,41 @@ function publishStrip (pub, ctx) {
     acts.map((act, i) => h('button', { class: ['btn', i === 0 && 'pri'], type: 'button', testid: `pr-publish-${act}`, onclick: () => publish(ctx, act) },
       act === 'ready' ? 'Mark ready…' : publishLabel(act) + '…'))),
   publishWhy(pub)]
+}
+
+// agentSwitch is the person's standing allowance for the card's session to
+// publish its own branch (DESIGN §22.14): one switch, then the session's
+// pr_* tools push, open and update the PR and read its checks with no
+// confirm each time. It never merges, force-pushes or lands.
+function agentSwitch (pub, ctx) {
+  if (!pub?.agentCan) return null
+  const err = h('p', { class: 'aerr', testid: 'pr-agent-publish-error', role: 'alert', hidden: true })
+  const box = h('input', { type: 'checkbox', testid: 'pr-agent-publish', checked: !!pub.agentAllowed })
+  box.addEventListener('change', async () => {
+    box.disabled = true
+    try {
+      const res = await put(cardPath(ctx.id, 'publish/allowance'), { allow: box.checked })
+      if (res.error) {
+        box.checked = !!res.allowed
+        err.textContent = res.error
+        err.hidden = false
+        return
+      }
+      err.hidden = true
+      toast(res.allowed ? 'The session may publish its branch' : 'The session may no longer publish')
+      refresh(ctx)
+    } catch (e) {
+      box.checked = !box.checked
+      err.textContent = e.message || String(e)
+      err.hidden = false
+    } finally {
+      box.disabled = false
+    }
+  })
+  return h('div', { class: 'pubagent', testid: 'pr-agent' },
+    h('label', null, box, ' Agent may publish'),
+    h('span', { class: 'sub' }, 'Pushes, opens and updates this PR and reads its checks; never merges or lands.'),
+    err)
 }
 
 function note (n) {

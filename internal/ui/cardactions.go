@@ -392,6 +392,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			publishable(in, r) && r.F.PullRequest.Empty() && spansUnlanded(r),
 		},
 		{
+			// a person's standing allowance (DESIGN §22.14): the session's
+			// own pr_* tools then publish with no confirm of their own
+			agentPublishID, "", agentPublishLabel(in.agentPublish), agentPublishDetail(in.agentPublish), false,
+			agentPublishOffered(in, r),
+		},
+		{
 			"push", "", "push to GitHub…", "push the branch's new commits to its remote", false,
 			publishable(in, r),
 		},

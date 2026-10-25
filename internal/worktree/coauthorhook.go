@@ -82,6 +82,17 @@ done <"$self/` + coAuthorHookList + `"
 exit 0
 `
 
+// IsOwnHook reports whether the file at path holds exactly the hook gummi
+// writes. A file of that name with any other content, in gummi's hooks
+// directory or anywhere else, is not gummi's.
+func IsOwnHook(path string) bool {
+	b, err := os.ReadFile(path)
+	return err == nil && bytes.Equal(b, []byte(coAuthorHook))
+}
+
+// OwnHook is the script gummi writes as every hook in its hooks directory.
+func OwnHook() []byte { return []byte(coAuthorHook) }
+
 // UseCoAuthorHooks names the directory the co-author hook lives in, under
 // the workspace's own state, and the workspace root whose checkouts it
 // names co-authors in. Until it is named only the commits gummi writes

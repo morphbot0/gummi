@@ -131,9 +131,10 @@ func TestRepoOfURL(t *testing.T) {
 	}
 }
 
-// Publishing is reached only from the faces a person uses: the engine,
-// the agent's MCP shim and every loop that runs without one
-// must not import it (DESIGN §22.7).
+// Publishing is reached only from the faces a person uses, and by one
+// agent-facing adapter that acts under a person's standing allowance: the
+// engine, the agent's MCP shim and every loop that runs without a person
+// must not import it (DESIGN §22.7, §22.14).
 func TestOnlyPersonFacingCodeImportsPublish(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, pkg := range []string{"engine", "mcp", "schedule", "agent", "verify", "spec", "state", "worktree"} {
@@ -144,6 +145,69 @@ func TestOnlyPersonFacingCodeImportsPublish(t *testing.T) {
 		for _, imp := range p.Imports {
 			if imp == "github.com/morphis/gummi/internal/publish" {
 				t.Errorf("internal/%s imports publish; only the person-facing faces may", pkg)
+			}
+		}
+	}
+}
+
+// importersOf lists, by path under the module, every non-test package of
+// internal/ and cmd/ that imports target.
+func importersOf(t *testing.T, target string) []string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	var got []string
+	for _, top := range []string{"internal", "cmd"} {
+		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d os.DirEntry, err error) error {
+			if err != nil || !d.IsDir() || d.Name() == "testdata" || d.Name() == "node_modules" {
+				return err
+			}
+			p, perr := build.ImportDir(path, 0)
+			if perr != nil {
+				return nil // no Go files, or only tagged ones
+			}
+			for _, imp := range p.Imports {
+				if imp == "github.com/morphis/gummi/"+target {
+					rel, _ := filepath.Rel(root, path)
+					got = append(got, filepath.ToSlash(rel))
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return got
+}
+
+// The one door from the engine's side: internal/agentpublish may import
+// publish because a person's per-session allowance stands in for the
+// confirm (decision 31). A new importer needs a decision of its own.
+func TestAgentAdapterIsTheOnlyEngineSidePublishImporter(t *testing.T) {
+	allowed := map[string]bool{
+		"internal/ui":           true, // the person-facing faces
+		"internal/agentpublish": true, // the one agent-facing adapter
+	}
+	for _, got := range importersOf(t, "internal/publish") {
+		if !allowed[got] {
+			t.Errorf("%s imports publish: a new publisher needs its own decision (DESIGN §22.14)", got)
+		}
+	}
+	// the hole stays one wide: only the engine reaches the adapter, and
+	// nothing that runs without a person's session does
+	for _, got := range importersOf(t, "internal/agentpublish") {
+		if got != "internal/engine" {
+			t.Errorf("%s imports agentpublish; only the engine, for a session a person allowed, may", got)
+		}
+	}
+	for _, pkg := range []string{"mcp", "schedule", "agent", "verify", "spec", "state", "worktree", "workflowrecipe", "workflowpolicy", "pr", "cardmint"} {
+		p, err := build.ImportDir(filepath.Join("..", "..", "internal", pkg), 0)
+		if err != nil {
+			t.Fatalf("%s: %v", pkg, err)
+		}
+		for _, imp := range p.Imports {
+			if imp == "github.com/morphis/gummi/internal/agentpublish" || imp == "github.com/morphis/gummi/internal/publish" {
+				t.Errorf("internal/%s imports %s", pkg, imp)
 			}
 		}
 	}

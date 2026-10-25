@@ -814,6 +814,8 @@ xterm-style{display:none}
 p.push.none{margin:0}
 .pubstrip{display:flex;flex-wrap:wrap;align-items:center;gap:8px;border-top:1px solid var(--line);padding-top:8px}
 .pubstrip .what{font-size:12.5px;color:var(--fg2);margin-right:auto}
+.pubagent{display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--line);padding-top:8px;font-size:12.5px}
+.pubagent .sub{color:var(--fg2)}
 .pubwhy{margin:0;font-size:12.5px;color:var(--fg3)}
 .pubcheck{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;color:var(--fg)}
 .pubcheck .sub{display:block;margin-top:2px;color:var(--fg3);font-size:12.5px;overflow-wrap:anywhere}

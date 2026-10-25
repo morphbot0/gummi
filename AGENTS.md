@@ -101,7 +101,8 @@ agent/worktree/verify as leaf services.
 | `branchlog` | Pure read model of a card's own commits (`Manager.Log` → rows: checkpoint, pushed, attribution) and the one rule for whether they may be rewritten (`Refusal`). Its `Env` runs the reads and `Manager.Rewrite`. Read by the TUI's log tab and the web page's (DESIGN §21). |
 | `repoview` | Pure read model of one repository's local branches: who holds each (the base, a card, a legacy adopted card or goal, nobody) and the one rule for which may be deleted from the repositories view — only a branch no card holds, nothing has checked out and no card forks from. The git reads and the three writes (fetch, fast-forward the base, delete a branch) are `worktree/repoview.go`, and a repository's remotes and a branch's upstream — git-config writes only — are `worktree/remotes.go`; how a remote closes cards (PR or push of the base, DESIGN §22.12) and that base push are `worktree/closepush.go`; the web face reads all of it through `ui/webrepos.go`. |
 | `fleetrun` | Pure fold at the workspace scale: every card's run → the stats tab's report (window and all-time money, the clock, peak concurrency, and the timeline lanes). Charges a pass to the window it started in; reuses `cardrun` per card, so the tab cannot disagree with the cards it is made of. |
-| `publish` | A **person** publishing a card (DESIGN §22): pure rules (`Refusal`, `Floor`, `PlanFor`) and the `Env` that reads the facts a person confirms (`Resolve`, `Fingerprint`) and runs the push and the `gh` calls (`Do`). Plans and publishes a session's attached repositories too (`span.go`: one push and PR each, bodies naming the others; both faces' confirm is `ui/publishspan.go`). Imported only by the person-facing faces (`ui/publish.go`); `TestOnlyPersonFacingCodeImportsPublish` fails if the engine, MCP shim or a loop does. Where a branch pushes is `worktree.Manager.PushTarget` (`pushtarget.go`), read by the pushed mark and the printed push line too. |
+| `publish` | A **person** publishing a card (DESIGN §22): pure rules (`Refusal`, `Floor`, `PlanFor`) and the `Env` that reads the facts a person confirms (`Resolve`, `Fingerprint`) and runs the push and the `gh` calls (`Do`). Plans and publishes a session's attached repositories too (`span.go`: one push and PR each, bodies naming the others; both faces' confirm is `ui/publishspan.go`). Imported only by the person-facing faces (`ui/publish.go`) and by `agentpublish`; `TestOnlyPersonFacingCodeImportsPublish` fails if the engine, MCP shim or a loop does, and `TestAgentAdapterIsTheOnlyEngineSidePublishImporter` if anything else does. Where a branch pushes is `worktree.Manager.PushTarget` (`pushtarget.go`), read by the pushed mark and the printed push line too. |
+| `agentpublish` | The one agent-facing door to `publish` (DESIGN §22.14, decision 31): a session a person has allowed to publish pushes its branch, opens and updates its PR and reads its checks through it, with no confirm per act. Same `Resolve`/`PlanFor`/`Do` and the same refusals, except that "an agent holds it" does not refuse the calling session. Imported only by `engine` (`engine/prtools.go`, `agentpublish.go`). No merge, force-push, retarget or landing exists in it. |
 | `credentials` | The GitHub token and SSH key a person may store from the web page's settings (DESIGN §22.2), 0600 under `.gummi/state/credentials/`. `WithToken` sets `GH_TOKEN` on a `gh` command gummi runs; `WithAgent` answers as a sign-only ssh-agent for the life of one git command. Behind a settings switch the key also signs every commit (`sign.go`): gummi names itself git's signing program through `GIT_CONFIG_*` in its own environment, which every child inherits, and `main` answers that call before cobra sees it. Never export either secret to an agent backend. |
 | `skillpack` | The workspace skill pack (DESIGN §23): `.gummi/skills`, its curator's writes, a card's staged changes and their delivery to claude, copilot and opencode. Also gummi's own skills (`builtin/`: `workflows`, `workflow-recipes`), shipped in the binary and delivered beside the pack (`Builtin`); change them with the workflow code they teach, and `TestEveryRecipeTheSkillsShowCanRun` holds their examples to the grammar. |
 | `diffannot` | Anchors line comments to diff content (survives minor rebases). |
@@ -242,14 +243,18 @@ worktrees and specs still work — the board just stays static. Key env vars are
 - **gummi's job ends at a branch a person can land — and a person may publish it.**
   It does not release, merge on GitHub, retarget a PR unasked or resolve
   a thread. Pushing a card's own branch and opening, updating or readying
-  its PR are acts a *person* starts (TUI or web),
+  its PR are acts a *person* starts (TUI or web), or that a session does
+  under that person's standing per-session allowance (decision 31, DESIGN
+  §22.14: `pr_push`, `pr_open`, `pr_update`, `pr_ready`, `pr_checks`,
+  through `internal/agentpublish` alone),
   through `gh` and the credentials already on the machine, or the GitHub
   token and SSH key a person stored in the web page's settings
   (`internal/credentials`: lent to gummi's own `gh` and push commands,
   never put in an agent's environment). It is optional, detected rather
   than switched on, and absent where `gh`/push access is not set up. No
-  session, workflow run, schedule, or MCP tool may reach the
-  publish code (decision 25, DESIGN §22).
+  workflow run, schedule, goal or MCP tool may reach the publish code
+  (decision 25, DESIGN §22); a session reaches it only once a person
+  allowed it to publish, and only through `agentpublish` (decision 31).
   Stacks (§18) still replay branches locally and print the `git push
   --force-with-lease` they need; publishing a stacked card is refused
   until §18.5's deferral is done.
@@ -330,6 +335,11 @@ worktrees and specs still work — the board just stays static. Key env vars are
 - "hand this card's failing PR checks to its session" → `internal/pr/checks.go`
   for the read and the message, `internal/ui/prchecks.go` for who gets it
   (DESIGN §22.11). A snapshot a person sends: never stored, never a gate.
+  A session a person allowed to publish reads them itself with `pr_checks`.
+- "an agent session publishes its own PR / reacts to red checks" →
+  `internal/agentpublish`, `engine/prtools.go`, `engine/agentpublish.go`
+  (the allowance), `ui/agentpublish.go` (its two faces) and the bundled
+  `publishing-prs` skill (DESIGN §22.14, decision 31).
 - Agent/model wiring → `internal/agent` + `internal/engine/profiles.go`.
 - "why may (or may not) this card land" → `domain.Feature.MayLand`, then
   `internal/engine/handoff.go` and `internal/ui` for the checks a landing

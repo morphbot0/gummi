@@ -372,6 +372,11 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 				own = append(own, repoTools()...)
 				hints = append(hints, sessionRepoHint)
 			}
+			// a person's standing allowance to publish (DESIGN §22.14)
+			if MayHavePublishAllowance(f) && e.AgentMayPublish(ctx, f.ID) {
+				own = append(own, prTools()...)
+				hints = append(hints, prPublishHint)
+			}
 			extra = append(extra, own...)
 			tools = append(tools, own...)
 			hints = append(hints, sessionSpecHint, sessionWorkflowHintFor(ag))
@@ -1497,7 +1502,8 @@ func (e *Engine) exhaustFreeform(ff *FreeformSession, sess *Session) {
 //
 // Inline on the pump goroutine, unlike dispatchConsultClientTool, which
 // hands its call to a goroutine because card_diff shells out to git and
-// would stall every event behind it. Every tool reachable here —
+// would stall every event behind it; the pr_* tools, which push and call
+// gh, are handed to one too. Every other tool reachable here —
 // resolve_annotation, the watch pair, the memory pair — resolves at once
 // (store and file writes, no human in the loop), so it is dispatched the
 // way a stage session's is.
@@ -1506,6 +1512,17 @@ func (e *Engine) dispatchFreeformClientTool(ff *FreeformSession, sess *Session, 
 		return
 	}
 	sess.appendToolCall(tc.ID, "", tc.Name, tc.Name, "")
+	if isPRTool(tc.Name) {
+		// a push and the gh calls take as long as the network does: off the
+		// pump, so no other event of the session waits behind them
+		e.wg.Add(1)
+		go func() {
+			defer e.wg.Done()
+			e.handleClientTool(sess, tc)
+			e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+		}()
+		return
+	}
 	e.handleClientTool(sess, tc)
 	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
 }

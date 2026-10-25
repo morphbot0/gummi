@@ -60,9 +60,12 @@ type nextInput struct {
 	// publish is whether this board publishes at all (gh found signed in,
 	// Shell.publishOffered) — the publish rows' first condition
 	publish bool
-	stage   domain.Stage
-	kind    domain.Kind
-	landed  bool
+	// agentPublish is whether a person allowed the session to publish its
+	// own branch (DESIGN §22.14)
+	agentPublish bool
+	stage        domain.Stage
+	kind         domain.Kind
+	landed       bool
 	// mergeChoice: the card may land as a merge commit keeping its commits
 	// as well as a squash (domain.Feature.Offers), so the landing's wording
 	// says both are on offer
@@ -266,6 +269,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	// a session's model switch needs an agent to start, and a board with
 	// no engine has none to start (cardactions.go's model row).
 	in.agentWired = m.engine != nil
+	in.agentPublish = m.engine != nil && r.AgentPublish
 	in.otherRepos = m.engine != nil && len(m.repoNames) > 0
 	if r.Drift != nil {
 		in.drifted, in.driftForkedFrom, in.driftMissingBase = true, r.Drift.ForkedFrom, r.Drift.MissingBase

@@ -38,16 +38,16 @@ func TestEverySessionGetsGummisOwnSkills(t *testing.T) {
 	f := &domain.Feature{ID: "FF-1"}
 
 	got := e.skillDirsFor(ctx, cf, f, "FF-1", false)
-	if names := baseNames(got); names != "gummi-workflow-recipes,gummi-workflows" {
+	if names := baseNames(got); names != "gummi-publishing-prs,gummi-workflow-recipes,gummi-workflows" {
 		t.Fatalf("a session with no pack gets %q", names)
 	}
-	if _, err := os.Stat(filepath.Join(got[0], "references", "deliver.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(got[1], "references", "deliver.yaml")); err != nil {
 		t.Errorf("the recipe skill lacks the bundled deliver: %v", err)
 	}
 
 	namespaced := agent.NewFake("")
 	namespaced.Caps = agent.Capabilities{SkillDirs: true, SkillNamespace: true}
-	if names := baseNames(e.skillDirsFor(ctx, namespaced, f, "FF-1", false)); names != "workflow-recipes,workflows" {
+	if names := baseNames(e.skillDirsFor(ctx, namespaced, f, "FF-1", false)); names != "publishing-prs,workflow-recipes,workflows" {
 		t.Errorf("a backend that namespaces skills itself gets %q", names)
 	}
 	noSkills := agent.NewFake("")

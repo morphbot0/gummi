@@ -1,0 +1,20 @@
+{
+  "offer": {
+    "available": true,
+    "acts": [
+      "push"
+    ],
+    "agentCan": true,
+    "agentAllowed": true
+  },
+  "request": {
+    "allow": true
+  },
+  "result": {
+    "allowed": true
+  },
+  "refused": {
+    "allowed": false,
+    "error": "the session is mid-turn; change the allowance when the turn ends"
+  }
+}
