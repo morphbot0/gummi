@@ -379,6 +379,41 @@ func PersonSaid(tr []engine.Message) time.Time {
 	return time.Time{}
 }
 
+// ConversationStart is when a session's conversation as it stands began:
+// its first turn's moment, past the pinned task list a /clear or /handoff
+// keeps. Zero when no turn carries one.
+func ConversationStart(tr []engine.Message) time.Time {
+	for _, msg := range tr {
+		if msg.Author != engine.AuthorTasks && !msg.At.IsZero() {
+			return msg.At
+		}
+	}
+	return time.Time{}
+}
+
+// CurrentRuns are the runs a session's thread still draws once its
+// conversation began at start (ConversationStart): every one but a run
+// that ended before then, which a /clear or /handoff left behind with the
+// conversation it belonged to. An open run is always drawn.
+func CurrentRuns(ins []RunInput, start time.Time) []RunInput {
+	if start.IsZero() {
+		return ins
+	}
+	out := ins[:0:0]
+	for _, in := range ins {
+		if !RunLeftBehind(in.Run.State, in.Run.EndedAt, start) {
+			out = append(out, in)
+		}
+	}
+	return out
+}
+
+// RunLeftBehind says whether a run in state that ended at ended belongs to
+// a conversation before the one that began at start (CurrentRuns).
+func RunLeftBehind(state domain.RunState, ended, start time.Time) bool {
+	return !start.IsZero() && state.Ended() && ended.Before(start)
+}
+
 // TurnMark is one turn of a conversation as a run's place among the turns
 // reads it: when it was written, and whether it sits inside an activity
 // row (a tool call, a thought, the agent's task list), which a run's

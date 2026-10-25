@@ -126,7 +126,7 @@ export async function loadThread (id = state.sel, full = false) {
   try {
     const t = await get(cardPath(id, 'thread') + (after ? `?after=${after}` : ''))
     if (state.sel !== id || state.gone === id) return
-    const items = after ? upsert(state.thread.items, t.items || []) : (t.items || [])
+    const items = after ? upsert(withoutGone(state.thread.items, t.items || []), t.items || []) : (t.items || [])
     const lastSeq = Math.max(t.lastSeq || 0, after)
     const was = state.thread
     // a run's block comes on every page (it moves without an event of its
@@ -140,6 +140,14 @@ export async function loadThread (id = state.sel, full = false) {
     if (state.sel !== id || state.gone === id) return
     set({ thread: { items: state.thread?.items || [], lastSeq: state.thread?.lastSeq || 0, unavailable: err.notBuilt, err } })
   }
+}
+
+// withoutGone drops the held run and dispatch items a paged read did not
+// bring: those come on every page (threadfold.Since), so one missing is
+// gone — a run a /clear or /handoff left behind with its conversation.
+function withoutGone (items, fresh) {
+  const keys = new Set(fresh.map(it => it.key))
+  return items.filter(it => (it.t !== 'run' && it.t !== 'dispatch') || keys.has(it.key))
 }
 
 // upsert merges newer items into the list by key: an item that grew

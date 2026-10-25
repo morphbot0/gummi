@@ -206,13 +206,38 @@ func (m *Shell) openRuns() []foldedRun {
 	if !m.cardOpen {
 		return nil
 	}
-	return m.wf.byCard[m.selectedID()]
+	return m.currentRuns(m.selectedID())
+}
+
+// currentRuns is a session's runs as last read, less any that ended before
+// its conversation as it stands began (threadfold.CurrentRuns): a /clear
+// on a session at rest moves no event the runs are read again on.
+func (m *Shell) currentRuns(id domain.FeatureID) []foldedRun {
+	runs := m.wf.byCard[id]
+	if len(runs) == 0 || m.engine == nil {
+		return runs
+	}
+	ff := m.engine.Freeform(id)
+	if ff == nil {
+		return runs
+	}
+	start := threadfold.ConversationStart(ff.Snapshot().Transcript)
+	if start.IsZero() {
+		return runs
+	}
+	out := make([]foldedRun, 0, len(runs))
+	for _, run := range runs {
+		if !threadfold.RunLeftBehind(domain.RunState(run.State), run.Ended, start) {
+			out = append(out, run)
+		}
+	}
+	return out
 }
 
 // runBlocks draws the session's runs for its thread, each at the moment it
 // was proposed.
 func (m *Shell) runBlocks(s *theme.Styles, r featureRow, w int) []timedBlock {
-	runs := m.wf.byCard[r.F.ID]
+	runs := m.currentRuns(r.F.ID)
 	if len(runs) == 0 {
 		return nil
 	}

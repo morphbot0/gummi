@@ -89,15 +89,17 @@ func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 	return out
 }
 
-// runFold reads what the fold of the session's runs needs: the runs
-// (runInputs), and when a person last said something to the session,
-// which folds the run that ended last (threadfold.FoldRuns).
+// runFold reads what the fold of the session's runs needs: the runs the
+// conversation as it stands still draws (runInputs, threadfold.CurrentRuns),
+// and when a person last said something to the session, which folds the
+// run that ended last (threadfold.FoldRuns).
 func (d *WebDocs) runFold(ctx context.Context) ([]threadfold.RunInput, time.Time) {
 	ins := d.runInputs(ctx)
 	if len(ins) == 0 || d.eng == nil {
 		return ins, time.Time{}
 	}
-	return ins, threadfold.PersonSaid(sessionTranscript(d.eng, d.f.ID))
+	tr := sessionTranscript(d.eng, d.f.ID)
+	return threadfold.CurrentRuns(ins, threadfold.ConversationStart(tr)), threadfold.PersonSaid(tr)
 }
 
 // sessionTranscript is the session's conversation as the engine holds it,
