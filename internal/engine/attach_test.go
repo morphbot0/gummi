@@ -478,3 +478,70 @@ func TestAnAttachedCardCannotStack(t *testing.T) {
 		t.Errorf("after detaching: %v", err)
 	}
 }
+
+func TestRepoFetchFetchesFromARemote(t *testing.T) {
+	x := spanEngine(t, agent.NewFake("x"))
+	ctx := context.Background()
+	ff, err := x.e.OpenFreeform(ctx, x.card(t, 1, "span"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := ff.Session()
+	call := func(args string) string {
+		t.Helper()
+		out, err := x.e.DispatchClientTool(ctx, s, "repo_fetch", []byte(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if out := call(`{}`); !strings.Contains(out, "no remote") {
+		t.Errorf("repo_fetch without a remote = %q", out)
+	}
+	if out := call(`{"repo":"nope"}`); !strings.HasPrefix(out, "error") {
+		t.Errorf("an unknown repository was fetched: %q", out)
+	}
+	remote := t.TempDir()
+	for _, args := range [][]string{{"-C", remote, "init", "-q", "--bare", "--initial-branch=main"}, {"-C", x.roots["b"], "remote", "add", "origin", remote}} {
+		if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if out := call(`{"repo":"b"}`); out != "fetched b" {
+		t.Errorf("repo_fetch = %q", out)
+	}
+	if out := call(`{"repo":"b","remote":"origin"}`); out != "fetched b" {
+		t.Errorf("repo_fetch of one remote = %q", out)
+	}
+	if out, _ := x.e.DispatchClientTool(ctx, s, "repo_list", []byte(`{}`)); !strings.Contains(out, "b (remotes: origin)") {
+		t.Errorf("repo_list does not name the remote: %q", out)
+	}
+	// the remote gains a commit; fetching alone leaves the base where it is
+	push := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	push("-C", x.roots["b"], "push", "-q", "-u", "origin", "main")
+	clone := t.TempDir()
+	push("clone", "-q", "--branch", "main", remote, clone)
+	push("-C", clone, "-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-q", "--allow-empty", "-m", "more")
+	push("-C", clone, "push", "-q", "origin", "HEAD:main")
+	if out := call(`{"repo":"b"}`); out != "fetched b" {
+		t.Fatalf("repo_fetch = %q", out)
+	}
+	fastForward := func() string {
+		out, err := x.e.DispatchClientTool(ctx, s, "repo_fast_forward", []byte(`{"repo":"b"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if out := fastForward(); !strings.Contains(out, "fast-forwarded") {
+		t.Errorf("repo_fast_forward = %q", out)
+	}
+	if out := fastForward(); !strings.Contains(out, "already up to date") {
+		t.Errorf("a second repo_fast_forward = %q", out)
+	}
+}

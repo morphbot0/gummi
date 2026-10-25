@@ -3,18 +3,54 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 const (
 	repoListToolName   = "repo_list"
 	repoAttachToolName = "repo_attach"
 	repoDetachToolName = "repo_detach"
+	repoFetchToolName  = "repo_fetch"
+	repoFFToolName     = "repo_fast_forward"
 )
+
+// repoFetchTimeout bounds one repo_fetch: a remote that never answers must
+// not hold a turn open.
+const repoFetchTimeout = 2 * time.Minute
+
+// repoFastForwardTool moves a repository's base branch up to its upstream
+// as last fetched. Unlike a fetch it moves a branch in the main checkout, so
+// it only ever fast-forwards and is refused over uncommitted changes there.
+func repoFastForwardTool() agent.ToolDef {
+	return mkTool(repoFFToolName,
+		"Fast-forward a repository's base branch (the one its main checkout has out) to its upstream as last fetched; "+
+			"run repo_fetch first. It only ever fast-forwards: a dirty main checkout, a base with commits of its own and "+
+			"a base tracking nothing are each refused. The repository is named as repo_list gives it; a session that "+
+			"names none uses its own.",
+		map[string]any{"repo": str("A repository's name, as repo_list gives it.")})
+}
+
+// repoFetchTool is a session's and an agent's way to bring a repository's
+// remote-tracking refs up to date. It reads the remotes and writes only
+// refs/remotes: no local branch moves, nothing is pushed, and the stored
+// SSH key is lent to the git command, never to the agent (DESIGN §22.2).
+func repoFetchTool() agent.ToolDef {
+	return mkTool(repoFetchToolName,
+		"Fetch a repository of the workspace from its remotes (git fetch --prune) so its remote-tracking branches are current. "+
+			"Only refs/remotes change: no local branch moves and nothing is pushed. The repository is named as repo_list gives it; "+
+			"a session that names none fetches its own. Give remote to fetch just that one.",
+		map[string]any{
+			"repo":   str("A repository's name, as repo_list gives it."),
+			"remote": str("One remote to fetch, if not all of them."),
+		})
+}
 
 // repoTools is a session's way to span repositories (DESIGN §27). It
 // attaches freely: cutting a branch is cheap and nothing lands without the
@@ -37,6 +73,8 @@ func repoTools() []agent.ToolDef {
 			"Detach an attached repository: removes its worktree and branch. Refused while that branch holds commits "+
 				"that have not landed or its tree holds changes. This session's own repository is never detached.",
 			map[string]any{"repo": str("The attached repository's name.")}, "repo"),
+		repoFetchTool(),
+		repoFastForwardTool(),
 	}
 }
 
@@ -48,11 +86,15 @@ func agentRepoListTool() agent.ToolDef {
 			"Your home is in none of them.", map[string]any{})
 }
 
-const sessionRepoHint = `This session may span repositories (gummi's DESIGN §27). repo_list shows the repositories there are and any attached to you; repo_attach cuts this session's branch in another one, in a worktree beside yours, and repo_detach drops an empty one. Commit in each repository's worktree; each lands on its own, on the person's read of its diff.`
+const sessionRepoHint = `This session may span repositories (gummi's DESIGN §27). repo_list shows the repositories there are and any attached to you; repo_attach cuts this session's branch in another one, in a worktree beside yours, and repo_detach drops an empty one; repo_fetch brings a repository's remote-tracking branches up to date and repo_fast_forward moves its base to them. Commit in each repository's worktree; each lands on its own, on the person's read of its diff.`
 
 func (e *Engine) handleRepoTool(s *Session, tc *agent.ToolCall) {
 	f := s.Feature
 	ctx := context.Background()
+	if tc.Name == repoFetchToolName || tc.Name == repoFFToolName {
+		e.handleRepoSync(s, tc)
+		return
+	}
 	if f.Home && !f.IsChild() && tc.Name == repoListToolName {
 		e.resolveNow(s, tc.ID, e.agentRepoListText())
 		return
@@ -96,12 +138,22 @@ func (e *Engine) handleRepoTool(s *Session, tc *agent.ToolCall) {
 }
 
 func (e *Engine) agentRepoListText() string {
+	ctx := context.Background()
 	names := e.repoNames()
 	if len(names) == 0 {
 		return "the workspace's pool holds no named repository: a dispatch has nowhere to go"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "repositories a dispatch may name: %s\n", strings.Join(names, ", "))
+	var withRemote []string
+	for _, n := range names {
+		if note := e.remotesNote(ctx, n); note != "" {
+			withRemote = append(withRemote, n+note)
+		}
+	}
+	if len(withRemote) > 0 {
+		fmt.Fprintf(&b, "repo_fetch and repo_fast_forward reach: %s\n", strings.Join(withRemote, ", "))
+	}
 	for name := range e.pool.Ambiguous() {
 		fmt.Fprintf(&b, "ambiguous (not a dispatch target until pinned under repos: in config): %s\n", name)
 	}
@@ -114,7 +166,7 @@ func (e *Engine) repoListText(ctx context.Context, f domain.Feature) string {
 	if own == "" {
 		own = "(the workspace's default)"
 	}
-	fmt.Fprintf(&b, "this session's repository: %s, branch %s\n", own, f.BranchName())
+	fmt.Fprintf(&b, "this session's repository: %s%s, branch %s\n", own, e.remotesNote(ctx, f.Repo), f.BranchName())
 	attached := map[string]bool{}
 	for _, t := range e.attachedTrees(ctx, f) {
 		attached[t.Att.Repo] = true
@@ -134,6 +186,9 @@ func (e *Engine) repoListText(ctx context.Context, f domain.Feature) string {
 			free = append(free, n)
 		}
 	}
+	for i, n := range free {
+		free[i] = n + e.remotesNote(ctx, n)
+	}
 	fmt.Fprintf(&b, "available to attach: %s\n", strings.Join(free, ", "))
 	if e.pool != nil {
 		for name := range e.pool.Ambiguous() {
@@ -141,4 +196,90 @@ func (e *Engine) repoListText(ctx context.Context, f domain.Feature) string {
 		}
 	}
 	return b.String()
+}
+
+func (e *Engine) handleRepoSync(s *Session, tc *agent.ToolCall) {
+	f := s.Feature
+	var a struct {
+		Repo   string `json:"repo"`
+		Remote string `json:"remote"`
+	}
+	_ = json.Unmarshal(tc.Args, &a)
+	if e.pool == nil {
+		e.resolveNow(s, tc.ID, "error: this workspace has no repositories")
+		return
+	}
+	if a.Repo == "" && !f.Home {
+		a.Repo = f.Repo
+	}
+	if a.Repo == "" && f.Home {
+		e.resolveNow(s, tc.ID, "error: name a repository, as repo_list gives it")
+		return
+	}
+	if !e.pool.Known(a.Repo) {
+		e.resolveNow(s, tc.ID, fmt.Sprintf("error: no repository %s in this workspace", a.Repo))
+		return
+	}
+	mgr, err := e.pool.ManagerForName(context.Background(), a.Repo)
+	if err != nil {
+		e.resolveNow(s, tc.ID, "error: "+err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), repoFetchTimeout)
+	defer cancel()
+	what := a.Repo
+	if what == "" {
+		what = "the default repository"
+	}
+	if tc.Name == repoFFToolName {
+		base := mgr.Status(ctx).Base
+		from, to, err := mgr.FastForwardBase(ctx)
+		switch {
+		case err != nil:
+			e.resolveNow(s, tc.ID, "error: "+mgr.RedactRemotes(ctx, err.Error()))
+		case from == to:
+			e.resolveNow(s, tc.ID, fmt.Sprintf("%s of %s is already up to date with its upstream", base, what))
+		default:
+			e.resolveNow(s, tc.ID, fmt.Sprintf("%s of %s fast-forwarded %s → %s", base, what, shortRev(from), shortRev(to)))
+		}
+		return
+	}
+	if a.Remote != "" {
+		err = mgr.FetchRemote(ctx, a.Remote)
+	} else {
+		err = mgr.Fetch(ctx)
+	}
+	switch {
+	case errors.Is(err, worktree.ErrNoRemote):
+		e.resolveNow(s, tc.ID, what+" has no remote to fetch from")
+	case err != nil:
+		e.resolveNow(s, tc.ID, "error: "+mgr.RedactRemotes(ctx, err.Error()))
+	default:
+		e.resolveNow(s, tc.ID, "fetched "+what)
+	}
+}
+
+func shortRev(s string) string {
+	if len(s) > 7 {
+		return s[:7]
+	}
+	return s
+}
+
+// remotesNote is ", remotes: origin, upstream" for a repository of the pool,
+// or "" when it has none (a name with no note has no remote): how a session knows what repo_fetch can reach and
+// what to give as its remote. Names only; a remote's URL may carry a secret.
+func (e *Engine) remotesNote(ctx context.Context, name string) string {
+	if e.pool == nil || !e.pool.Known(name) {
+		return ""
+	}
+	mgr, err := e.pool.ManagerForName(ctx, name)
+	if err != nil {
+		return ""
+	}
+	r := mgr.Remotes(ctx)
+	if len(r) == 0 {
+		return ""
+	}
+	return " (remotes: " + strings.Join(r, ", ") + ")"
 }
