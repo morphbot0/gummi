@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/morphis/gummi/internal/agentpublish"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/state"
@@ -20,10 +21,11 @@ import (
 // restarts it. Taking the allowance back is never refused for it.
 var ErrAllowanceBusy = errors.New("the session is mid-turn; change the allowance when the turn ends")
 
-// mayHavePublishAllowance reports whether f is a card a person can allow
-// to publish: a session on a branch of its own in a repository.
-func mayHavePublishAllowance(f domain.Feature) bool {
-	return isSession(f) && !f.Home && !f.MainCheckout
+// MayHavePublishAllowance reports whether f is a card a person can allow
+// to publish: an open session on a branch of its own in a repository. It
+// is the one answer both faces offer the switch on.
+func MayHavePublishAllowance(f domain.Feature) bool {
+	return isSession(f) && !f.Home && !f.MainCheckout && f.Stage != domain.StageDone
 }
 
 // AgentMayPublish reports whether a person allowed the session f to
@@ -71,9 +73,26 @@ func (e *Engine) SetAgentMayPublish(ctx context.Context, id domain.FeatureID, al
 		// taking it back never waits: every tool call asks the store, so
 		// the next one is refused; the tool list is corrected when the
 		// backend next starts
-		return e.cfg.Store.SetAgentPublish(ctx, id, false)
+		return e.revokePublish(ctx, id)
 	}
-	if err := e.cfg.Store.SetAgentPublish(ctx, id, allow); err != nil {
+	repo := ""
+	if allow {
+		// the allowance is for the repository the branch pushes to now:
+		// a push the agent redirects anywhere else is refused
+		mgr, err := e.mgr(ctx, &f)
+		if err != nil {
+			return err
+		}
+		if repo, err = agentpublish.Target(ctx, mgr, &f); err != nil {
+			return fmt.Errorf("%s has nowhere to publish to: %w", f.Name(), err)
+		}
+		if err := e.cfg.Store.SetAgentPublishRepo(ctx, id, repo); err != nil {
+			return err
+		}
+		if err := e.cfg.Store.SetAgentPublish(ctx, id, true); err != nil {
+			return err
+		}
+	} else if err := e.revokePublish(ctx, id); err != nil {
 		return err
 	}
 	if ff == nil {
@@ -90,7 +109,7 @@ func (e *Engine) SetAgentMayPublish(ctx context.Context, id domain.FeatureID, al
 		who = by
 	}
 	if allow {
-		sess.appendSystem(who + " allows this session to publish its own branch: pr_push, pr_open, pr_update, pr_ready and pr_checks are yours from the next start.")
+		sess.appendSystem(who + " allows this session to publish its own branch to " + repo + ": pr_push, pr_open, pr_update, pr_ready and pr_checks are yours from the next start, and a push anywhere else is refused.")
 	} else {
 		sess.appendSystem(who + " takes back the allowance to publish: the pr_* tools are no longer offered.")
 	}
@@ -106,6 +125,13 @@ func (e *Engine) SetAgentMayPublish(ctx context.Context, id domain.FeatureID, al
 		e.persist(sess)
 	}
 	return nil
+}
+
+func (e *Engine) revokePublish(ctx context.Context, id domain.FeatureID) error {
+	if err := e.cfg.Store.SetAgentPublish(ctx, id, false); err != nil {
+		return err
+	}
+	return e.cfg.Store.SetAgentPublishRepo(ctx, id, "")
 }
 
 // publishHost lends agentpublish what the engine owns.

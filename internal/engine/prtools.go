@@ -64,7 +64,7 @@ func (e *Engine) handlePRTool(s *Session, tc *agent.ToolCall) {
 	deny := func(err *agentpublish.Error) { e.resolveNow(s, tc.ID, err.Error()) }
 	// every call asks the store afresh: the allowance may have been taken
 	// back since the backend started
-	if !mayHavePublishAllowance(f) || !e.AgentMayPublish(ctx, f.ID) {
+	if !MayHavePublishAllowance(f) || !e.AgentMayPublish(ctx, f.ID) {
 		deny(agentpublish.NotAllowed())
 		return
 	}

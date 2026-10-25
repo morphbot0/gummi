@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/publish"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // prGHShim is a gh that records its calls and answers from files in
@@ -21,7 +22,14 @@ const prGHShim = `#!/bin/sh
 echo "$*" >> "$GH_FAKE/log"
 case "$1 $2" in
 "auth status") exit 0 ;;
-"repo view") cat "$GH_FAKE/repo.json" ;;
+"repo view")
+	# GH_PLANT: from the second resolve on, plant a steering setting
+	# while the act is on the network, after its checks were made
+	if [ -n "$GH_PLANT" ]; then
+		[ -e "$GH_FAKE/seen" ] && git -C "$GH_PLANT" config core.sshCommand /tmp/evil
+		touch "$GH_FAKE/seen"
+	fi
+	cat "$GH_FAKE/repo.json" ;;
 "pr list") echo '[]' ;;
 "pr view") cat "$GH_FAKE/view.json" ;;
 "pr create") cat > "$GH_FAKE/body"; echo "https://github.com/me/widget/pull/512" ;;
@@ -129,8 +137,8 @@ func prSession(t *testing.T, allow bool) *prFixture {
 	if err := os.MkdirAll(hooks, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"reference-transaction", "commit-msg"} {
-		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	for _, name := range []string{"pre-push", "reference-transaction", "commit-msg"} {
+		if err := os.WriteFile(filepath.Join(hooks, name), worktree.OwnHook(), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -151,7 +159,7 @@ func prSession(t *testing.T, allow bool) *prFixture {
 	p.f = freeformCard(1, "limit the pairing rate")
 	createFeature(t, store, p.f)
 	if allow {
-		if err := store.SetAgentPublish(context.Background(), p.f.ID, true); err != nil {
+		if err := p.e.SetAgentMayPublish(context.Background(), p.f.ID, true, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -237,7 +245,7 @@ func TestPRToolsRefusedWithoutAllowance(t *testing.T) {
 	// a child card (a workflow step's) never publishes
 	child := freeformCard(3, "a step")
 	child.Child = domain.ChildLink{Of: p.f.ID, Seq: 1, Node: "build/1"}
-	if mayHavePublishAllowance(child) {
+	if MayHavePublishAllowance(child) {
 		t.Error("a child card may have the allowance")
 	}
 }
@@ -435,12 +443,12 @@ func TestPRToolsRefusePlantedHookAndSteering(t *testing.T) {
 	}
 	_ = os.Remove(hook)
 	p.sh(p.dir, "git", "config", "core.sshCommand", "/tmp/evil")
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: facts-changed: ") {
+	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") {
 		t.Errorf("planted sshCommand = %q", got)
 	}
 	p.sh(p.dir, "git", "config", "--unset", "core.sshCommand")
 	p.sh(p.dir, "git", "config", "remote.origin.pushurl", "/tmp/elsewhere")
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: ") {
+	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") || !strings.Contains(got, "remote.origin.pushurl") {
 		t.Errorf("planted pushurl = %q", got)
 	}
 }
@@ -464,5 +472,111 @@ func TestPRToolsRefuseAHooksPathOutsideGummis(t *testing.T) {
 	t.Setenv("GIT_CONFIG_VALUE_0", evil)
 	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
 		t.Errorf("hooks path in the agent's tree = %q", got)
+	}
+}
+
+func (p *prFixture) clearGHLog() { _ = os.Remove(filepath.Join(p.fake, "log")) }
+
+// What the agent planted is refused before gummi runs the first command
+// that carries the person's credential: no gh call, no ls-remote.
+func TestPRToolsRefuseBeforeTheCredentialIsUsed(t *testing.T) {
+	p := prSession(t, true)
+	p.commit("a.txt")
+	p.sh(p.dir, "git", "config", "credential.helper", "!/tmp/evil")
+	p.clearGHLog()
+	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") {
+		t.Fatalf("planted credential helper = %q", got)
+	}
+	if log := p.ghLog(); log != "" {
+		t.Errorf("gh ran with the token before the refusal:\n%s", log)
+	}
+}
+
+// A push only a force would make is refused, and the remote keeps its tip.
+func TestPRToolsNeverForcePush(t *testing.T) {
+	p := prSession(t, true)
+	p.commit("a.txt")
+	if got := p.call(prPushToolName, `{}`); strings.HasPrefix(got, "error") {
+		t.Fatalf("first push: %q", got)
+	}
+	branch := p.f.BranchName()
+	pushed := p.sh(p.bare, "git", "rev-parse", branch)
+	p.sh(p.dir, "git", "commit", "-q", "--amend", "-m", "feat: a.txt, amended")
+	got := p.call(prPushToolName, `{}`)
+	if !strings.HasPrefix(got, "error: force-refused: ") {
+		t.Errorf("rewritten branch = %q", got)
+	}
+	if now := p.sh(p.bare, "git", "rev-parse", branch); now != pushed {
+		t.Errorf("the remote was force-pushed: %s, was %s", now, pushed)
+	}
+}
+
+// The allowance is for the repository the branch pushed to when the person
+// gave it: a push remote or URL the agent points elsewhere is refused, and
+// nothing reaches the network first.
+func TestPRToolsRefuseAnotherTarget(t *testing.T) {
+	p := prSession(t, true)
+	p.commit("a.txt")
+	branch := p.f.BranchName()
+	p.sh(p.dir, "git", "remote", "add", "x", "git@github.com:someone/public.git")
+	p.sh(p.dir, "git", "config", "branch."+branch+".pushRemote", "x")
+	p.clearGHLog()
+	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: target-changed: ") || !strings.Contains(got, "someone/public") {
+		t.Errorf("redirected push remote = %q", got)
+	}
+	p.sh(p.dir, "git", "config", "--unset", "branch."+branch+".pushRemote")
+	p.sh(p.dir, "git", "remote", "set-url", "origin", "git@github.com:someone/public.git")
+	if got := p.call(prOpenToolName, `{"title":"t"}`); !strings.HasPrefix(got, "error: target-changed: ") {
+		t.Errorf("rewritten origin url = %q", got)
+	}
+	if log := p.ghLog(); log != "" {
+		t.Errorf("gh ran before the refusal:\n%s", log)
+	}
+}
+
+// A file in gummi's hooks directory is gummi's only while it holds gummi's
+// script: the agent's shell can write there too.
+func TestPRToolsRefuseARewrittenGummiHook(t *testing.T) {
+	p := prSession(t, true)
+	p.commit("a.txt")
+	hook := filepath.Join(p.e.cfg.Workspace.HooksDir(), "pre-push")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
+		t.Errorf("rewritten gummi hook = %q", got)
+	}
+}
+
+// gummi's hook runs the hook a person's own configuration names, in any
+// scope but the environment's: one there is refused as any other is.
+func TestPRToolsRefuseTheHookGummisHookWouldRun(t *testing.T) {
+	p := prSession(t, true)
+	p.commit("a.txt")
+	theirs := filepath.Join(filepath.Dir(p.bare), "global-hooks")
+	if err := os.MkdirAll(theirs, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(theirs, "pre-push"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p.sh(p.dir, "git", "config", "--global", "core.hooksPath", theirs)
+	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") || !strings.Contains(got, "global-hooks") {
+		t.Errorf("global hooks path = %q", got)
+	}
+}
+
+// A setting planted while the act is on the network, after its first
+// checks, is caught by the check made again just before the push.
+func TestPRToolsRecheckBeforeThePush(t *testing.T) {
+	p := prSession(t, true)
+	p.commit("a.txt")
+	t.Setenv("GH_PLANT", p.dir)
+	got := p.call(prPushToolName, `{}`)
+	if !strings.HasPrefix(got, "error: steering-config: ") {
+		t.Errorf("setting planted mid-act = %q", got)
+	}
+	if b := p.remoteBranches(); b != "" {
+		t.Errorf("pushed anyway: %q", b)
 	}
 }

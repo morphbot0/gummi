@@ -376,6 +376,11 @@ func do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 	}
 	env.Dir, env.GH = tree, fx.GH
 	res := Result{Act: req.Act, Draft: p.Draft}
+	if env.Recheck != nil {
+		if r := env.Recheck(ctx); r != nil {
+			return res, r
+		}
+	}
 	if p.ToDraft {
 		t.begin(p.step(StepToDraft))
 		if _, err := env.gh(ctx, nil, "pr", "ready", strconv.Itoa(fx.PR.Number), "--repo", fx.PR.Repo, "--undo"); err != nil {

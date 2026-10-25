@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -39,6 +40,15 @@ func TestAgentPublishToggleWebAndTUI(t *testing.T) {
 	in.publish = false
 	if got := label(false); got != "" {
 		t.Errorf("a board that does not publish offers %q", got)
+	}
+
+	// the allowance is given for the repository the branch pushes to
+	wt, err := eng.WorktreesFor(ctx, &f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.CommandContext(ctx, "git", "-C", wt.RepoRoot(), "remote", "add", "origin", "git@github.com:me/dark.git").CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
 	}
 
 	// the web page's request

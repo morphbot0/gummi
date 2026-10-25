@@ -36,8 +36,7 @@ func agentPublishDetail(on bool) string {
 // agentPublishOffered is whether the card can carry the allowance at all:
 // a session on a branch of its own, on a board that publishes.
 func agentPublishOffered(in nextInput, r featureRow) bool {
-	return in.publish && in.agentWired && r.F.IsFreeform() && !r.F.IsChild() && !r.F.Home && !r.F.MainCheckout &&
-		!r.Landed && !r.watchOnly() && r.F.Stage != domain.StageDone
+	return in.publish && in.agentWired && engine.MayHavePublishAllowance(r.F) && !r.Landed && !r.watchOnly()
 }
 
 func agentPublishNotice(name string, allow bool) string {

@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -31,9 +32,20 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-// CodeNotAllowed is the refusal of a call from a session its person has
-// not allowed to publish.
-const CodeNotAllowed = "publish-not-allowed"
+// The refusals of this adapter's own, beside publish.Code's.
+const (
+	// CodeNotAllowed is the refusal of a call from a session its person
+	// has not allowed to publish.
+	CodeNotAllowed = "publish-not-allowed"
+	// CodeSteering is a repository-local git setting that would steer the
+	// push or its authentication. It stays until the setting is removed.
+	CodeSteering = "steering-config"
+	// CodeTargetChanged is a push that would go to another repository than
+	// the one the person allowed.
+	CodeTargetChanged = "target-changed"
+	// CodeWouldForce is a push only a force would make.
+	CodeWouldForce = "force-refused"
+)
 
 // Error is a typed failure as the agent reads it.
 type Error struct {
@@ -89,8 +101,9 @@ type Host interface {
 	// GH is the gh binary to run, "" for gh on the path.
 	GH() string
 	// HooksDir is the directory of git hooks gummi names to git in its own
-	// environment (core.hooksPath), "" when it names none. It sits outside
-	// every tree an agent writes in.
+	// environment (core.hooksPath), "" when it names none. It comes from
+	// the workspace, never from the environment an agent can set; a hook
+	// in it counts as gummi's only if it holds gummi's own script.
 	HooksDir() string
 }
 
@@ -114,8 +127,20 @@ type Outcome struct {
 	Text string
 }
 
+// acting serialises one session's calls: the card lock is re-entrant for
+// the session that holds it, and each pr_* call runs on its own goroutine.
+var acting sync.Map // domain.FeatureID → *sync.Mutex
+
 // Do runs act for the session f under the card's lock.
+//
+// Everything the agent could have planted in the repository — a push hook,
+// a steering git setting, a push target other than the one the person
+// allowed — is refused before the first command that carries the
+// credential, and checked again just before the push.
 func Do(ctx context.Context, h Host, f domain.Feature, act publish.Act, a Args) (Outcome, *Error) {
+	mu, _ := acting.LoadOrStore(f.ID, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
 	release, err := h.Lock(f.ID)
 	if err != nil {
 		return Outcome{}, &Error{Code: string(publish.CodeBusy), Text: err.Error()}
@@ -132,6 +157,18 @@ func Do(ctx context.Context, h Host, f domain.Feature, act publish.Act, a Args) 
 	if err != nil {
 		return Outcome{}, fromPublish(publish.AsError(err))
 	}
+	dir, err := mgr.Path(&f)
+	if err != nil {
+		return Outcome{}, fromPublish(publish.AsError(err))
+	}
+	allowed, err := st.AgentPublishRepo(ctx, f.ID)
+	if err != nil {
+		return Outcome{}, fromPublish(publish.AsError(err))
+	}
+	recheck := func(ctx context.Context) *Error { return planted(ctx, mgr, &f, dir, h.HooksDir(), allowed) }
+	if r := recheck(ctx); r != nil {
+		return Outcome{}, r
+	}
 	anns, err := st.ListDiffAnnotations(ctx, f.ID)
 	if err != nil {
 		return Outcome{}, fromPublish(publish.AsError(err))
@@ -145,20 +182,13 @@ func Do(ctx context.Context, h Host, f domain.Feature, act publish.Act, a Args) 
 	if perr != nil {
 		return Outcome{}, fromPublish(perr)
 	}
-	// A person's confirm is what lets a hook or a steering git setting run
-	// with the credential loaded: they are shown it and the fingerprint
-	// pins it. An agent writes into this tree and nobody is shown anything,
-	// so what it could have planted refuses instead.
-	if hook := foreignHook(ctx, mgr, &f, fx.Hook, h.HooksDir()); hook != "" {
-		return Outcome{}, &Error{
-			Code: string(publish.CodeHookRejected), Text: "git would run a push hook with the person's credential loaded: " + hook,
-			Fix: "remove the hook, or ask the person to publish this branch themselves",
-		}
+	if !strings.EqualFold(fx.HeadRepo, allowed) {
+		return Outcome{}, targetChanged(fx.HeadRepo, allowed)
 	}
-	if key := steeringKey(ctx, mgr, &f); key != "" {
+	if fx.Push == publish.PushLease && act != publish.ActReady {
 		return Outcome{}, &Error{
-			Code: string(publish.CodeFactsChanged), Text: "this repository's own git configuration sets " + key + ", which steers where a push goes or how it authenticates",
-			Fix: "remove it, or ask the person to publish this branch themselves",
+			Code: CodeWouldForce, Text: fx.Remote + "/" + fx.RemoteBranch + " holds a tip this branch was rewritten away from, and only a force push would replace it",
+			Fix: "put the pushed commits back under the branch, or ask the person to publish it themselves",
 		}
 	}
 	req := publish.Request{Act: act, Title: a.Title, Body: a.Body, Draft: a.Draft}
@@ -182,6 +212,12 @@ func Do(ctx context.Context, h Host, f domain.Feature, act publish.Act, a Args) 
 		return Outcome{}, fromPublish(perr)
 	}
 	req.Fingerprint = fx.Fingerprint()
+	env.Recheck = func(ctx context.Context) *publish.Error {
+		if r := recheck(ctx); r != nil {
+			return &publish.Error{Code: publish.Code(r.Code), Text: r.Text, Fix: r.Fix}
+		}
+		return nil
+	}
 	res, perr := publish.Do(ctx, env, mgr, in, req, func(ctx context.Context, ref domain.PullRequestRef) error {
 		return st.SetPullRequest(ctx, f.ID, ref)
 	})
@@ -198,66 +234,142 @@ func Do(ctx context.Context, h Host, f domain.Feature, act publish.Act, a Args) 
 	return Outcome{Text: resultText(res, plan)}, nil
 }
 
+// planted is the first thing in the repository that would run code or
+// steer the push with the person's credential loaded and that nobody was
+// shown: a push hook not gummi's, a steering setting in the repository's
+// own configuration, or a push target other than allowed. It reads the
+// tree's git configuration and files only; nothing in it reaches the
+// network.
+func planted(ctx context.Context, mgr *worktree.Manager, f *domain.Feature, dir, own, allowed string) *Error {
+	if hook := foreignHook(ctx, dir, own); hook != "" {
+		return &Error{
+			Code: string(publish.CodeHookRejected), Text: "git would run a push hook with the person's credential loaded: " + hook,
+			Fix: "remove the hook, or ask the person to publish this branch themselves",
+		}
+	}
+	if key := steeringKey(ctx, dir); key != "" {
+		return &Error{
+			Code: CodeSteering, Text: "this repository's own git configuration sets " + key + ", which steers where a push goes or how it authenticates; calling again will not help",
+			Fix: "remove it, or ask the person to publish this branch themselves",
+		}
+	}
+	if repo, err := target(ctx, mgr, f, dir); err == nil && !strings.EqualFold(repo, allowed) {
+		return targetChanged(repo, allowed)
+	}
+	// a target that cannot be read is Resolve's to refuse, typed
+	return nil
+}
+
+func targetChanged(repo, allowed string) *Error {
+	if allowed == "" {
+		return &Error{Code: CodeTargetChanged, Text: "the allowance names no repository to publish to", Fix: "ask the person to allow this session to publish again"}
+	}
+	return &Error{
+		Code: CodeTargetChanged, Text: "the push would go to " + repo + ", and the person allowed this session to publish to " + allowed,
+		Fix: "put the branch's push remote back, or ask the person to allow publishing again",
+	}
+}
+
+// Target is the GitHub repository (owner/name) the card's branch pushes
+// to, read from the repository's configuration alone: the remote the branch
+// pushes to and its push URL. The engine records it when a person gives
+// the allowance, and every act refuses a push anywhere else.
+func Target(ctx context.Context, mgr *worktree.Manager, f *domain.Feature) (string, error) {
+	return target(ctx, mgr, f, mgr.RepoRoot())
+}
+
+func target(ctx context.Context, mgr *worktree.Manager, f *domain.Feature, dir string) (string, error) {
+	t, err := mgr.PushTarget(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	url := ""
+	for _, key := range []string{"remote." + t.Remote + ".pushurl", "remote." + t.Remote + ".url"} {
+		if out, err := exec.CommandContext(ctx, "git", "-C", dir, "config", "--get", key).Output(); err == nil {
+			if url = strings.TrimSpace(string(out)); url != "" {
+				break
+			}
+		}
+	}
+	repo := publish.RepoOfURL(url)
+	if repo == "" {
+		return "", fmt.Errorf("the push remote %s (%s) is not a github.com repository", t.Remote, url)
+	}
+	return repo, nil
+}
+
 // pushHookNames are the client-side hooks a push runs (publish's list).
 var pushHookNames = []string{"pre-push", "reference-transaction"}
 
-// foreignHook names the first push hook in hooks (publish's ", "-joined
-// list) that is not gummi's own, "" for none. A hook in gummi's hooks
-// directory is gummi's: it is outside every agent-writable tree. It chains
-// to the repository's own hook of the same name, though, so one of those
-// counts as foreign too.
-func foreignHook(ctx context.Context, mgr *worktree.Manager, f *domain.Feature, hooks, own string) string {
-	if hooks == "" {
-		return ""
-	}
+// foreignHook names the first hook git would run during a push that is not
+// gummi's, "" for none. gummi's is a hook in its own hooks directory that
+// holds exactly gummi's script; anything else there, a link out of it, and
+// a hook anywhere else is foreign. gummi's script runs the repository's own
+// hook of the same name, found the way the script finds it, so an
+// executable one of those is foreign too.
+func foreignHook(ctx context.Context, dir, own string) string {
 	within := func(p string) bool {
 		if own == "" {
 			return false
 		}
-		a, b := resolved(p), resolved(own)
-		rel, err := filepath.Rel(b, a)
+		rel, err := filepath.Rel(resolved(own), resolved(p))
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
-	ours := false
-	for _, p := range strings.Split(hooks, ", ") {
-		if !within(p) {
-			return p
-		}
-		ours = true
-	}
-	if !ours {
-		return ""
-	}
-	dir, err := mgr.Path(f)
-	if err != nil {
-		return hooks
-	}
-	theirs := ""
-	if out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
-		theirs = filepath.Join(strings.TrimSpace(string(out)), "hooks")
-		if !filepath.IsAbs(theirs) {
-			theirs = filepath.Join(dir, theirs)
-		}
-	}
-	for _, scope := range []string{"--local", "--worktree"} {
-		out, err := exec.CommandContext(ctx, "git", "-C", dir, "config", scope, "--type=path", "--get-all", "core.hooksPath").Output()
+	for _, name := range pushHookNames {
+		out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--git-path", "hooks/"+name).Output()
 		if err != nil {
 			continue
 		}
-		if lines := strings.Fields(string(out)); len(lines) > 0 {
-			theirs = lines[len(lines)-1]
+		p := strings.TrimSpace(string(out))
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, p)
 		}
-	}
-	if theirs == "" || within(filepath.Join(theirs, "x")) {
-		return ""
-	}
-	for _, name := range pushHookNames {
-		p := filepath.Join(theirs, name)
-		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+		if !executable(p) {
+			continue
+		}
+		if !within(p) || !worktree.IsOwnHook(p) {
 			return p
+		}
+		theirs := chainedHooks(ctx, dir)
+		if theirs == "" || within(filepath.Join(theirs, name)) {
+			continue
+		}
+		if q := filepath.Join(theirs, name); executable(q) {
+			return q
 		}
 	}
 	return ""
+}
+
+// chainedHooks is the directory gummi's hook script runs the repository's
+// own hook from: the last core.hooksPath of any scope but the environment's
+// (git's "command"), else the common git directory's hooks. A relative path
+// is the tree's, where git runs a hook.
+func chainedHooks(ctx context.Context, dir string) string {
+	theirs := ""
+	if out, err := exec.CommandContext(ctx, "git", "-C", dir, "config", "--type=path", "--show-scope", "--get-all", "core.hooksPath").Output(); err == nil {
+		for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+			if scope, p, ok := strings.Cut(line, "\t"); ok && scope != "command" {
+				theirs = p
+			}
+		}
+	}
+	if theirs == "" {
+		out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--git-common-dir").Output()
+		if err != nil {
+			return ""
+		}
+		theirs = filepath.Join(strings.TrimSpace(string(out)), "hooks")
+	}
+	if !filepath.IsAbs(theirs) {
+		theirs = filepath.Join(dir, theirs)
+	}
+	return theirs
+}
+
+func executable(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
 }
 
 func resolved(p string) string {
@@ -270,26 +382,25 @@ func resolved(p string) string {
 	return filepath.Clean(p)
 }
 
-// steeringKeys are the repository-local git settings an agent could plant to
-// redirect or hijack an authenticated push.
-var steeringKeys = []string{"core.sshcommand", "core.askpass", "core.hookspath", "credential.", "url.", "http.", "include", "gpg.", "core.gitproxy", "core.fsmonitor"}
+// steeringKeys are the repository-local git settings an agent could plant
+// to run code during the push or hijack its authentication. Where the push
+// goes is pinned apart from these (target).
+var steeringKeys = []string{
+	"core.sshcommand", "core.askpass", "core.hookspath", "core.gitproxy", "core.fsmonitor",
+	"credential.", "url.", "http.", "include", "gpg.", "push.", "submodule.", "protocol.",
+}
 
-// steeringSuffixes are per-remote settings that redirect a push without
-// touching the remote's fetch url.
-var steeringSuffixes = []string{".pushurl", ".receivepack", ".proxy", ".uploadpack"}
+// steeringSuffixes are per-remote settings that redirect a push or run a
+// program for it.
+var steeringSuffixes = []string{".pushurl", ".receivepack", ".proxy", ".uploadpack", ".vcs"}
 
 // steeringKey names the first such setting in the tree's own git
-// configuration, "" for none. A tree that cannot be read counts as none:
-// the push itself then fails or succeeds as git decides.
-func steeringKey(ctx context.Context, mgr *worktree.Manager, f *domain.Feature) string {
-	dir, err := mgr.Path(f)
-	if err != nil {
-		return ""
-	}
+// configuration (its local and worktree scopes), "" for none. The person's
+// global and system configuration are theirs and are not read: DESIGN
+// §22.14 says what that leaves open.
+func steeringKey(ctx context.Context, dir string) string {
 	for _, scope := range []string{"--local", "--worktree"} {
-		cmd := exec.CommandContext(ctx, "git", "-C", dir, "config", scope, "--list")
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
-		out, err := cmd.Output()
+		out, err := exec.CommandContext(ctx, "git", "-C", dir, "config", scope, "--list").Output()
 		if err != nil {
 			continue
 		}

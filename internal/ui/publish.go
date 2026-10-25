@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -662,7 +663,7 @@ func (d *WebDocs) PublishOffer(ctx context.Context) *webapi.PublishOffer {
 		return nil
 	}
 	out := &webapi.PublishOffer{Available: true}
-	if d.eng != nil && f.IsFreeform() && !f.IsChild() && !f.Home && !f.MainCheckout && f.Stage != domain.StageDone {
+	if d.eng != nil && engine.MayHavePublishAllowance(f) {
 		out.AgentCan, out.AgentAllowed = true, d.eng.AgentMayPublish(ctx, f.ID)
 	}
 	doer := d.publishDoer()

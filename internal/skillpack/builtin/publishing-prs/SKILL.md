@@ -51,12 +51,21 @@ Every failure is `error: <code>: text — fix`.
 - `publish-not-allowed`: the person took the allowance back; stop.
 - `dirty`: commit or discard; `rebase-in-flight`: finish it.
 - `remote-ahead`, `name-taken`: the remote holds commits you lack; bring
-  them in locally (fetch and rebase or merge) and push again. Nothing is
-  ever forced.
+  them in locally (fetch and merge) and push again.
+- `force-refused`: you rewrote commits you had already pushed (an amend,
+  a rebase). Nothing is ever forced: put the pushed commits back under
+  the branch and add new ones on top, or ask the person to publish.
+- `hook-rejected`, `steering-config`: a git hook or a repository setting
+  would run with the person's credential. Calling again will not help;
+  remove it if you put it there, else tell the person.
+- `target-changed`: the push would go to another repository than the one
+  the person allowed. Put the push remote back, or ask the person.
 - `agent-busy`: a workflow run is working in your tree; wait for it.
 - `no-pr`: open one with `pr_open`. `base-unchosen`: call `pr_open` again
   with `base_repo` set to one of the repositories named.
 - `facts-changed`, `branch-moved`: the branch or remote moved during the
-  call; call again.
-- `not-verified`, `unresolved-annotations`: the diff has open review
-  comments; resolve them before `pr_ready`.
+  call; call again once.
+- `not-verified`: the card may not land yet (the reason is in the text);
+  `unresolved-annotations`: the diff has open review comments. Either
+  refuses `pr_ready`; a push to a ready PR returns it to draft first and
+  says so.

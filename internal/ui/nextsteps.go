@@ -269,7 +269,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	// a session's model switch needs an agent to start, and a board with
 	// no engine has none to start (cardactions.go's model row).
 	in.agentWired = m.engine != nil
-	in.agentPublish = m.engine != nil && m.engine.AgentMayPublish(context.Background(), r.F.ID)
+	in.agentPublish = m.engine != nil && r.AgentPublish
 	in.otherRepos = m.engine != nil && len(m.repoNames) > 0
 	if r.Drift != nil {
 		in.drifted, in.driftForkedFrom, in.driftMissingBase = true, r.Drift.ForkedFrom, r.Drift.MissingBase

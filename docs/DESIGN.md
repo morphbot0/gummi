@@ -5515,53 +5515,6 @@ workflow card.
   when they turn red; that needs the per-card remote read §22.10 defers.
   A session watches by calling `pr_checks` (§22.14).
 
-### 22.14 A session publishes on a person's standing allowance
-
-Decision 31. Decision 25 made every publish a person's act. That left a
-session able to write a branch and unable to finish the job it was given:
-open the PR, see a check go red, fix it and push again. A person who
-wants that can now say so once.
-
-- **The allowance.** A per-session flag, off by default
-  (`features.agent_publish`, `Store.SetAgentPublish`,
-  `Engine.AgentMayPublish` / `SetAgentMayPublish`). The PR tab's
-  "Agent may publish" switch (`PUT /api/cards/{id}/publish/allowance`)
-  and the card menu's "let the session publish…" set it; a person is
-  named in the thread when it changes. It is refused for an agent (a
-  home), a main-checkout card, a workflow step's card and a closed card,
-  and while a turn is in flight, because the session's tools are fixed
-  when its backend starts and a change restarts it with the conversation
-  replayed. No tool, run or schedule sets it.
-- **The tools** (`engine/prtools.go`), listed only while the allowance
-  is on and refused with `publish-not-allowed` if called anyway (each
-  call reads the store afresh): `pr_push`, `pr_open`, `pr_update`,
-  `pr_ready`, `pr_checks`. Each resolves and acts in one call with no
-  confirm. There is no merge, force-push, retarget, review-resolve,
-  landing or back-to-draft tool.
-- **One adapter** (`internal/agentpublish`): the same `Resolve`,
-  `PlanFor` and `Do` a person's confirm runs, under the card lock, with
-  the credential lent to the one command that needs it (§22.2) and never
-  in the session's environment. The same refusals apply — a dirty tree,
-  a rebase in flight, a stacked or landed card, the floor under ready.
-  The one input that changes is "an agent holds it", because the caller
-  is that agent; a workflow run working in the same tree still refuses
-  (`agent-busy`). A failure reaches the session as `error: <code>: text
-  — fix`, the code being `publish.Code`'s. A push is never forced: a
-  remote that has moved is refused, not overwritten. Each act is a line
-  in the thread, by the agent. The engine does not import `publish`;
-  `internal/agentpublish` is the one agent-facing importer.
-- **Watching without a watcher.** gummi adds no poller, no webhook and
-  no attention event on a red check. The loop is the session's — push,
-  `pr_checks`, on a failure read the logs and the commit they ran on,
-  fix, commit, `pr_push`, `pr_checks` again — and the bundled
-  `publishing-prs` skill teaches it. To come back later it asks the
-  person for a heartbeat (§26); a session cannot propose a schedule
-  itself today. The loop is bounded by the session's envelope like any
-  turn.
-- **What does not bend.** gummi never merges, retargets, force-pushes or
-  lands, and never resolves a review thread; a person does. The
-  allowance replaces the per-act confirm, not the floor.
-
 ### 22.12 Closing a card by push
 
 Some remotes take a push to the base directly — a team forge with no
@@ -5629,6 +5582,108 @@ branch, a fetch, and the push of §22.1.
   a running agent either.
 - The TUI does not offer the tab yet; its diff view and the card's
   terminal remain how a person works the tree there.
+
+### 22.14 A session publishes on a person's standing allowance
+
+Decision 31. Decision 25 made every publish a person's act. That left a
+session able to write a branch and unable to finish the job it was given:
+open the PR, see a check go red, fix it and push again. A person who
+wants that can now say so once.
+
+- **The allowance.** A per-session flag, off by default
+  (`features.agent_publish`, `Store.SetAgentPublish`,
+  `Engine.AgentMayPublish` / `SetAgentMayPublish`). The PR tab's
+  "Agent may publish" switch (`PUT /api/cards/{id}/publish/allowance`)
+  and the card menu's "let the session publish…" set it; a person is
+  named in the thread when it changes. It is given for one repository:
+  the GitHub repository the branch pushes to when the person gives it
+  (`features.agent_publish_repo`, `agentpublish.Target`), named in that
+  thread line; a push anywhere else is refused (`target-changed`). It is
+  refused for an agent (a home), a main-checkout card, a workflow step's
+  card and a closed card (`engine.MayHavePublishAllowance`, which both
+  faces ask), and giving it is refused while a turn is in flight, because
+  the session's tools are fixed when its backend starts and a change
+  restarts it with the conversation replayed. Taking it back is never
+  refused: every call reads the store, so the next one fails. No tool,
+  run or schedule sets it.
+- **The tools** (`engine/prtools.go`), listed only while the allowance
+  is on and refused with `publish-not-allowed` if called anyway (each
+  call reads the store afresh): `pr_push`, `pr_open`, `pr_update`,
+  `pr_ready`, `pr_checks`. Each resolves and acts in one call with no
+  confirm. There is no merge, force-push, retarget, review-resolve,
+  landing or back-to-draft tool.
+- **One adapter** (`internal/agentpublish`): the same `Resolve`,
+  `PlanFor` and `Do` a person's confirm runs, under the card lock, with
+  the credential lent to the one command that needs it (§22.2) and never
+  in the session's environment. The same refusals apply — a dirty tree,
+  a rebase in flight, a stacked or landed card, the floor under ready.
+  The one input that changes is "an agent holds it", because the caller
+  is that agent; a workflow run working in the same tree still refuses
+  (`agent-busy`). A failure reaches the session as `error: <code>: text
+  — fix`, the code being `publish.Code`'s or the adapter's own
+  (`steering-config`, `target-changed`, `force-refused`). A push is
+  never forced: a remote that has moved is refused, not overwritten, and
+  so is a remote holding a tip the branch was rewritten away from, which
+  a person's confirm would push with a lease (`force-refused`). A push to
+  a ready PR whose tip may not land returns the PR to draft first, as a
+  person's would, and says so in its answer. Each act is a line in the
+  thread, by the agent. The engine does not import `publish`;
+  `internal/agentpublish` is the one agent-facing importer.
+- **What the agent planted is refused, not shown.** A person's confirm
+  shows the hooks and the steering configuration and its fingerprint
+  pins them; nobody is shown anything here. So before the first command
+  that carries the credential (`gh`, `ls-remote`), and again after the
+  act's last network read and just before the push (`publish.Env.Recheck`),
+  the adapter refuses, reading only local files and configuration:
+  - a push hook (`pre-push`, `reference-transaction`) git would run that
+    is not gummi's own. gummi's own is a file in the workspace's hooks
+    directory (`Workspace.HooksDir`, lent by the engine, never read from
+    the environment) holding exactly gummi's script
+    (`worktree.IsOwnHook`); a link out of it, other content in it, or a
+    hook anywhere else is refused (`hook-rejected`). gummi's script runs
+    the repository's own hook of the same name, found as the script
+    finds it (the last `core.hooksPath` of any scope but the
+    environment's, else the common git directory's `hooks`), so an
+    executable one of those is refused too;
+  - a setting in the repository's own configuration, its local and
+    worktree scopes, that runs a program or carries authentication:
+    `core.sshCommand`, `core.askpass`, `core.hooksPath`, `core.gitProxy`,
+    `core.fsmonitor`, `credential.*`, `url.*`, `http.*`, `include*`,
+    `gpg.*`, `push.*`, `submodule.*`, `protocol.*`, and a remote's
+    `pushurl`, `receivepack`, `uploadpack`, `proxy` or `vcs`
+    (`steering-config`);
+  - a push target other than the allowance's repository, however the
+    branch's push remote, `remote.pushDefault` or a remote's URL was
+    changed (`target-changed`).
+- **What those checks do not close.** The agent's shell is not confined
+  (`internal/sandbox`): it runs as the person. The checks keep gummi's own commands from
+  running what the agent planted *in the repository*; they are not a
+  sandbox. They leave open:
+  - the person's home: the global and system git configuration, which
+    are the person's own and legitimately carry credential helpers and
+    URL rewrites, are not read for steering keys, and `~/.ssh/config`
+    (a `ProxyCommand` runs with the lent key's agent socket), `gh`'s
+    configuration and the `PATH` gummi itself was started with are not
+    read at all. A shell that can write those can as well read the
+    stored token and key directly (`internal/credentials`);
+  - a write in the moment between the last check and git reading its
+    configuration and hooks for the push, which no check outside git
+    closes;
+  - what the receiving side runs, and what a check run on GitHub does
+    with the pushed commits.
+  A person who needs more gives the allowance only to a session whose
+  backend is confined, or publishes by hand.
+- **Watching without a watcher.** gummi adds no poller, no webhook and
+  no attention event on a red check. The loop is the session's — push,
+  `pr_checks`, on a failure read the logs and the commit they ran on,
+  fix, commit, `pr_push`, `pr_checks` again — and the bundled
+  `publishing-prs` skill teaches it. To come back later it asks the
+  person for a heartbeat (§26); a session cannot propose a schedule
+  itself today. The loop is bounded by the session's envelope like any
+  turn.
+- **What does not bend.** gummi never merges, retargets, force-pushes or
+  lands, and never resolves a review thread; a person does. The
+  allowance replaces the per-act confirm, not the floor.
 
 ## 23. Self-improvement — the skill pack and its curator
 
