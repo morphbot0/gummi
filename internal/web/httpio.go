@@ -1,6 +1,7 @@
 package web
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,11 +22,51 @@ import (
 // JSON is a composer line or a spec note.
 const maxBody = 1 << 20
 
+// gzipMin is the smallest JSON answer worth compressing: below it the
+// gzip framing costs about what it saves.
+const gzipMin = 1024
+
+// gzipOK is a response whose request takes gzip (compressJSON): writeJSON
+// compresses a large answer through it. A thread or a live block runs to
+// many kilobytes, and on a slow link every window of them is a round trip.
+// Every other write passes straight through.
+type gzipOK struct{ http.ResponseWriter }
+
+// Unwrap lets http.ResponseController reach the connection underneath.
+func (g gzipOK) Unwrap() http.ResponseWriter { return g.ResponseWriter }
+
+// compressJSON marks the response of a request that takes gzip, for
+// writeJSON. An upgrade (the terminal's websocket) is left as it came.
+func compressJSON(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if acceptsGzip(r) && r.Header.Get("Upgrade") == "" {
+			w = gzipOK{w}
+		}
+		h(w, r)
+	}
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", noCache)
+	b, err := json.Marshal(v)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	b = append(b, '\n')
+	h := w.Header()
+	h.Set("Content-Type", "application/json")
+	h.Set("Cache-Control", noCache)
+	if _, ok := w.(gzipOK); ok && len(b) >= gzipMin {
+		h.Add("Vary", "Accept-Encoding")
+		h.Set("Content-Encoding", "gzip")
+		w.WriteHeader(status)
+		zw := gzip.NewWriter(w)
+		_, _ = zw.Write(b)
+		_ = zw.Close()
+		return
+	}
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(b)
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

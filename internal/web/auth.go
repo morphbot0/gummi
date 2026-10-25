@@ -124,7 +124,9 @@ func (s *Server) authed(h http.HandlerFunc, waitingOK bool) http.Handler {
 }
 
 // api registers an authenticated route: a device with the board only.
-func (s *Server) api(pattern string, h http.HandlerFunc) { s.mux.Handle(pattern, s.authed(h, false)) }
+func (s *Server) api(pattern string, h http.HandlerFunc) {
+	s.mux.Handle(pattern, s.authed(compressJSON(h), false))
+}
 
 // waiting registers an authenticated route a device still waiting to be
 // let in may reach too: its event stream, which tells it only about
