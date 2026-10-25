@@ -746,7 +746,7 @@ function drawDiff (box, d) {
 // composer is the line to the step's agent: a turn while it runs, a
 // follow-up once it has ended (the server's words say which).
 function composer (s, pctx) {
-  const ta = h('textarea', { class: 'stp-input', testid: 'step-input', rows: '2', placeholder: s.says, 'aria-label': `Message ${s.id}` })
+  const ta = h('textarea', { class: 'stp-input', testid: 'step-input', rows: '1', placeholder: `Message ${s.id}`, 'aria-label': `Message ${s.id}` })
   ta.value = drafts.get(s.card) || ''
   ta.addEventListener('input', () => drafts.set(s.card, ta.value))
   const send = async (btn) => {
@@ -765,10 +765,12 @@ function composer (s, pctx) {
       btn.disabled = false
     }
   }
-  const btn = h('button', { class: 'btn pri', type: 'button', testid: 'step-send', onclick: (e) => send(e.currentTarget) }, 'Send')
+  const btn = h('button', { class: 'send', type: 'button', testid: 'step-send', onclick: (e) => send(e.currentTarget) }, 'Send')
   ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(btn) } })
+  // the thread's own composer, its bar saying what enter sends
   return h('div', { class: 'stp-comp', testid: 'step-composer', data: { draft: `step:${s.card}` } },
-    h('span', { class: 'to' }, `to ${s.id}`), ta, btn)
+    h('div', { class: 'composer' }, ta,
+      h('div', { class: 'bar' }, h('span', { class: 'enter' }, h('kbd', null, 'enter'), h('b', null, s.says)), btn)))
 }
 
 // ---------------------------------------------------------------- the proposal

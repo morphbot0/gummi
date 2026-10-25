@@ -1462,7 +1462,9 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .rb-foldbtn{font-size:13px;color:var(--fg3);padding:0 4px}
 
 /* a workflow step opened beside the thread (DESIGN §25.10) */
-.stp{display:flex;flex-direction:column;gap:10px;min-height:100%}
+/* the step panel is spaced as the thread is: 20px in from either side,
+   its composer the thread's own, docked at the foot as the thread's is */
+.stp{display:flex;flex-direction:column;gap:10px;min-height:100%;padding:14px 20px 0}
 .stp-head{display:flex;flex-direction:column;gap:5px}
 .stp-crumb{font-size:12px;color:var(--fg3);display:flex;flex-wrap:wrap;gap:2px;align-items:baseline}
 .stp-crumb b{color:var(--fg2)}
@@ -1473,7 +1475,7 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .stp-live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--q-run)}
 .stp-tabs{margin-left:0;align-self:flex-start}
 .stp-transcript{display:flex;flex-direction:column;gap:14px;flex:1}
-.stp-diff .file{margin-bottom:10px}
+.stp-diff .file{margin:0 0 10px}
 .stp-brief{display:flex;flex-direction:column;gap:10px}
 .stp-arts{display:flex;flex-direction:column;gap:4px;font-size:12.5px}
 .stp-art{display:flex;gap:8px;align-items:baseline;min-width:0}
@@ -1481,9 +1483,7 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .stp-art .hint{color:var(--fg4);font-size:11.5px}
 .stp-prompt,.stp-out pre{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow:auto}
 .stp-out{display:flex;flex-direction:column;gap:4px}
-.stp-comp{position:sticky;bottom:0;display:flex;gap:8px;align-items:flex-end;padding:8px 0 4px;background:var(--panel)}
-.stp-comp .to{font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--fg3);white-space:nowrap;align-self:center}
-.stp-input{flex:1;min-width:0;resize:vertical;border:1px solid var(--line2);border-radius:8px;padding:6px 10px;background:var(--panel);font-size:13px}
+.stp-comp{position:sticky;bottom:0;margin-top:auto;padding:8px 0 16px;background:var(--bg)}
 
 /* a run's proposal, on its decision (DESIGN §25.5) */
 .decision > .q.wfpq{white-space:normal;font-size:13px;font-weight:400;flex:0 1 auto;min-height:min(240px,34vh)}
