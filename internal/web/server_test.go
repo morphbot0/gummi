@@ -1036,3 +1036,35 @@ func TestTheNewDeviceNoticeSkipsTheDeviceItIsAbout(t *testing.T) {
 		}
 	}
 }
+
+// A stream opens gzipped with a hello naming it, and its page sets the
+// card it shows by that name; another device cannot.
+func TestAStreamIsNamedAndItsPageSetsItsFocus(t *testing.T) {
+	h := newHarness(t)
+	c, other := h.client(), h.client()
+	h.pair(c, "Simon")
+	h.pair(other, "Ana")
+	stream := h.events(c, "")
+	if !stream.res.Uncompressed {
+		t.Error("the event stream was not gzipped for a client that takes it")
+	}
+	hello := stream.until(webapi.EventHello)
+	var hi webapi.StreamHello
+	if err := json.Unmarshal([]byte(hello.data), &hi); err != nil || hi.Stream == "" || hello.id != "" {
+		t.Fatalf("hello = %+v (%v), want a stream name and no id", hello, err)
+	}
+	focus := func(cl *http.Client, stream string) int {
+		body, _ := json.Marshal(webapi.FocusRequest{Stream: stream, Card: "FD-007"})
+		res, _ := h.do(cl, http.MethodPost, "/api/events/focus", string(body))
+		return res.StatusCode
+	}
+	if st := focus(c, hi.Stream); st != http.StatusNoContent {
+		t.Errorf("focus on its own stream = %d, want 204", st)
+	}
+	if st := focus(other, hi.Stream); st != http.StatusNotFound {
+		t.Errorf("focus on another device's stream = %d, want 404", st)
+	}
+	if st := focus(c, "nope"); st != http.StatusNotFound {
+		t.Errorf("focus on no stream = %d, want 404", st)
+	}
+}

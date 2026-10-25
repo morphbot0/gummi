@@ -127,9 +127,16 @@ func notYet(w http.ResponseWriter, r *http.Request) {
 // response. It returns false when the caller should stop.
 func (s *Server) do(w http.ResponseWriter, r *http.Request, fn func(m *ui.Shell) tea.Cmd) bool {
 	err := s.opt.Board.Do(r.Context(), fn)
-	switch {
-	case err == nil:
+	if err == nil {
 		return true
+	}
+	s.doFailed(w, err)
+	return false
+}
+
+// doFailed answers a request whose read of the board failed (Bridge.Do).
+func (s *Server) doFailed(w http.ResponseWriter, err error) {
+	switch {
 	case errors.Is(err, ui.ErrBridgeStopped):
 		writeError(w, http.StatusServiceUnavailable, "the board has stopped")
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
@@ -137,7 +144,6 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request, fn func(m *ui.Shell)
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}
-	return false
 }
 
 func clientIP(r *http.Request) string {

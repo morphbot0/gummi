@@ -28,7 +28,8 @@ type ChangeKind string
 // text/event-stream). They are
 // invalidations, not payloads: the page refetches the JSON route the kind
 // names. Toast and viewers are the exceptions — each carries its whole
-// (small) value, because there is no route to refetch it from.
+// (small) value, because there is no route to refetch it from — and so is
+// a live change sent to a stream focused on its card (Change.Live).
 const (
 	// ChangeBoard: the board's rows, counts or the needs-you queue moved.
 	// Refetch GET /api/board.
@@ -37,7 +38,9 @@ const (
 	// set). Refetch GET /api/cards/{id} and its open tab.
 	ChangeCard ChangeKind = "card"
 	// ChangeLive: one card's live session streamed (ID set) — a delta, a
-	// tool call, spend. Refetch GET /api/cards/{id}/live.
+	// tool call, spend. Refetch GET /api/cards/{id}/live — unless the
+	// change carries Live, which is that read's answer, sent to a stream
+	// focused on the card (FocusRequest).
 	ChangeLive ChangeKind = "live"
 	// ChangeToast: a notice the TUI would have shown in its status band.
 	// Carries Text, Err and, when it is about one card, ID.
@@ -64,6 +67,26 @@ const (
 // it shows.
 const EventResync = "resync"
 
+// EventHello opens every event stream. Its data is a StreamHello: the
+// name a page gives the stream when it says which card it shows
+// (POST /api/events/focus). It has no id and is never replayed.
+const EventHello = "hello"
+
+// StreamHello is EventHello's data.
+type StreamHello struct {
+	Stream string `json:"stream"`
+}
+
+// FocusRequest is POST /api/events/focus: the card the page on Stream
+// has open (empty for none). A live change about that card is sent to
+// the stream with the live block in it (Change.Live), so the page draws
+// a streamed delta as it arrives rather than a round trip later. Answers
+// 204; 404 when this device has no such stream open.
+type FocusRequest struct {
+	Stream string `json:"stream"`
+	Card   string `json:"card,omitempty"`
+}
+
 // Change is one invalidation the model reports and the server fans out.
 // The SSE event name is Kind and the data is this value as JSON; the SSE
 // id is assigned by the server and is not part of the value.
@@ -85,6 +108,10 @@ type Change struct {
 	Done bool   `json:"done,omitempty"`
 	// Viewers is the whole presence list, on a viewers change.
 	Viewers []Viewer `json:"viewers,omitempty"`
+	// Live is the card's live block (GET /api/cards/{id}/live's answer)
+	// on a live change sent to a stream focused on the card; absent on
+	// every other stream, and on a change replayed to one reconnecting.
+	Live *Live `json:"live,omitempty"`
 	// Except is a device the change is not sent to: the one a toast is
 	// about, when what it says is addressed to everyone else. Never on
 	// the wire.

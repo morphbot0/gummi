@@ -21,6 +21,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -150,6 +151,7 @@ func New(o Options) (*Server, error) {
 		hub:     newHub(o.Now, o.Coalesce),
 		hosts:   map[string]struct{}{},
 	}
+	s.hub.fill = s.fillLive
 	s.filesSecret = make([]byte, 32)
 	if _, err := rand.Read(s.filesSecret); err != nil {
 		return nil, err
@@ -193,6 +195,23 @@ func (s *Server) secure(r *http.Request) bool { return s.opt.Secure || r.TLS != 
 // Publish fans a change out to every connected page. It never blocks: it
 // is the board model's change hook (ui.Shell.SetChangeHook).
 func (s *Server) Publish(c webapi.Change) { s.hub.publish(c) }
+
+// fillTimeout bounds the read of a live block a live change carries: a
+// board that does not answer in time sends the change bare, and the page
+// fetches it as it would have.
+const fillTimeout = 2 * time.Second
+
+// fillLive is card id's live block for the streams focused on it (hub.fill),
+// or nil when it cannot be read.
+func (s *Server) fillLive(id string) *webapi.Live {
+	ctx, cancel := context.WithTimeout(context.Background(), fillTimeout)
+	defer cancel()
+	live, ok, err := s.readLive(ctx, id)
+	if err != nil || !ok {
+		return nil
+	}
+	return &live
+}
 
 // Close ends every event stream, so an http.Server.Shutdown that follows
 // is not left waiting on connections that never go idle, and every shell

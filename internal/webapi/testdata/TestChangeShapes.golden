@@ -16,6 +16,15 @@
     "id": "FD-012"
   },
   {
+    "kind": "live",
+    "id": "FD-012",
+    "live": {
+      "busy": true,
+      "verb": "writing",
+      "spent": 0
+    }
+  },
+  {
     "kind": "toast",
     "id": "FD-012",
     "text": "FD-012: paused"

@@ -132,10 +132,20 @@ func TestChangeShapes(t *testing.T) {
 		{Kind: ChangeCard, ID: "FD-012"},
 		{Kind: ChangeCard, ID: "FD-013", Gone: true},
 		{Kind: ChangeLive, ID: "FD-012"},
+		{Kind: ChangeLive, ID: "FD-012", Live: &Live{Busy: true, Verb: "writing"}},
 		{Kind: ChangeToast, ID: "FD-012", Text: "FD-012: paused", Err: false},
 		{Kind: ChangeWork, ID: "FD-012", Step: "push", Text: "Push 4f1c2aa to morphis/gummi"},
 		{Kind: ChangeWork, ID: "FD-012", Step: "push", Err: true, Done: true},
 		{Kind: ChangeViewers, Viewers: []Viewer{{Person: "Simon", Device: "Mac · Firefox", DeviceID: "a1b2c3d4", Since: at}}},
+	}))
+}
+
+// A stream's hello and the focus a page sets on it.
+func TestStreamFocusShapes(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, map[string]any{
+		"hello": StreamHello{Stream: "9f2c41d0a7b3e815"},
+		"focus": FocusRequest{Stream: "9f2c41d0a7b3e815", Card: "FD-012"},
+		"none":  FocusRequest{Stream: "9f2c41d0a7b3e815"},
 	}))
 }
 

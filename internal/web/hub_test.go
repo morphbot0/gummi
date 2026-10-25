@@ -139,3 +139,53 @@ func TestHubCloseEndsEveryStream(t *testing.T) {
 	}
 	h.publish(webapi.Change{Kind: webapi.ChangeBoard}) // must not panic or block
 }
+
+// A live change goes whole to the stream whose page shows its card, read
+// once however many streams show it, and bare to every other stream; the
+// ring keeps it bare, so a page that resumes refetches. A page names only
+// its own device's streams.
+func TestHubSendsALiveChangeWholeToTheStreamShowingItsCard(t *testing.T) {
+	h := newHub(nil, time.Millisecond)
+	var reads []string
+	h.fill = func(id string) *webapi.Live {
+		reads = append(reads, id)
+		return &webapi.Live{Busy: true, Verb: "writing", Streaming: "half a sen"}
+	}
+	shows, other := Who{DeviceID: "d1"}, Who{DeviceID: "d2"}
+	a, _, _ := h.subscribe(shows, "")
+	drain(t, a, 1)
+	b, _, _ := h.subscribe(other, "")
+	drain(t, a, 1)
+	drain(t, b, 1)
+	if h.focus(other.DeviceID, a.stream, "FD-1") {
+		t.Fatal("a device set the focus of another device's stream")
+	}
+	if !h.focus(shows.DeviceID, a.stream, "FD-1") {
+		t.Fatal("a device could not set its own stream's focus")
+	}
+
+	h.publish(webapi.Change{Kind: webapi.ChangeLive, ID: "FD-1"})
+	h.publish(webapi.Change{Kind: webapi.ChangeLive, ID: "FD-2"})
+	whole, bare := drain(t, a, 2), drain(t, b, 2)
+	var c webapi.Change
+	if err := json.Unmarshal(whole[0].data, &c); err != nil || c.Live == nil || c.Live.Streaming != "half a sen" {
+		t.Errorf("focused stream got %s, want the live block in it", whole[0].data)
+	}
+	for _, ev := range []sseEvent{whole[1], bare[0], bare[1]} {
+		if c := (webapi.Change{}); json.Unmarshal(ev.data, &c) != nil || c.Live != nil {
+			t.Errorf("event %s carries a live block it was not focused on", ev.data)
+		}
+	}
+	if len(reads) != 1 || reads[0] != "FD-1" {
+		t.Errorf("live blocks read = %v, want FD-1 once", reads)
+	}
+	if whole[0].id != bare[0].id {
+		t.Errorf("ids %d and %d: one change is one event id on every stream", whole[0].id, bare[0].id)
+	}
+	for _, ev := range h.ring {
+		if c := (webapi.Change{}); json.Unmarshal(ev.data, &c) != nil || c.Live != nil {
+			t.Errorf("the ring keeps %s, want it bare", ev.data)
+		}
+	}
+	quiet(t, a)
+}

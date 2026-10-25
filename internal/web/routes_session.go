@@ -22,7 +22,24 @@ func (s *Server) sessionRoutes() {
 	s.public("POST "+adminPath, s.handleAdminPair)
 	s.waiting("POST /api/unpair", s.handleUnpair)
 	s.waiting("GET /api/events", s.handleEvents)
+	s.api("POST /api/events/focus", s.handleFocus)
 	s.approvalRoutes()
+}
+
+// handleFocus is POST /api/events/focus: the card the page on one of this
+// device's streams shows, whose live changes that stream is sent whole.
+func (s *Server) handleFocus(w http.ResponseWriter, r *http.Request) {
+	var body webapi.FocusRequest
+	if err := readJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "expected {\"stream\": …, \"card\": …}")
+		return
+	}
+	who, _ := WhoFrom(r.Context())
+	if !s.hub.focus(who.DeviceID, body.Stream, body.Card) {
+		writeError(w, http.StatusNotFound, "no such event stream is open on this device")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleSession is GET /api/session. It answers without a cookie: it is

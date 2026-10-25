@@ -152,28 +152,37 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 // (WebDocs.PlaceLiveRuns), made off the board's update loop.
 func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var (
-		live webapi.Live
-		ok   bool
-		d    *ui.WebDocs
-	)
-	if !s.do(w, r, func(m *ui.Shell) tea.Cmd {
-		live, ok = m.WebLive(id)
-		if ok && live.Freeform != nil {
-			d, _ = m.WebDocs(id)
-		}
-		return nil
-	}) {
+	live, ok, err := s.readLive(r.Context(), id)
+	if err != nil {
+		s.doFailed(w, err)
 		return
 	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "no card "+id+" on this board")
 		return
 	}
-	if d != nil {
-		d.PlaceLiveRuns(r.Context(), &live)
-	}
 	writeJSON(w, http.StatusOK, live)
+}
+
+// readLive is card id's live block: what handleLive answers, and what a
+// live change carries to a stream focused on the card (hub.fill). ok is
+// false for a card not on the board.
+func (s *Server) readLive(ctx context.Context, id string) (live webapi.Live, ok bool, err error) {
+	var d *ui.WebDocs
+	err = s.opt.Board.Do(ctx, func(m *ui.Shell) tea.Cmd {
+		live, ok = m.WebLive(id)
+		if ok && live.Freeform != nil {
+			d, _ = m.WebDocs(id)
+		}
+		return nil
+	})
+	if err != nil {
+		return live, false, err
+	}
+	if d != nil {
+		d.PlaceLiveRuns(ctx, &live)
+	}
+	return live, ok, nil
 }
 
 // handleLiveEarlier is GET /api/cards/{id}/live/earlier?conv=&before=:

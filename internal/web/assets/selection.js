@@ -4,7 +4,7 @@
 // event refetches the head and the thread's newer items, a "live" event the
 // live block. It never decides anything about the card; it only fetches.
 
-import { get, cardPath } from './api.js?v=__ASSET_V__'
+import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, shownTab } from './store.js?v=__ASSET_V__'
 import { write as writeHash } from './router.js?v=__ASSET_V__'
 import { isMobile } from './dom.js?v=__ASSET_V__'
@@ -83,6 +83,7 @@ export async function select (id, { tab = null, view = true, named = true } = {}
   // nor with the surface closed, where a reload would open it
   if (named) writeHash(id, linked ? tab : shownTab())
   const tabBefore = state.tab
+  if (changed) focus()
   // the head, the thread and the live block are read side by side: none
   // needs another's answer, and on a slow link each wait is a round trip
   const head = loadCard(id)
@@ -163,6 +164,7 @@ let liveRoute = true
 let liveBusy = false
 let liveAgain = false
 let liveAsks = 0 // live reads started, for which one an outgoing line waits on
+let pushedAt = 0 // liveAsks when the stream last brought the live block
 export async function loadLive (id = state.sel) {
   if (!id || !liveRoute) { if (!liveRoute) loadThread(id); return }
   if (liveBusy) { liveAgain = true; return }
@@ -170,6 +172,8 @@ export async function loadLive (id = state.sel) {
   const n = ++liveAsks
   try {
     const l = await get(cardPath(id, 'live'))
+    // a read asked before the stream brought a block is older than it
+    if (n <= pushedAt) return
     if (state.sel === id && state.gone !== id) {
       const patch = {}
       const live = liveOrNull(l)
@@ -187,6 +191,43 @@ export async function loadLive (id = state.sel) {
     liveBusy = false
     if (liveAgain) { liveAgain = false; loadLive() }
   }
+}
+
+// The event stream's name (its hello) and the card this page told it it
+// shows: a live change about that card comes with its live block (pushLive)
+// rather than as word to fetch it. A server without the route leaves
+// every live change bare, and the page fetches as it always did.
+let stream = ''
+let focused = ''
+let focusRoute = true
+export function setStream (name) {
+  stream = name || ''
+  focused = ''
+  focus()
+}
+
+function focus () {
+  if (!stream || !focusRoute || focused === (state.sel || '')) return
+  const card = state.sel || ''
+  focused = card
+  post('/api/events/focus', { stream, card }).catch((err) => {
+    if (err.notBuilt) focusRoute = false
+    else if (focused === card) focused = ''
+  })
+}
+
+// pushLive draws the live block a "live" event brought for the open card:
+// the read it stands for is done, and a read still on its way, asked
+// before it, is older and is let go (loadLive).
+export function pushLive (id, l) {
+  if (state.sel !== id || state.gone === id) return
+  pushedAt = liveAsks
+  const patch = {}
+  const live = liveOrNull(l)
+  if (!same(live, state.live)) patch.live = live
+  const o = state.outgoing
+  if (o && o.id === id && shows(live, o.text)) patch.outgoing = null
+  if (Object.keys(patch).length) set(patch)
 }
 
 // outgoing is a line on its way to the open card's session, drawn under

@@ -32,7 +32,7 @@ import { showPair, showPending } from './pair.js?v=__ASSET_V__'
 import { initApprovals } from './approvals.js?v=__ASSET_V__'
 import { h } from './dom.js?v=__ASSET_V__'
 import {
-  initSelection, loadBoard, select, refresh, refreshAll, loadLive, nextNeeding, nextRunning, step
+  initSelection, loadBoard, select, refresh, refreshAll, loadLive, pushLive, setStream, nextNeeding, nextRunning, step
 } from './selection.js?v=__ASSET_V__'
 import { registerWorker, openPush } from './push.js?v=__ASSET_V__'
 import './views/index.js?v=__ASSET_V__'
@@ -246,7 +246,10 @@ function connectEvents (resync = false) {
     // a card that is gone has nothing to refetch: the board change that
     // comes with it moves the page off it (initSelection)
     card: (c) => { if (c.id === state.sel && !c.gone) refresh(c.id) },
-    live: (c) => { if (c.id === state.sel) loadLive(c.id) },
+    hello: (c) => setStream(c.stream),
+    // a live change for the card this page told the stream it shows
+    // carries the block; any other is word to fetch it
+    live: (c) => { if (c.id === state.sel) c.live ? pushLive(c.id, c.live) : loadLive(c.id) },
     toast: (c) => toast(c.text, { err: c.err }),
     viewers: (c) => set({ viewers: c.viewers || [] }),
     resync: () => refreshAll()
