@@ -444,3 +444,25 @@ func TestPRToolsRefusePlantedHookAndSteering(t *testing.T) {
 		t.Errorf("planted pushurl = %q", got)
 	}
 }
+
+// A hooks directory the environment names is trusted only when it is
+// gummi's own: one inside the agent's tree is refused.
+func TestPRToolsRefuseAHooksPathOutsideGummis(t *testing.T) {
+	p := prSession(t, true)
+	p.commit("a.txt")
+	common := p.sh(p.dir, "git", "rev-parse", "--git-common-dir")
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(p.dir, common)
+	}
+	evil := filepath.Join(common, "evil-hooks") // inside the repository, which the agent writes
+	if err := os.MkdirAll(evil, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(evil, "reference-transaction"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_VALUE_0", evil)
+	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
+		t.Errorf("hooks path in the agent's tree = %q", got)
+	}
+}
