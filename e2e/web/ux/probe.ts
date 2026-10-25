@@ -66,8 +66,15 @@ export async function probe(page: Page, phone: boolean): Promise<Probe> {
     const floor = phone ? 44 : 24;
     for (const el of interactive) {
       const r = el.getBoundingClientRect();
+      // a control drawn smaller than it presses grows its hit area with an
+      // invisible ::after edge: count that edge too
+      const after = getComputedStyle(el, '::after');
+      const grow = (v: string) => Math.max(0, -(parseFloat(v) || 0));
+      const edge = after.content !== 'none' && after.position === 'absolute' ? { w: grow(after.left) + grow(after.right), h: grow(after.top) + grow(after.bottom) } : { w: 0, h: 0 };
+      const tw = r.width + edge.w;
+      const th = r.height + edge.h;
       // a resizer is a thin edge by design
-      if (!el.matches('[role="separator"]') && (r.width < floor || r.height < floor)) smallTargets.push(`${describe(el)} ${Math.round(r.width)}×${Math.round(r.height)}`);
+      if (!el.matches('[role="separator"]') && (tw < floor || th < floor)) smallTargets.push(`${describe(el)} ${Math.round(tw)}×${Math.round(th)}`);
       const name = (el.getAttribute('aria-label') || el.getAttribute('title') || (el as HTMLElement).innerText || el.getAttribute('aria-labelledby') || (el as HTMLInputElement).placeholder || '').trim();
       // a <details> summary is named by its content, which may be an icon
       // the browser draws itself
