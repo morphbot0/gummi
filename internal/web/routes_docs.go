@@ -45,6 +45,7 @@ func (s *Server) docsRoutes() {
 	s.api("POST /api/cards/{id}/pr/pull", func(w http.ResponseWriter, r *http.Request) { s.handlePRPull(w, r, prs) })
 	s.api("GET /api/cards/{id}/publish", s.handlePublishFacts)
 	s.api("POST /api/cards/{id}/publish", func(w http.ResponseWriter, r *http.Request) { s.handlePublish(w, r, prs) })
+	s.api("PUT /api/cards/{id}/publish/allowance", func(w http.ResponseWriter, r *http.Request) { s.handlePublishAllowance(w, r, prs) })
 	s.api("GET /api/cards/{id}/publish/span", s.handlePublishSpanFacts)
 	s.api("POST /api/cards/{id}/publish/span", func(w http.ResponseWriter, r *http.Request) { s.handlePublishSpan(w, r, prs) })
 	s.api("GET /api/cards/{id}/stats", s.handleStats)
@@ -656,6 +657,26 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, cache *pr
 	res := d.Publish(context.WithoutCancel(r.Context()), req, person(r), s.Publish)
 	cache.drop(id)
 	_ = s.opt.Board.Do(context.Background(), func(m *ui.Shell) tea.Cmd { return m.WebPublished(id) })
+	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: id})
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handlePublishAllowance is PUT /api/cards/{id}/publish/allowance: a
+// person switching "agent may publish" on or off for a session (DESIGN
+// §22.14). A refusal is the answer's Error, shown beside the switch.
+func (s *Server) handlePublishAllowance(w http.ResponseWriter, r *http.Request, cache *prCache) {
+	var req webapi.PublishAllowance
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	res := d.SetAgentPublish(r.Context(), req.Allow, person(r))
+	cache.drop(id)
 	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: id})
 	writeJSON(w, http.StatusOK, res)
 }

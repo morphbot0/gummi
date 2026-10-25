@@ -112,6 +112,24 @@ type PublishOffer struct {
 	// Unpushed counts the card's commits GitHub's PR head does not have.
 	Unpushed int  `json:"unpushed,omitempty"`
 	Draft    bool `json:"draft,omitempty"`
+	// AgentCan is whether the switch "agent may publish" is shown: the
+	// card is a session on a branch of its own. AgentAllowed is whether a
+	// person has switched it on (DESIGN §22.14).
+	AgentCan     bool `json:"agentCan,omitempty"`
+	AgentAllowed bool `json:"agentAllowed,omitempty"`
+}
+
+// PublishAllowance is PUT /api/cards/{id}/publish/allowance: a person
+// switching a session's standing allowance to publish on or off.
+type PublishAllowance struct {
+	Allow bool `json:"allow"`
+}
+
+// PublishAllowanceResult is the allowance as it stands after the request;
+// Error says why it was not changed.
+type PublishAllowanceResult struct {
+	Allowed bool   `json:"allowed"`
+	Error   string `json:"error,omitempty"`
 }
 
 // PublishSpan is GET /api/cards/{id}/publish/span: a session that spans

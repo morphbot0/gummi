@@ -257,3 +257,17 @@ func TestTreeShapes(t *testing.T) {
 		Result:  TreeResult{Done: "committed bbbbbbb feat: x", SHA: "bbbbbbb2", Tree: tree},
 	}))
 }
+
+func TestWebAPIAgentPublishShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, struct {
+		Offer   PublishOffer           `json:"offer"`
+		Request PublishAllowance       `json:"request"`
+		Result  PublishAllowanceResult `json:"result"`
+		Refused PublishAllowanceResult `json:"refused"`
+	}{
+		Offer:   PublishOffer{Available: true, Acts: []string{"push"}, AgentCan: true, AgentAllowed: true},
+		Request: PublishAllowance{Allow: true},
+		Result:  PublishAllowanceResult{Allowed: true},
+		Refused: PublishAllowanceResult{Error: "the session is mid-turn; change the allowance when the turn ends"},
+	}))
+}

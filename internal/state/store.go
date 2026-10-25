@@ -1073,6 +1073,10 @@ var migrations = []string{
 	// from before, and on every run a session proposed.
 	`ALTER TABLE workflow_runs ADD COLUMN schedule_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE schedules ADD COLUMN spec_n INTEGER NOT NULL DEFAULT 0`,
+	// A person's standing allowance for a session to publish its own branch
+	// and read its PR's checks (DESIGN §22.14). 0 is every row from before,
+	// and every session nobody allowed.
+	`ALTER TABLE features ADD COLUMN agent_publish INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Close releases the database.

@@ -662,6 +662,9 @@ func (d *WebDocs) PublishOffer(ctx context.Context) *webapi.PublishOffer {
 		return nil
 	}
 	out := &webapi.PublishOffer{Available: true}
+	if d.eng != nil && f.IsFreeform() && !f.IsChild() && !f.Home && !f.MainCheckout && f.Stage != domain.StageDone {
+		out.AgentCan, out.AgentAllowed = true, d.eng.AgentMayPublish(ctx, f.ID)
+	}
 	doer := d.publishDoer()
 	doer.f = f
 	mgr, in, err := doer.input(ctx)
