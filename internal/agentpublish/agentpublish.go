@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -87,6 +88,10 @@ type Host interface {
 	Lock(id domain.FeatureID) (release func(), err error)
 	// GH is the gh binary to run, "" for gh on the path.
 	GH() string
+	// HooksDir is the directory of git hooks gummi names to git in its own
+	// environment (core.hooksPath), "" when it names none. It sits outside
+	// every tree an agent writes in.
+	HooksDir() string
 }
 
 // Args is a tool call's arguments.
@@ -144,9 +149,9 @@ func Do(ctx context.Context, h Host, f domain.Feature, act publish.Act, a Args) 
 	// with the credential loaded: they are shown it and the fingerprint
 	// pins it. An agent writes into this tree and nobody is shown anything,
 	// so what it could have planted refuses instead.
-	if fx.Hook != "" {
+	if hook := foreignHook(ctx, mgr, &f, fx.Hook, h.HooksDir()); hook != "" {
 		return Outcome{}, &Error{
-			Code: string(publish.CodeHookRejected), Text: "git would run a push hook with the person's credential loaded: " + fx.Hook,
+			Code: string(publish.CodeHookRejected), Text: "git would run a push hook with the person's credential loaded: " + hook,
 			Fix: "remove the hook, or ask the person to publish this branch themselves",
 		}
 	}
@@ -191,6 +196,78 @@ func Do(ctx context.Context, h Host, f domain.Feature, act publish.Act, a Args) 
 		return Outcome{}, fromPublish(perr)
 	}
 	return Outcome{Text: resultText(res, plan)}, nil
+}
+
+// pushHookNames are the client-side hooks a push runs (publish's list).
+var pushHookNames = []string{"pre-push", "reference-transaction"}
+
+// foreignHook names the first push hook in hooks (publish's ", "-joined
+// list) that is not gummi's own, "" for none. A hook in gummi's hooks
+// directory is gummi's: it is outside every agent-writable tree. It chains
+// to the repository's own hook of the same name, though, so one of those
+// counts as foreign too.
+func foreignHook(ctx context.Context, mgr *worktree.Manager, f *domain.Feature, hooks, own string) string {
+	if hooks == "" {
+		return ""
+	}
+	within := func(p string) bool {
+		if own == "" {
+			return false
+		}
+		a, b := resolved(p), resolved(own)
+		rel, err := filepath.Rel(b, a)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	ours := false
+	for _, p := range strings.Split(hooks, ", ") {
+		if !within(p) {
+			return p
+		}
+		ours = true
+	}
+	if !ours {
+		return ""
+	}
+	dir, err := mgr.Path(f)
+	if err != nil {
+		return hooks
+	}
+	theirs := ""
+	if out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
+		theirs = filepath.Join(strings.TrimSpace(string(out)), "hooks")
+		if !filepath.IsAbs(theirs) {
+			theirs = filepath.Join(dir, theirs)
+		}
+	}
+	for _, scope := range []string{"--local", "--worktree"} {
+		out, err := exec.CommandContext(ctx, "git", "-C", dir, "config", scope, "--type=path", "--get-all", "core.hooksPath").Output()
+		if err != nil {
+			continue
+		}
+		if lines := strings.Fields(string(out)); len(lines) > 0 {
+			theirs = lines[len(lines)-1]
+		}
+	}
+	if theirs == "" || within(filepath.Join(theirs, "x")) {
+		return ""
+	}
+	for _, name := range pushHookNames {
+		p := filepath.Join(theirs, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+			return p
+		}
+	}
+	return ""
+}
+
+func resolved(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	if r, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+		return filepath.Join(r, filepath.Base(p))
+	}
+	return filepath.Clean(p)
 }
 
 // steeringKeys are the repository-local git settings an agent could plant to

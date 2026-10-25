@@ -109,7 +109,6 @@ func prSession(t *testing.T, allow bool) *prFixture {
 	t.Setenv("GUMMI_GH_CMD", gh)
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("GIT_CONFIG_COUNT", "0") // gummi's own injected config (hooks, signing) must not reach the fixture repos
 	p.write("repo.json", `{"nameWithOwner":"me/widget","viewerPermission":"WRITE","isFork":false}`)
 
 	ag := &agent.Fake{Reply: "ok"}
@@ -124,6 +123,20 @@ func prSession(t *testing.T, allow bool) *prFixture {
 	}
 	ws, store, wt := newRepo(t)
 	root := wt.RepoRoot()
+	// gummi's own environment, as it injects it: its hooks directory as
+	// core.hooksPath, holding the hooks it installs
+	hooks := ws.HooksDir()
+	if err := os.MkdirAll(hooks, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"reference-transaction", "commit-msg"} {
+		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", hooks)
 	p.sh(tmp, "git", "init", "-q", "--bare", p.bare)
 	p.sh(p.bare, "git", "config", "maintenance.auto", "false")
 	p.sh(root, "git", "remote", "add", "origin", "git@github.com:me/widget.git")
@@ -405,10 +418,12 @@ func TestAgentPublishToggleRespawnsBackend(t *testing.T) {
 func TestPRToolsRefusePlantedHookAndSteering(t *testing.T) {
 	p := prSession(t, true)
 	p.commit("a.txt")
-	hook := p.sh(p.dir, "git", "rev-parse", "--git-path", "hooks/pre-push")
-	if !filepath.IsAbs(hook) {
-		hook = filepath.Join(p.dir, hook)
+	// the repository's own hooks directory, not gummi's core.hooksPath one
+	common := p.sh(p.dir, "git", "rev-parse", "--git-common-dir")
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(p.dir, common)
 	}
+	hook := filepath.Join(common, "hooks", "pre-push")
 	if err := os.MkdirAll(filepath.Dir(hook), 0o750); err != nil {
 		t.Fatal(err)
 	}

@@ -126,3 +126,5 @@ func (h publishHost) TreeBusy(ctx context.Context, id domain.FeatureID) string {
 func (h publishHost) Lock(id domain.FeatureID) (func(), error) { return h.e.lockCard(id) }
 
 func (h publishHost) GH() string { return pr.GHBinary() }
+
+func (h publishHost) HooksDir() string { return h.e.cfg.Workspace.HooksDir() }
