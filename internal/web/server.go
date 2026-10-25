@@ -86,6 +86,10 @@ type Options struct {
 	// Doctor runs the readiness checklist `gummi doctor` prints. It lives
 	// in the command package, so it is handed in rather than imported.
 	Doctor func(*http.Request) webapi.Doctor
+	// Restart asks the host to restart the server in place (routes_system.go);
+	// nil serves the route as not set up. It returns at once: the host
+	// unwinds and starts again after the answer is written.
+	Restart func()
 	// Terminal serves a shell in each card's worktree to a paired device
 	// (routes_term.go). It is more than the board: arbitrary commands as
 	// whoever runs the server. Refused together with OpenAccess.

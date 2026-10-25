@@ -399,6 +399,9 @@ type Shell struct {
 	// changeHook is told what a message may have changed, for a host
 	// without a screen (bridge.go's SetChangeHook). Nil under the TUI.
 	changeHook func(webapi.Change)
+	// restart marks the process for a restart when the host supports one
+	// (SetRestartHook); the "restart" command then quits. Nil hides it.
+	restart func()
 	// webBusy is whether each card was working the last time an engine
 	// update was mapped for the web (bridge.go's emitEngineChange): a
 	// streaming update moves only the live block, until the one that ends

@@ -118,6 +118,7 @@ func runWeb(fl cliFlags, args []string) error {
 	// the next host to trip over.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
+	defer restartOnSignal(stop)()
 
 	// Take the board first, then listen: a second `gummi web` on the same
 	// address must be refused by the lock, which names the holder and
@@ -206,6 +207,7 @@ func runWeb(fl cliFlags, args []string) error {
 		Hosts:      hosts,
 		Secure:     secure,
 		AdminToken: adminToken,
+		Restart:    func() { requestRestart(); stop() },
 		// ?deep=1 is `gummi doctor --deep`: the live per-role probe, opt-in
 		// on both surfaces because it asks every backend for a turn.
 		Doctor: func(r *http.Request) webapi.Doctor {

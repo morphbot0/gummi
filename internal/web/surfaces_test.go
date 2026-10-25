@@ -37,6 +37,9 @@ import (
 // workspace, a store, a worktree pool and an engine whose agent is the
 // in-process fake — everything `gummi web` builds, with no network and no
 // real agent anywhere.
+// restarts counts the restarts the harness's server was asked for.
+var restarts atomic.Int32
+
 type boardHarness struct {
 	*harness
 	root  string
@@ -139,6 +142,7 @@ func newBoardHarness(t *testing.T) *boardHarness {
 	srv, err := New(Options{
 		Board: bridge, Devices: devices, Pairing: h.pairing, Repo: "demo", Host: "box", Version: "v0-test",
 		Coalesce: 5 * time.Millisecond, Log: func(string, ...any) {},
+		Restart: func() { restarts.Add(1) },
 		Doctor: func(r *http.Request) webapi.Doctor {
 			return webapi.Doctor{Ready: r.URL.Query().Get("deep") != "1", Checks: []webapi.DoctorCheck{{Name: "repo", Status: "ok", Detail: "git repository"}}}
 		},
@@ -476,6 +480,22 @@ func TestDoctorThroughTheBoard(t *testing.T) {
 	b.must(http.StatusOK, http.MethodPost, "/api/doctor?deep=1", nil, &d)
 	if d.Ready {
 		t.Fatal("?deep=1 did not reach the checklist's builder")
+	}
+}
+
+func TestRestartThroughTheBoard(t *testing.T) {
+	b := newBoardHarness(t)
+	before := restarts.Load()
+	// a write from another origin must not restart the server
+	if res, _ := b.do(b.c, http.MethodPost, "/api/restart", "{}", "Origin", "http://evil.example"); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("a cross-origin restart = %d, want 403", res.StatusCode)
+	}
+	if restarts.Load() != before {
+		t.Fatal("a refused restart reached the host")
+	}
+	b.must(http.StatusAccepted, http.MethodPost, "/api/restart", nil, nil)
+	if got := restarts.Load() - before; got != 1 {
+		t.Fatalf("restarts asked of the host = %d, want 1", got)
 	}
 }
 

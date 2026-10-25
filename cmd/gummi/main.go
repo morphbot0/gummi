@@ -53,7 +53,11 @@ func main() {
 	if exe, err := os.Executable(); err == nil {
 		credentials.UseSigner(exe)
 	}
-	if err := run(os.Args[1:]); err != nil {
+	err := run(os.Args[1:])
+	if err == nil {
+		err = restartIfRequested()
+	}
+	if err != nil {
 		// A driver invocation reports its typed exit via exitError, having
 		// already told the story on the NDJSON stream — exit with that code
 		// and stay quiet. Everything else is a setup/usage failure.
@@ -128,8 +132,10 @@ func runBoard() error {
 		return err
 	}
 	defer h.Close()
+	h.shell.SetRestartHook(requestRestart)
 	p := tea.NewProgram(h.shell)
 	defer quitOnHangup(p)()
+	defer restartOnSignal(p.Quit)()
 	_, err = p.Run()
 	return err
 }

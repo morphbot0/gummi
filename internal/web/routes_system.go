@@ -9,6 +9,7 @@ import (
 func (s *Server) systemRoutes() {
 	s.api("GET /api/doctor", s.handleDoctor)
 	s.api("POST /api/doctor", s.handleDeepDoctor)
+	s.api("POST /api/restart", s.handleRestart)
 	s.api("GET /api/settings", s.handleSettings)
 	s.api("PUT /api/settings", s.handleSetSettings)
 	s.api("PUT /api/settings/credentials", s.handleSetCredentials)
@@ -126,4 +127,20 @@ func (s *Server) handleDeepDoctor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.opt.Doctor(r))
+}
+
+// handleRestart is POST /api/restart: the server stops the way a quit does
+// and starts again from the same binary, so a new build or a setting read
+// only at start takes effect. The answer is written before the host is
+// told; the page's event stream reconnects once the server is back.
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	if s.opt.Restart == nil {
+		notYet(w, r)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]bool{"restarting": true})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	s.opt.Restart()
 }
