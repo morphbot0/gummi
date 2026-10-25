@@ -11,6 +11,8 @@ adopt-info: metadata
 apps:
   gummi:
     command: bin/gummi
+  install-script:
+    command: bin/install-script
 
 parts:
   metadata:
@@ -29,5 +31,9 @@ parts:
     override-build: |
       version="$(cd "$CRAFT_PART_SRC" && sh scripts/snap-version.sh)"
       go build -ldflags "-X main.Version=$version" -o "$CRAFT_PART_INSTALL"/bin/gummi ./cmd/gummi
+      install -D -m 0755 scripts/snap-install-script.sh "$CRAFT_PART_INSTALL"/bin/install-script
+      install -D -m 0644 scripts/gummi-web-install.sh "$CRAFT_PART_INSTALL"/share/gummi-web-install.sh
     prime:
       - bin/gummi
+      - bin/install-script
+      - share/gummi-web-install.sh
