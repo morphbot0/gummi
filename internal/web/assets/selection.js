@@ -83,17 +83,20 @@ export async function select (id, { tab = null, view = true, named = true } = {}
   // nor with the surface closed, where a reload would open it
   if (named) writeHash(id, linked ? tab : shownTab())
   const tabBefore = state.tab
-  const card = await loadCard(id)
+  // the head, the thread and the live block are read side by side: none
+  // needs another's answer, and on a slow link each wait is a round trip
+  const head = loadCard(id)
+  if (changed) {
+    loadThread(id, true)
+    loadLive(id)
+  }
+  const card = await head
   // the panel follows the decision only when nothing chose a tab while the
   // card loaded: a later select (a link naming its tab) or a person's own
   // click wins over a guess made from a head that was still in flight
   if (changed && !tab && mine === picks && state.tab === tabBefore && card?.decision && card.decision.anchor !== 'thread' && state.sel === id) {
     set({ tab: card.decision.anchor })
     if (named) writeHash(id, shownTab())
-  }
-  if (changed) {
-    loadThread(id, true)
-    loadLive(id)
   }
 }
 
@@ -244,9 +247,13 @@ export function initSelection () {
   // said to be gone where it was open. The page used to move itself onto
   // another card: a line half-typed for this one was dropped, and enter
   // then answered that other card's decision — a landing, say — which
-  // its reader had never looked at.
+  // its reader had never looked at. Only a card the board has held is
+  // gone: one made a moment ago is opened beside the board's read of it,
+  // and an older read still on its way does not hold it yet.
+  const seen = new Set()
   on('board', () => {
-    if (state.sel && state.board && !rows().some(r => r.id === state.sel) && state.card) {
+    for (const r of rows()) seen.add(r.id)
+    if (state.sel && seen.has(state.sel) && state.board && !rows().some(r => r.id === state.sel) && state.card) {
       set({ card: null, live: null, gone: state.sel, thread: { items: [], lastSeq: 0, gone: true } })
     }
   })
