@@ -109,6 +109,7 @@ func prSession(t *testing.T, allow bool) *prFixture {
 	t.Setenv("GUMMI_GH_CMD", gh)
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "0") // gummi's own injected config (hooks, signing) must not reach the fixture repos
 	p.write("repo.json", `{"nameWithOwner":"me/widget","viewerPermission":"WRITE","isFork":false}`)
 
 	ag := &agent.Fake{Reply: "ok"}
