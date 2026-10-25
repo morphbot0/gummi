@@ -63,7 +63,7 @@ func restartIfRequested() error {
 	if err != nil {
 		return fmt.Errorf("restart: %w", err)
 	}
-	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil { //nolint:gosec // gummi's own binary, with the arguments it was started with
 		return fmt.Errorf("restart: starting %s: %w", exe, err)
 	}
 	return nil
