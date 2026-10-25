@@ -18,7 +18,8 @@ test('a session thread has bubbles, reply footers, step rows and changed files',
   await input.click();
   await input.fill('first line\nsecond line');
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('thread')).toContainText('Done: noted it in NOTES.md.', { timeout: 30_000 });
+  // the card's first turn already said it: this line's reply is the second
+  await expect(page.getByTestId('reply').filter({ hasText: 'Done: noted it in NOTES.md.' })).toHaveCount(2, { timeout: 30_000 });
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 10_000 });
 
   // the person's line is a bubble on the right, its line breaks kept

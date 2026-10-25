@@ -67,7 +67,7 @@ export async function select (id, { tab = null, view = true, named = true } = {}
   const mine = ++picks
   const changed = id !== state.sel
   if (changed) {
-    set({ sel: id, card: null, cardErr: null, thread: null, live: null, hi: 0, showNext: null, mdecOpen: false, decAll: false, gone: null })
+    set({ sel: id, card: null, cardErr: null, thread: null, live: null, outgoing: null, hi: 0, showNext: null, mdecOpen: false, decAll: false, gone: null })
   }
   // on a phone a link that names a tab opens that document, not the
   // thread; a remembered tab only says which document waits behind it
@@ -162,19 +162,69 @@ export function upsert (items, fresh) {
 let liveRoute = true
 let liveBusy = false
 let liveAgain = false
+let liveAsks = 0 // live reads started, for which one an outgoing line waits on
 export async function loadLive (id = state.sel) {
   if (!id || !liveRoute) { if (!liveRoute) loadThread(id); return }
   if (liveBusy) { liveAgain = true; return }
   liveBusy = true
+  const n = ++liveAsks
   try {
     const l = await get(cardPath(id, 'live'))
-    if (state.sel === id && state.gone !== id) setLive(liveOrNull(l))
+    if (state.sel === id && state.gone !== id) {
+      const patch = {}
+      const live = liveOrNull(l)
+      if (!same(live, state.live)) patch.live = live
+      // a read asked after the line was taken draws the line itself (or
+      // nothing, for a line that was no message): the page's stand-in goes
+      // in the same redraw, so the two never show side by side
+      const o = state.outgoing
+      if (o && o.id === id && ((o.ack && n >= o.ack) || (n >= o.from && shows(live, o.text)))) patch.outgoing = null
+      if (Object.keys(patch).length) set(patch)
+    }
   } catch (err) {
     if (err.notBuilt) liveRoute = false
   } finally {
     liveBusy = false
     if (liveAgain) { liveAgain = false; loadLive() }
   }
+}
+
+// outgoing is a line on its way to the open card's session, drawn under
+// the thread from the moment it is sent rather than a round trip later.
+// sendOut puts it there; sendTaken says the server took it — as a message
+// to the agent (keep), so the next live read stands in for it, or as
+// something else, which the live block will never show — and sendFailed
+// takes it back off. A line whose live read never lands goes after a while.
+let outgoingTimer = 0
+export function sendOut (id, text) {
+  clearTimeout(outgoingTimer)
+  set({ outgoing: { id, text, from: liveAsks + 1, ack: 0 } })
+}
+
+// shows says the live block holds text as a line on its way or as its
+// conversation's newest line from the person — the server's own drawing
+// of what the page was standing in for.
+export function shows (l, text) {
+  return ['consult', 'freeform'].some(k => {
+    const c = l?.[k]
+    if (!c) return false
+    if (c.sending === text) return true
+    const mine = (c.turns || []).filter(t => t.author === 'you')
+    return mine.length > 0 && String(mine[mine.length - 1].text || '').trim() === text
+  })
+}
+
+export function sendTaken (keep) {
+  const o = state.outgoing
+  if (!o) return
+  if (!keep || !liveRoute) { set({ outgoing: null }); return }
+  set({ outgoing: { ...o, ack: liveAsks + 1 } })
+  outgoingTimer = setTimeout(() => { if (state.outgoing?.text === o.text) set({ outgoing: null }) }, 10000)
+}
+
+export function sendFailed () {
+  clearTimeout(outgoingTimer)
+  if (state.outgoing) set({ outgoing: null })
 }
 
 // setLive stores the live block unless it is the one already held: a
