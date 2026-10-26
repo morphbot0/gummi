@@ -109,7 +109,7 @@ func (e *Engine) SetAgentMayPublish(ctx context.Context, id domain.FeatureID, al
 		who = by
 	}
 	if allow {
-		sess.appendSystem(who + " allows this session to publish its own branch to " + repo + ": pr_push, pr_open, pr_update, pr_ready and pr_checks are yours from the next start, and a push anywhere else is refused.")
+		sess.appendSystem(who + " allows this session to publish its own branch to " + repo + ": git_push, pr_create, pr_update, pr_ready and pr_checks are yours from the next start, and a push anywhere else is refused.")
 	} else {
 		sess.appendSystem(who + " takes back the allowance to publish: the pr_* tools are no longer offered.")
 	}

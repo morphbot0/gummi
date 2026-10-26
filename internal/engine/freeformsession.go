@@ -373,9 +373,14 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 				hints = append(hints, sessionRepoHint)
 			}
 			// a person's standing allowance to publish (DESIGN §22.14)
-			if MayHavePublishAllowance(f) && e.AgentMayPublish(ctx, f.ID) {
-				own = append(own, prTools()...)
-				hints = append(hints, prPublishHint)
+			if MayHavePublishAllowance(f) {
+				if e.AgentMayPublish(ctx, f.ID) {
+					own = append(own, prTools()...)
+					hints = append(hints, prPublishHint)
+				} else {
+					own = append(own, publishRequestTool())
+					hints = append(hints, publishRequestHint)
+				}
 			}
 			extra = append(extra, own...)
 			tools = append(tools, own...)

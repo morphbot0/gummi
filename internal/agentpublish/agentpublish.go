@@ -462,7 +462,7 @@ func Checks(ctx context.Context, h Host, f domain.Feature, logs bool) (string, *
 		f = cur
 	}
 	if f.PullRequest.Empty() {
-		return "", &Error{Code: string(publish.CodeNoPR), Text: "this session has no linked pull request", Fix: "open one with pr_open"}
+		return "", &Error{Code: string(publish.CodeNoPR), Text: "this session has no linked pull request", Fix: "open one with pr_create"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, publish.Timeout)
 	defer cancel()
