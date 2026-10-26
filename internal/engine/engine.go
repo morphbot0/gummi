@@ -215,6 +215,8 @@ type Engine struct {
 	// spawned with no turns sent — consultIdleTimeout's twin, a field for
 	// the same test reason.
 	freeformIdleTimeout time.Duration
+	// limitSlack is the wait past a usage limit's stated reset (limitresume.go).
+	limitSlack time.Duration
 
 	// wg tracks the pump and kickoff goroutines so Close can join them
 	// before returning: a barrier for any filesystem touch (git subprocess
@@ -348,6 +350,7 @@ func New(cfg Config) *Engine {
 	e.initProfiles()
 	e.consultIdleTimeout = consultIdleTimeout
 	e.freeformIdleTimeout = freeformIdleTimeout
+	e.limitSlack = limitSlack
 	e.envWarn = func(msg string) {
 		e.envMu.Lock()
 		e.envNotices = append(e.envNotices, msg)

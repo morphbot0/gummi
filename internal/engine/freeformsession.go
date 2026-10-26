@@ -145,6 +145,10 @@ type FreeformSession struct {
 
 	idleMu    sync.Mutex
 	idleTimer *time.Timer
+
+	// limitTimer is the wait for a backend's usage limit to lift
+	// (limitresume.go), under idleMu with the idle timer.
+	limitTimer *time.Timer
 }
 
 // OpenFreeform starts (or reuses) a freeform card's session, taking the
@@ -1227,6 +1231,10 @@ func (ff *FreeformSession) settle() {
 // itself.
 func (ff *FreeformSession) stopBackend() {
 	ff.idleMu.Lock()
+	if ff.limitTimer != nil {
+		ff.limitTimer.Stop()
+		ff.limitTimer = nil
+	}
 	if ff.idleTimer != nil {
 		ff.idleTimer.Stop()
 		ff.idleTimer = nil
@@ -1465,6 +1473,9 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		e.dispatchTurnEnded(ff, sess)
 	case agent.EventError:
 		sess.setError(ev.Err)
+		if ev.Err != nil && !sess.Feature.IsChild() && ff.resumeAfterLimit(sess, ev.Err) {
+			break
+		}
 		if ev.Err != nil {
 			ff.settleObjective(domain.ObjectiveFailed, "the backend errored: "+ev.Err.Error())
 			ff.workflowStepErrored(sess, ev.Err)
