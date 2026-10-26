@@ -251,7 +251,7 @@ func FailingTurn(ref domain.PullRequestRef, c Checks, localTip string) string {
 // (DESIGN §22.14): the same facts and the same quoting of logs as evidence,
 // but the session itself pushes the fix.
 func FailingReport(ref domain.PullRequestRef, c Checks, localTip string) string {
-	return failingMessage(ref, c, localTip, "Fix it, commit, and push with pr_push; GitHub runs the checks again on the new commit, which pr_checks then reads. ")
+	return failingMessage(ref, c, localTip, "Fix it, commit, and push with git_push; GitHub runs the checks again on the new commit, which pr_checks then reads. ")
 }
 
 func failingMessage(ref domain.PullRequestRef, c Checks, localTip, pushLine string) string {

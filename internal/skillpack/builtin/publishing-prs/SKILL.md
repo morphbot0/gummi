@@ -10,9 +10,9 @@ source: gummi
 A person allowed you to publish your own branch, once. The tools
 act on that allowance with no confirm each time:
 
-- `pr_open` pushes the branch if needed and opens the PR (`title`, `body`,
+- `pr_create` pushes the branch if needed and opens the PR (`title`, `body`,
   `draft`; `base_repo` only when a fork asks for it).
-- `pr_push` pushes new commits, never a force. `pr_update` does the same
+- `git_push` pushes new commits, never a force. `pr_update` does the same
   and can edit the title or body.
 - `pr_ready` marks a draft ready; it is refused while review comments on
   the diff are unresolved.
@@ -25,12 +25,12 @@ or land. Do not look for one: the person lands.
 ## The loop
 
 1. Commit what you mean to publish. A dirty tree is refused (`dirty`).
-2. `pr_open` the first time, `pr_push` after.
+2. `pr_create` the first time, `git_push` after.
 3. `pr_checks`.
    - all green: tell the person, you are done;
    - still running: do other work, or tell the person to ask you again;
    - failing: read the log and the commit it ran on, reproduce it
-     locally, fix, commit, `pr_push`, `pr_checks` again.
+     locally, fix, commit, `git_push`, `pr_checks` again.
 4. Stop after a few rounds that do not turn green and say what you
    found. A loop that never goes green is the person's to judge.
 
@@ -61,7 +61,7 @@ Every failure is `error: <code>: text — fix`.
 - `target-changed`: the push would go to another repository than the one
   the person allowed. Put the push remote back, or ask the person.
 - `agent-busy`: a workflow run is working in your tree; wait for it.
-- `no-pr`: open one with `pr_open`. `base-unchosen`: call `pr_open` again
+- `no-pr`: open one with `pr_create`. `base-unchosen`: call `pr_create` again
   with `base_repo` set to one of the repositories named.
 - `facts-changed`, `branch-moved`: the branch or remote moved during the
   call; call again once.

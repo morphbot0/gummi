@@ -2113,8 +2113,8 @@ Decided in the design interview (2026-07-03):
 31. **A session may publish its own branch and watch its checks, on a
     person's standing allowance**, decided 2026-10-25 (§22.14). A person
     switches "agent may publish" on for a session once, the way "always
-    allow runs" is switched on; thereafter the session's `pr_push`,
-    `pr_open`, `pr_update`, `pr_ready` and `pr_checks` push its branch,
+    allow runs" is switched on; thereafter the session's `git_push`,
+    `pr_create`, `pr_update`, `pr_ready` and `pr_checks` push its branch,
     open and update its PR, mark it ready and read its checks with no
     confirm of their own. This **amends decision 25** (publishing is no
     longer a person's act every time: the allowance stands in for the
@@ -5612,7 +5612,7 @@ wants that can now say so once.
   run or schedule sets it.
 - **The tools** (`engine/prtools.go`), listed only while the allowance
   is on and refused with `publish-not-allowed` if called anyway (each
-  call reads the store afresh): `pr_push`, `pr_open`, `pr_update`,
+  call reads the store afresh): `git_push`, `pr_create`, `pr_update`,
   `pr_ready`, `pr_checks`. Each resolves and acts in one call with no
   confirm. There is no merge, force-push, retarget, review-resolve,
   landing or back-to-draft tool.
@@ -5680,7 +5680,7 @@ wants that can now say so once.
 - **Watching without a watcher.** gummi adds no poller, no webhook and
   no attention event on a red check. The loop is the session's — push,
   `pr_checks`, on a failure read the logs and the commit they ran on,
-  fix, commit, `pr_push`, `pr_checks` again — and the bundled
+  fix, commit, `git_push`, `pr_checks` again — and the bundled
   `publishing-prs` skill teaches it. To come back later it asks the
   person for a heartbeat (§26); a session cannot propose a schedule
   itself today. The loop is bounded by the session's envelope like any

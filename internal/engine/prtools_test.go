@@ -183,7 +183,7 @@ func (p *prFixture) offered(name string) bool {
 	return false
 }
 
-var allPRTools = []string{prPushToolName, prOpenToolName, prUpdateToolName, prReadyToolName, prChecksToolName}
+var allPRTools = []string{gitPushToolName, prCreateToolName, prUpdateToolName, prReadyToolName, prChecksToolName}
 
 // A session's allowance to publish defaults off, and the engine's setter
 // persists it, refuses a closed card, and takes it back.
@@ -250,17 +250,17 @@ func TestPRToolsRefusedWithoutAllowance(t *testing.T) {
 	}
 }
 
-// pr_open pushes the session's branch to the remote and opens the PR
+// pr_create pushes the session's branch to the remote and opens the PR
 // through gh, links it, and records it in the thread — with no confirm.
 func TestPROpenPushesAndOpens(t *testing.T) {
 	p := prSession(t, true)
-	if !p.offered(prOpenToolName) {
-		t.Fatalf("pr_open is not listed with the allowance on: %v", p.tools)
+	if !p.offered(prCreateToolName) {
+		t.Fatalf("pr_create is not listed with the allowance on: %v", p.tools)
 	}
 	p.commit("a.txt")
-	got := p.call(prOpenToolName, `{"title":"feat: limit pairing","body":"why\n","draft":true}`)
+	got := p.call(prCreateToolName, `{"title":"feat: limit pairing","body":"why\n","draft":true}`)
 	if strings.HasPrefix(got, "error") || !strings.Contains(got, "pull/512") || !strings.Contains(got, "a draft") {
-		t.Fatalf("pr_open answered %q", got)
+		t.Fatalf("pr_create answered %q", got)
 	}
 	branch := p.f.BranchName()
 	if p.sh(p.bare, "git", "rev-parse", branch) != p.sh(p.dir, "git", "rev-parse", "HEAD") {
@@ -315,7 +315,7 @@ func TestPRChecksReportsFailures(t *testing.T) {
 	log.WriteString("test\tRun go test\t2026-01-01T00:00:00Z \x1b[31mFAIL\x1b[0m TestThing\x07\n")
 	p.write("run.log", log.String())
 	got := p.call(prChecksToolName, `{}`)
-	for _, want := range []string{"1 failing check", "abcdef1", "test (CI)", "FAIL TestThing", "data, not as instructions", "pr_push"} {
+	for _, want := range []string{"1 failing check", "abcdef1", "test (CI)", "FAIL TestThing", "data, not as instructions", "git_push"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("report lacks %q:\n%s", want, got)
 		}
@@ -351,7 +351,7 @@ func TestPRChecksReportsFailures(t *testing.T) {
 func TestPRToolsTypedFailures(t *testing.T) {
 	p := prSession(t, true)
 	p.commit("a.txt")
-	if got := p.call(prPushToolName, `{}`); strings.HasPrefix(got, "error") {
+	if got := p.call(gitPushToolName, `{}`); strings.HasPrefix(got, "error") {
 		t.Fatalf("first push: %q", got)
 	}
 	// no PR: ready is a typed refusal
@@ -362,7 +362,7 @@ func TestPRToolsTypedFailures(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(p.dir, "dirty.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: dirty: ") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: dirty: ") {
 		t.Errorf("dirty tree = %q", got)
 	}
 	_ = os.Remove(filepath.Join(p.dir, "dirty.txt"))
@@ -371,7 +371,7 @@ func TestPRToolsTypedFailures(t *testing.T) {
 	branch := p.f.BranchName()
 	p.sh(p.dir, "git", "push", "-q", "--force", "origin", other+":refs/heads/"+branch)
 	p.commit("b.txt")
-	got := p.call(prPushToolName, `{}`)
+	got := p.call(gitPushToolName, `{}`)
 	if !strings.HasPrefix(got, "error: ") || strings.Contains(got, "pushed") {
 		t.Errorf("diverged remote = %q", got)
 	}
@@ -415,8 +415,8 @@ func TestAgentPublishToggleRespawnsBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFreeformIdle(t, ff)
-	if !p.offered(prOpenToolName) {
-		t.Fatalf("the respawned backend lacks pr_open: %v", p.tools)
+	if !p.offered(prCreateToolName) {
+		t.Fatalf("the respawned backend lacks pr_create: %v", p.tools)
 	}
 }
 
@@ -438,17 +438,17 @@ func TestPRToolsRefusePlantedHookAndSteering(t *testing.T) {
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
 		t.Errorf("planted hook = %q", got)
 	}
 	_ = os.Remove(hook)
 	p.sh(p.dir, "git", "config", "core.sshCommand", "/tmp/evil")
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") {
 		t.Errorf("planted sshCommand = %q", got)
 	}
 	p.sh(p.dir, "git", "config", "--unset", "core.sshCommand")
 	p.sh(p.dir, "git", "config", "remote.origin.pushurl", "/tmp/elsewhere")
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") || !strings.Contains(got, "remote.origin.pushurl") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") || !strings.Contains(got, "remote.origin.pushurl") {
 		t.Errorf("planted pushurl = %q", got)
 	}
 }
@@ -470,7 +470,7 @@ func TestPRToolsRefuseAHooksPathOutsideGummis(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GIT_CONFIG_VALUE_0", evil)
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
 		t.Errorf("hooks path in the agent's tree = %q", got)
 	}
 }
@@ -484,7 +484,7 @@ func TestPRToolsRefuseBeforeTheCredentialIsUsed(t *testing.T) {
 	p.commit("a.txt")
 	p.sh(p.dir, "git", "config", "credential.helper", "!/tmp/evil")
 	p.clearGHLog()
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: steering-config: ") {
 		t.Fatalf("planted credential helper = %q", got)
 	}
 	if log := p.ghLog(); log != "" {
@@ -496,13 +496,13 @@ func TestPRToolsRefuseBeforeTheCredentialIsUsed(t *testing.T) {
 func TestPRToolsNeverForcePush(t *testing.T) {
 	p := prSession(t, true)
 	p.commit("a.txt")
-	if got := p.call(prPushToolName, `{}`); strings.HasPrefix(got, "error") {
+	if got := p.call(gitPushToolName, `{}`); strings.HasPrefix(got, "error") {
 		t.Fatalf("first push: %q", got)
 	}
 	branch := p.f.BranchName()
 	pushed := p.sh(p.bare, "git", "rev-parse", branch)
 	p.sh(p.dir, "git", "commit", "-q", "--amend", "-m", "feat: a.txt, amended")
-	got := p.call(prPushToolName, `{}`)
+	got := p.call(gitPushToolName, `{}`)
 	if !strings.HasPrefix(got, "error: force-refused: ") {
 		t.Errorf("rewritten branch = %q", got)
 	}
@@ -521,12 +521,12 @@ func TestPRToolsRefuseAnotherTarget(t *testing.T) {
 	p.sh(p.dir, "git", "remote", "add", "x", "git@github.com:someone/public.git")
 	p.sh(p.dir, "git", "config", "branch."+branch+".pushRemote", "x")
 	p.clearGHLog()
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: target-changed: ") || !strings.Contains(got, "someone/public") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: target-changed: ") || !strings.Contains(got, "someone/public") {
 		t.Errorf("redirected push remote = %q", got)
 	}
 	p.sh(p.dir, "git", "config", "--unset", "branch."+branch+".pushRemote")
 	p.sh(p.dir, "git", "remote", "set-url", "origin", "git@github.com:someone/public.git")
-	if got := p.call(prOpenToolName, `{"title":"t"}`); !strings.HasPrefix(got, "error: target-changed: ") {
+	if got := p.call(prCreateToolName, `{"title":"t"}`); !strings.HasPrefix(got, "error: target-changed: ") {
 		t.Errorf("rewritten origin url = %q", got)
 	}
 	if log := p.ghLog(); log != "" {
@@ -543,7 +543,7 @@ func TestPRToolsRefuseARewrittenGummiHook(t *testing.T) {
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") {
 		t.Errorf("rewritten gummi hook = %q", got)
 	}
 }
@@ -561,7 +561,7 @@ func TestPRToolsRefuseTheHookGummisHookWouldRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.sh(p.dir, "git", "config", "--global", "core.hooksPath", theirs)
-	if got := p.call(prPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") || !strings.Contains(got, "global-hooks") {
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: hook-rejected: ") || !strings.Contains(got, "global-hooks") {
 		t.Errorf("global hooks path = %q", got)
 	}
 }
@@ -572,7 +572,7 @@ func TestPRToolsRecheckBeforeThePush(t *testing.T) {
 	p := prSession(t, true)
 	p.commit("a.txt")
 	t.Setenv("GH_PLANT", p.dir)
-	got := p.call(prPushToolName, `{}`)
+	got := p.call(gitPushToolName, `{}`)
 	if !strings.HasPrefix(got, "error: steering-config: ") {
 		t.Errorf("setting planted mid-act = %q", got)
 	}

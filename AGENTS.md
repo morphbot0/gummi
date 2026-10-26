@@ -245,7 +245,7 @@ worktrees and specs still work — the board just stays static. Key env vars are
   a thread. Pushing a card's own branch and opening, updating or readying
   its PR are acts a *person* starts (TUI or web), or that a session does
   under that person's standing per-session allowance (decision 31, DESIGN
-  §22.14: `pr_push`, `pr_open`, `pr_update`, `pr_ready`, `pr_checks`,
+  §22.14: `git_push`, `pr_create`, `pr_update`, `pr_ready`, `pr_checks`,
   through `internal/agentpublish` alone),
   through `gh` and the credentials already on the machine, or the GitHub
   token and SSH key a person stored in the web page's settings
