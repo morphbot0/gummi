@@ -430,3 +430,34 @@ func TestARunProposedInTheSettledHistorySitsThere(t *testing.T) {
 		t.Fatalf("items %s", strings.Join(keys, " "))
 	}
 }
+
+// TestARunEndedBeforeTheConversationIsNotDrawn: once /clear or /handoff
+// starts the conversation over, a run that ended before it is left out;
+// an open run, and one that ended since, stay.
+func TestARunEndedBeforeTheConversationIsNotDrawn(t *testing.T) {
+	t0 := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	cleared := t0.Add(time.Hour)
+	tr := []engine.Message{
+		{Author: engine.AuthorTasks, At: t0},
+		{Author: engine.AuthorSystem, Content: "Cleared the conversation.", At: cleared},
+	}
+	start := ConversationStart(tr)
+	if !start.Equal(cleared) {
+		t.Fatalf("start = %v, want the cleared note's %v", start, cleared)
+	}
+	ins := []RunInput{
+		{Run: domain.Run{N: 1, State: domain.RunDone, CreatedAt: t0, EndedAt: t0.Add(time.Minute)}},
+		{Run: domain.Run{N: 2, State: domain.RunRunning, CreatedAt: t0}},
+		{Run: domain.Run{N: 3, State: domain.RunDone, CreatedAt: t0, EndedAt: cleared.Add(time.Minute)}},
+	}
+	var got []int
+	for _, in := range CurrentRuns(ins, start) {
+		got = append(got, in.Run.N)
+	}
+	if fmt.Sprint(got) != "[2 3]" {
+		t.Errorf("runs drawn = %v, want [2 3]", got)
+	}
+	if n := len(CurrentRuns(ins, ConversationStart(nil))); n != 3 {
+		t.Errorf("with no conversation, %d runs drawn, want all 3", n)
+	}
+}

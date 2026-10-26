@@ -35,6 +35,7 @@ import {
   initSelection, loadBoard, select, refresh, refreshAll, loadLive, pushLive, setStream, nextNeeding, nextRunning, step
 } from './selection.js?v=__ASSET_V__'
 import { registerWorker, openPush } from './push.js?v=__ASSET_V__'
+import { openCache, forgetAll } from './threadcache.js?v=__ASSET_V__'
 import './views/index.js?v=__ASSET_V__'
 
 let started = false
@@ -59,6 +60,8 @@ async function boot () {
     return
   }
   if (!session.authed && !session.openAccess) {
+    // a browser asked to pair again keeps nothing it was shown before
+    forgetAll()
     $('#app').hidden = true
     showPair(session, () => { $('#pair').hidden = true; boot() })
     return
@@ -97,6 +100,7 @@ async function unpair () {
         testid: 'unpair-confirm',
         onClick: async () => {
           try { await post('/api/unpair', {}) } catch (err) { toast(err.message, { err: true }); return false }
+          forgetAll()
           closeEvents()
           location.hash = ''
           location.reload()
@@ -109,6 +113,7 @@ async function unpair () {
 async function startBoard () {
   if (started) return
   started = true
+  openCache(`${state.session?.host || ''}/${state.session?.repo || ''}`)
   const ctx = {
     select: (id, o) => select(id, o),
     setTab,
@@ -159,7 +164,7 @@ async function startBoard () {
     focusComposer,
     focusFilter
   })
-  setUnauthorizedHandler(() => { closeEvents(); closeOverlay(); location.reload() })
+  setUnauthorizedHandler(() => { forgetAll(); closeEvents(); closeOverlay(); location.reload() })
   // a read that failed is asked again, everything the page shows, until
   // one goes through: the event that asked for it will not come twice
   let again = 0

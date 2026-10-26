@@ -231,3 +231,27 @@ func TestMintRefusesACollidingBranch(t *testing.T) {
 		t.Errorf("seq advanced on a refused mint: %s -> %s", seq, got)
 	}
 }
+
+// TestMintTakesTheNameItWasGiven: a Title is the card's title and spells
+// its branch, and the opening's own first line is kept as the one-liner;
+// with none, the first line is the title as before.
+func TestMintTakesTheNameItWasGiven(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	f, err := Mint(context.Background(), store, ws, Input{
+		Description: "the login page loops for SSO users\n\nit started after the IdP move",
+		Title:       "SSO login loop", Envelope: 2400,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Title != "SSO login loop" || f.Slug != "sso-login-loop" || f.OneLiner != "the login page loops for SSO users" {
+		t.Errorf("title=%q slug=%q oneLiner=%q", f.Title, f.Slug, f.OneLiner)
+	}
+	g, err := Mint(context.Background(), store, ws, Input{Description: "Dark mode toggle", Envelope: 2400})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Title != "Dark mode toggle" {
+		t.Errorf("unnamed title = %q", g.Title)
+	}
+}

@@ -212,7 +212,7 @@ func TestCardFormTabOrder(t *testing.T) {
 	if form.expanded {
 		t.Fatal("options should open collapsed")
 	}
-	for _, want := range []int{cardStopText, cardStopEnvelope, cardStopProfile, cardStopWhere, cardStopStack, cardStopButtons, cardStopText} {
+	for _, want := range []int{cardStopText, cardStopEnvelope, cardStopProfile, cardStopWhere, cardStopStack, cardStopButtons, cardStopName, cardStopText} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}
@@ -560,5 +560,41 @@ func TestBoardNOpensTheDoorAndRemembersTheRepo(t *testing.T) {
 	}
 	if !strings.Contains(m.notice.text, "“Dark mode” created") {
 		t.Errorf("notice = %q", m.notice.text)
+	}
+}
+
+// TestCardFormNamesTheSessionBeforeItStarts: a name typed on the name row
+// is the result's, and the readout shows it as the title in place of the
+// text's first line; left empty, the result carries none.
+func TestCardFormNamesTheSessionBeforeItStarts(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	var got formResult
+	form := door(func(res formResult) tea.Cmd { got = res; return nil })
+	form.SetText("the login page loops for SSO users")
+	form.setFocus(cardStopName)
+	form.HandlePaste(tea.PasteMsg{Content: "SSO login loop"})
+	if view := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(view, "· SSO login loop") {
+		t.Errorf("the readout does not title the card by its name:\n%s", view)
+	}
+	if done, _ := form.HandleKey(keyEnter); !done {
+		t.Fatalf("enter on the name row did not create: %s", form.errText)
+	}
+	if got.Name != "SSO login loop" || got.Desc != "the login page loops for SSO users" {
+		t.Errorf("result = %+v", got)
+	}
+
+	form = door(func(res formResult) tea.Cmd { got = res; return nil })
+	form.SetText("Login loops")
+	form.HandleKey(keyEnter)
+	if got.Name != "" {
+		t.Errorf("an unnamed card carries the name %q", got.Name)
+	}
+
+	form = door(func(res formResult) tea.Cmd { t.Fatal("a name with no letter submitted"); return nil })
+	form.SetText("Login loops")
+	form.setFocus(cardStopName)
+	form.HandlePaste(tea.PasteMsg{Content: "!!!"})
+	if done, _ := form.HandleKey(keyEnter); done || !strings.Contains(form.errText, "name") {
+		t.Errorf("done=%v err=%q", done, form.errText)
 	}
 }

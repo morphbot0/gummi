@@ -275,6 +275,8 @@ button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:
 .subline > .stages,.subline > .spend{flex-shrink:0}
 .subline{overflow:hidden}
 .subline .mono{color:var(--fg2)}
+.subline .draft-name{flex:0 1 18em;height:24px;border:1px solid var(--line2);border-radius:6px;padding:0 8px;background:var(--bg);outline:0;font-size:12.5px;color:var(--fg)}
+.subline .draft-name:focus{border-color:var(--fg4)}
 .stages{display:flex;align-items:center;font-size:12px}
 .stages button,.stages .cur{display:inline-flex;align-items:center;padding:2px 7px;border-radius:5px;cursor:default;white-space:pre}
 .stages button{color:var(--fg3)}

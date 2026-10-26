@@ -174,6 +174,12 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 		return why
 	}
 	d.text.SetValue(text)
+	if name := strings.TrimSpace(req.Name); name != "" {
+		if why := tooLong(d.name.CharLimit, "the session's name", name); why != "" {
+			return why
+		}
+		d.name.SetValue(name)
+	}
 	if req.Envelope != nil {
 		if why := tooLong(d.env.CharLimit, "that budget", domain.DollarsInput(*req.Envelope)); why != "" {
 			return why
