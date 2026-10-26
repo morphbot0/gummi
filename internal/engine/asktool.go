@@ -82,6 +82,11 @@ type Ask struct {
 	// D18) — so it carries none, and the surfaces that offer it say why
 	// rather than presenting a bare chat row as all the agent offered.
 	Restored bool `json:"-"`
+	// PublishRequest marks the session's request for the standing
+	// allowance to publish (publishrequest.go): its first option grants it,
+	// and the answer is settled there rather than handed to the agent as
+	// the result of a call.
+	PublishRequest bool `json:"-"`
 }
 
 // AskOption is one selectable answer.
@@ -357,6 +362,8 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleAgentTool(s, tc)
 	case repoListToolName, repoAttachToolName, repoDetachToolName:
 		e.handleRepoTool(s, tc)
+	case publishRequestToolName:
+		e.handlePublishRequest(s, tc)
 	case gitPushToolName, prCreateToolName, prUpdateToolName, prReadyToolName, prChecksToolName, "pr_push", "pr_open":
 		e.handlePRTool(s, tc)
 	case skillReadTool, skillManageTool:
@@ -1039,6 +1046,9 @@ func (e *Engine) AnswerCall(ctx context.Context, id domain.FeatureID, call, answ
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
 		return fmt.Errorf("empty answer")
+	}
+	if open.PublishRequest {
+		return e.answerPublishRequest(ctx, s, open, answer, by)
 	}
 	// A permission's answer is a ruling on a held tool call, not a reply
 	// the turn consumes: the call stays blocked server-side until the

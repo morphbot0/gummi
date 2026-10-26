@@ -27,6 +27,9 @@ const (
 var legacyPRTools = map[string]string{"pr_push": gitPushToolName, "pr_open": prCreateToolName}
 
 func isPRTool(name string) bool {
+	if name == publishRequestToolName {
+		return true
+	}
 	if _, ok := legacyPRTools[name]; ok {
 		return true
 	}

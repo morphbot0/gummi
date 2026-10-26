@@ -5609,7 +5609,11 @@ wants that can now say so once.
   the session's tools are fixed when its backend starts and a change
   restarts it with the conversation replayed. Taking it back is never
   refused: every call reads the store, so the next one fails. No tool,
-  run or schedule sets it.
+  run or schedule sets it. A session may *ask*: `publish_request` (offered
+  while the allowance is off) puts an ask in the thread naming the repository
+  and returns at once; only the person's answer of its first option calls
+  `SetAgentMayPublish`, any other answer leaves it off, and an allow while
+  the session is mid-turn is refused until the turn ends.
 - **The tools** (`engine/prtools.go`), listed only while the allowance
   is on and refused with `publish-not-allowed` if called anyway (each
   call reads the store afresh): `git_push`, `pr_create`, `pr_update`,

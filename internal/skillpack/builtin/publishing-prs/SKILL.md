@@ -7,6 +7,10 @@ source: gummi
 
 # Publishing your branch and watching its checks
 
+No publishing tools listed? Commit, then call `publish_request` with a
+one-sentence reason and end your turn: the person answers in the thread, and
+on a yes the tools below are yours. Only their answer grants it.
+
 A person allowed you to publish your own branch, once. The tools
 act on that allowance with no confirm each time:
 

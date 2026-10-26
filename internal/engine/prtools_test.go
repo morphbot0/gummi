@@ -580,3 +580,42 @@ func TestPRToolsRecheckBeforeThePush(t *testing.T) {
 		t.Errorf("pushed anyway: %q", b)
 	}
 }
+
+// A session without the allowance is offered publish_request, not the
+// publishing tools; the person's answer in the thread grants it, and a
+// "no" leaves it off.
+func TestPublishRequestIsAnsweredInTheThread(t *testing.T) {
+	ctx := context.Background()
+	p := prSession(t, false)
+	if !p.offered(publishRequestToolName) || p.offered(gitPushToolName) {
+		t.Fatalf("a session without the allowance is offered %v", p.tools)
+	}
+	if got := p.call(publishRequestToolName, `{"reason":"open the PR"}`); strings.HasPrefix(got, "error") {
+		t.Fatalf("publish_request answered %q", got)
+	}
+	open := p.s.Snapshot().PendingAsk
+	if open == nil || !open.PublishRequest || open.CallID != "" || !strings.Contains(open.Question, "me/widget") {
+		t.Fatalf("the question put to the person is %+v", open)
+	}
+	if got := p.call(gitPushToolName, `{}`); !strings.HasPrefix(got, "error: publish-not-allowed") {
+		t.Fatalf("a push before the answer: %q", got)
+	}
+	if err := p.e.Answer(ctx, p.f.ID, "Not now"); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, p.e)
+	if p.e.AgentMayPublish(ctx, p.f.ID) {
+		t.Fatal("a no allowed publishing")
+	}
+	p.call(publishRequestToolName, `{}`)
+	if err := p.e.Answer(ctx, p.f.ID, open.Options[0].Label); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, p.e)
+	if !p.e.AgentMayPublish(ctx, p.f.ID) {
+		t.Fatal("the person's yes did not allow publishing")
+	}
+	if !p.offered(gitPushToolName) || p.offered(publishRequestToolName) {
+		t.Fatalf("after the yes the backend is offered %v", p.tools)
+	}
+}
