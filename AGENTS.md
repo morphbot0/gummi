@@ -12,7 +12,8 @@ fresh-context steps working in its own tree — when the work is worth
 one. It orchestrates other agents — it is
 not itself a coding agent. A person drives it from the keyboard in the
 TUI or from a browser through its web face, `gummi web`. A script, an
-eval or CI runs one session unattended with `gummi run "<prompt>"`
+eval or CI runs one session unattended with `gummi run "<prompt>"`, or one
+workflow on its inputs with `gummi run --workflow <recipe> --input …`
 (`internal/driver`), which answers on the person's behalf and streams
 NDJSON. An agent working *inside* a card reaches gummi's
 tools only through that card's own session MCP endpoint (§16) — there is
@@ -123,7 +124,7 @@ agent/worktree/verify as leaf services.
 | `webapi` | The JSON contract between `internal/web` and its page: types only, golden-tested shapes. Change a shape here first. |
 | `threadfold` | Pure fold of a card's event log into what a thread draws — its sessions, answered decisions, and the structured `Items` the web page renders — in the words the TUI thread uses. An agent's dispatched sessions fold into one item each too (`dispatches.go`: `Options.Dispatches`, keyed `dispatch:<card>`). A session's workflow runs fold into one item each (`runs.go`: `Options.Runs`, `FoldRun`, keyed `run:<n>` with a content-hash `Rev`), an open one carrying its live strip (`runstrip.go`: `RunStrip`). Both faces read it. |
 | `decisions` | Pure rules for a card's open decisions: which one a card shows (`Rank`), its attention lane, how an `ask_user` question is offered as options, a run's decision too (`RunOptions`), and what an answer says. Both faces read it. |
-| `driver` | The unattended session loop behind `gummi run`: mints a session from a prompt, always allows its workflow runs (the envelope the only cap), and drives it to its end with no person present — a question is answered with its recommended option, a parked run resumed, a loop at its max carried on, a revised plan declined, each answer put on the NDJSON stream. Money is never decided: a spent envelope stops it as `exhausted`. Exit statuses are `driver.Status.ExitCode`. |
+| `driver` | The unattended session loop behind `gummi run`: mints a session from a prompt, always allows its workflow runs (the envelope the only cap), and drives it to its end with no person present — a question is answered with its recommended option, a parked run resumed, a loop at its max carried on, a revised plan declined, each answer put on the NDJSON stream. Money is never decided: a spent envelope stops it as `exhausted`. Exit statuses are `driver.Status.ExitCode`. With `--workflow` it runs a recipe on `--input`s itself (`workflow.go`): gummi writes the spec (`--spec`, or one from the inputs and `--check`s), proposes the run with no session turn first, keeps the report from the session when no spec was given, and puts the run's end, artifacts and notes on the stream as `workflow_ended` (DESIGN §25.11). |
 | `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to a live session's tools (`--feature <id>`). |
 
 `cmd/gummi` holds `main.go` and the few commands there are: the board (no

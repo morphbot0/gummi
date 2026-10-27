@@ -92,6 +92,9 @@ type workflowRuntime struct {
 	// diffs caches the diff between two settled snapshots: a run's or a
 	// step's that has ended never changes, and reading it runs git
 	diffs map[string]cachedDiff
+	// unsent marks each session whose runs' reports this process keeps
+	// from it (KeepReports): the report is written all the same
+	unsent map[domain.FeatureID]bool
 }
 
 func newWorkflowRuntime() *workflowRuntime {
@@ -100,7 +103,27 @@ func newWorkflowRuntime() *workflowRuntime {
 		locks: map[domain.FeatureID]*sync.Mutex{}, planTries: map[string]int{},
 		held: map[domain.FeatureID]func(){}, conducted: map[string]bool{},
 		stamps: map[string]map[string]time.Time{}, diffs: map[string]cachedDiff{},
+		unsent: map[domain.FeatureID]bool{},
 	}
+}
+
+// KeepReports stops this process sending session the reports of its runs
+// as turns: a run's end is written into its spec, its run directory and
+// the run itself, but the session is not woken to read it. `gummi run`
+// asks it for a run it drives with no session turn — a triage whose
+// report is the product. It lasts the life of the engine.
+func (e *Engine) KeepReports(session domain.FeatureID) {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	rt.unsent[session] = true
+	rt.mu.Unlock()
+}
+
+func (e *Engine) keepsReports(session domain.FeatureID) bool {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.unsent[session]
 }
 
 func runKey(session domain.FeatureID, n int) string { return fmt.Sprintf("%s/%d", session, n) }
@@ -477,15 +500,9 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("the recipe cannot run:\n- %s", strings.Join(problems, "\n- "))
 	}
-	var missing []string
-	for in := range recipe.Inputs {
-		if _, ok := req.Inputs[in]; !ok {
-			missing = append(missing, in)
-		}
-	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
-		return nil, fmt.Errorf("the recipe needs the input%s %s", plural(len(missing)), strings.Join(missing, ", "))
+	inputs, err := workflowrecipe.ResolveInputs(recipe, req.Inputs)
+	if err != nil {
+		return nil, err
 	}
 	n, err := e.runSpec(ctx, sess, req.Spec)
 	if err != nil {
@@ -516,7 +533,7 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		return nil, err
 	}
 	run := &domain.Run{
-		Session: session, RecipeName: name, Recipe: recipe, RecipeYAML: text, Inputs: req.Inputs,
+		Session: session, RecipeName: name, Recipe: recipe, RecipeYAML: text, Inputs: inputs,
 		Spec: n, SpecRev: rev, State: domain.RunProposed, CreatedAt: e.now(),
 	}
 	if _, items := e.frozenSpec(ctx, run); true {
@@ -571,6 +588,22 @@ func recipeLabel(r *domain.Run) string {
 		return r.Recipe.Name + ", inline"
 	}
 	return "inline recipe"
+}
+
+// WorkflowCheck reads req's recipe and refuses it as WorkflowPropose
+// would for the recipe alone — one that fails Check, an input it does not
+// declare, a required one left out — with no session yet: `gummi run`
+// asks it before it mints one.
+func (e *Engine) WorkflowCheck(req WorkflowRequest) (domain.Recipe, error) {
+	recipe, _, _, err := e.loadRecipe(req)
+	if err != nil {
+		return recipe, err
+	}
+	if problems, _ := workflowrecipe.Check(recipe); len(problems) > 0 {
+		return recipe, fmt.Errorf("the recipe cannot run:\n- %s", strings.Join(problems, "\n- "))
+	}
+	_, err = workflowrecipe.ResolveInputs(recipe, req.Inputs)
+	return recipe, err
 }
 
 // loadRecipe reads the request's recipe: its name, its text, and the
@@ -2067,6 +2100,9 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	e.writeRunReport(ctx, cur)
 	e.runNote(session, fmt.Sprintf("run %d ended %s", n, end))
 	e.noteDispatcher(ctx, session, n, end, report)
+	if e.keepsReports(session) {
+		return
+	}
 	msg := fmt.Sprintf("Workflow run %d has reported. Read the report and the diff it left in the tree, tell the person what it means, "+
 		"and commit what you keep — gummi commits nothing.\n\n%s", n, report)
 	_ = e.sendSessionTurn(WithActor(ctx, state.ActorWorkflow), session, msg)

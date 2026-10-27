@@ -23,8 +23,8 @@ var doctorCmd = &cobra.Command{
 // runCmd implements `gummi run "<prompt>"`: one session, driven to its end
 // with no person at the keyboard.
 var runCmd = &cobra.Command{
-	Use:   `run --envelope <dollars> [--profile name] [--repo name] [--base branch] [--ref id] [--timeout d] [--verbose] "<prompt>"`,
-	Short: "Run one session from a prompt, unattended, streaming NDJSON (for evals and CI)",
+	Use:   `run --envelope <dollars> [--workflow name | --workflow-file path] [--input name=value ...] [--profile name] [--repo name] [--base branch] [--ref id] [--timeout d] [--verbose] ["<prompt>"]`,
+	Short: "Run one session from a prompt, or one workflow on its inputs, unattended, streaming NDJSON (for evals and CI)",
 	Long: `Run mints a session from the prompt and drives it to its end with no one at
 the keyboard. Its workflow runs are always allowed, the envelope their only
 cap. A question is answered on your behalf with its recommended option and
@@ -34,7 +34,24 @@ max carries on. Money is never decided: a spent envelope stops the run.
 The stream is NDJSON on stdout. The exit status is 0 when the session is done,
 1 on an error, 2 when a person paused its workflow run from the board, 3 when
 the envelope is spent and 4 on --timeout. The session stays on the board,
-with its branch, for a person to read and land.`,
+with its branch, for a person to read and land.
+
+With --workflow (a workspace's or a bundled recipe) or --workflow-file, gummi
+runs that workflow itself, with no session turn before it. Its inputs are
+--input name=value (name=@file reads a file, name=- reads stdin; repeat it for
+each) and --inputs, a YAML or JSON file of names to text that --input
+overrides; an input the recipe does not declare, or a required one left out,
+is refused before any card is minted. The run is judged against --spec, a
+markdown spec, or else against a spec gummi writes from the prompt and the
+inputs, with a done-when item for each --check. Without --spec, or with
+--no-session, the run's report is the result: it is kept from the session,
+and the drive ends with the run. Its end is a workflow_ended line carrying the
+report, each artifact and the steps' DECISION: and OPEN: lines, and a run that
+ends partial exits 5.`,
+	Example: `  gummi run --envelope 5 "tidy the README"
+  gummi run --envelope 2 --workflow triage --input report=@bug.md --input logs=@bug.log
+  gh issue view 42 --json body -q .body | gummi run --envelope 2 --workflow triage --input report=-
+  gummi run --envelope 10 --workflow deliver --spec feature.md`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRun(cmdFlags(cmd), args)
@@ -100,6 +117,13 @@ func bindRunFlags(fs *pflag.FlagSet) {
 	fs.String("ref", "", "an external id kept on the session and echoed on the created line (an eval case, a CI job)")
 	fs.Duration("timeout", defaultRunTimeout, "stop when nothing has happened for this long (0: never)")
 	fs.Bool("verbose", false, "add the session's tool-call activity lines to the stream")
+	fs.String("workflow", "", "run this recipe itself, a workspace's or a bundled one, instead of sending the prompt")
+	fs.String("workflow-file", "", "run the recipe written in this YAML file itself")
+	fs.StringArray("input", nil, "an input of the workflow as name=value, name=@file or name=- (stdin); repeat for each")
+	fs.String("inputs", "", "a YAML or JSON file mapping the workflow's input names to their text (--input overrides one)")
+	fs.String("spec", "", "a markdown spec the workflow run is judged against (default: one gummi writes from the prompt and inputs)")
+	fs.StringArray("check", nil, "a done-when command for the spec gummi writes; repeat for each (refused beside --spec)")
+	fs.Bool("no-session", false, "keep the workflow run's report from the session and end with the run (the default without --spec)")
 }
 
 // bindWebFlags declares `gummi web`'s flags.

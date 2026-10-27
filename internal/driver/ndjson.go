@@ -82,6 +82,41 @@ type workflowEvent struct {
 	Report string  `json:"report,omitempty"`
 }
 
+// workflowStartedEvent is the run a drive proposed itself: its recipe,
+// the spec it is judged against and the inputs it was given, resolved.
+type workflowStartedEvent struct {
+	Event  string            `json:"event"`
+	ID     string            `json:"id"`
+	Run    int               `json:"run"`
+	Recipe string            `json:"recipe"`
+	Spec   int               `json:"spec"`
+	Inputs map[string]string `json:"inputs,omitempty"`
+}
+
+// workflowEndedEvent is a run's end with what it left: its report, each
+// artifact a step declared (its path, and its text when it was written),
+// and the DECISION: and OPEN: lines its steps wrote — what a caller posts
+// back where the work came from.
+type workflowEndedEvent struct {
+	Event     string              `json:"event"`
+	ID        string              `json:"id"`
+	Run       int                 `json:"run"`
+	Recipe    string              `json:"recipe,omitempty"`
+	State     string              `json:"state"`
+	Reason    string              `json:"reason,omitempty"`
+	Report    string              `json:"report,omitempty"`
+	Artifacts map[string]artifact `json:"artifacts,omitempty"`
+	Decisions []string            `json:"decisions,omitempty"`
+	Open      []string            `json:"open,omitempty"`
+}
+
+// artifact is one declared artifact of an ended run. Text is empty when
+// no step wrote it.
+type artifact struct {
+	Path string `json:"path"`
+	Text string `json:"text,omitempty"`
+}
+
 // answeredEvent is a question the drive answered on the person's behalf.
 // Kind is "ask" (the session's ask_user), "workflow_ask" (a step's), or
 // "workflow_" and the run decision's kind.
@@ -95,10 +130,12 @@ type answeredEvent struct {
 	Step   string `json:"step,omitempty"`
 }
 
-// doneEvent: the session is idle with no workflow run open.
+// doneEvent: the session is idle with no workflow run open. Status is
+// done, or partial when one of the drive's runs ended partial.
 type doneEvent struct {
 	Event  string  `json:"event"`
 	ID     string  `json:"id"`
+	Status string  `json:"status"`
 	Branch string  `json:"branch,omitempty"`
 	Spent  float64 `json:"spent_credits"`
 }

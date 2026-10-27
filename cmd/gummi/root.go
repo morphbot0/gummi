@@ -65,7 +65,13 @@ func resetFlags(cmd *cobra.Command) {
 		if !f.Changed {
 			return
 		}
-		_ = f.Value.Set(f.DefValue)
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			// a repeatable flag appends on Set: its default is no values,
+			// not the text "[]"
+			_ = sv.Replace(nil)
+		} else {
+			_ = f.Value.Set(f.DefValue)
+		}
 		f.Changed = false
 	})
 	for _, sub := range cmd.Commands() {

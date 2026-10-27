@@ -205,10 +205,11 @@ type sessionFake struct {
 	cardStep map[string]string
 	session  []string
 	steps    []string
+	briefs   map[string]string // each step's first brief, whole
 }
 
 func newSessionFake(first string) *sessionFake {
-	sf := &sessionFake{Fake: agent.NewFake(""), first: first, cardStep: map[string]string{}}
+	sf := &sessionFake{Fake: agent.NewFake(""), first: first, cardStep: map[string]string{}, briefs: map[string]string{}}
 	sf.Caps = agent.Capabilities{ClientTools: true, UsageEvents: true, Interrupt: true}
 	sf.Responder = sf.respond
 	return sf
@@ -238,6 +239,9 @@ func (sf *sessionFake) respond(opts agent.SessionOpts, msg string) []agent.Event
 	}
 	if step != "" {
 		sf.steps = append(sf.steps, step+": "+firstLine(msg))
+		if _, ok := sf.briefs[step]; !ok {
+			sf.briefs[step] = msg
+		}
 		sf.mu.Unlock()
 		return sf.respondStep(opts, step, msg)
 	}
@@ -303,6 +307,10 @@ func (sf *sessionFake) respondStep(opts agent.SessionOpts, step, msg string) []a
 		return say("Wrote it.\nDECISION: plain text")
 	case "validate":
 		return say("It is there.\nMET: DW-1")
+	case "reproduce":
+		return say("Reproduced it in parser.go.\nOPEN: whether 1.3 has it too")
+	case "assess":
+		return say("```markdown\nVerdict: a real bug, severity high.\n```\nDECISION: severity high")
 	}
 	return say("ok")
 }

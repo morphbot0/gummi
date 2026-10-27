@@ -17,6 +17,16 @@
 // card for a person to top up on the board. A run a person paused stops it
 // too. The drive is done when the session is idle with no workflow run open
 // or queued and every run's report has been answered.
+//
+// A drive may instead start a workflow itself (Options.Workflow or
+// WorkflowYAML): gummi writes the session's spec — the one given
+// (Options.Spec), or one it writes from the prompt, the run's inputs and
+// Options.Checks — and proposes the run with those inputs, with no session
+// turn before it. Without a spec given the run's report is the product (a
+// bug triaged, a question answered): it is kept from the session and the
+// drive ends with the run (Options.NoSession). The run's end is on the
+// stream as workflow_ended, its artifacts and notes with it, and a run
+// that ends partial makes the drive's status partial.
 package driver
 
 import (
@@ -53,6 +63,27 @@ type Options struct {
 	Timeout time.Duration
 	// Verbose adds the session's tool-call activity lines to the stream.
 	Verbose bool
+
+	// Workflow names the recipe the drive runs itself (a workspace's or a
+	// bundled one), or WorkflowYAML writes it out; at most one is set.
+	Workflow     string
+	WorkflowYAML string
+	// Inputs are the run's inputs, checked against the recipe's.
+	Inputs map[string]string
+	// Spec is the spec the run is judged against, as markdown. Empty,
+	// gummi writes one from the prompt, the inputs and Checks.
+	Spec string
+	// Checks are done-when commands for the spec gummi writes, one item
+	// each. They are refused beside Spec: that spec says its own.
+	Checks []string
+	// NoSession keeps the run's report from the session: the drive ends
+	// with the run, and the session never takes a turn.
+	NoSession bool
+}
+
+// RunsWorkflow reports whether the drive starts a workflow run itself.
+func (o Options) RunsWorkflow() bool {
+	return strings.TrimSpace(o.Workflow) != "" || strings.TrimSpace(o.WorkflowYAML) != ""
 }
 
 // Status is how a drive ended; each maps to the process's exit code.
@@ -64,6 +95,9 @@ const (
 	StatusPaused    Status = "paused"
 	StatusExhausted Status = "exhausted"
 	StatusTimeout   Status = "timeout"
+	// StatusPartial is a drive whose workflow run ended partial: a checked
+	// done-when item does not pass, or the run could not finish.
+	StatusPartial Status = "partial"
 )
 
 // ExitCode is the process exit for s: 0 only when the session is done.
@@ -77,6 +111,8 @@ func (s Status) ExitCode() int {
 		return 3
 	case StatusTimeout:
 		return 4
+	case StatusPartial:
+		return 5
 	}
 	return 1
 }
@@ -127,6 +163,8 @@ type Driver struct {
 	// answered holds the decisions this drive has answered, so one that
 	// lingers while the engine settles it is not answered twice
 	answered map[string]bool
+	// partial is set once a run this drive saw live ends partial
+	partial bool
 }
 
 // New builds a driver writing its NDJSON stream to out. The caller owns
@@ -146,14 +184,20 @@ func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out io.Writ
 // failure is on the stream as an error line and returned beside a
 // StatusError outcome.
 func (d *Driver) Run(ctx context.Context, prompt string) (Outcome, error) {
-	if strings.TrimSpace(prompt) == "" {
+	description := prompt
+	if d.opts.RunsWorkflow() {
+		var err error
+		if description, err = d.checkWorkflow(prompt); err != nil {
+			return d.fail(ctx, "", err)
+		}
+	} else if strings.TrimSpace(prompt) == "" {
 		return d.fail(ctx, "", errors.New("run needs a prompt"))
 	}
 	if d.opts.Envelope <= 0 {
 		return d.fail(ctx, "", errors.New("run needs an envelope"))
 	}
 	f, err := cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
-		Description: prompt, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
+		Description: description, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
 		Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
 		ExternalRef: d.opts.Ref,
 		// the same prompt run again, an eval's next pass, takes the next
@@ -173,6 +217,12 @@ func (d *Driver) Run(ctx context.Context, prompt string) (Outcome, error) {
 	ff, err := d.eng.OpenFreeform(ctx, f)
 	if err != nil {
 		return d.fail(ctx, f.ID, err)
+	}
+	if d.opts.RunsWorkflow() {
+		if err := d.startWorkflow(ctx, f, prompt); err != nil {
+			return d.fail(ctx, f.ID, err)
+		}
+		return d.loop(ctx, f.ID)
 	}
 	if err := ff.KickoffWith(ctx, prompt); err != nil {
 		return d.fail(ctx, f.ID, err)
@@ -273,7 +323,10 @@ func (d *Driver) check(ctx context.Context, id domain.FeatureID) (Outcome, bool,
 		out, err := d.fail(ctx, id, snap.Err)
 		return out, true, err
 	default:
-		if snap.Busy || len(snap.Queued) > 0 || (ff != nil && ff.Watching()) || open != nil || queued != nil || d.reportPending(ctx, id, snap) {
+		// a report kept from the session is never answered: the run's end
+		// is the drive's
+		pending := !d.opts.NoSession && d.reportPending(ctx, id, snap)
+		if snap.Busy || len(snap.Queued) > 0 || (ff != nil && ff.Watching()) || open != nil || queued != nil || pending {
 			return Outcome{}, false, nil
 		}
 		return d.done(ctx, id), true, nil
@@ -440,6 +493,13 @@ func (d *Driver) streamRuns(ctx context.Context, id domain.FeatureID) {
 	if err != nil {
 		return
 	}
+	var ended []domain.Run
+	defer func() {
+		// each after its own state line
+		for i := range ended {
+			d.emitEnded(ctx, id, &ended[i])
+		}
+	}()
 	for _, r := range runs {
 		if !r.State.Ended() && r.State != domain.RunDenied {
 			d.seenLive[r.N] = true
@@ -448,6 +508,12 @@ func (d *Driver) streamRuns(ctx context.Context, id domain.FeatureID) {
 			continue
 		}
 		d.runStates[r.N] = r.State
+		if r.State.Ended() && d.seenLive[r.N] {
+			ended = append(ended, r)
+			if r.State == domain.RunPartial {
+				d.partial = true
+			}
+		}
 		name := r.RecipeName
 		if name == "" {
 			name = r.Recipe.Name // an inline recipe's own
@@ -464,10 +530,14 @@ func (d *Driver) streamRuns(ctx context.Context, id domain.FeatureID) {
 func (d *Driver) done(ctx context.Context, id domain.FeatureID) Outcome {
 	f, _ := d.store.GetFeature(ctx, id)
 	// the session's spend is its pool's: its own turns and its runs' steps
+	status := StatusDone
+	if d.partial {
+		status = StatusPartial
+	}
 	d.out.Emit(doneEvent{
-		Event: "done", ID: string(id), Branch: f.BranchName(), Spent: d.eng.SessionPoolSpent(ctx, f),
+		Event: "done", ID: string(id), Status: string(status), Branch: f.BranchName(), Spent: d.eng.SessionPoolSpent(ctx, f),
 	})
-	return Outcome{Status: StatusDone, ID: id}
+	return Outcome{Status: status, ID: id}
 }
 
 // exhausted is the envelope spent: the session's own turn stopped on it,

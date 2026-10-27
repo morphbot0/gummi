@@ -7365,6 +7365,30 @@ with no person at the keyboard.
   board, its branch uncommitted to by gummi, for a person to read and
   land.
 
+`gummi run --workflow <recipe>` (or `--workflow-file`) runs a workflow
+on inputs instead of sending a prompt — a bug report to triage, a spec
+to deliver.
+- Its inputs are `--input name=value` (`@file`, `-` for stdin), each
+  repeatable, over an `--inputs` YAML or JSON file. A recipe declares an
+  input as `name: hint` (required) or `{hint, required: false}` /
+  `{hint, default}` (optional); one it does not declare, or a required
+  one left out, is refused before any card is minted
+  (`workflowrecipe.ResolveInputs`, `Engine.WorkflowCheck`). A step is
+  given each input between delimiters naming it (`WrapInput`), as it is
+  a step's output: an input is text from outside the run.
+- The session takes no turn first. gummi writes its spec: the one
+  `--spec` gives, or one written from the prompt and the inputs, with a
+  done-when item per `--check`. A run is still judged against a spec,
+  so its report, its spec state and both faces work as for any run.
+- Without `--spec` (or with `--no-session`) the report is the product:
+  gummi keeps it from the session (`Engine.KeepReports`) and the drive
+  ends with the run. With one, the session reads the report as for a run
+  it proposed.
+- The run's end is a `workflow_ended` line: its report, each artifact a
+  step declared with its text, and the steps' `DECISION:` and `OPEN:`
+  lines — what a caller posts back where the work came from. A run that
+  ends `partial` makes the drive `partial` (exit 5).
+
 ### 25.12 What goes, and what stays
 
 **Goes:**

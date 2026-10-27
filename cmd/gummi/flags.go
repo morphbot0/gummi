@@ -60,6 +60,14 @@ func (f cliFlags) Duration(name string) time.Duration {
 	return v
 }
 
+func (f cliFlags) StringArray(name string) []string {
+	v, err := f.fs.GetStringArray(name)
+	if err != nil {
+		panic(fmt.Sprintf("reading --%s as a string array: %v", name, err))
+	}
+	return v
+}
+
 // Changed reports whether the flag was present on the command line, so an
 // explicitly empty value (`--answer ""`) is distinguishable from an unset
 // one. This is what the old stdlib round trip could not carry: a []string
