@@ -355,7 +355,11 @@ func (d *Driver) answerAsk(ctx context.Context, session, card domain.FeatureID, 
 	if step != nil {
 		ev.Kind, ev.Run, ev.Step = "workflow_ask", step.Run, step.Path
 	}
-	if err := d.eng.AnswerCall(ctx, card, ask.CallID, sent, state.ActorAutopilot); err != nil {
+	if err := d.eng.AnswerCall(ctx, card, ask.CallID, sent, state.ActorAutopilot); errors.Is(err, engine.ErrQuestionMoved) {
+		// asked again under the drive since it read the question: the
+		// next check reads the one open now and answers that
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("answering %q: %w", firstLine(ask.Question), err)
 	}
 	d.answered[key] = true
@@ -528,6 +532,9 @@ func (d *Driver) streamRuns(ctx context.Context, id domain.FeatureID) {
 // --- ends ----------------------------------------------------------------
 
 func (d *Driver) done(ctx context.Context, id domain.FeatureID) Outcome {
+	// check streamed the runs before it read none open: one that ended
+	// between the two reads is put on the stream, and counted, here
+	d.streamRuns(ctx, id)
 	f, _ := d.store.GetFeature(ctx, id)
 	// the session's spend is its pool's: its own turns and its runs' steps
 	status := StatusDone

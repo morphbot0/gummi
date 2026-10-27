@@ -113,7 +113,7 @@ func TestAStepsQuestionIsAnswered(t *testing.T) {
 	h := newHarness(t, sf)
 	out, f := h.run(Options{Envelope: 2000}, "make the file")
 	if out.Status != StatusDone {
-		t.Fatalf("outcome %+v, want done; stream %v", out, h.eventKinds())
+		t.Fatalf("outcome %+v, want done; stream %s", out, h.buf.String())
 	}
 	a := h.last("answered")
 	if a == nil || a["kind"] != "workflow_ask" || a["step"] != "make" || a["run"] != float64(1) || a["answer"] != "plain" {
