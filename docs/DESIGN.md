@@ -7337,14 +7337,57 @@ in the session's tree, whose terminal (§20.5) is the session's own.
 
 ### 25.11 The headless driver
 
-`gummi run` and `resume` drive workflows as they drove crews.
-- `gummi run` always allows the runs of the session it mints; the
-  envelope is their only cap.
-- A run proposal on a session not always allowed, a question, a run's
-  decision or a spent pool stops the driver with `needs_you` (or
-  `exhausted`).
-- NDJSON events are renamed from `crew_*` to `workflow_*`, and the
-  `crew_*` names are still emitted alongside for one release.
+> **Rebuilt.** The `run`/`resume` pair that stopped on every question
+> with `needs_you` was removed with the rest of the command-line verbs;
+> `gummi run` came back alone, as an unattended drive for evals and CI.
+> There is no `resume`.
+
+`gummi run --envelope <dollars> "<prompt>"` (`internal/driver`) mints one
+session, sends the prompt as its first turn, and drives it to its end
+with no person at the keyboard.
+- It always allows the session's workflow runs: the person typing the
+  command allows them once, up front, and the envelope is their only
+  cap.
+- A question is answered on the person's behalf, and the answer is an
+  `answered` line on the stream: an `ask_user` (the session's or a
+  step's) takes its recommended option (`engine.RecommendedOption`), or
+  is told to decide for itself when it offered none; a parked run is
+  resumed; a `repeat` at its max, or one that cannot judge its `until`,
+  carries on; a revised plan is declined, so the run keeps the plan it
+  was allowed with.
+- Money is never decided: a spent envelope, or a run paused on a spent
+  pool, ends the drive as `exhausted` (exit 3) and leaves the card for a
+  person to top up on the board. A run a person paused from the board
+  ends it as `paused` (exit 2); a quiet past `--timeout` as `timeout`
+  (exit 4); a failure as `error` (exit 1).
+- It is done (exit 0) when the session is idle with no run open or
+  queued and has answered every run's report. The session stays on the
+  board, its branch uncommitted to by gummi, for a person to read and
+  land.
+
+`gummi run --workflow <recipe>` (or `--workflow-file`) runs a workflow
+on inputs instead of sending a prompt — a bug report to triage, a spec
+to deliver.
+- Its inputs are `--input name=value` (`@file`, `-` for stdin), each
+  repeatable, over an `--inputs` YAML or JSON file. A recipe declares an
+  input as `name: hint` (required) or `{hint, required: false}` /
+  `{hint, default}` (optional); one it does not declare, or a required
+  one left out, is refused before any card is minted
+  (`workflowrecipe.ResolveInputs`, `Engine.WorkflowCheck`). A step is
+  given each input between delimiters naming it (`WrapInput`), as it is
+  a step's output: an input is text from outside the run.
+- The session takes no turn first. gummi writes its spec: the one
+  `--spec` gives, or one written from the prompt and the inputs, with a
+  done-when item per `--check`. A run is still judged against a spec,
+  so its report, its spec state and both faces work as for any run.
+- Without `--spec` (or with `--no-session`) the report is the product:
+  gummi keeps it from the session (`Engine.KeepReports`) and the drive
+  ends with the run. With one, the session reads the report as for a run
+  it proposed.
+- The run's end is a `workflow_ended` line: its report, each artifact a
+  step declared with its text, and the steps' `DECISION:` and `OPEN:`
+  lines — what a caller posts back where the work came from. A run that
+  ends `partial` makes the drive `partial` (exit 5).
 
 ### 25.12 What goes, and what stays
 

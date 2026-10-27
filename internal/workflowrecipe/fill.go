@@ -34,8 +34,11 @@ type Vars struct {
 // output (a failed branch of a settled parallel) fills as a note saying so.
 func Fill(prompt string, v Vars) (string, error) {
 	return fill(prompt, v, func(r ref) string {
-		if r.step != "" {
+		switch {
+		case r.step != "":
 			return Wrap(r.step, r.text)
+		case r.input != "":
+			return WrapInput(r.input, r.text)
 		}
 		return r.text
 	})
@@ -59,8 +62,8 @@ func FillShell(command string, v Vars) (string, error) {
 }
 
 // ref is one resolved template: its text, and the id of the step it is the
-// output of (empty for anything else).
-type ref struct{ step, text string }
+// output of or the name of the input it is (each empty for anything else).
+type ref struct{ step, input, text string }
 
 func fill(text string, v Vars, render func(ref) string) (string, error) {
 	var err error
@@ -103,7 +106,7 @@ func (v Vars) resolve(name string) (ref, error) {
 		if !given {
 			return ref{}, fmt.Errorf("{{%s}}: input %q was not given", name, tail)
 		}
-		return ref{text: s}, nil
+		return ref{input: tail, text: s}, nil
 	case head == "artifacts":
 		s, declared := v.Artifacts[tail]
 		if !declared {
@@ -117,8 +120,10 @@ func (v Vars) resolve(name string) (ref, error) {
 }
 
 const (
-	openMark  = "<<<gummi-output step=%q>>>"
-	closeMark = "<<<end gummi-output step=%q>>>"
+	openMark       = "<<<gummi-output step=%q>>>"
+	closeMark      = "<<<end gummi-output step=%q>>>"
+	openInputMark  = "<<<gummi-input name=%q>>>"
+	closeInputMark = "<<<end gummi-input name=%q>>>"
 )
 
 // Wrap puts a step's output between delimiters naming the step. A
@@ -130,6 +135,17 @@ func Wrap(step, output string) string {
 		body = fmt.Sprintf("(step %s left no output)", step)
 	}
 	return fmt.Sprintf(openMark+"\n%s\n"+closeMark, step, body, step)
+}
+
+// WrapInput puts a run's input between delimiters naming it, as Wrap does
+// a step's output: an input is text from outside the run — a bug report
+// as it was filed — and must not pose as instructions to the step.
+func WrapInput(name, text string) string {
+	body := strings.TrimSpace(strings.ReplaceAll(text, "<<<", "<< <"))
+	if body == "" {
+		body = fmt.Sprintf("(input %s was left empty)", name)
+	}
+	return fmt.Sprintf(openInputMark+"\n%s\n"+closeInputMark, name, body, name)
 }
 
 // LatestOutputs maps each step id to the output of its latest instance,

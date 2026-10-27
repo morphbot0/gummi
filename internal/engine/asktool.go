@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -1011,6 +1012,11 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	return e.AnswerCall(ctx, id, "", answer, by)
 }
 
+// ErrQuestionMoved is AnswerCall's refusal of an answer to a question
+// call the card no longer has open: another was asked since, or the same
+// one again under a new call.
+var ErrQuestionMoved = errors.New("the question answered is no longer open")
+
 // AnswerCall is AnswerAs for the question call (Ask.CallID) a person read:
 // once the card asks another — answered on another face, or asked again
 // since — the answer is refused rather than given to a question the
@@ -1023,7 +1029,7 @@ func (e *Engine) AnswerCall(ctx context.Context, id domain.FeatureID, call, answ
 		if ff := e.Freeform(id); ff != nil {
 			if s := ff.Session(); s != nil {
 				if open := s.Snapshot().PendingAsk; open != nil && open.CallID != call {
-					return fmt.Errorf("the question answered is no longer open: it now asks %q — read it and answer that", firstLine(open.Question))
+					return fmt.Errorf("%w: it now asks %q — read it and answer that", ErrQuestionMoved, firstLine(open.Question))
 				}
 			}
 		}

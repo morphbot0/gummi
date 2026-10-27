@@ -998,3 +998,45 @@ func TestRemoveFinishesWhatAReaderHeldUp(t *testing.T) {
 		t.Fatalf("git still lists the worktree:\n%s", list)
 	}
 }
+
+// git empties a worktree's admin directory in whatever order the
+// filesystem lists it. When it took the gitdir file before reaching the
+// file a reader held, git no longer lists the worktree while the directory
+// is still there: the removal is finished only once the directory is gone,
+// after the reader lets go.
+func TestRemoveFinishesWhenGitForgotTheWorktreeFirst(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "Forgotten under a reader")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := mustGit(t, p, "rev-parse", "--absolute-git-dir")
+	if got := worktreeAdminDir(p); got != admin {
+		t.Fatalf("worktreeAdminDir = %q, want %q", got, admin)
+	}
+	held := filepath.Join(admin, "held")
+	writeFile(t, admin, "held/index.lock", "")
+	if err := os.Chmod(held, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(held, 0o700) })
+	// where git got to: the checkout and the gitdir file gone, the rest held
+	if err := os.Remove(filepath.Join(admin, "gitdir")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(p); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = os.Chmod(held, 0o700)
+	}()
+	if !m.removedButAdmin(ctx, p, admin) {
+		t.Fatal("removedButAdmin = false, want the removal finished once the reader let go")
+	}
+	if _, err := os.Stat(admin); !os.IsNotExist(err) {
+		t.Fatalf("the admin directory is still there: %v", err)
+	}
+}

@@ -141,16 +141,17 @@ func TestNoCommandParsesItsOwnFlags(t *testing.T) {
 	}
 }
 
-// The board and the browser are the only ways in: the root launches the
-// TUI, and the only subcommands are the ones that serve, check or identify
-// it (plus the hidden shim an agent backend starts).
-func TestTheCommandSurfaceIsTheBoardAndTheWeb(t *testing.T) {
+// The board and the browser are the ways a person drives gummi, and `run`
+// the one way a script does: the root launches the TUI, and the other
+// subcommands serve, check or identify it (plus the hidden shim an agent
+// backend starts).
+func TestTheCommandSurfaceIsTheBoardTheWebAndRun(t *testing.T) {
 	var got []string
 	for _, c := range rootCmd.Commands() {
 		got = append(got, c.Name())
 	}
 	sort.Strings(got)
-	want := []string{"__mcp", "doctor", "help", "version", "web"}
+	want := []string{"__mcp", "doctor", "help", "run", "version", "web"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("root commands = %v, want %v", got, want)
 	}

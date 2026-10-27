@@ -106,6 +106,24 @@ func runGitEnv(ctx context.Context, dir string, env []string, args ...string) (s
 // file's directory.
 //
 // The admin directory's back-pointer is left absolute, as git wrote it.
+// worktreeAdminDir is the admin directory under the repository's
+// .git/worktrees that the checkout at dir links to through its .git file,
+// "" when dir has no such link.
+func worktreeAdminDir(dir string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return ""
+	}
+	target, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir: ")
+	if !ok || target == "" {
+		return ""
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(dir, target)
+	}
+	return filepath.Clean(target)
+}
+
 func relinkGitFile(dir string) error {
 	file := filepath.Join(dir, ".git")
 	raw, err := os.ReadFile(file)

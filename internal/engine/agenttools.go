@@ -114,8 +114,8 @@ func (e *Engine) scheduleProposeText(ctx context.Context, agentCard domain.Featu
 	if problems, _ := workflowrecipe.Check(recipe); len(problems) > 0 {
 		return "", fmt.Errorf("the recipe cannot run:\n- %s", strings.Join(problems, "\n- "))
 	}
-	if len(recipe.Inputs) > 0 {
-		return "", errors.New("a scheduled recipe takes no inputs: nobody is there to give them")
+	if len(workflowrecipe.RequiredInputs(recipe)) > 0 {
+		return "", errors.New("a scheduled recipe takes no required inputs: nobody is there to give them")
 	}
 	n, given, err := parseSpecArg(a.Spec)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -24,11 +25,68 @@ import (
 
 // rawRecipe is a recipe's YAML before it becomes the AST.
 type rawRecipe struct {
-	Name        string            `yaml:"name"`
-	Description string            `yaml:"description,omitempty"`
-	Tier        any               `yaml:"tier,omitempty"`
-	Inputs      map[string]string `yaml:"inputs,omitempty"`
-	Steps       []rawEntry        `yaml:"steps"`
+	Name        string              `yaml:"name"`
+	Description string              `yaml:"description,omitempty"`
+	Tier        any                 `yaml:"tier,omitempty"`
+	Inputs      map[string]rawInput `yaml:"inputs,omitempty"`
+	Steps       []rawEntry          `yaml:"steps"`
+}
+
+// rawInput is one of a recipe's inputs: its hint alone, which makes it
+// required, or a mapping that may let a run leave it out —
+// `{hint, required: false}` fills as nothing, `{hint, default}` as the
+// default.
+type rawInput struct {
+	Hint     string
+	Required bool
+	Default  *string
+}
+
+func (in *rawInput) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		in.Required = true
+		return n.Decode(&in.Hint)
+	}
+	if n.Kind == yaml.MappingNode {
+		// Node.Decode does not carry Parse's KnownFields: a misspelt key
+		// would quietly make the input required
+		for i := 0; i < len(n.Content); i += 2 {
+			switch k := n.Content[i].Value; k {
+			case "hint", "required", "default":
+			default:
+				return fmt.Errorf("line %d: an input takes hint, required and default, not %q", n.Content[i].Line, k)
+			}
+		}
+	}
+	var m struct {
+		Hint     string  `yaml:"hint"`
+		Required *bool   `yaml:"required"`
+		Default  *string `yaml:"default"`
+	}
+	if err := n.Decode(&m); err != nil {
+		return err
+	}
+	if m.Required != nil && *m.Required && m.Default != nil {
+		return fmt.Errorf("line %d: an input with a default is not required", n.Line)
+	}
+	in.Hint, in.Default = m.Hint, m.Default
+	// an input with a default may be left out; one without is required
+	// unless it says it is not
+	in.Required = m.Default == nil && (m.Required == nil || *m.Required)
+	return nil
+}
+
+func (in rawInput) MarshalYAML() (any, error) {
+	if in.Required {
+		return in.Hint, nil
+	}
+	m := map[string]any{"hint": in.Hint}
+	if in.Default != nil && *in.Default != "" {
+		m["default"] = *in.Default
+	} else {
+		m["required"] = false
+	}
+	return m, nil
 }
 
 // rawEntry is one entry of steps: a step's fields, or a parallel or a
@@ -153,8 +211,21 @@ func Parse(data []byte) (domain.Recipe, error) {
 		Description: strings.TrimSpace(raw.Description),
 		StaleTier:   raw.Tier != nil,
 	}
-	if len(raw.Inputs) > 0 {
-		r.Inputs = raw.Inputs
+	for name, in := range raw.Inputs {
+		if r.Inputs == nil {
+			r.Inputs = map[string]string{}
+		}
+		r.Inputs[name] = in.Hint
+		if !in.Required {
+			if r.InputDefaults == nil {
+				r.InputDefaults = map[string]string{}
+			}
+			if in.Default != nil {
+				r.InputDefaults[name] = *in.Default
+			} else {
+				r.InputDefaults[name] = ""
+			}
+		}
 	}
 	steps, err := entries(raw.Steps)
 	if err != nil {
@@ -283,10 +354,85 @@ func Marshal(r domain.Recipe) ([]byte, error) {
 	raw := rawRecipe{
 		Name:        r.Name,
 		Description: r.Description,
-		Inputs:      r.Inputs,
+		Inputs:      rawInputs(r),
 		Steps:       rawEntries(r.Steps),
 	}
 	return yaml.Marshal(raw)
+}
+
+func rawInputs(r domain.Recipe) map[string]rawInput {
+	if len(r.Inputs) == 0 {
+		return nil
+	}
+	out := map[string]rawInput{}
+	for name, hint := range r.Inputs {
+		in := rawInput{Hint: hint, Required: true}
+		if d, ok := r.InputDefaults[name]; ok {
+			in.Required, in.Default = false, &d
+		}
+		out[name] = in
+	}
+	return out
+}
+
+// ResolveInputs is the inputs a run of r is given: every one of given
+// that r declares, and each optional one left out as its default. An
+// input r does not declare is refused, naming the ones it does, and so is
+// a required one left out.
+func ResolveInputs(r domain.Recipe, given map[string]string) (map[string]string, error) {
+	var unknown, missing []string
+	for name := range given {
+		if _, ok := r.Inputs[name]; !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		declared := "none"
+		if len(r.Inputs) > 0 {
+			names := make([]string, 0, len(r.Inputs))
+			for name := range r.Inputs {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			declared = strings.Join(names, ", ")
+		}
+		return nil, fmt.Errorf("the recipe declares no input %s (its inputs: %s)", strings.Join(unknown, ", "), declared)
+	}
+	out := map[string]string{}
+	for name := range r.Inputs {
+		if v, ok := given[name]; ok {
+			out[name] = v
+		} else if d, optional := r.InputDefaults[name]; optional {
+			out[name] = d
+		} else {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		s := ""
+		if len(missing) > 1 {
+			s = "s"
+		}
+		return nil, fmt.Errorf("the recipe needs the input%s %s", s, strings.Join(missing, ", "))
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// RequiredInputs is the inputs r cannot run without, sorted.
+func RequiredInputs(r domain.Recipe) []string {
+	var out []string
+	for name := range r.Inputs {
+		if _, optional := r.InputDefaults[name]; !optional {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // MarshalEntries writes a list of entries as YAML that ParseEntries reads.

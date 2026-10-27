@@ -71,6 +71,10 @@ type Recipe struct {
 	StaleTier bool
 	// Inputs names what workflow_run fills in, each with a hint.
 	Inputs map[string]string
+	// InputDefaults holds the inputs a run may leave out, each with the
+	// text it fills as when it is not given ("" for none). An input not
+	// in it is required.
+	InputDefaults map[string]string
 	// Steps run in order.
 	Steps []Entry
 }

@@ -19,7 +19,7 @@ problems, with nothing proposed: fix them and call again.
 ```yaml
 name: test-first
 description: Write the failing tests, then build until they pass
-inputs: {}                  # name: hint; filled by workflow_run's inputs
+inputs: {}  # name: hint (required), or {hint: h, default: d} / {hint: h, required: false}
 steps:
   - id: tests
     role: tester
@@ -87,7 +87,7 @@ bigger or cheaper model; the profile decides that.
 | template | is |
 |---|---|
 | `{{spec}}` | the frozen spec's text — put it in every prompt that needs the goal |
-| `{{inputs.<name>}}` | an input given at `workflow_run` |
+| `{{inputs.<name>}}` | an input, wrapped as data |
 | `{{artifacts.<name>}}` | an artifact's absolute path in the run's directory |
 | `{{previous.output}}` | the step before's final message |
 | `{{<id>.output}}` | an earlier step's; in a `repeat`, its latest round |
