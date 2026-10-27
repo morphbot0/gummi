@@ -725,7 +725,9 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 		args = append(args, "--force")
 	}
 	args = append(args, "--", p)
-	if _, err := runGit(ctx, m.repo, args...); err != nil && !m.removedButAdmin(ctx, p) {
+	// read before git starts: once the checkout is gone, so is its link
+	admin := worktreeAdminDir(p)
+	if _, err := runGit(ctx, m.repo, args...); err != nil && !m.removedButAdmin(ctx, p, admin) {
 		return err
 	}
 	// The worktree is gone, so its recorded fork is meaningless. Clear it so
@@ -739,9 +741,16 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 // not, because a git command reading the tree at that moment (the board
 // refreshing what a card shows) still had a file in it. Once that reader
 // is done, prune takes the directory. It reports whether git no longer
-// knows a worktree at p; a checkout still on disk is a real failure, and
-// is left to the caller's error.
-func (m *Manager) removedButAdmin(ctx context.Context, p string) bool {
+// knows a worktree at p and its admin directory (admin, "" when it was not
+// known) is gone; a checkout still on disk is a real failure, and is left
+// to the caller's error.
+//
+// git learns a worktree's path from the gitdir file in its admin
+// directory, and empties that directory in whatever order the filesystem
+// lists it: when gitdir went first, git no longer lists the worktree while
+// the directory is still there, so the directory itself is the proof —
+// removed here once git has let it go, and the reader too.
+func (m *Manager) removedButAdmin(ctx context.Context, p, admin string) bool {
 	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
 		return false
 	}
@@ -749,7 +758,13 @@ func (m *Manager) removedButAdmin(ctx context.Context, p string) bool {
 		if _, err := runGit(ctx, m.repo, "worktree", "prune"); err == nil {
 			out, err := runGit(ctx, m.repo, "worktree", "list", "--porcelain")
 			if err == nil && !slices.Contains(strings.Split(out, "\n"), "worktree "+p) {
-				return true
+				if admin == "" {
+					return true
+				}
+				_ = os.RemoveAll(admin)
+				if _, err := os.Stat(admin); errors.Is(err, fs.ErrNotExist) {
+					return true
+				}
 			}
 		}
 		select {
