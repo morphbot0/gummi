@@ -29,7 +29,7 @@ import (
 
 // filesFenceRe matches one ```gummi-files … ``` block (the first wins),
 // mirroring checksFenceRe.
-var filesFenceRe = regexp.MustCompile("(?s)```gummi-files\\s*\\n(.*?)```")
+var filesFenceRe = regexp.MustCompile("(?s)```gummi-files\\s*\\n(.*?)(?m:^)[ ]{0,3}```")
 
 // ParseFiles extracts the artifact's gummi-files block. found reports
 // whether a block exists at all — even one that yields no usable entries
@@ -78,7 +78,7 @@ func repoRelative(p string) bool {
 // RenderFiles renders the canonical fenced block for a manifest, so a
 // writer and a reader agree on one shape.
 func RenderFiles(files []domain.PlannedFile) string {
-	body, err := yaml.Marshal(files)
+	body, err := marshalBlock(files)
 	if err != nil { // a []PlannedFile of plain scalars cannot fail to marshal
 		body = nil
 	}
