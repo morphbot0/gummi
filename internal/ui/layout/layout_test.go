@@ -46,9 +46,9 @@ func TestComputeStandard(t *testing.T) {
 	}
 }
 
-// TestComputeTakesTheFullWidth: the backlog is the only board shape, so
-// the main pane always spans the terminal — there is no column to carve
-// out of it at any size.
+// TestComputeTakesTheFullWidth: Compute's main pane always spans the
+// terminal; the one column ever carved out of it is the session rail,
+// and only WithRail carves it.
 func TestComputeTakesTheFullWidth(t *testing.T) {
 	for _, dim := range [][2]int{{120, 34}, {80, 24}, {60, 20}} {
 		l := Compute(dim[0], dim[1])
@@ -76,5 +76,27 @@ func TestComputeSpendsNoAirOnAShortTerminal(t *testing.T) {
 	}
 	if l := Compute(64, gapMinHeight); l.Main.Min.Y != 2 {
 		t.Errorf("main starts at row %d on a %d-row terminal, want 2", l.Main.Min.Y, gapMinHeight)
+	}
+}
+
+// TestWithRailCarvesTheLeftColumn: the rail takes the left of the main
+// pane at the same rows, and the pane keeps the rest of the width.
+func TestWithRailCarvesTheLeftColumn(t *testing.T) {
+	l := WithRail(Compute(120, 34), 30, 80)
+	if l.Rail.Min.X != 0 || l.Rail.Dx() != 30 || l.Rail.Min.Y != 2 || l.Rail.Dy() != 31 {
+		t.Errorf("rail rect wrong: %+v", l.Rail)
+	}
+	if l.Main.Min.X != 30 || l.Main.Dx() != 90 || l.Main.Min.Y != 2 || l.Main.Dy() != 31 {
+		t.Errorf("main rect wrong: %+v", l.Main)
+	}
+}
+
+// TestWithRailLeavesANarrowPaneWhole: a main pane that could not keep
+// minMain columns beside the rail gets no rail at all.
+func TestWithRailLeavesANarrowPaneWhole(t *testing.T) {
+	whole := Compute(100, 34)
+	l := WithRail(whole, 30, 80)
+	if !l.Rail.Empty() || l.Main != whole.Main {
+		t.Errorf("a 100-column terminal should keep its main pane whole: rail=%+v main=%+v", l.Rail, l.Main)
 	}
 }

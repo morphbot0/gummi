@@ -881,6 +881,18 @@ to disambiguate which pane owns them. Every card verb (`g`, `v`, `m`,
 route through the one guarded `boardVerb`; only movement, `enter` and
 `esc` differ, and each level's binding table says which (`keymap.go`).
 
+**The session rail.** With a card page or a new session's draft open, a
+terminal wide enough for both (the page keeps at least 80 columns, so
+110 and up) draws the board's rows again in a 30-column rail on the
+left — the web page's rail, in the terminal (`ui/rail.go`,
+`layout.WithRail`). It is the backlog drawn small, not a second list:
+the same order, groups and marks (`backlogEntries`), two lines a card —
+the title, then what it is doing and what it has spent — and no cursor
+or keys of its own. The board's selection is its band, so `alt+j`/`alt+k`
+walk it, and the arrow keys stay aimed at the page. Beside the full-width
+backlog it would be the same list twice, so it is drawn only beside a
+page; below the width it steps aside and the page takes the terminal.
+
 The board sits behind a one-row tab bar shared with the status bar:
 `gummi │ board │ stats │ inbox │`. `tab` cycles all three;
 `alt+1`/`alt+2`/`alt+3` jump straight to one — alt-prefixed

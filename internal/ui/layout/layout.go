@@ -18,9 +18,12 @@ const (
 
 // Layout is the set of screen rectangles the shell paints into.
 type Layout struct {
-	Area   uv.Rectangle
-	Tabs   uv.Rectangle
-	Main   uv.Rectangle
+	Area uv.Rectangle
+	Tabs uv.Rectangle
+	Main uv.Rectangle
+	// Rail is the session list beside the main pane (WithRail); empty
+	// when the terminal has no room for one or nothing asked for it.
+	Rail   uv.Rectangle
 	Status uv.Rectangle
 }
 
@@ -52,5 +55,18 @@ func Compute(w, h int) Layout {
 	}
 	mainH := max(h-tabsH-gap-statusH, 0)
 	l.Main = uv.Rect(0, tabsH+gap, w, mainH)
+	return l
+}
+
+// WithRail carves a column w wide off the left of l's main pane for the
+// session rail, the main pane keeping the rest. A main pane too narrow
+// to give w away and still hold minMain columns is left whole, with no
+// rail.
+func WithRail(l Layout, w, minMain int) Layout {
+	if w <= 0 || l.Main.Dx()-w < minMain {
+		return l
+	}
+	l.Rail = uv.Rect(l.Main.Min.X, l.Main.Min.Y, w, l.Main.Dy())
+	l.Main = uv.Rect(l.Main.Min.X+w, l.Main.Min.Y, l.Main.Dx()-w, l.Main.Dy())
 	return l
 }

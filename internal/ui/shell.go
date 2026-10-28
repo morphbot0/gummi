@@ -2849,7 +2849,11 @@ func (m *Shell) selectFirstDisplayed() {
 // the status bar (layout.Compute) — the same three rows regardless of
 // which tab is active; only the main pane's content changes (mainView).
 func (m *Shell) computeLayout() layout.Layout {
-	return layout.Compute(m.width, m.height)
+	l := layout.Compute(m.width, m.height)
+	if m.railWanted() {
+		l = layout.WithRail(l, railWidth, railMinMain)
+	}
+	return l
 }
 
 // boardPaneFocused reports whether the board pane owns the arrow keys —
@@ -2927,7 +2931,12 @@ func paintBase(b *uv.Buffer, bg color.Color) {
 
 func (m *Shell) draw(scr uv.Screen) {
 	s := m.styles
-	l := m.layout
+	// the rail comes and goes with the card page, so the layout is
+	// carved per frame rather than only on a resize
+	l := m.computeLayout()
+	if !l.Rail.Empty() {
+		uv.NewStyledString(m.railView(l.Rail.Dx(), l.Rail.Dy())).Draw(scr, l.Rail)
+	}
 
 	uv.NewStyledString(m.tabBarView(l.Tabs.Dx())).Draw(scr, l.Tabs)
 	// a long error/remedy, or any notice of several lines, is wrapped
