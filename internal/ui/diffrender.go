@@ -23,7 +23,11 @@ func (m *Shell) diffViewRender(w, h int) string {
 		return ""
 	}
 	var b strings.Builder
-	head := s.Title.Render(string(dv.f.ID)) + " " + s.Base.Render("· diff")
+	head := s.Title.Render(dv.f.ID.Ref()) + " " + s.Base.Render("· diff")
+	if n := len(dv.files); n > 0 {
+		head += " " + s.Faint.Render("· "+itoa(n)+" file"+plural(n)+" ") +
+			s.Success.Render(fmt.Sprintf("+%d", dv.adds)) + " " + s.Error.Render(fmt.Sprintf("−%d", dv.dels))
+	}
 	if dv.f.TreeRepo != "" {
 		head += " " + s.Base.Render("· "+dv.f.TreeRepo+" (] next repository · L land it)")
 	}
@@ -96,7 +100,11 @@ func diffStyleFor(m *Shell, line string) lipgloss.Style {
 // to, the orphan footer, and the line cursor.
 func (dv *diffView) render(m *Shell, w, h int) string {
 	s := m.styles
-	numW := len(strconv.Itoa(len(dv.lines)))
+	top := 1
+	for _, n := range dv.newNum {
+		top = max(top, n)
+	}
+	numW := len(strconv.Itoa(top))
 	textW := max(w-numW-3, 4)
 	// Build every display row — each source line (wrapped into
 	// continuation rows when wider than the pane, number and gutter only
@@ -108,13 +116,22 @@ func (dv *diffView) render(m *Shell, w, h int) string {
 	cursorIdx := 0
 	push := func(str string) { rendered = append(rendered, strings.Split(str, "\n")...) }
 	for i := range dv.lines {
+		if dv.hidden[i] {
+			continue
+		}
 		n := i + 1
 		gutter := " "
 		if idxs, ok := dv.located[i]; ok && len(idxs) > 0 {
 			gutter = s.Warning.Render("▍")
 		}
-		raw := sanitize(dv.lines[i])
-		style := diffStyleFor(m, raw)
+		raw, style := dv.displayLine(m, i)
+		if _, ok := dv.heads[i]; ok && len(rendered) > 0 {
+			push("")
+		}
+		num := ""
+		if dv.newNum[i] > 0 {
+			num = strconv.Itoa(dv.newNum[i])
+		}
 		segs := strings.Split(ansi.Wrap(raw, textW, ""), "\n")
 		if n == dv.cursor {
 			cursorIdx = len(rendered)
@@ -123,9 +140,9 @@ func (dv *diffView) render(m *Shell, w, h int) string {
 			content := style.Render(seg)
 			switch {
 			case j == 0 && n == dv.cursor:
-				push(s.Cursor.Render("▸") + s.Selection.Render(fmt.Sprintf("%*d", numW, n)) + gutter + " " + content)
+				push(s.Cursor.Render("▸") + s.Selection.Render(fmt.Sprintf("%*s", numW, num)) + gutter + " " + content)
 			case j == 0:
-				push(" " + s.Faint.Render(fmt.Sprintf("%*d", numW, n)) + gutter + " " + content)
+				push(" " + s.Faint.Render(fmt.Sprintf("%*s", numW, num)) + gutter + " " + content)
 			default:
 				push(" " + strings.Repeat(" ", numW) + " " + " " + content)
 			}
@@ -151,6 +168,25 @@ func (dv *diffView) render(m *Shell, w, h int) string {
 		}
 	}
 	return strings.Join(windowLines(rendered, cursorIdx, h), "\n")
+}
+
+// displayLine is how diff line i reads: a file's "diff --git" as the
+// file's name, a hunk's "@@ -a,b +c,d @@" as a faint break with the
+// enclosing function git found for it, anything else as written.
+func (dv *diffView) displayLine(m *Shell, i int) (string, lipgloss.Style) {
+	s := m.styles
+	raw := sanitize(dv.lines[i])
+	if name, ok := dv.heads[i]; ok {
+		return "▌ " + sanitize(name), s.Title
+	}
+	if strings.HasPrefix(raw, "@@") {
+		ctx := ""
+		if k := strings.Index(raw[2:], "@@"); k >= 0 {
+			ctx = strings.TrimSpace(raw[k+4:])
+		}
+		return strings.TrimSpace("⋯ " + ctx), s.Faint
+	}
+	return raw, diffStyleFor(m, raw)
 }
 
 // orphanRows renders one orphaned annotation: its comment block plus a
