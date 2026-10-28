@@ -624,6 +624,17 @@ func (m *Shell) scheduleSaveEdit(sc *domain.Schedule) tea.Cmd {
 // preview must not set the frame's width.
 func (d *scheduleForm) View(s *theme.Styles, w, h int) string {
 	width, _ := dialogDescSize(w, h, 12)
+	// what it asks is a sentence: the field takes the dialog's width, or
+	// a prompt a little longer than a fixed field scrolls its first words
+	// out of sight and reads as if they were never typed
+	if want := max(width-12, 20); d.prompt.Width() != want {
+		// the input keeps the scroll it had at its old width until its
+		// value is set again
+		pos := d.prompt.Position()
+		d.prompt.SetWidth(want)
+		d.prompt.SetValue(d.prompt.Value())
+		d.prompt.SetCursor(pos)
+	}
 	var b strings.Builder
 	title := "new schedule"
 	if d.edit != nil {

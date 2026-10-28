@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
@@ -603,5 +604,19 @@ func TestTheCardMenuOpensAHeartbeatAimedAtTheCard(t *testing.T) {
 	sc := scheduleRowReads(t, m, strings.ToLower(string(card.ID))+"-heartbeat")
 	if !sc.Enabled || sc.NextRun.IsZero() || sc.Target != card.ID {
 		t.Errorf("stored row = enabled %v next %v target %s, want it on and aimed at %s", sc.Enabled, sc.NextRun, sc.Target, card.ID)
+	}
+}
+
+// TestTheScheduleDialogShowsWhatItAsksWhole: the prompt is a sentence, and
+// a fixed narrow field scrolled its first words out of sight once it ran
+// a little long — it read as if they had never been typed.
+func TestTheScheduleDialogShowsWhatItAsksWhole(t *testing.T) {
+	m := scheduleFormBoard(t)
+	_, d := openScheduleFormOn(t, m, nil)
+	const asks = "Check CI and fix whatever broke overnight, then say what"
+	d.prompt.SetValue(asks)
+	d.setFocus(schedStopWhen)
+	if view := ansi.Strip(d.View(m.styles, 120, 34)); !strings.Contains(view, asks) {
+		t.Errorf("the prompt is cut in the dialog:\n%s", view)
 	}
 }
