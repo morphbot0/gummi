@@ -14,6 +14,7 @@ package workflowpolicy
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -362,15 +363,36 @@ func (s *sim) iterations(path string) []iteration {
 	return out
 }
 
-// TestPropertyASpentPoolStartsNothing: a spent pool pauses the run and
-// nothing else happens, unless nothing is left, when the run ends.
+// TestPropertyASpentPoolStartsNothing: on a spent pool nothing starts, and
+// a tick that leaves a step live pauses the run, so nothing spends on.
 func TestPropertyASpentPoolStartsNothing(t *testing.T) {
+	props(t, func(ht *hegel.T, s *sim, in Snapshot, acts []Action) {
+		if in.State != domain.RunRunning || in.Stopping || !in.Bounded || in.Left > 0 {
+			return
+		}
+		if slices.ContainsFunc(acts, func(a Action) bool { return a.Kind == Start }) {
+			ht.Fatalf("left %v: a step starts: %s", in.Left, renderAll(acts))
+		}
+		if live := s.live(); len(live) > 0 && s.in.State != domain.RunPaused {
+			ht.Fatalf("left %v: %v stay live and the run did not pause: %s", in.Left, live, renderAll(acts))
+		}
+	})
+}
+
+// TestPropertyASpentPoolHoldsBackNothingFree: on a spent pool, everything
+// that costs no money — an interrupt, an until to judge, a question to the
+// person — goes out as it would with money left.
+func TestPropertyASpentPoolHoldsBackNothingFree(t *testing.T) {
 	props(t, func(ht *hegel.T, _ *sim, in Snapshot, acts []Action) {
 		if in.State != domain.RunRunning || in.Stopping || !in.Bounded || in.Left > 0 {
 			return
 		}
-		if len(acts) != 1 || (acts[0].Kind != Pause && acts[0].Kind != End) {
-			ht.Fatalf("left %v: want one pause or one end, got %s", in.Left, renderAll(acts))
+		free := clone(in)
+		free.Bounded = false
+		for _, a := range Decide(free) {
+			if a.Kind != Start && a.Kind != End && !slices.ContainsFunc(acts, func(b Action) bool { return reflect.DeepEqual(a, b) }) {
+				ht.Fatalf("left %v: held back %s: got %s", in.Left, a, renderAll(acts))
+			}
 		}
 	})
 }
@@ -734,7 +756,7 @@ func TestPropertyAJoinAnySettlesOnTheFirstSuccess(t *testing.T) {
 			}
 			for _, b := range branches {
 				st, _ := stateOf(in, b)
-				starts := slices.Contains(acts, Action{Kind: Start, Path: b, Step: b[len(base)+1:]})
+				starts := slices.ContainsFunc(acts, func(a Action) bool { return a.Kind == Start && a.Path == b })
 				interrupted := slices.ContainsFunc(acts, func(a Action) bool { return a.Kind == Interrupt && a.Path == b })
 				if starts || (st.Live() && !interrupted) {
 					ht.Fatalf("any %s has a branch done, yet %s (%s): %s", base, b, st, renderAll(acts))
