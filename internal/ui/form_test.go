@@ -541,22 +541,25 @@ func TestCreateCardEnvelope(t *testing.T) {
 	}
 }
 
-// TestBoardNOpensTheDoorAndRemembersTheRepo: n opens the door on a
-// session; a created card's repository preselects the next one.
+// TestBoardNOpensTheDoorAndRemembersTheRepo: n opens a new session's
+// draft, and its first message creates the session.
 func TestBoardNOpensTheDoorAndRemembersTheRepo(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
-	if _, ok := m.Overlay.Top().(*cardForm); !ok {
-		t.Fatal("n did not open the door on a session")
+	if m.draft == nil || m.Overlay.HasDialogs() {
+		t.Fatal("n did not open a new session's draft")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.draft != nil || m.draftKept != nil {
+		t.Fatal("esc on an empty draft should drop it")
+	}
 	m.lastRepo = ""
-	m = openSessionForm(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Dark mode")
 	m = press(t, m, keyEnter)
-	if m.Overlay.HasDialogs() || len(m.rows) != 1 {
-		t.Fatalf("create: dialogs=%v rows=%d notice=%q", m.Overlay.HasDialogs(), len(m.rows), m.notice.text)
+	if m.draft != nil || len(m.rows) != 1 {
+		t.Fatalf("create: draft=%v rows=%d notice=%q", m.draft != nil, len(m.rows), m.notice.text)
 	}
 	if !strings.Contains(m.notice.text, "“Dark mode” created") {
 		t.Errorf("notice = %q", m.notice.text)

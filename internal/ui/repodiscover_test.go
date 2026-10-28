@@ -254,11 +254,10 @@ func openCardFormOverTwoRepos(t *testing.T) (*Shell, *cardForm, string) {
 	gitBranch(t, filepath.Join(root, "git", "d"), "feat")
 	m = pump(t, m, m.rescanRepos(""))
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
-	d, ok := m.Overlay.Top().(*cardForm)
-	if !ok {
-		t.Fatalf("n opened %T, want the new-card form", m.Overlay.Top())
+	if m.draft == nil {
+		t.Fatal("n opened no draft")
 	}
-	return m, d, root
+	return m, m.draft.form, root
 }
 
 // cloneAfterOpen makes a third repo e and runs the rescan a dialog open

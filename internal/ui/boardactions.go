@@ -258,8 +258,7 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 	case "model":
 		return m.openCardModelPicker()
 	case "new-freeform":
-		m.Overlay.Push(m.openCardForm())
-		return nil
+		return m.openSessionDraft(nil)
 	}
 	return m.boardVerb(id)
 }

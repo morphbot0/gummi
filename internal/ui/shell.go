@@ -92,6 +92,10 @@ type Shell struct {
 	// belongs to no other tab.
 	tab      Tab
 	cardOpen bool
+	// draft is a new session before its first message (sessiondraft.go),
+	// drawn over the board tab's pane while it is open; draftKept is one
+	// left with words in it, which the next n brings back.
+	draft, draftKept *sessionDraft
 	// threadInput is the card page's persistent message/verb box
 	// (thread.go, threadinput.go): a Shell field rather than one rebuilt
 	// per render so an unsent draft survives leaving and returning to the
@@ -555,6 +559,11 @@ func (m *Shell) landRepos(msg reposReadMsg) {
 	for i := 0; i < m.Overlay.Len(); i++ {
 		if d, ok := m.Overlay.At(i).(repoChoices); ok {
 			d.setRepoChoices(m.repoNames, m.baseBranches, m.repoBranches)
+		}
+	}
+	for _, d := range []*sessionDraft{m.draft, m.draftKept} {
+		if d != nil {
+			d.form.setRepoChoices(m.repoNames, m.baseBranches, m.repoBranches)
 		}
 	}
 	if msg.reopenPicker != "" && !m.overlayHasRepoPicker(msg.reopenPicker) {
@@ -2012,6 +2021,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cardCreatedMsg:
 		return m, m.cardCreated(msg)
 
+	case draftFailedMsg:
+		return m, m.draftFailed(msg)
+
 	case foreignTickMsg:
 		// keep the probe running whether or not anything is driven
 		// elsewhere: a run can start in another terminal at any moment.
@@ -2116,6 +2128,9 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	// Focused() at once — a card page stays open across a tab switch and
 	// nothing blurs its input — so an ungated test here answered for
 	// whichever branch came first, and this one did.
+	if m.boardSurfacesLive() && m.draft != nil {
+		return m.draftPaste(msg)
+	}
 	if m.boardSurfacesLive() && m.cardOpen && m.stepv != nil {
 		if m.stepv.composing {
 			var cmd tea.Cmd
@@ -2182,6 +2197,11 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// tier 3: whichever surface owns the main pane, in the same order
 	// mainView paints them, and only on the tab they belong to.
 	if m.boardSurfacesLive() {
+		// a new session's draft is over everything on the board tab
+		if m.draft != nil {
+			m.clearTransientNotice()
+			return m.handleDraftKey(msg)
+		}
 		// the card page's tabs, answered before any of the three surfaces
 		// they switch between gets the key (cardtabs.go)
 		if m.cardOpen && m.stepv != nil {
@@ -2320,6 +2340,9 @@ func (m *Shell) textEntry() bool {
 	// from someone typing prose", and that reason does not hold when a
 	// review surface, not the composer, is what the user is actually
 	// looking at and typing into.
+	if m.draft != nil {
+		return m.draft.typing()
+	}
 	if m.cardOpen && m.stepv != nil {
 		return m.stepv.composing
 	}
@@ -2501,7 +2524,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			m.syncActionFocus()
 		}
 	case "n":
-		m.Overlay.Push(m.openCardForm())
+		return m.openSessionDraft(nil)
 	case "T":
 		// Stack a new card on TOP of the selected one. This is the whole
 		// of setting a stack up: the stack is created by the act of
@@ -3174,6 +3197,9 @@ func (m *Shell) mainView(w, h int) string {
 		// bar naming where it is and how to get back (cardtabs.go).
 		// Reached from the backlog list there is no page underneath and no
 		// bar — the same surface, mounted without a card page around it.
+		if m.draft != nil {
+			return m.draftView(w, h)
+		}
 		if m.stepv != nil && m.cardOpen {
 			// a step opened over the thread, with its own crumb back
 			return m.stepViewRender(w, h)

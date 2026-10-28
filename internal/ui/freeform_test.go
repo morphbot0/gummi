@@ -339,11 +339,9 @@ func TestTheFreeformCommandIsInTheVocabulary(t *testing.T) {
 	if found.key != "" {
 		t.Errorf("the freeform command took the accelerator %q", found.key)
 	}
-	if cmd := m.runCommand(found.id); cmd != nil {
-		t.Error("opening the creation dialog should need no command")
-	}
-	if _, ok := m.Overlay.Top().(*cardForm); !ok {
-		t.Fatalf("the freeform command did not open the creation dialog")
+	m.runCommand(found.id)
+	if m.draft == nil {
+		t.Fatalf("the freeform command did not open a new session's draft")
 	}
 }
 

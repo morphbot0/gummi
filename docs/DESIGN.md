@@ -3689,7 +3689,8 @@ hand-off `internal/ui/rebase.go` already had.
 ### 18.4 Setting one up
 
 A stack is **created by the act of stacking**, not by a dialog: `T` on a
-card opens the ordinary new-card form with its `stack` row pre-answered,
+card opens a new session's draft with its `from` setting already on that
+card,
 and creating that second card is what brings the stack into being, named
 after the card at the bottom. The common case costs one key, and a stack of
 one card — which nobody wants — never exists. The row itself lives in the
@@ -4276,6 +4277,20 @@ the card (`POST /api/cards`, kind freeform, no title needed; the title is
 its first line) and is its first turn verbatim (`KickoffWith`). The card
 itself keeps only that first line, so before this a multi-line opening
 was cut to its title.
+
+The terminal does the same (`ui/sessiondraft.go`). `n`, the command
+menu's New session and `T` open no dialog. The board tab's pane becomes
+an empty session, with the thread's own composer at its foot and one
+strip of settings above it, already holding the defaults: repository,
+where it works (its own worktree, the main checkout, an agent's home),
+what it forks from (a branch, or a card to stack on: one setting), model,
+budget and profile. shift+tab moves into the strip. A setting can also
+be typed as a slash command (`/repo`, `/from`, `/main`, `/budget 5`, …).
+Enter on a message creates the session and starts it. esc puts a draft
+with words in it away for the next `n`. The draft has no rules of its
+own: its model is the new-card form, run without its view the way the
+web's create runs it, so both faces validate and create through one
+path.
 
 **Writing a spec continues the work on a branch of the spec's own.** The
 session is handed off: its branch kept, and the one floor it has (open

@@ -330,13 +330,13 @@ func (m *Shell) openStackForm() tea.Cmd {
 			return noticeMsg{text: f.Name() + " is a goal — its own cards already share one branch", isErr: true}
 		}
 	}
-	form := m.openCardForm()
-	form.stackOn(f.ID, f.Title, "")
-	// The new card must live in the same repository as the card it forks
-	// from, so the repo row is settled rather than asked.
-	form.repo.selectName(f.Repo)
-	m.Overlay.Push(form)
-	return nil
+	return m.openSessionDraft(func(form *cardForm) {
+		// The new card must live in the same repository as the card it
+		// forks from, so the repository is settled rather than asked.
+		form.setWhere(0)
+		form.moveRepo(func() { form.repo.selectName(f.Repo) })
+		form.stackOn(f.ID, f.Title, "")
+	})
 }
 
 // stackEngine resolves the engine handle the stack surfaces need: the

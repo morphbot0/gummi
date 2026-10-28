@@ -61,6 +61,8 @@ func helpRows(bs []binding) [][2]string {
 func (m *Shell) activeSurface() (string, []binding) {
 	live := m.boardSurfacesLive()
 	switch {
+	case live && m.draft != nil:
+		return "new session", m.draftBindings()
 	case live && m.cardOpen && m.stepv != nil:
 		return "step", m.stepBindings()
 	case live && m.spec != nil:

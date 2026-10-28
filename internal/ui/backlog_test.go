@@ -235,8 +235,8 @@ func TestBacklogListMovesSelection(t *testing.T) {
 func TestBacklogKeepsTheCardVerbs(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, key('n'))
-	if m.Overlay.Top() == nil {
-		t.Error("n should still raise the new-feature form from the backlog list")
+	if m.draft == nil {
+		t.Error("n should still open a new session's draft from the backlog list")
 	}
 }
 

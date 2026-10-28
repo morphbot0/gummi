@@ -90,7 +90,10 @@ func (m *Shell) runSessionBackend(id string) tea.Cmd {
 // backend (empty when the agent cannot enumerate and no profile names
 // one), for the card the tier was opened on.
 type sessionModelsMsg struct {
-	id      domain.FeatureID
+	id domain.FeatureID
+	// draft is a probe for a new session's draft (sessiondraft.go), which
+	// has no card yet.
+	draft   bool
 	backend string
 	models  []string
 }
@@ -100,6 +103,10 @@ type sessionModelsMsg struct {
 // deleted); a card that is no longer an open session gets nothing, since
 // the picker's answer would land on a menu it cannot change.
 func (m *Shell) handleSessionModelsMsg(msg sessionModelsMsg) {
+	if msg.draft {
+		m.openDraftModelMenu(msg.backend, msg.models)
+		return
+	}
 	r, ok := m.rowByID(msg.id)
 	if !ok || !r.F.IsFreeform() || r.F.Stage != domain.StageOpen {
 		return
