@@ -330,18 +330,18 @@ func (e *Engine) readWatch(ctx context.Context, sess domain.Feature, spec *domai
 		facts.ChecksHead, facts.Checks = prev.ChecksHead, prev.Checks
 	}
 	if prev == nil || prev.UpdatedAt != facts.UpdatedAt || prev.Head != facts.Head || prev.Unreadable != "" ||
-		facts.ReadAt.Sub(prev.FetchedAt) > watchPollMax {
-		facts.FetchedAt = facts.ReadAt
+		prev.FetchedGen != w.ForwardGen || facts.ReadAt.Sub(prev.FetchedAt) > watchPollMax {
+		facts.FetchedAt, facts.FetchedGen = facts.ReadAt, w.ForwardGen
 		items, unread, err := pr.FetchFeedback(ctx, gh, ref)
 		if err != nil {
 			facts.ReadError = "reading the PR's feedback: " + err.Error()
 			return facts, true
 		}
-		e.applyTrust(ctx, gh, ref, w.Trust, items, &facts)
+		e.applyTrust(ctx, gh, ref, w.Trust, w.Forwarded, items, &facts)
 		facts.Unread = unread
 	} else {
 		facts.Feedback, facts.KeptOut, facts.KeptOutByKind, facts.Threads = prev.Feedback, prev.KeptOut, prev.KeptOutByKind, prev.Threads
-		facts.Unread = prev.Unread
+		facts.Unread, facts.KeptOutPrints, facts.FetchedGen = prev.Unread, prev.KeptOutPrints, prev.FetchedGen
 	}
 	return facts, false
 }
@@ -360,7 +360,7 @@ func hasBucket(cs []domain.WatchCheck, bucket string) bool {
 // filter. A lookup that fails leaves the filter unreadable and the feedback
 // empty — never a guess. The lookups are made for this read alone, so
 // membership is read again at every event.
-func (e *Engine) applyTrust(ctx context.Context, gh string, ref domain.PullRequestRef, t domain.TrustFilter, items []pr.FeedbackItem, facts *domain.WatchFacts) {
+func (e *Engine) applyTrust(ctx context.Context, gh string, ref domain.PullRequestRef, t domain.TrustFilter, forwarded []string, items []pr.FeedbackItem, facts *domain.WatchFacts) {
 	viewer := ""
 	teams := map[domain.OrgTeam][]string{}
 	perms := map[string]string{}
@@ -418,6 +418,7 @@ func (e *Engine) applyTrust(ctx context.Context, gh string, ref domain.PullReque
 		return false
 	}
 	facts.Feedback, facts.KeptOut, facts.KeptOutByKind, facts.Threads, facts.Unreadable = nil, 0, nil, 0, ""
+	facts.KeptOutPrints = nil
 	for _, it := range items {
 		if it.Kind == "thread" {
 			facts.Threads++
@@ -425,16 +426,22 @@ func (e *Engine) applyTrust(ctx context.Context, gh string, ref domain.PullReque
 		if it.Kind == "review" && it.State != "CHANGES_REQUESTED" && strings.TrimSpace(it.Body) == "" {
 			continue // an approval or a plain review without words says nothing to act on
 		}
-		// a thread read only in part has people the filter never saw: kept out
-		ok := !it.Partial
+		// a thread read only in part has people the filter never saw: kept
+		// out, unless a person forwarded it as it stands
+		fp := pr.FeedbackPrint(it)
+		fwd := slices.Contains(forwarded, fp)
+		ok := fwd || !it.Partial
 		for _, who := range it.People {
+			if fwd {
+				break
+			}
 			if !trusted(who) {
 				ok = false
 				break
 			}
 		}
 		if failure != "" {
-			facts.Feedback, facts.KeptOut, facts.KeptOutByKind = nil, 0, nil
+			facts.Feedback, facts.KeptOut, facts.KeptOutByKind, facts.KeptOutPrints = nil, 0, nil, nil
 			facts.Unreadable = failure
 			return
 		}
@@ -444,6 +451,7 @@ func (e *Engine) applyTrust(ctx context.Context, gh string, ref domain.PullReque
 				facts.KeptOutByKind = map[string]int{}
 			}
 			facts.KeptOutByKind[it.Kind]++
+			facts.KeptOutPrints = append(facts.KeptOutPrints, fp)
 			continue
 		}
 		body := it.Body
@@ -1183,4 +1191,49 @@ func (e *Engine) freezeHandlers(r *domain.Recipe) (bool, error) {
 		}
 	}
 	return changed, nil
+}
+
+// WorkflowForward is a person forwarding to run n's watch the feedback its
+// trust filter kept out (DESIGN §28.3): each item as it stands now is read
+// as trusted, and the watch reads the PR again at once. An item someone
+// edits after it was forwarded is kept out again.
+func (e *Engine) WorkflowForward(ctx context.Context, session domain.FeatureID, n int, by string) error {
+	unlock := e.lockRuns(session)
+	defer unlock()
+	run, err := e.openRunLocked(ctx, session)
+	if err != nil {
+		return err
+	}
+	if run == nil || run.N != n {
+		return fmt.Errorf("run %d is not open", n)
+	}
+	steps, err := e.cfg.Store.RunSteps(ctx, session, n)
+	if err != nil {
+		return err
+	}
+	for i := range steps {
+		s := &steps[i]
+		if s.State != domain.StepWatching || s.Watch == nil || s.Watch.Observed == nil || len(s.Watch.Observed.KeptOutPrints) == 0 {
+			continue
+		}
+		w := s.Watch
+		count := len(w.Observed.KeptOutPrints)
+		for _, fp := range w.Observed.KeptOutPrints {
+			if !slices.Contains(w.Forwarded, fp) {
+				w.Forwarded = append(w.Forwarded, fp)
+			}
+		}
+		// read the feedback again on the next poll, which is now
+		w.ForwardGen++
+		w.NextPoll = e.now()
+		if err := e.cfg.Store.UpdateRunStep(ctx, s); err != nil {
+			return err
+		}
+		e.runNote(session, fmt.Sprintf("run %d: %s forwarded %s from outside the trust filter to its watch",
+			n, by, domain.WatchWords(count, "item")))
+		e.wfRT().conduct(session, n)
+		e.workflowEvent(session)
+		return nil
+	}
+	return fmt.Errorf("run %d's watch holds nothing from outside its trust filter", n)
 }

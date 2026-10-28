@@ -180,6 +180,14 @@ type WatchState struct {
 	// Allowed holds event keys a person said one more pass for, past the
 	// same-event and unchanged-pass questions.
 	Allowed []string
+	// Forwarded holds the prints (FeedbackPrint) of items from outside the
+	// trust filter a person forwarded to the run: read as trusted while
+	// they stand as they were forwarded, kept out again once anyone edits
+	// them.
+	Forwarded []string
+	// ForwardGen counts the forwards; a read whose FetchedGen is older reads
+	// the feedback again, so a read already under way cannot miss one.
+	ForwardGen int
 	// Asked is the key of the open question, "" when none; Answers holds the
 	// answers to the keys asked (more, wait, again, stop).
 	Asked      string
@@ -240,6 +248,8 @@ type WatchFacts struct {
 	Feedback       []WatchFeedback // from inside the trust filter only
 	KeptOut        int
 	KeptOutByKind  map[string]int // review, thread, comment
+	KeptOutPrints  []string       // the kept-out items' prints, for a person to forward
+	FetchedGen     int            // the ForwardGen the feedback was read under
 	Threads        int            // unresolved threads seen
 	Unread         int            // top-level comments and reviews past the first 100, not read
 	Unreadable     string         // why the trust filter could not be read

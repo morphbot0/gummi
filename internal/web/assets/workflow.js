@@ -319,7 +319,7 @@ function stepRow (id, row) {
   const open = row.card && !row.folded
   const where = row.iter ? `↺ ${row.iter}` : ''
   return h('div', {
-    class: ['rb-row', `s-${row.state}`, row.waiting && 'waiting', row.question && 'asking', row.folded && 'folded'],
+    class: ['rb-row', `s-${row.state}`, row.waiting && 'waiting', row.question && 'asking', row.folded && 'folded', row.watch && 'rb-watch', row.pass && !row.role && 'rb-pass'],
     testid: `run-row-${row.key}`,
     data: { card: row.card || null, state: row.state }
   },
@@ -329,6 +329,7 @@ function stepRow (id, row) {
   h('span', { class: 'ti' },
     h('span', { class: 'n' }, row.pass && row.folded ? `${row.id} · ${row.event}` : (row.folded ? row.steps : row.id)),
     row.line ? h('small', { testid: 'run-row-line' }, row.line) : null,
+    row.watch && row.watch.url ? h('a', { class: 'rb-pr mono', href: row.watch.url, target: '_blank', rel: 'noopener', testid: 'run-watch-pr' }, row.watch.pr) : null,
     row.pass && row.folded && row.steps ? h('small', { class: 'hint' }, row.steps) : null,
     row.flag ? h('small', { class: 'flag', testid: 'run-row-flag' }, row.flag) : null),
   h('span', { class: 'cost mono', title: [row.model, rowTook(row) && `took ${rowTook(row)}`].filter(Boolean).join(' · ') || null },
@@ -418,6 +419,7 @@ function foot (id, r, ended) {
     h('span', { class: 'sp' }),
     files.length && r.started ? h('button', { class: 'link', type: 'button', testid: 'run-diff', onclick: () => openRunDiff(id, r) }, 'diff ▸') : null,
     r.report ? h('button', { class: 'link', type: 'button', testid: 'run-report', onclick: () => openSpec(r.spec) }, 'report ▸') : null,
+    r.canForward ? h('button', { class: 'btn', type: 'button', testid: 'run-forward', title: 'Act on the feedback the trust filter kept out, as it stands now; read it on the PR first', onclick: (e) => { const btn = e.currentTarget; openModal({ title: 'Forward kept-out feedback', testid: 'run-forward-confirm', body: h('p', { class: 'aq' }, 'Read it on the PR first. Forwarded, each item the trust filter kept out is acted on as trusted feedback, as it stands now; an edit after this keeps it out again.'), actions: [{ label: 'Cancel', testid: 'run-forward-cancel' }, { label: 'Forward', primary: true, testid: 'run-forward-go', onClick: () => runPost(id, r.n, 'forward', 'forwarded to its watch', btn) }] }) } }, 'Forward kept-out feedback') : null,
     r.canRetry ? h('button', { class: 'btn', type: 'button', testid: 'run-retry', title: 'Run its failed and stopped steps again, keeping every step that finished', onclick: (e) => runPost(id, r.n, 'retry', 'its failed steps run again', e.currentTarget) }, 'Retry failed steps') : null,
     r.canRevert ? h('button', { class: 'btn', type: 'button', testid: 'run-revert', onclick: () => openRevert(id, r.n) }, 'Revert run…') : null,
     saveEl(id, r))

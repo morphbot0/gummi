@@ -142,6 +142,9 @@ type Run struct {
 	// CanRetry offers to run an ended run's failed and stopped steps again
 	// (domain.RetryRefusal), set where all the session's runs are folded.
 	CanRetry bool `json:"canRetry,omitempty"`
+	// CanForward offers to forward to the open run's watch what its trust
+	// filter kept out (DESIGN §28.3).
+	CanForward bool `json:"canForward,omitempty"`
 	// AlwaysAllowed is set on the session's newest run while a person
 	// always allows its runs: the block says so, with Ask again.
 	AlwaysAllowed bool `json:"alwaysAllowed,omitempty"`
@@ -625,6 +628,13 @@ func FoldRun(in RunInput) Run {
 	r.CanStop = run.State.Open() && !run.Stopping && !ending
 	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0 && run.State != domain.RunRunning && r.Phase == ""
 	r.CanWithdraw = run.State == domain.RunQueued
+	if run.State.Open() && !run.Stopping {
+		for _, s := range in.Steps {
+			if s.State == domain.StepWatching && s.Watch != nil && s.Watch.Observed != nil && len(s.Watch.Observed.KeptOutPrints) > 0 {
+				r.CanForward = true
+			}
+		}
+	}
 	r.SavedAs = Sanitize(run.SavedAs)
 	if r.CanSave = engine.RunSaveRefusal(run) == ""; r.CanSave {
 		if workflowrecipe.CheckName(run.Recipe.Name) == nil {

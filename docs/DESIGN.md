@@ -8430,8 +8430,12 @@ Where the code differs from, or adds to, the text above:
   cannot see everyone in it. Top-level comments and reviews are read to
   the first 100 each, and the strip names how many past that were not
   read.
-- Not built: a person's "forward this filtered-out comment", and web
-  styling of the watch row beyond the existing classes.
+- **Forwarding is all or nothing.** A person forwards everything the
+  filter kept out at once (TUI `F` on the run's head, the run block's
+  **Forward kept-out feedback** on the page), after reading it on the PR.
+  Each item is forwarded by its print — its id and a hash of its body and
+  everyone in it — so an edit after the forward, by anyone, keeps it out
+  again. A forward makes the watch read the feedback again at once.
 - **A pass's steps commit.** A step under a watch (not a reading role) is
   briefed to commit its changes on the branch, since gummi pushes only
   what the branch holds and never commits for it; the bundled `ship` and

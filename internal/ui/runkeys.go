@@ -317,6 +317,19 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 		return m.runAct(r, run.N, "askagain")
 	case "f":
 		return m.openRunDiff(r, run.N)
+	case "F":
+		if !run.CanForward {
+			m.notice = noticeMsg{text: fmt.Sprintf("run %d's watch holds nothing from outside its trust filter", run.N)}
+			return nil
+		}
+		n := run.N
+		m.Overlay.Push(&confirmDialog{
+			id: "run-forward", card: r.F.ID,
+			question:     fmt.Sprintf("Forward what the trust filter kept out to %s?", threadfold.RunLine(run)),
+			detail:       "Read them on the PR first. Forwarded, each is acted on as trusted feedback, as it stands now; an edit after this keeps it out again.",
+			confirmLabel: "Forward",
+			onConfirm:    func() tea.Cmd { return m.runAct(r, n, "forward") },
+		})
 	case "t":
 		if !run.CanRetry {
 			m.notice = noticeMsg{text: fmt.Sprintf("run %d has nothing to retry: only the newest run that ended partial or stopped, with no other run open", run.N)}
@@ -397,6 +410,7 @@ func (m *Shell) runBindings() []binding {
 		{key: "f", label: "run diff", help: "read the run's whole diff, from where it started to the tree now"},
 		{key: "r", label: "artifacts", help: "read the artifacts the run wrote beside the tree: a report, a design, a review"},
 		{key: "t", label: "retry", help: "run an ended run's failed and stopped steps again, keeping every step that finished"},
+		{key: "F", label: "forward", help: "forward to the open run's watch the feedback its trust filter kept out, as it stands now — read it on the PR first"},
 		{key: "w", label: "withdraw", help: "withdraw a run allowed and queued behind the open one, before it starts"},
 		{key: "a", label: "ask again", help: "take back always-allow: the session's next proposal asks you again"},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread"},
@@ -478,6 +492,8 @@ func actWord(act string) string {
 		return "retried: its failed steps run again"
 	case "askagain":
 		return "its session's runs ask you again"
+	case "forward":
+		return "forwarded to its watch"
 	}
 	return act
 }

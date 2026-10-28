@@ -573,6 +573,9 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, stepsOpen, hin
 	if sel == "head" && r.CanRetry {
 		tail = append(tail, s.KeyHint.Render("t")+s.Faint.Render(" retries its failed steps"))
 	}
+	if sel == "head" && r.CanForward {
+		tail = append(tail, s.KeyHint.Render("F")+s.Faint.Render(" forwards what the filter kept out"))
+	}
 	if ended && sel == "head" {
 		tail = append(tail, s.KeyHint.Render("enter")+s.Faint.Render(" folds it"))
 	}

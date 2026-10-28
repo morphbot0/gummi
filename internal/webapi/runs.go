@@ -72,6 +72,9 @@ type RunBlock struct {
 	// CanRetry offers to run an ended run's failed and stopped steps again
 	// (POST …/runs/{n}/retry), keeping every step that finished.
 	CanRetry bool `json:"canRetry,omitempty"`
+	// CanForward offers to forward to the open run's watch the feedback its
+	// trust filter kept out (POST .../runs/{n}/forward).
+	CanForward bool `json:"canForward,omitempty"`
 	// AlwaysAllowed, on the session's newest run, says a person always
 	// allows its runs: Ask again (POST …/runs/{n}/askagain) takes it back.
 	AlwaysAllowed bool `json:"alwaysAllowed,omitempty"`

@@ -3,6 +3,8 @@ package pr
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -54,6 +56,18 @@ type FeedbackItem struct {
 	// Partial marks a thread with more comments than were read: its
 	// People are not all known, so the trust filter keeps it out.
 	Partial bool
+}
+
+// FeedbackPrint names an item as it stands: its id and a hash of its body
+// and everyone in it, so an edit — by anyone — makes a new print.
+func FeedbackPrint(it FeedbackItem) string {
+	h := sha256.New()
+	h.Write([]byte(it.Body))
+	for _, p := range it.People {
+		h.Write([]byte{0})
+		h.Write([]byte(strings.ToLower(p)))
+	}
+	return it.ID + ":" + hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 const feedbackQuery = `query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
