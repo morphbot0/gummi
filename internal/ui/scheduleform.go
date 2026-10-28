@@ -646,17 +646,17 @@ func (d *scheduleForm) View(s *theme.Styles, w, h int) string {
 		b.WriteString(strings.Join(choiceRowLines(s, d.focus == focus, label, opts, idx, "", false, width, 2), "\n") + "\n")
 	}
 	input := func(focus int, label string, in textinput.Model) {
-		line := fieldRow(s, d.focus == focus, label) + " " + in.View()
-		b.WriteString(strings.Join(foldReadout(line, 12, width), "\n") + "\n")
+		line := schedLabel(s, d.focus == focus, label) + in.View()
+		b.WriteString(strings.Join(foldReadout(line, width), "\n") + "\n")
 	}
 
 	input(schedStopPrompt, "asks", d.prompt)
 	if d.edit != nil {
 		// an edit keeps the kind: the row is a readout, off the walk —
 		// the same fixed field the web form shows
-		line := fieldRow(s, false, "kind") + " " + scheduleKindLabels[d.kind] +
+		line := schedLabel(s, false, "kind") + scheduleKindLabels[d.kind] +
 			"  " + s.Faint.Render("· an edit keeps the kind")
-		b.WriteString(strings.Join(foldReadout(line, 12, width), "\n") + "\n")
+		b.WriteString(strings.Join(foldReadout(line, width), "\n") + "\n")
 	} else {
 		cycle(schedStopKind, "kind", scheduleKindLabels, d.kind)
 	}
@@ -668,13 +668,16 @@ func (d *scheduleForm) View(s *theme.Styles, w, h int) string {
 		if d.repo.shown() {
 			b.WriteString(strings.Join(choiceRowLines(s, d.focus == schedStopRepo, "repo", d.repo.options(), d.repo.idx, repoUnsetLabel, false, width, 2), "\n") + "\n")
 		}
-		backend := fieldRow(s, d.focus == schedStopBackend, "agent") + " " + d.backendRow()
-		b.WriteString(strings.Join(foldReadout(backend, 12, width), "\n") + "\n")
+		backend := schedLabel(s, d.focus == schedStopBackend, "agent") + d.backendRow()
+		b.WriteString(strings.Join(foldReadout(backend, width), "\n") + "\n")
 		if d.backendName() != "" {
 			input(schedStopModel, "model", d.model)
 		}
 		input(schedStopEnvelope, "budget", d.env)
-		b.WriteString(s.Faint.Render(ansi.Wrap(d.envHint, width, "  ")) + "\n")
+		pad := strings.Repeat(" ", schedValueCol)
+		for _, row := range strings.Split(ansi.Wrap(d.envHint, max(width-schedValueCol, 20), " "), "\n") {
+			b.WriteString(pad + s.Faint.Render(row) + "\n")
+		}
 	}
 	input(schedStopName, "name", d.name)
 
@@ -689,6 +692,22 @@ func (d *scheduleForm) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString("\n" + s.Faint.Render(strings.Join(wrapHint(hint, width), "\n")))
 	return s.DialogFrame.Render(b.String())
+}
+
+// schedValueCol is the column every value in the dialog starts at: the
+// label column the choice rows already use (choiceRowLines, cardLabelW),
+// so a text row's value lines up under a cycle row's instead of starting
+// wherever its own label happened to end.
+const schedValueCol = cardLabelW + 2
+
+// schedLabel is a row's label padded to schedValueCol, marked when the
+// row has focus.
+func schedLabel(s *theme.Styles, focused bool, label string) string {
+	padded := fmt.Sprintf("%-*s", cardLabelW, label)
+	if focused {
+		return s.Band(s.BandMarker(true)+s.Base.Render(padded), 0, true)
+	}
+	return "  " + s.Faint.Render(padded)
 }
 
 // backendRow is the agent row's value: the picked backend, with the

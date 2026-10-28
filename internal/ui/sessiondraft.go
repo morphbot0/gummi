@@ -669,17 +669,30 @@ func (m *Shell) draftView(w, h int) string {
 
 	var foot []string
 	if from := f.fromLine(s); from != "" {
-		foot = append(foot, foldReadout(from, cardLabelW+2, w)...)
+		foot = append(foot, foldReadout(from, w)...)
 	}
 	if f.errText != "" {
 		for _, row := range strings.Split(ansi.Wrap(f.errText, max(w-2, 1), " -"), "\n") {
 			foot = append(foot, "  "+s.Error.Render(row))
 		}
 	}
-	foot = append(foot, m.draftStrip(w)...)
+	// the strip sits a blank row above the composer, and the composer a
+	// blank row above the status bar — the room the session page's own
+	// composer has — so settings, message and keys read as three things
+	for _, row := range m.draftStrip(w - 1) {
+		// one column in, so a setting's words start under the message's
+		// rather than under the composer's bar
+		foot = append(foot, " "+row)
+	}
+	foot = append(foot, "")
 	f.text.SetWidth(max(w, 1))
 	foot = append(foot, strings.Split(f.text.View(), "\n")...)
-	foot = append(foot, s.Faint.Render(ansi.Truncate(d.hint(), max(w, 0), "…")))
+	foot = append(foot, "")
+	// the status bar names the message's keys; the row here says only
+	// what it does not: a setting's keys, or that alt+g would import
+	if hint := d.hint(); d.chips || strings.Contains(hint, "alt+g") {
+		foot = append(foot, s.Faint.Render(ansi.Truncate(hint, max(w, 0), "…")))
+	}
 
 	room := h - len(head) - len(foot)
 	body := d.body(s, w)

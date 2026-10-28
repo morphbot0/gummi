@@ -523,15 +523,17 @@ func choiceRowLines(s *theme.Styles, focused bool, label string, opts []string, 
 	return foldedRow(s, cardLabel(s, label), cardLabelW+2, choiceCells(s, focused, opts, idx, unsetLabel, numbered), idx, width, maxLines)
 }
 
-// foldReadout folds an already-labelled readout row — `from`, `becomes`,
-// `runs as` — to width, indenting its continuation lines under the label
-// so the row still reads as one. It wraps rather than truncates: the
+// foldReadout folds an already-labelled row — the draft's `from`, a
+// dialog's labelled value — to width, indenting its continuation lines
+// under the value (the label column, cardLabelW, plus its margin) so the
+// row still reads as one. It wraps rather than truncates: the
 // `becomes` line carries the derived title with DeriveTitle's own
 // ellipsis where a long first line was cut to maxTitleLen, and that cut
 // is the whole reason the title is shown there at all — a second,
 // width-driven ellipsis on top of it would hide exactly what the line
 // exists to say.
-func foldReadout(line string, indent, width int) []string {
+func foldReadout(line string, width int) []string {
+	const indent = cardLabelW + 2
 	if width < 1 || ansi.StringWidth(line) <= width {
 		return []string{line}
 	}
