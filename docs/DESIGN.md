@@ -2401,7 +2401,7 @@ piece of machinery doc-ingest didn't need, and what makes GitHub polling safe.
 The gate lives on two surfaces, mirroring §11.4, and both pick a **single**
 issue out of one fetch rather than gating a batch — an entire repo's issues
 should never land in todo from one keystroke. In the TUI the gate *is* the
-new-card dialog: a pasted issue reference is imported into it with `alt+g`
+new session's draft (§19.8; it was the new-card dialog): a pasted issue reference is imported into it with `alt+g`
 (the title and body land in the box, editable, with the labels reported
 beside the reference and the severity read from them), and the issue
 picker — `alt+g` with no reference, or `G` from the board — lists the
@@ -4282,10 +4282,12 @@ what it forks from (a branch, or a card to stack on: one setting), model,
 budget and profile. shift+tab moves into the strip. A setting can also
 be typed as a slash command (`/repo`, `/from`, `/main`, `/budget 5`, …).
 Enter on a message creates the session and starts it. esc puts a draft
-with words in it away for the next `n`. The draft has no rules of its
-own: its model is the new-card form, run without its view the way the
-web's create runs it, so both faces validate and create through one
-path.
+with words in it away for the next `n`. A workspace with one named
+repository has nothing to choose, so the strip names it without making
+it a setting. The draft has no rules of its own: its model is
+`cardForm`, which draws nothing and reads no keys, and the web's create
+drives the same model, so both faces validate and create through one
+path. The new-card dialog that came before the draft is gone.
 
 **Writing a spec continues the work on a branch of the spec's own.** The
 session is handed off: its branch kept, and the one floor it has (open

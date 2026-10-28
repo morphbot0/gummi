@@ -196,7 +196,7 @@ func TestCreatingAFreeformCardMintsItOutsideTheGraph(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -231,7 +231,7 @@ func TestLandingAFreeformCardFromTheBoard(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -396,7 +396,7 @@ func TestDeletingAFreeformCardLeavesTheWorkspaceStanding(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 

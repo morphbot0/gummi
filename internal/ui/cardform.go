@@ -16,18 +16,16 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// cardForm is the one dialog for a new card of any kind — feature, bug or
-// research — reached by `n`, with `B`, `R` and `G` as presets that open
-// it with a row already set. It asks three questions in the order a
-// person can answer them (where, what kind, what), then reads back what
-// will be created and how it will run.
+// cardForm is the model of a new session: what it asks, where it runs,
+// what it forks from, its budget and profile, and the one set of rules
+// that refuses or creates it (submit). It draws nothing and reads no
+// keys: the terminal's draft in the board pane (sessiondraft.go) and the
+// web page's create (webcreate.go's webFill) both drive it, so the two
+// faces cannot disagree about what a new session may be.
 //
-// Rule 0: the dialog never acts on its own. A pasted issue reference is
-// an offer on the `from` line; alt+g accepts it; enter only ever creates.
-// Labels an import brings back are reported, never applied. Nothing
-// fetches, moves a row or rewrites the box without a key.
-//
-// PROPOSAL-new-card.md holds the rationale and the settled decisions.
+// Rule 0: it never acts on its own. A pasted issue reference is an offer;
+// alt+g accepts it (github); enter only ever creates. Labels an import
+// brings back are reported, never applied.
 type cardForm struct {
 	// sessionBackend and sessionModel are the agent and model a freeform
 	// card's session will run on. The form has no row for them — the web
@@ -64,21 +62,9 @@ type cardForm struct {
 	checkedOut map[string]string
 	branchesOf map[string][]string
 	// stackOnto names the card this one is being stacked on top of, and
-	// stackCands the cards the row can name. stackInto names an existing
-	// stack to join instead. All empty is a standalone card.
-	//
-	// They live in the expanded options rather than the main flow because
-	// the overwhelming majority of cards are standalone, and a row every
-	// reader has to tab past to say "no" is a row that costs more than it
-	// gives. What keeps the T gesture legible is the `becomes` readout,
-	// which is always visible and names the branch this card will fork
-	// from — so the one case where stacking matters says so without the
-	// reader opening anything.
-	//
-	// T stays the one-key path — it
-	// preselects a card here — but a reader who opened the dialog with
-	// `n` and only then thought of the card below is no longer told to
-	// cancel and start again.
+	// stackCands the cards the draft's "from" setting can name. stackInto
+	// names an existing stack to join instead. All empty is a standalone
+	// card. T presets stackOnto; the setting can change it after.
 	stackOnto  domain.FeatureID
 	stackLabel string
 	stackInto  domain.StackID
@@ -100,31 +86,21 @@ type cardForm struct {
 	// rule above about a session with no branch holds for it unasked.
 	home bool
 
-	// expanded shows the run options as rows instead of one readout line.
-	expanded bool
-
 	// imported is the issue whose title and body the box currently holds,
 	// once alt+g has accepted an offer; fetching marks the round trip.
 	imported *importedIssue
 	fetching bool
 
-	focus   int // a cardStop, always one of stops()
+	// focus names the setting a refusal is about (a cardStop), so the
+	// draft can move its own cursor there (sessionDraft.syncFocus)
+	focus   int
 	errText string
-	buttons *buttonRow
 
 	onSubmit func(formResult) tea.Cmd
 	// onImport fetches ref (never bare: the caller resolved it against the
 	// chosen repo's origin) and delivers the result back through
 	// applyIssue.
 	onImport func(ref domain.IssueRef, repo string) tea.Cmd
-	// onCancel runs when the form is abandoned — esc, or the Cancel
-	// button. Nil for the plain new-card door, where abandoning it loses
-	// nothing that was not typed into it. It is set by the caller that
-	// seeded the box from somewhere else: a re-entry's "not this card's
-	// work" opens this form already holding a line the reader typed on a
-	// card page, and dropping the form has to give that line back rather
-	// than being the one gesture in the package that discards prose.
-	onCancel func() tea.Cmd
 }
 
 // stackCand is one card the `stack` row can fork from. Touched orders
@@ -155,36 +131,20 @@ type repoOrigin struct {
 
 func (o repoOrigin) github() bool { return o.host == "github.com" }
 
-// label is the readout at the right end of the repo row.
-func (o repoOrigin) label() string {
-	switch {
-	case o.host == "":
-		return "no origin"
-	case o.github():
-		return "github.com/" + o.ownerRepo
-	default:
-		return o.host + " · not github"
-	}
-}
-
-// The dialog's focus stops. Not every stop is live at once: repo needs a
-// choice to be one, runs is the collapsed options line and expands the
-// moment focus reaches it. stops() is the live list; focus always names one of its entries.
+// The settings a refusal can name (cardForm.focus), so a face can move
+// its cursor to the one that needs changing.
 const (
 	cardStopRepo = iota
 	cardStopName
 	cardStopText
-	cardStopRuns
 	cardStopEnvelope
-	cardStopProfile
-	cardStopWhere
 	cardStopBase
 	cardStopStack
-	cardStopButtons
 )
 
-// newCardForm builds the door: it makes a session (an agent is the
-// session's "where" choice). repos and hasDefault shape the repo row as in every other creation dialog;
+// newCardForm builds the model of a new session (an agent is the
+// session's "where" choice). repos and hasDefault shape the repository
+// setting as in every other creation dialog;
 // lastRepo preselects the repo chosen last time this session (a name
 // that is not configured is ignored); defaultEnvelope prefills the budget.
 func newCardForm(profiles, repos []string, hasDefault bool, lastRepo string, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *cardForm {
@@ -214,43 +174,22 @@ func newCardForm(profiles, repos []string, hasDefault bool, lastRepo string, def
 	d := &cardForm{
 		repo: repo, origins: map[string]repoOrigin{},
 		name: name, text: text, env: env, profiles: profiles,
-		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}),
 		onSubmit: onSubmit,
 	}
-	d.buttons.SetCursor(1)
 	// the repository is the one field with no default, so a form that
 	// still needs one opens on it; everything else opens in the text.
 	if d.asksRepo() && d.repo.needsChoice() {
-		d.setFocus(cardStopRepo)
+		d.focus = cardStopRepo
 	} else {
-		d.setFocus(cardStopText)
+		d.focus = cardStopText
 	}
 	d.text.Placeholder = cardPlaceholder
 	return d
 }
 
-// cardPlaceholder is the box's manual, shown only while the box is empty.
-const cardPlaceholder = "Say what you want done. The first line is the title, unless you name it above.\n\n" +
-	"  it starts working in this card's own branch straight away:\n" +
-	"  you read the diff and land it when it's right\n" +
-	"  #123 or an issue link on the first line: alt+g imports it\n" +
-	"  alt+o: runs in the main checkout, without a branch or worktree"
-
-// ID implements overlay.Dialog.
-func (d *cardForm) ID() string { return "new-card" }
-
-// cancel is the abandon path, both keys that reach it (esc and the
-// Cancel button) routed through one place so they cannot diverge on what
-// leaving without creating anything does.
-func (d *cardForm) cancel() tea.Cmd {
-	if d.onCancel == nil {
-		return nil
-	}
-	return d.onCancel()
-}
-
-// SetText replaces the box's content (a preset's seed, a test's fixture).
-func (d *cardForm) SetText(s string) { d.text.SetValue(s) }
+// cardPlaceholder is what the web's create offers a session as: say
+// what you want done.
+const cardPlaceholder = "Say what you want done. The first line is the title, unless you name it."
 
 // Text is the box's current content.
 func (d *cardForm) Text() string { return d.text.Value() }
@@ -260,80 +199,6 @@ func (d *cardForm) Text() string { return d.text.Value() }
 func (d *cardForm) asksRepo() bool {
 	// an agent is in no repository, so a workspace of several asks none
 	return d.repo.multi() && !d.home
-}
-
-// stops is the live focus ring, in tab order.
-func (d *cardForm) stops() []int {
-	var s []int
-	if d.asksRepo() {
-		s = append(s, cardStopRepo)
-	}
-	s = append(s, cardStopName, cardStopText)
-	if d.expanded {
-		s = append(s, cardStopEnvelope, cardStopProfile, cardStopWhere)
-		if len(d.baseCands) > 1 && !d.mainCheckout {
-			s = append(s, cardStopBase)
-		}
-		if d.asksStack() {
-			s = append(s, cardStopStack)
-		}
-	} else {
-		s = append(s, cardStopRuns)
-	}
-	return append(s, cardStopButtons)
-}
-
-// advanceFocus moves by dir over stops(), wrapping. Landing on the
-// collapsed runs line expands it: the options are reached by tabbing
-// onto them, and there is nothing to do on the line itself.
-func (d *cardForm) advanceFocus(dir int) {
-	stops := d.stops()
-	i := 0
-	for j, s := range stops {
-		if s == d.focus {
-			i = j
-			break
-		}
-	}
-	next := stops[((i+dir)%len(stops)+len(stops))%len(stops)]
-	if next == cardStopRuns {
-		d.expanded = true
-		if dir > 0 {
-			next = cardStopEnvelope
-		} else {
-			// the last option row: the one just above the buttons
-			opts := d.stops()
-			next = opts[len(opts)-2]
-		}
-	}
-	d.setFocus(next)
-}
-
-// firstOptionStop is the option row alt+o lands on: the budget when the
-// card has one, and otherwise whatever this kind's first option is.
-func (d *cardForm) firstOptionStop() int {
-	stops := d.stops()
-	for i, stop := range stops {
-		if stop == cardStopText && i+1 < len(stops) {
-			return stops[i+1]
-		}
-	}
-	return cardStopText
-}
-
-func (d *cardForm) setFocus(f int) {
-	d.focus = f
-	d.name.Blur()
-	d.text.Blur()
-	d.env.Blur()
-	switch f {
-	case cardStopName:
-		d.name.Focus()
-	case cardStopText:
-		d.text.Focus()
-	case cardStopEnvelope:
-		d.env.Focus()
-	}
 }
 
 // formRepo is the repository the card is created in: the chosen one.
@@ -362,186 +227,49 @@ func (d *cardForm) reference() (domain.IssueRef, bool) {
 	return domain.ParseIssueRef(domain.FirstLine(d.text.Value()))
 }
 
-// HandleKey implements overlay.Dialog.
-func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
-	k := key.String()
-	switch k {
-	case "esc":
-		return true, d.cancel()
-	case "tab":
-		d.advanceFocus(1)
-		return false, nil
-	case "shift+tab":
-		d.advanceFocus(-1)
-		return false, nil
-	case "alt+o":
-		d.expanded = !d.expanded
-		switch {
-		case d.expanded && d.focus == cardStopText:
-			// The row this opens is labelled "alt+o edit" and its first
-			// field is a text input, which draws its "> " prompt whether
-			// or not it has focus. Leaving focus in the description made
-			// that prompt a lie: the next keystrokes edited the card's
-			// text, out of sight below the panel that had just opened,
-			// and a person correcting the budget deleted four characters
-			// of their own brief before noticing. Opening the options
-			// means editing them.
-			d.setFocus(d.firstOptionStop())
-		case !d.expanded && (d.focus == cardStopEnvelope || d.focus == cardStopProfile || d.focus == cardStopWhere):
-			d.setFocus(cardStopText)
-		}
-		return false, nil
-	case "alt+g":
-		return d.github()
-	case "alt+enter", "ctrl+j":
-		if d.focus == cardStopText {
-			d.text.InsertString("\n")
-			d.errText = ""
-		}
-		return false, nil
-	}
-
-	switch d.focus {
-	case cardStopButtons:
-		switch k {
-		case "left", "h":
-			d.buttons.Move(-1)
-		case "right", "l":
-			d.buttons.Move(1)
-		case "enter":
-			if d.buttons.Cursor() == 0 {
-				return true, d.cancel()
-			}
-			return d.submit()
-		}
-		return false, nil
-	case cardStopRepo:
-		if delta, ok := selectCycleDelta(k); ok {
-			d.moveRepo(func() { d.repo.cycle(delta) })
-			d.errText = ""
-			return false, nil
-		}
-		if n := digitKey(key); n > 0 && n <= len(d.repo.options()) {
-			d.moveRepo(func() { d.repo.idx = n - 1 })
-			d.errText = ""
-			return false, nil
-		}
-		if k == "enter" {
-			return d.submit()
-		}
-		return d.fallThrough(key)
-	case cardStopName:
-		if k == "enter" {
-			return d.submit()
-		}
-		d.name, _ = d.name.Update(key)
-		d.errText = ""
-	case cardStopText:
-		if k == "enter" {
-			return d.submit()
-		}
-		d.text, _ = d.text.Update(key)
-		d.errText = ""
-	case cardStopEnvelope:
-		if k == "enter" {
-			return d.submit()
-		}
-		d.env, _ = d.env.Update(key)
-		d.errText = ""
-	case cardStopProfile:
-		if delta, ok := selectCycleDelta(k); ok {
-			n := len(d.profiles)
-			d.profile = ((d.profile+delta)%n + n) % n
-		} else if k == "enter" {
-			return d.submit()
-		}
-	case cardStopWhere:
-		if delta, ok := selectCycleDelta(k); ok {
-			d.cycleWhere(delta)
-		} else if k == "enter" {
-			return d.submit()
-		}
-	case cardStopBase:
-		if delta, ok := selectCycleDelta(k); ok {
-			d.cycleBase(delta)
-		} else if k == "enter" {
-			return d.submit()
-		}
-	case cardStopStack:
-		if delta, ok := selectCycleDelta(k); ok {
-			d.cycleStack(delta)
-		} else if k == "enter" {
-			return d.submit()
-		}
-	}
-	return false, nil
-}
-
-// fallThrough is the kind and repo rows' answer to a printable key: it
-// belongs to the text, so focus moves there and the key types. A person
-// who starts describing the card on the wrong row never cycles or
-// filters anything by accident.
-func (d *cardForm) fallThrough(key tea.KeyPressMsg) (bool, tea.Cmd) {
-	if key.Text == "" || key.Mod != 0 {
-		return false, nil
-	}
-	d.setFocus(cardStopText)
-	d.text, _ = d.text.Update(key)
-	d.errText = ""
-	return false, nil
-}
-
-// digitKey returns 1–9 for a bare digit key, else 0.
-func digitKey(key tea.KeyPressMsg) int {
-	if key.Mod != 0 || len(key.Text) != 1 || key.Text[0] < '1' || key.Text[0] > '9' {
-		return 0
-	}
-	return int(key.Text[0] - '0')
-}
-
 // github is alt+g: refetch an import or import the offered reference,
 // whichever the form's state calls for; with no reference in the box it
 // does nothing. A bare reference with no repository chosen moves focus
 // to the repo row and says so.
-func (d *cardForm) github() (bool, tea.Cmd) {
+func (d *cardForm) github() tea.Cmd {
 	if d.fetching {
-		return false, nil
+		return nil
 	}
 	if d.imported != nil {
 		if d.onImport == nil {
-			return false, nil
+			return nil
 		}
 		if !strings.Contains(d.text.Value(), d.imported.text) {
 			d.errText = "the imported text was edited — clear it to fetch the issue again"
-			return false, nil
+			return nil
 		}
 		d.fetching = true
-		return false, d.onImport(d.imported.ref, d.repo.name())
+		return d.onImport(d.imported.ref, d.repo.name())
 	}
 	ref, ok := d.reference()
 	if !ok {
-		return false, nil
+		return nil
 	}
 	if ref.Bare() {
 		if d.repo.needsChoice() {
 			d.errText = fmt.Sprintf("choose a repository to resolve %s", ref)
-			d.setFocus(cardStopRepo)
-			return false, nil
+			d.focus = cardStopRepo
+			return nil
 		}
 		o := d.origin()
 		if !o.github() {
 			d.errText = fmt.Sprintf("%s has no GitHub origin to resolve %s against — paste the issue's link instead", d.repo.label(), ref)
-			return false, nil
+			return nil
 		}
 		owner, repo, _ := strings.Cut(o.ownerRepo, "/")
 		ref.Owner, ref.Repo = owner, repo
 	}
 	if d.onImport == nil {
-		return false, nil
+		return nil
 	}
 	d.fetching = true
 	d.errText = ""
-	return false, d.onImport(ref, d.repo.name())
+	return d.onImport(ref, d.repo.name())
 }
 
 // applyIssue is the import's landing: the reference line in the box is
@@ -587,7 +315,7 @@ func (d *cardForm) failImport(err error) {
 func (d *cardForm) submit() (bool, tea.Cmd) {
 	if d.asksRepo() && d.repo.needsChoice() {
 		d.errText = repoUnchosenErr
-		d.setFocus(cardStopRepo)
+		d.focus = cardStopRepo
 		return false, nil
 	}
 	desc := strings.TrimSpace(d.text.Value())
@@ -603,7 +331,7 @@ func (d *cardForm) submit() (bool, tea.Cmd) {
 		d.errText = "the first line needs a letter or digit to make a title"
 		if d.named() != "" {
 			d.errText = "the name needs a letter or digit to make a title"
-			d.setFocus(cardStopName)
+			d.focus = cardStopName
 		}
 		return false, nil
 	}
@@ -615,7 +343,7 @@ func (d *cardForm) submit() (bool, tea.Cmd) {
 	// happen.
 	if c, ok := d.stackCandFor(d.stackOnto); ok && c.Repo != d.formRepo() {
 		d.errText = c.ID.Ref() + " is in " + stackRepoLabel(c.Repo) + " — a stack is one repository"
-		d.setFocus(cardStopStack)
+		d.focus = cardStopStack
 		return false, nil
 	}
 	var env *int
@@ -634,7 +362,7 @@ func (d *cardForm) submit() (bool, tea.Cmd) {
 		// refusal names the row rather than minting a card the store would
 		// reject at Validate.
 		d.errText = "a session in the main checkout has no branch to stack on — clear the stack row"
-		d.setFocus(cardStopStack)
+		d.focus = cardStopStack
 		return false, nil
 	}
 	res := formResult{
@@ -657,33 +385,9 @@ func (d *cardForm) submit() (bool, tea.Cmd) {
 	return true, d.onSubmit(res)
 }
 
-// HandlePaste implements overlay.Paster: pasted text goes into the text
-// while it's focused, newlines intact — and into the budget when that is.
-func (d *cardForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
-	switch d.focus {
-	case cardStopName:
-		d.name, _ = d.name.Update(msg)
-		d.errText = ""
-	case cardStopText:
-		d.text, _ = d.text.Update(msg)
-		d.errText = ""
-	case cardStopEnvelope:
-		d.env, _ = d.env.Update(msg)
-	case cardStopRepo:
-		d.setFocus(cardStopText)
-		d.text, _ = d.text.Update(msg)
-		d.errText = ""
-	}
-	return nil
-}
-
 // --- rendering ---
 
 const cardLabelW = 9 // "becomes" plus two spaces, the widest label
-
-func cardLabel(s *theme.Styles, label string) string {
-	return "  " + s.Faint.Render(fmt.Sprintf("%-*s", cardLabelW, label))
-}
 
 // A row of options is a horizontal list, and its length is the
 // workspace's to decide: `repos:` names, profiles.yaml presets. On one
@@ -819,26 +523,6 @@ func choiceRowLines(s *theme.Styles, focused bool, label string, opts []string, 
 	return foldedRow(s, cardLabel(s, label), cardLabelW+2, choiceCells(s, focused, opts, idx, unsetLabel, numbered), idx, width, maxLines)
 }
 
-// foldedRow prefixes a folded option row with its already-rendered
-// label, indenting the continuation lines by the label cell's width
-// (indent, which differs between the top-level rows and the expanded
-// option rows under "runs as").
-func foldedRow(s *theme.Styles, prefix string, indent int, cells []string, sel, width, maxLines int) []string {
-	lines := foldChoices(s, cells, sel, max(width-indent, choiceMinWidth), maxLines, choiceSep)
-	if len(lines) == 0 {
-		return []string{prefix}
-	}
-	rows := make([]string, len(lines))
-	for i, ln := range lines {
-		if i == 0 {
-			rows[i] = prefix + ln
-			continue
-		}
-		rows[i] = strings.Repeat(" ", indent) + ln
-	}
-	return rows
-}
-
 // foldReadout folds an already-labelled readout row — `from`, `becomes`,
 // `runs as` — to width, indenting its continuation lines under the label
 // so the row still reads as one. It wraps rather than truncates: the
@@ -888,122 +572,6 @@ func wrapHint(hint string, width int) []string {
 	return lines
 }
 
-// optionLabelW is optionLabel's rendered width: the four-column marker
-// margin plus the eleven-column label cell. It is what a folded option
-// row indents its continuation lines by.
-const optionLabelW = 4 + 11
-
-// optionLabel is an expanded option row's label cell: indented under
-// "runs as", banded when its row has focus — and, since the band alone
-// used to be the only tell, carrying a leading ▸ too. The rows here
-// (budget, profile, severity, runs in) each show their own value with
-// choices()' own "▸" beside whichever option is picked, on every row,
-// focused or not — that answers "what is this row set to", never "which
-// row is tab on right now". A reader driving the dialog with no working
-// color (or who just can't tell a faint cell from a banded one at a
-// glance) needs a mark that only ever appears on the one row focus is
-// actually on; the label's own margin is that mark, and it costs no
-// width — "  ▸ " and "    " are both four columns.
-func optionLabel(s *theme.Styles, focused bool, label string) string {
-	// 11, not 10: "forks from" is itself 10 characters, and a %-10s cell
-	// would butt the label straight up against the row's value.
-	cell := fmt.Sprintf("%-11s", label)
-	if focused {
-		return "  ▸ " + s.Band(cell, 0, true)
-	}
-	return "    " + s.Faint.Render(cell)
-}
-
-// fromLine is the offer or the provenance, or "" when the box holds
-// neither an import nor a reference.
-func (d *cardForm) fromLine(s *theme.Styles) string {
-	if d.imported != nil {
-		p := d.imported.prop
-		parts := []string{s.Success.Render(p.Source), d.imported.ref.String()}
-		if p.State != "" {
-			parts = append(parts, p.State)
-		}
-		if len(p.Labels) > 0 {
-			parts = append(parts, s.Faint.Render("labelled "+strings.Join(p.Labels, ", ")))
-		}
-		if n := strings.Count(p.Report.Discussion, "**"); n > 0 {
-			parts = append(parts, fmt.Sprintf("%d comments", n/2))
-		}
-		parts = append(parts, fmt.Sprintf("%d lines", strings.Count(strings.TrimSpace(d.imported.text), "\n")+1))
-		tail := s.KeyHint.Render("↻ alt+g")
-		if d.fetching {
-			tail = s.Faint.Render("fetching…")
-		}
-		return cardLabel(s, "from") + strings.Join(parts, " · ") + "   " + tail
-	}
-	ref, ok := d.reference()
-	if !ok {
-		return ""
-	}
-	if d.fetching {
-		return cardLabel(s, "from") + s.Faint.Render("fetching "+ref.String()+"…")
-	}
-	if ref.Bare() {
-		if d.repo.needsChoice() {
-			return cardLabel(s, "from") + s.Faint.Render("choose a repository to resolve ") + ref.String() + s.Faint.Render(" · ") + s.KeyHint.Render("alt+g")
-		}
-		o := d.origin()
-		if !o.github() && d.originFor != nil {
-			return cardLabel(s, "from") + s.Faint.Render(d.repo.label()+": no GitHub origin to resolve ") + ref.String() + s.Faint.Render(" against")
-		}
-		if o.github() {
-			ref.Owner, ref.Repo, _ = strings.Cut(o.ownerRepo, "/")
-		}
-	}
-	return cardLabel(s, "from") + s.Faint.Render("looks like ") + ref.String() + s.Faint.Render(" · ") + s.KeyHint.Render("alt+g") + s.Faint.Render(" import it")
-}
-
-// becomesLine reads back the card the text would create: the id prefix
-// with the kind word beside it, and the derived title. No number — that is minted at Create.
-//
-// This used to show the branch slug instead of the title, which hid a
-// live truncation: DeriveTitle caps a title at maxTitleLen characters
-// (internal/domain/feature.go), keeping the untruncated text in the
-// card's OneLiner — but the truncated title is what the board, the card
-// header, the artifact's H1 and every notice actually show, and the
-// slug is derived from that same truncated title anyway. Showing the
-// title instead means the cut is visible here, before Create, exactly
-// where a person can still do something about it: DeriveTitle already
-// appends an ellipsis when it cuts, so this line needs no truncation
-// logic of its own. The slug stays the least interesting half of the
-// line — worth confirming (via Slugify) that Create would accept it,
-// not worth a reader's attention — so it is no longer drawn at all.
-func (d *cardForm) becomesLine(s *theme.Styles) string {
-	desc := strings.TrimSpace(d.text.Value())
-	if desc == "" {
-		return cardLabel(s, "becomes") + s.Faint.Render("—")
-	}
-	if _, isRef := d.reference(); isRef && d.imported == nil {
-		return cardLabel(s, "becomes") + s.Faint.Render("— import the reference first, or describe the card")
-	}
-	title := d.title()
-	if _, err := domain.Slugify(title); err != nil {
-		if d.named() != "" {
-			return cardLabel(s, "becomes") + s.Error.Render("the name needs a letter or digit to make a title")
-		}
-		return cardLabel(s, "becomes") + s.Error.Render("the first line needs a letter or digit to make a title")
-	}
-	f := domain.Feature{Kind: domain.KindFreeform, Home: d.home}
-	out := domain.CardType{Kind: f.Kind}.Prefix() + " (" + strings.ToLower(f.TypeName()) + ") · " + title
-	// Name where the branch comes from whenever it is not the plain
-	// default. This is the line that keeps the S gesture honest: the
-	// stack row itself is folded away in the options, so this readout is
-	// the reader's only chance to see what the card will fork from
-	// before pressing enter.
-	if from := d.forkFrom(); from != "" {
-		out += s.Faint.Render(" · from ") + from
-	}
-	if d.mainCheckout && !d.home {
-		out += " · in " + d.whereChoices()[d.whereIdx()]
-	}
-	return cardLabel(s, "becomes") + out
-}
-
 // named is the name the person typed, "" for none.
 func (d *cardForm) named() string { return strings.TrimSpace(d.name.Value()) }
 
@@ -1015,245 +583,6 @@ func (d *cardForm) title() string {
 	}
 	title, _, _ := domain.SplitFreeform(strings.TrimSpace(d.text.Value()))
 	return title
-}
-
-// nameRow is the name row: what the person typed, or the placeholder
-// saying it may stay empty.
-func (d *cardForm) nameRow(s *theme.Styles, width int) string {
-	d.name.SetWidth(max(width-cardLabelW-3, choiceMinWidth))
-	return cardLabel(s, "name") + d.name.View()
-}
-
-// runsLine is the collapsed options readout.
-func (d *cardForm) runsLine(s *theme.Styles) string {
-	env := strings.TrimSpace(d.env.Value())
-	if env == "" {
-		env = "default budget"
-	} else {
-		env = "$" + strings.TrimPrefix(env, "$")
-	}
-	out := env + " · " + d.profiles[d.profile]
-	if st := d.stackSummary(); st != "" {
-		out += " · " + st
-	}
-	if d.mainCheckout && !d.home {
-		out += " · in " + d.whereChoices()[d.whereIdx()]
-	}
-	if d.base != "" {
-		out += " · on " + d.base
-	}
-	return cardLabel(s, "runs as") + out + "   " + s.KeyHint.Render("alt+o") + s.Faint.Render(" edit")
-}
-
-// optionRows are the expanded options: budget, profile, where it runs, what it forks from and its stack.
-func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
-	rows := []string{
-		cardLabel(s, "runs as"),
-		optionLabel(s, d.focus == cardStopEnvelope, "budget") + d.env.View() + " " + s.Faint.Render(envelopeHintCapped),
-	}
-	// profiles.yaml sets how many presets there are, so the profile row
-	// folds the same way the repo row does rather than setting the
-	// dialog's width from the config file.
-	rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopProfile, "profile"), optionLabelW,
-		choiceCells(s, d.focus == cardStopProfile, d.profiles, d.profile, "", false), d.profile, width, maxLines)...)
-	rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopWhere, "runs in"), optionLabelW,
-		choiceCells(s, d.focus == cardStopWhere, d.whereChoices(), d.whereIdx(), "", false),
-		d.whereIdx(), width, maxLines)...)
-	// The base row appears only when there is a choice to make: a repo
-	// with one branch has nothing to offer, and an unanswerable row is
-	// a tab stop that teaches nothing. A session in the main checkout
-	// forks from no branch, so the row has nothing to ask even when the
-	// repository could offer one.
-	if len(d.baseCands) > 1 && !d.mainCheckout {
-		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopBase, "forks from"), optionLabelW,
-			choiceCells(s, d.focus == cardStopBase, d.baseChoices(), d.baseIdx(), "", false),
-			d.baseIdx(), width, maxLines)...)
-	}
-	if d.asksStack() {
-		label := optionLabel(s, d.focus == cardStopStack, "stack")
-		if d.stackInto != "" {
-			// Nothing in the TUI sets this; a form carrying one came from
-			// somewhere that did, and the row says so rather than
-			// rendering a cycle its value is not in.
-			rows = append(rows, label+"into "+s.KeyHint.Render(string(d.stackInto)))
-			return rows
-		}
-		rows = append(rows, foldedRow(s, label, optionLabelW,
-			choiceCells(s, d.focus == cardStopStack, d.stackChoices(), d.stackIdx(), "", false),
-			d.stackIdx(), width, maxLines)...)
-	}
-	return rows
-}
-
-// repoRows is the repo row: the configured names folded to the dialog's
-// width, with the chosen repository's origin read back at the end of the
-// last line — or on a line of its own when what is left there is too
-// narrow to hold it. The readout used to be appended to the row
-// regardless, which pushed the dialog past the width it had just been
-// padded to fit.
-func (d *cardForm) repoRows(s *theme.Styles, width, maxLines int) []string {
-	rows := choiceRowLines(s, d.focus == cardStopRepo, "repo", d.repo.options(), d.repo.idx, repoUnsetLabel, d.focus == cardStopRepo, width, maxLines)
-	if d.originFor == nil || !d.repo.chosen() {
-		return rows
-	}
-	origin := s.Faint.Render(ansi.Truncate(d.origin().label(), width, "…"))
-	last := len(rows) - 1
-	if pad := width - ansi.StringWidth(rows[last]) - ansi.StringWidth(origin); pad > 2 {
-		rows[last] += strings.Repeat(" ", pad) + origin
-		return rows
-	}
-	return append(rows, strings.Repeat(" ", max(width-ansi.StringWidth(origin), 0))+origin)
-}
-
-// View implements overlay.Dialog.
-//
-// Every row is built before any of it is written, because none of the
-// dialog's parts has a fixed height any more: a repo row folds to as
-// many lines as the workspace's `repos:` list needs, a readout wraps
-// rather than running off the edge, and the key hint is longer than an
-// 80-column terminal on its own. A frame is as wide and as tall as its
-// widest and tallest content, so a row that overflows doesn't get
-// clipped neatly — it drags the whole dialog off the screen, and the
-// overlay centres what's left. Everything is folded to textW first and
-// counted, so the box gets exactly the rows that are left.
-func (d *cardForm) View(s *theme.Styles, w, h int) string {
-	// dialogDescSize's width depends only on the terminal's, never on the
-	// row count, so textW is final before a single row is laid out.
-	textW, _ := dialogDescSize(w, h, 0)
-
-	// Folding trades width for height, and a short terminal has none to
-	// spare — so the layout is tried at a full budget first and gives
-	// things up, in the order a reader can most afford to lose them,
-	// until the box can still have its floor: first the option rows'
-	// extra lines (they window around the selection instead), then the
-	// key hint (the one row that only repeats what tab and the arrows
-	// already say), then the blank lines between the blocks.
-	var rows []string
-	var textAt, static int
-	for _, try := range []struct {
-		fold          int
-		hint, spacers bool
-	}{
-		{choiceMaxLines, true, true},
-		{2, true, true},
-		{1, true, true},
-		{1, false, true},
-		{1, false, false},
-	} {
-		rows, textAt, static = d.layout(s, textW, h, try.fold, try.hint, try.spacers)
-		if dialogFrameChromeH+static+descHeightMin <= h-dialogStatusBarMargin {
-			break
-		}
-	}
-
-	_, textH := dialogDescSize(w, h, static)
-	d.text.SetWidth(textW)
-	d.text.SetHeight(textH)
-	rows[textAt] = d.text.View()
-	return s.DialogFrame.Render(strings.Join(rows, "\n"))
-}
-
-// layout builds every row of the dialog for a content width of textW, a
-// draw height of h, at most fold lines per option row, and the hint and
-// the blank separators only when asked for. It returns the rows (with
-// the text box's own slot left empty), that slot's index, and the row
-// count everything but the box takes: title+blank(2), kind, repo?,
-// from?, blank, the box, blank, becomes, runs (one readout or the
-// expanded options), blank+buttons, blank+error?, blank+hint?.
-func (d *cardForm) layout(s *theme.Styles, textW, h, fold int, hint, spacers bool) (rows []string, textAt, static int) {
-	gap := func() []string {
-		if spacers {
-			return []string{""}
-		}
-		return nil
-	}
-	rows = append(rows, s.DialogTitle.Render("new card"), "")
-	if d.repo.shown() {
-		rows = append(rows, d.repoRows(s, textW, fold)...)
-	}
-	if from := d.fromLine(s); from != "" {
-		rows = append(rows, foldReadout(from, cardLabelW+2, textW)...)
-	}
-	rows = append(rows, d.nameRow(s, textW))
-
-	// the box always keeps its own blank line above: it is what separates
-	// the fields from the prose, and the two run together without it.
-	rows = append(rows, "", "")
-	textAt = len(rows) - 1
-	rows = append(rows, gap()...)
-
-	rows = append(rows, foldReadout(d.becomesLine(s), cardLabelW+2, textW)...)
-	if d.expanded {
-		rows = append(rows, d.optionRows(s, textW, fold)...)
-	} else {
-		rows = append(rows, foldReadout(d.runsLine(s), cardLabelW+2, textW)...)
-	}
-	rows = append(rows, gap()...)
-	rows = append(rows, strings.Split(d.buttons.ViewWidth(s, d.focus == cardStopButtons, textW), "\n")...)
-	if d.errText != "" {
-		rows = append(rows, gap()...)
-		for _, row := range strings.Split(ansi.Wrap(d.errText, textW, " -"), "\n") {
-			rows = append(rows, s.Error.Render(row))
-		}
-	}
-	// a terminal too short for the hint never had room for it: the rule
-	// predates the folding and is why h reaches this far down.
-	if hint && h >= 24 {
-		rows = append(rows, gap()...)
-		for _, row := range wrapHint(d.hint(), textW) {
-			rows = append(rows, s.Faint.Render(row))
-		}
-	}
-	return rows, textAt, len(rows) - 1
-}
-
-// hint is the key line for the focused row.
-func (d *cardForm) hint() string {
-	switch d.focus {
-	case cardStopRepo:
-		return "←/→ or 1–9 choose a repo · typing goes to the text · tab next · esc cancel"
-	case cardStopName:
-		return "the session's title, or leave it empty for the text's first line · tab next · enter create · esc cancel"
-	case cardStopText:
-		g := ""
-		if d.imported != nil {
-			g = "alt+g refetch · "
-		} else if _, ok := d.reference(); ok {
-			g = "alt+g import · "
-		}
-		// shift+tab is named here, not just tab: the rows above the
-		// composer are one shift+tab away and several tabs the other way
-		// round the cycle.
-		return "tab/shift+tab rows · " + g + "alt+o options · alt+enter newline · enter create · esc cancel"
-	case cardStopEnvelope:
-		return "type a dollar amount · alt+o collapse · tab next · esc cancel"
-	case cardStopProfile:
-		return "←/→ choose the profile · alt+o collapse · tab next · esc cancel"
-	case cardStopWhere:
-		return "←/→ choose where the session works · alt+o collapse · tab next · esc cancel"
-	case cardStopBase:
-		return "←/→ choose the branch it forks from · alt+o collapse · tab next · esc cancel"
-	case cardStopStack:
-		// The cells are bare ids, so the title of the chosen card is
-		// named here rather than on the row: the hint line is the one
-		// place with room for it at 60 columns.
-		if d.stackLabel != "" {
-			return "on top of " + d.stackLabel + " · ←/→ choose the card below · alt+o collapse · tab next · esc cancel"
-		}
-		return "←/→ choose a card to stack on, or leave it standalone · alt+o collapse · tab next · esc cancel"
-	case cardStopButtons:
-		return "←/→ buttons · enter activate · tab next · esc cancel"
-	case cardStopRuns:
-		// stops() offers this as the collapsed "runs as" line's tab stop,
-		// but advanceFocus always converts landing here into
-		// cardStopEnvelope or the last option row (expanding the row instead of
-		// focusing it bare) before setFocus runs, so d.focus is never
-		// actually this value. Named anyway so the switch has no silent
-		// gap if that ever stops being true.
-		return "tab expands the run options · esc cancel"
-	default:
-		return "tab rows · esc cancel"
-	}
 }
 
 // --- base and stack ------------------------------------------------------
@@ -1331,18 +660,6 @@ func (d *cardForm) stackVisible() []stackCand {
 	return out
 }
 
-// stackChoices is the cycle's cells: standing alone reads first, because
-// it is the default and what the overwhelming majority of cards do.
-func (d *cardForm) stackChoices() []string {
-	vis := d.stackVisible()
-	out := make([]string, 0, len(vis)+1)
-	out = append(out, "standalone")
-	for _, c := range vis {
-		out = append(out, "on "+c.ID.Ref())
-	}
-	return out
-}
-
 // stackIdx is the selected cell of stackChoices.
 func (d *cardForm) stackIdx() int {
 	if d.stackOnto == "" {
@@ -1389,36 +706,6 @@ func sortStackCands(c []stackCand) {
 	})
 }
 
-// forkFrom is the phrase the `becomes` readout uses for where this
-// card's branch comes from, empty when it is the plain default (the
-// checkout's HEAD, unstacked) and there is nothing to say.
-func (d *cardForm) forkFrom() string {
-	if d.mainCheckout {
-		return ""
-	}
-	if d.stackOnto != "" {
-		return d.stackOnto.Ref() + "'s branch"
-	}
-	if d.stackInto != "" {
-		return "the top of " + string(d.stackInto)
-	}
-	if d.base != "" {
-		return d.base
-	}
-	return ""
-}
-
-// stackSummary is the stack half of the collapsed options readout.
-func (d *cardForm) stackSummary() string {
-	switch {
-	case d.stackOnto != "":
-		return "on top of " + d.stackOnto.Ref()
-	case d.stackInto != "":
-		return "into " + string(d.stackInto)
-	}
-	return ""
-}
-
 // baseChoices are the row's cells: the default first, then each branch.
 func (d *cardForm) baseChoices() []string {
 	out := make([]string, 0, len(d.baseCands)+1)
@@ -1437,14 +724,6 @@ func (d *cardForm) baseIdx() int {
 		}
 	}
 	return 0
-}
-
-// whereChoices is the "runs in" row's cells: the card's own worktree,
-// which is what nearly every session wants and what every card minted
-// before the choice existed got, then the main checkout, then an agent,
-// in no repository at all.
-func (d *cardForm) whereChoices() []string {
-	return []string{"its own worktree", "the main checkout", "an agent"}
 }
 
 // whereIdx is the selected cell of whereChoices.
@@ -1474,46 +753,6 @@ func (d *cardForm) cycleWhere(dir int) {
 		d.base = ""
 		d.stackOnto, d.stackLabel, d.stackInto = "", "", ""
 	}
-}
-
-// cycleBase moves the base row by dir over baseChoices.
-func (d *cardForm) cycleBase(dir int) {
-	choices := d.baseChoices()
-	i := (d.baseIdx()+dir)%len(choices) + 0
-	if i < 0 {
-		i += len(choices)
-	}
-	if i == 0 {
-		d.base = ""
-		return
-	}
-	d.base = choices[i]
-}
-
-// cycleStack moves the stack row by dir over stackChoices: standing
-// alone, or on top of one of the cards on offer.
-//
-// Joining a whole stack (stackInto) is not part of the cycle — nothing
-// in the TUI sets it, and `gummi stack add` is where that lives — so a
-// form holding one steps off it to standalone and then cycles cards
-// like any other.
-func (d *cardForm) cycleStack(dir int) {
-	if d.stackInto != "" {
-		d.stackOnto, d.stackInto, d.stackLabel = "", "", ""
-		return
-	}
-	vis := d.stackVisible()
-	if len(vis) == 0 {
-		return // no card on the board this one could fork from
-	}
-	n := len(vis) + 1
-	i := ((d.stackIdx()+dir)%n + n) % n
-	if i == 0 {
-		d.stackOnto, d.stackLabel = "", ""
-		return
-	}
-	c := vis[i-1]
-	d.stackOnto, d.stackLabel = c.ID, c.Title
 }
 
 // setRepoData hands the form the board's branch facts (each repo's checked-out
@@ -1552,4 +791,88 @@ func (d *cardForm) setRepoChoices(names []string, base map[string]string, branch
 		}
 	}
 	d.base = explicit
+}
+
+// digitKey returns 1–9 for a bare digit key, else 0.
+func digitKey(key tea.KeyPressMsg) int {
+	if key.Mod != 0 || len(key.Text) != 1 || key.Text[0] < '1' || key.Text[0] > '9' {
+		return 0
+	}
+	return int(key.Text[0] - '0')
+}
+
+func cardLabel(s *theme.Styles, label string) string {
+	return "  " + s.Faint.Render(fmt.Sprintf("%-*s", cardLabelW, label))
+}
+
+// foldedRow prefixes a folded option row with its already-rendered
+// label, indenting the continuation lines by the label cell's width
+// (indent, which differs between the top-level rows and the expanded
+// option rows under "runs as").
+func foldedRow(s *theme.Styles, prefix string, indent int, cells []string, sel, width, maxLines int) []string {
+	lines := foldChoices(s, cells, sel, max(width-indent, choiceMinWidth), maxLines, choiceSep)
+	if len(lines) == 0 {
+		return []string{prefix}
+	}
+	rows := make([]string, len(lines))
+	for i, ln := range lines {
+		if i == 0 {
+			rows[i] = prefix + ln
+			continue
+		}
+		rows[i] = strings.Repeat(" ", indent) + ln
+	}
+	return rows
+}
+
+// whereChoices is the "runs in" row's cells: the card's own worktree,
+// which is what nearly every session wants and what every card minted
+// before the choice existed got, then the main checkout, then an agent,
+// in no repository at all.
+func (d *cardForm) whereChoices() []string {
+	return []string{"its own worktree", "the main checkout", "an agent"}
+}
+
+// fromLine is the offer or the provenance, or "" when the box holds
+// neither an import nor a reference.
+func (d *cardForm) fromLine(s *theme.Styles) string {
+	if d.imported != nil {
+		p := d.imported.prop
+		parts := []string{s.Success.Render(p.Source), d.imported.ref.String()}
+		if p.State != "" {
+			parts = append(parts, p.State)
+		}
+		if len(p.Labels) > 0 {
+			parts = append(parts, s.Faint.Render("labelled "+strings.Join(p.Labels, ", ")))
+		}
+		if n := strings.Count(p.Report.Discussion, "**"); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d comments", n/2))
+		}
+		parts = append(parts, fmt.Sprintf("%d lines", strings.Count(strings.TrimSpace(d.imported.text), "\n")+1))
+		tail := s.KeyHint.Render("↻ alt+g")
+		if d.fetching {
+			tail = s.Faint.Render("fetching…")
+		}
+		return cardLabel(s, "from") + strings.Join(parts, " · ") + "   " + tail
+	}
+	ref, ok := d.reference()
+	if !ok {
+		return ""
+	}
+	if d.fetching {
+		return cardLabel(s, "from") + s.Faint.Render("fetching "+ref.String()+"…")
+	}
+	if ref.Bare() {
+		if d.repo.needsChoice() {
+			return cardLabel(s, "from") + s.Faint.Render("choose a repository to resolve ") + ref.String() + s.Faint.Render(" · ") + s.KeyHint.Render("alt+g")
+		}
+		o := d.origin()
+		if !o.github() && d.originFor != nil {
+			return cardLabel(s, "from") + s.Faint.Render(d.repo.label()+": no GitHub origin to resolve ") + ref.String() + s.Faint.Render(" against")
+		}
+		if o.github() {
+			ref.Owner, ref.Repo, _ = strings.Cut(o.ownerRepo, "/")
+		}
+	}
+	return cardLabel(s, "from") + s.Faint.Render("looks like ") + ref.String() + s.Faint.Render(" · ") + s.KeyHint.Render("alt+g") + s.Faint.Render(" import it")
 }

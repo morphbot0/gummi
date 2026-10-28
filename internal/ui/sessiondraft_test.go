@@ -30,7 +30,7 @@ func shiftTab() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyTab, Mod: 
 func TestSessionDraftGolden(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.draft = m.newSessionDraft()
-	m.draft.form.SetText("dark mode toggle")
+	m.draft.form.text.SetValue("dark mode toggle")
 	m.draft.focusComposer()
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
@@ -40,7 +40,7 @@ func TestSessionDraftGolden(t *testing.T) {
 func TestSessionDraftCommandsGolden(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.draft = m.newSessionDraft()
-	m.draft.form.SetText("/")
+	m.draft.form.text.SetValue("/")
 	m.draft.focusComposer()
 	golden.RequireEqual(t, []byte(m.View().Content))
 }

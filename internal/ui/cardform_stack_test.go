@@ -9,14 +9,12 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// stackDoor is the new-card dialog with a board's worth of cards on the
-// stack row and repos to choose between, focused on that row.
+// stackDoor is a new session's model with a board's worth of cards to
+// stack on and repos to choose between.
 func stackDoor(t *testing.T, ct domain.CardType, cands []stackCand, repos []string) *cardForm {
 	t.Helper()
 	d := newCardForm([]string{"thrifty"}, repos, false, "", 2400, nil)
 	d.setStackCands(cands)
-	d.expanded = true
-	d.setFocus(cardStopStack)
 	return d
 }
 
@@ -33,26 +31,26 @@ func TestTheStackRowOffersTheBoardsCards(t *testing.T) {
 		stackCandAt("FD-002", "", time.Minute),
 	}, nil)
 
-	if got := d.stackChoices(); len(got) != 3 || got[0] != "standalone" || got[1] != "on #2" {
-		t.Fatalf("choices = %v, want standalone then the most recent card", got)
+	if got := d.fromChoices(); len(got) != 3 || got[0] != "checked-out" || got[1] != "on #2" {
+		t.Fatalf("choices = %v, want the checked-out branch then the most recent card", got)
 	}
-	d.HandleKey(keyRight)
+	d.cycleFrom(1)
 	if d.stackOnto != "FD-002" {
 		t.Fatalf("one right = %q, want FD-002 — the card touched last", d.stackOnto)
 	}
 	if d.stackLabel != "FD-002 title" {
 		t.Errorf("label = %q, want the candidate's title", d.stackLabel)
 	}
-	if got := d.forkFrom(); got != "#2's branch" {
-		t.Errorf("becomes readout = %q, want the card's branch", got)
+	if got := d.fromChoices()[d.fromIdx()]; got != "on #2" {
+		t.Errorf("from = %q, want the card", got)
 	}
-	d.HandleKey(keyRight)
+	d.cycleFrom(1)
 	if d.stackOnto != "FD-001" {
 		t.Fatalf("two rights = %q, want FD-001", d.stackOnto)
 	}
-	d.HandleKey(keyRight)
+	d.cycleFrom(1)
 	if d.stackOnto != "" || d.stackLabel != "" {
-		t.Fatalf("the cycle should wrap back to standalone, got %q/%q", d.stackOnto, d.stackLabel)
+		t.Fatalf("the cycle should wrap back to the checked-out branch, got %q/%q", d.stackOnto, d.stackLabel)
 	}
 }
 
@@ -67,11 +65,11 @@ func TestTheStackRowKeepsWhatTGaveIt(t *testing.T) {
 	if d.stackIdx() != 1 {
 		t.Fatalf("stackIdx = %d, want the preselected card", d.stackIdx())
 	}
-	d.HandleKey(keyRight)
+	d.cycleFrom(1)
 	if d.stackOnto != "" {
 		t.Fatalf("right off the only card = %q, want standalone", d.stackOnto)
 	}
-	d.HandleKey(keyRight)
+	d.cycleFrom(1)
 	if d.stackOnto != "FD-001" {
 		t.Fatalf("right again = %q, want the offer back", d.stackOnto)
 	}
@@ -84,13 +82,13 @@ func TestTheStackRowCarriesAnOfferTheBoardDoesNotHave(t *testing.T) {
 	d := stackDoor(t, domain.CardType{Kind: domain.KindFeature}, nil, nil)
 	d.stackOn("FD-404", "vanished", "")
 
-	if got := d.stackChoices(); len(got) != 2 || got[1] != "on #404" {
+	if got := d.fromChoices(); len(got) != 2 || got[1] != "on #404" {
 		t.Fatalf("choices = %v, want the offer carried", got)
 	}
 	if d.stackIdx() != 1 {
 		t.Errorf("stackIdx = %d, want the offer selected", d.stackIdx())
 	}
-	d.HandleKey(keyRight)
+	d.cycleFrom(1)
 	if d.stackOnto != "" {
 		t.Errorf("the carried offer should still be escapable, got %q", d.stackOnto)
 	}
@@ -108,10 +106,10 @@ func TestTheStackRowIsOneRepository(t *testing.T) {
 	}, []string{"api", "web"})
 	d.repo.selectName("api")
 
-	if got := d.stackChoices(); len(got) != 2 || got[1] != "on #1" {
+	if got := d.fromChoices(); len(got) != 2 || got[1] != "on #1" {
 		t.Fatalf("choices = %v, want only the chosen repo's card", got)
 	}
-	d.HandleKey(keyRight)
+	d.cycleFrom(1)
 	if d.stackOnto != "FD-001" {
 		t.Fatalf("stackOnto = %q, want FD-001", d.stackOnto)
 	}
@@ -159,7 +157,7 @@ func TestStackCandsAreTheCardsWithABranch(t *testing.T) {
 	}
 	// and the row puts the most recently touched of them first.
 	d := stackDoor(t, domain.CardType{Kind: domain.KindFeature}, cands, nil)
-	if choices := d.stackChoices(); len(choices) != 3 || choices[1] != "on #1" {
+	if choices := d.fromChoices(); len(choices) != 3 || choices[1] != "on #1" {
 		t.Errorf("choices = %v, want the most recently touched card first", choices)
 	}
 }

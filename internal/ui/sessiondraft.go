@@ -294,7 +294,7 @@ func (m *Shell) handleDraftKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	case "alt+g":
-		_, cmd := f.github()
+		cmd := f.github()
 		d.syncFocus()
 		return cmd
 	}
@@ -755,7 +755,15 @@ func (m *Shell) draftStrip(w int) []string {
 	d := m.draft
 	var cells []string
 	sel := 0
+	// a workspace of one named repository has nothing to choose, but the
+	// draft still says where the session goes: silent, it reads as if
+	// `repos:` had been ignored
+	if f := d.form; !f.asksRepo() && !f.home && f.repo.shown() {
+		cells = append(cells, " "+s.Faint.Render("repo")+" "+f.repo.label()+" ")
+	}
+	off := len(cells)
 	for i, c := range d.chipList() {
+		i += off
 		label, value := d.chipText(c)
 		focused := d.chips && d.chip == c
 		if focused {

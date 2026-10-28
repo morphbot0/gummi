@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -38,17 +40,16 @@ func TestPrefillLeavesEstimationModeIntact(t *testing.T) {
 }
 
 // TestCreationDialogsPrefillDefaultEnvelope: the default reaches the
-// field the user actually reads, in every creation dialog that budgets.
+// setting the person actually reads — the new session's budget, with its
+// unit, in the draft's strip.
 func TestCreationDialogsPrefillDefaultEnvelope(t *testing.T) {
-	s := theme.New(theme.GummiDark())
 	want := domain.DollarsInput(DefaultEnvelopeCredits)
-	views := map[string]string{}
-	for _, ct := range domain.CardTypes {
-		views[ct.Name()] = newCardForm(nil, nil, true, "", DefaultEnvelopeCredits, nil).View(s, 80, 24)
+	if got := newCardForm(nil, nil, true, "", DefaultEnvelopeCredits, nil).env.Value(); got != want {
+		t.Errorf("the budget prefills %q, want %q", got, want)
 	}
-	for name, view := range views {
-		if !strings.Contains(view, want) {
-			t.Errorf("%s dialog does not prefill $%s:\n%s", name, want, view)
-		}
+	m := populatedShell(100, 30)
+	m.draft = m.newSessionDraft()
+	if strip := ansi.Strip(strings.Join(m.draftStrip(100), "\n")); !strings.Contains(strip, "budget $"+domain.DollarsInput(m.envelopePrefill())) {
+		t.Errorf("the draft's strip does not carry the budget with its unit:\n%s", strip)
 	}
 }

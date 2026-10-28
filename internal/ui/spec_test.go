@@ -508,6 +508,6 @@ func TestSpecBindingsAreOneTable(t *testing.T) {
 // openSessionForm opens the new-session form, as n does.
 func openSessionForm(t *testing.T, m *Shell) *Shell {
 	t.Helper()
-	m.Overlay.Push(m.openCardForm())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	return m
 }

@@ -6,8 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // TestRepoPickerNeverOffersDefaultBesideNames: a workspace with `repos:`
@@ -85,10 +83,10 @@ func TestRepoPickerSingleRepoNeedsNoChoice(t *testing.T) {
 	}
 }
 
-// TestCardFormRefusesUnchosenRepo: the door will not create a card until
-// a repository is named. It opens on the repo row, since that is the one
-// field with no default; enter there is refused and focus stays. Once
-// chosen, the card carries that repo.
+// TestCardFormRefusesUnchosenRepo: a new session is not created until a
+// repository is named, since that is the one setting with no default; the
+// refusal names the repository so a face can move its cursor there. Once
+// chosen, the session carries that repo.
 func TestCardFormRefusesUnchosenRepo(t *testing.T) {
 	var got formResult
 	var created bool
@@ -96,25 +94,17 @@ func TestCardFormRefusesUnchosenRepo(t *testing.T) {
 		got, created = res, true
 		return nil
 	})
-	if f.focus != cardStopRepo {
-		t.Fatalf("focus = %d, want the repo row", f.focus)
-	}
-	f.SetText("teach the board to whistle")
+	f.text.SetValue("teach the board to whistle")
 
-	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); done || created {
+	if done, _ := f.submit(); done || created {
 		t.Fatal("form submitted without a repository")
 	}
-	if f.errText != repoUnchosenErr {
-		t.Errorf("errText = %q, want %q", f.errText, repoUnchosenErr)
-	}
-	if view := f.View(theme.New(theme.GummiDark()), 80, 24); !strings.Contains(view, repoUnchosenErr) {
-		t.Errorf("refusal not shown in the dialog:\n%s", view)
+	if f.errText != repoUnchosenErr || f.focus != cardStopRepo {
+		t.Errorf("errText = %q focus = %d, want %q on the repository", f.errText, f.focus, repoUnchosenErr)
 	}
 
-	// choose the second repo, then create
-	f.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
-	f.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
-	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done || !created {
+	f.repo.selectName("b")
+	if done, _ := f.submit(); !done || !created {
 		t.Fatalf("form did not submit after choosing: done=%v created=%v err=%q", done, created, f.errText)
 	}
 	if got.Repo != "b" {
@@ -133,7 +123,7 @@ func TestAnAgentNeedsNoRepositoryChosen(t *testing.T) {
 		return nil
 	})
 	f.home, f.mainCheckout = true, true
-	f.SetText("watch the nightly CI")
+	f.text.SetValue("watch the nightly CI")
 	if done, _ := f.submit(); !done || !created {
 		t.Fatalf("an agent was refused for want of a repository: done=%v err=%q", done, f.errText)
 	}
@@ -142,23 +132,9 @@ func TestAnAgentNeedsNoRepositoryChosen(t *testing.T) {
 	}
 }
 
-// TestCardFormRepoRowNeverEatsTyping: on the repo row, digits and arrows
-// choose; any other printable key falls through to the text, so a person
-// who starts describing the card never cycles anything by accident. The
-// last repo chosen this session is the preselect.
-func TestCardFormRepoRowNeverEatsTyping(t *testing.T) {
-	f := newCardForm(nil, []string{"a", "b", "c"}, false, "", 0, nil)
-	f.HandleKey(tea.KeyPressMsg{Code: '3', Text: "3"})
-	if f.repo.name() != "c" {
-		t.Errorf("digit 3 chose %q, want c", f.repo.name())
-	}
-	f.HandleKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	if f.focus != cardStopText || f.Text() != "x" {
-		t.Errorf("typing on the repo row: focus=%d text=%q", f.focus, f.Text())
-	}
-	if f.repo.name() != "c" {
-		t.Errorf("typing changed the repo to %q", f.repo.name())
-	}
+// TestCardFormPreselectsTheLastRepo: the last repo chosen this session
+// is the preselect, and one no longer configured is not.
+func TestCardFormPreselectsTheLastRepo(t *testing.T) {
 	sticky := newCardForm(nil, []string{"a", "b", "c"}, false, "b", 0, nil)
 	if sticky.repo.name() != "b" || sticky.focus != cardStopText {
 		t.Errorf("last repo preselect: repo=%q focus=%d", sticky.repo.name(), sticky.focus)
@@ -177,60 +153,49 @@ func TestSingleRepoFormsSubmitUnprompted(t *testing.T) {
 		created = true
 		return nil
 	})
-	f.SetText("a card in the only repo there is")
-	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done || !created {
+	f.text.SetValue("a card in the only repo there is")
+	if done, _ := f.submit(); !done || !created {
 		t.Fatalf("single-repo form did not submit: done=%v created=%v err=%q", done, created, f.errText)
 	}
 }
 
+// draftStripFor is the strip a draft over form draws.
+func draftStripFor(f *cardForm) string {
+	m := populatedShell(100, 30)
+	m.draft = m.newSessionDraft()
+	m.draft.form = f
+	return ansi.Strip(strings.Join(m.draftStrip(100), "\n"))
+}
+
 // TestSingleNamedRepoStillRenders: a `repos:` workspace with exactly one
-// entry has nothing to pick, but every creation dialog still prints the
-// repository row. Hiding it left the dialog silent about where the card
-// was about to be created, which reads as "repos: was ignored" rather
-// than "there is only one".
+// entry has nothing to pick, but the draft still names the repository.
+// Silent, it would read as "repos: was ignored" rather than "there is
+// only one".
 func TestSingleNamedRepoStillRenders(t *testing.T) {
-	s := theme.New(theme.GummiDark())
-	views := map[string]string{
-		"card": ansi.Strip(newCardForm(nil, []string{"lxd"}, false, "", 0, nil).View(s, 80, 24)),
-	}
-	for name, view := range views {
-		if !strings.Contains(view, "repo") || !strings.Contains(view, "lxd") {
-			t.Errorf("%s dialog does not name its sole repository:\n%s", name, view)
-		}
+	strip := draftStripFor(newCardForm(nil, []string{"lxd"}, false, "", 0, nil))
+	if !strings.Contains(strip, "repo lxd") {
+		t.Errorf("the draft does not name its sole repository:\n%s", strip)
 	}
 }
 
 // TestLoneWorkspaceDefaultRendersNoRepoRow: the unconfigured single-repo
 // workspace has no repository name to report — "default" is not one — so
-// the row stays absent and the dialog keeps its space for real fields.
+// the strip says nothing about one.
 func TestLoneWorkspaceDefaultRendersNoRepoRow(t *testing.T) {
-	s := theme.New(theme.GummiDark())
-	views := map[string]string{
-		"card": ansi.Strip(newCardForm(nil, nil, true, "", 0, nil).View(s, 80, 24)),
-	}
-	for name, view := range views {
-		if strings.Contains(view, "repo ") || strings.Contains(view, "repo:") {
-			t.Errorf("%s dialog renders a repo row for the anonymous default:\n%s", name, view)
-		}
+	if strip := draftStripFor(newCardForm(nil, nil, true, "", 0, nil)); strings.Contains(strip, "repo") {
+		t.Errorf("the draft names a repository for the anonymous default:\n%s", strip)
 	}
 }
 
-// TestSingleNamedRepoIsNotATabStop: the row a single-repo workspace shows
-// is read-only. Tabbing through the dialog must never land on it, because
-// ←/→ there would do nothing.
+// TestSingleNamedRepoIsNotATabStop: the sole repository is read-only, so
+// it is no setting the strip's cursor can land on.
 func TestSingleNamedRepoIsNotATabStop(t *testing.T) {
-	f := newCardForm(nil, []string{"lxd"}, false, "", 0, nil)
-	for _, s := range f.stops() {
-		if s == cardStopRepo {
-			t.Error("the read-only repo row is a tab stop")
+	m := populatedShell(100, 30)
+	m.draft = m.newSessionDraft()
+	m.draft.form = newCardForm(nil, []string{"lxd"}, false, "", 0, nil)
+	for _, c := range m.draft.chipList() {
+		if c == chipRepo {
+			t.Error("the read-only repository is a setting the cursor can reach")
 		}
-	}
-	seen := map[int]bool{}
-	for i := 0; i < 12; i++ {
-		f.advanceFocus(1)
-		seen[f.focus] = true
-	}
-	if seen[cardStopRepo] {
-		t.Error("focus landed on the read-only repo row")
 	}
 }
