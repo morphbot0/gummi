@@ -25,7 +25,7 @@ func TestComputeWide(t *testing.T) {
 	if l.Tabs.Dy() != 1 || l.Tabs.Dx() != 120 || l.Tabs.Min.Y != 0 {
 		t.Errorf("tabs rect wrong: %+v", l.Tabs)
 	}
-	if l.Main.Min.Y != 1 || l.Main.Dy() != 32 || l.Main.Dx() != 120 || l.Main.Min.X != 0 {
+	if l.Main.Min.Y != 2 || l.Main.Dy() != 31 || l.Main.Dx() != 120 || l.Main.Min.X != 0 {
 		t.Errorf("main rect wrong: %+v", l.Main)
 	}
 	if l.Status.Min.Y != 33 || l.Status.Dy() != 1 || l.Status.Dx() != 120 {
@@ -38,7 +38,7 @@ func TestComputeStandard(t *testing.T) {
 	if l.Tabs.Dx() != 80 || l.Tabs.Dy() != 1 {
 		t.Errorf("tabs rect wrong: %+v", l.Tabs)
 	}
-	if l.Main.Dx() != 80 || l.Main.Dy() != 22 {
+	if l.Main.Dx() != 80 || l.Main.Min.Y != 2 || l.Main.Dy() != 21 {
 		t.Errorf("main rect wrong: %+v", l.Main)
 	}
 	if l.Status.Dy() != 1 {
@@ -64,5 +64,17 @@ func TestComputeDegenerate(t *testing.T) {
 		if l.Main.Dx() < 0 || l.Main.Dy() < 0 || l.Status.Dy() < 0 || l.Tabs.Dy() < 0 {
 			t.Errorf("negative rect for %v: %+v", dim, l)
 		}
+	}
+}
+
+// TestComputeSpendsNoAirOnAShortTerminal: below gapMinHeight rows the
+// main pane starts right under the tab bar — a line you can read is
+// worth more than a blank one.
+func TestComputeSpendsNoAirOnAShortTerminal(t *testing.T) {
+	if l := Compute(64, gapMinHeight-1); l.Main.Min.Y != 1 {
+		t.Errorf("main starts at row %d on a %d-row terminal, want 1", l.Main.Min.Y, gapMinHeight-1)
+	}
+	if l := Compute(64, gapMinHeight); l.Main.Min.Y != 2 {
+		t.Errorf("main starts at row %d on a %d-row terminal, want 2", l.Main.Min.Y, gapMinHeight)
 	}
 }

@@ -1,7 +1,7 @@
 // Package layout computes gummi's rectangle layout: a one-line tab bar
-// at the top, the main pane owned by whichever tab is active, and a
-// one-line status bar at the bottom. Pure geometry — no styling, no
-// state.
+// at the top, a blank row under it when the terminal can spare one, the
+// main pane owned by whichever tab is active, and a one-line status bar
+// at the bottom. Pure geometry — no styling, no state.
 package layout
 
 import (
@@ -11,6 +11,9 @@ import (
 const (
 	tabsHeight   = 1
 	statusHeight = 1
+	// gapMinHeight is the shortest terminal that spends a row on air
+	// under the tab bar: below it a line you can read is worth more.
+	gapMinHeight = 12
 )
 
 // Layout is the set of screen rectangles the shell paints into.
@@ -22,7 +25,9 @@ type Layout struct {
 }
 
 // Compute lays out a w×h terminal: the tab bar on row 0, the status bar
-// on the last row, and the main pane spending everything between. Both
+// on the last row, and the main pane spending everything between — less
+// one blank row under the tab bar, so no surface's first line sits flush
+// against it, on a terminal of at least gapMinHeight rows. Both
 // chrome rows clamp against a terminal too short to hold them, so a 1-
 // or 2-row terminal degrades to a shrinking main pane rather than
 // negative heights.
@@ -41,7 +46,11 @@ func Compute(w, h int) Layout {
 	statusH := min(statusHeight, max(h-tabsH, 0))
 	l.Status = uv.Rect(0, h-statusH, w, statusH)
 
-	mainH := max(h-tabsH-statusH, 0)
-	l.Main = uv.Rect(0, tabsH, w, mainH)
+	gap := 0
+	if h >= gapMinHeight {
+		gap = 1
+	}
+	mainH := max(h-tabsH-gap-statusH, 0)
+	l.Main = uv.Rect(0, tabsH+gap, w, mainH)
 	return l
 }
