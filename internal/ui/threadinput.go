@@ -106,9 +106,10 @@ func composerPlaceholder(k domain.Kind) string {
 // freeformPlaceholderText is the composer's placeholder on a freeform
 // card. It advertises no verb and no inventory, because the ones this
 // surface is built around — approve, send it back, cross the gate — are
-// exactly what such a card does not have. What it does have is a turn and
-// a landing, so those are what it names.
-const freeformPlaceholderText = "say what to do next — it works in this card's branch; alt+d to review, m to land"
+// exactly what such a card does not have. What it does have is a turn, a
+// diff and its actions — landing among them — so those are what it names.
+// Not "m to land": while the composer holds the keyboard m is a letter.
+const freeformPlaceholderText = "say what to do next — it works on its own branch; alt+d reads the diff, ↑ for actions"
 
 // freeformMainPlaceholderText is the same promise for a session minted
 // into the main checkout: there is no branch to land, so the line names
@@ -472,7 +473,7 @@ func (m *Shell) updateThreadInput(msg tea.Msg) tea.Cmd {
 
 func (m *Shell) openCardActions(r featureRow) {
 	l := m.cardActions()
-	d := newCardActionsDialog(string(r.F.ID), l, func(cursor int, expanded bool) {
+	d := newCardActionsDialog(r.F.Name(), l, func(cursor int, expanded bool) {
 		m.actionCursor = cursor
 		m.actionsExpanded = expanded
 	}, func(a cardAction) tea.Cmd {

@@ -202,7 +202,7 @@ func TestCardPageJKStepsCards(t *testing.T) {
 	if next == first {
 		t.Fatal("J did not move to another card")
 	}
-	if !strings.Contains(ansi.Strip(m.View().Content), string(next)) {
+	if !strings.Contains(ansi.Strip(m.View().Content), next.Ref()) {
 		t.Errorf("the page still shows %s after stepping to %s", first, next)
 	}
 

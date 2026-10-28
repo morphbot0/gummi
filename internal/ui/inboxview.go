@@ -216,6 +216,17 @@ func inboxRowLabel(stage domain.Stage, kind attnKind) string {
 	return string(stage) + " " + word
 }
 
+// inboxStage is the stage an inbox row names: none for a session, whose
+// "open" is where it holds for its whole life rather than a stop on the
+// way — "open question" reads as an adjective, and trimming "open " off
+// the front of its question would eat a word the question meant.
+func (m *Shell) inboxStage(id domain.FeatureID) domain.Stage {
+	if st := m.stageOf(id); st != domain.StageOpen {
+		return st
+	}
+	return ""
+}
+
 // inboxRowText is a row's question with the stage its own label just
 // named trimmed off the front. The recorded question has to be
 // self-describing everywhere else it is read — the card's history, the
@@ -270,7 +281,7 @@ func (m *Shell) inboxView(w, _ int) string {
 	labelW := 0
 	labels := make([]string, len(items))
 	for i, it := range items {
-		labels[i] = inboxRowLabel(m.stageOf(it.Feature), it.Kind)
+		labels[i] = inboxRowLabel(m.inboxStage(it.Feature), it.Kind)
 		labelW = max(labelW, ansi.StringWidth(labels[i]))
 	}
 
@@ -292,7 +303,7 @@ func (m *Shell) inboxView(w, _ int) string {
 			row = s.Subtle
 		}
 		icon := attnIcon(s, it.Kind)
-		stage := m.stageOf(it.Feature)
+		stage := m.inboxStage(it.Feature)
 		label := padRight(labels[i], labelW)
 		ts := it.At.Format("15:04")
 		// The label and time are never truncated — only the question

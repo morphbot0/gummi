@@ -507,7 +507,7 @@ func (m *Shell) backlogBindings() []binding {
 		case "j/k ↓↑":
 			b.label, b.help, b.bar = "select", "select card", false
 		case "enter":
-			b.label, b.help, b.bar = "open card", "open the card page — full width, with the card's actions", true
+			b.label, b.help, b.bar = "open card", "open its page — the thread, its diff and its actions", true
 			lead = append(lead, b)
 			continue
 		}

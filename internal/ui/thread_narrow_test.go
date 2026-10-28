@@ -126,7 +126,7 @@ func TestNarrowKeepsTheQuestionWhole(t *testing.T) {
 	if strings.Contains(view, "1 of 1") {
 		t.Errorf("the crumb held its row on a nine-row terminal:\n%s", view)
 	}
-	if !strings.Contains(view, "FF-042") {
+	if !strings.Contains(view, "#42") {
 		t.Errorf("the card's own identity is missing at 36×9:\n%s", view)
 	}
 }

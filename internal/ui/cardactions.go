@@ -173,7 +173,7 @@ var promotedActions = map[string]bool{}
 // the action inventory, the board's key table, the ? overlay. It names
 // what is kept before what is lost, because keeping the branch is the
 // whole reason anyone reaches for it.
-const handOffHelp = "close the card without landing it — nothing reaches the base"
+const handOffHelp = "close it without landing — nothing reaches the base"
 
 // foreignBlockedKeys is the same rule stated as accelerators, for the
 // board's key handler (shell.go's boardVerb). The two must stay in

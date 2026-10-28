@@ -156,12 +156,12 @@ func (m *Shell) helpOverlay() *helpDialog {
 // not named here (there should be nothing: every boardBindings() key is
 // covered) reads as the last group rather than silently vanishing.
 var boardHelpKeyGroup = map[string]int{
-	// works the card, or spends credits on it now
-	"enter": 0, "p": 0, "h": 0, "u": 0,
-	// reads the card without changing anything
-	"s": 1, "d": 1, "t": 1, "i": 1,
-	// branch/worktree plumbing
-	"r": 2, "m": 2, "z": 2, "c": 2, "o": 2,
+	// works the selected session: open it, read it, stop it, fund it, end it
+	"enter": 0, "t": 0, "s": 0, "d": 0, "p": 0, "u": 0, "a": 0, "h": 0,
+	// its branch: land it, keep it current, tidy it
+	"m": 1, "r": 1, "z": 1, "c": 1, "C": 1, "o": 1,
+	// a new session, or one gone
+	"n": 2, "T": 2, "D": 2,
 }
 
 // boardHelpGroupCount is len(the distinct groups boardHelpKeyGroup
@@ -169,16 +169,13 @@ var boardHelpKeyGroup = map[string]int{
 const boardHelpGroupCount = 4
 
 // boardHelpGroupTitles names the sections in boardHelpRows' render
-// order; index boardHelpGroupCount-1 (last) is the catch-all — creation,
-// navigation, tabs, delete, help, quit — deliberately unnamed as a
-// "workflow" or "reading" concern of its own, the way §7 asked for "the
-// few keys that move a card, the reading keys, the git plumbing, the
-// rest" rather than a fifth invented category.
+// order; index boardHelpGroupCount-1 (last) is the catch-all — moving
+// round the board, its tabs and the windows it opens, help and quit.
 var boardHelpGroupTitles = [boardHelpGroupCount]string{
-	"move this card",
-	"read",
-	"git",
-	"everything else",
+	"this session",
+	"its branch",
+	"new and gone",
+	"around the board",
 }
 
 // boardHelpRows renders bs (boardBindings, or backlogBindings' minor
@@ -250,7 +247,7 @@ func (m *Shell) boardBindings() []binding {
 	}
 	enter := binding{key: "enter", label: "open", help: "open the card's page — its thread, diff and decisions", bar: true}
 	pause := binding{key: "p", label: "stop", help: "stop the session's turn in flight"}
-	peek := binding{key: "t", label: "open", help: "open the card's thread without starting or attaching anything"}
+	peek := binding{key: "t", label: "open", help: "open its thread without starting or attaching anything"}
 	bs := []binding{
 		{key: "j/k ↓↑", label: "select", help: "select card"},
 		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
@@ -261,20 +258,20 @@ func (m *Shell) boardBindings() []binding {
 		peek,
 		// s and d are off the bar: the action list reaches both without a
 		// key, so the bar can spend its width on the two ways in instead.
-		{key: "s", label: "spec", help: "spec — comment, resolve and approve in place"},
-		{key: "d", label: "diff", help: "diff — comment, resolve and approve in place"},
+		{key: "s", label: "spec", help: "its spec — comment and resolve in place"},
+		{key: "d", label: "diff", help: "its diff — comment on lines and send them to the session"},
 		// the second ending, beside the landing — it reads next to the
 		// diff it ends on rather than down among the git plumbing.
 		{key: "h", label: "hand off", help: handOffHelp},
-		{key: "u", label: "budget", help: "set the card's budget (dollars; 0 = uncapped)"},
-		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
-		{key: "a", label: "attach", help: "open a terminal agent in this card's worktree"},
+		{key: "u", label: "budget", help: "set its budget (dollars; 0 = uncapped)"},
+		{key: "o", label: "repo", help: "change its repository, before it has a worktree"},
+		{key: "a", label: "attach", help: "open a terminal agent in its worktree"},
 		{key: "tab", label: "next tab", help: "cycle the tabs (board, stats, inbox, agent)"},
 		{key: tabChords, label: "tab", help: "jump straight to board / stats / inbox / agent"},
 		{key: "i", label: "inbox", help: "open the needs-you inbox"},
-		{key: "r", label: "rebase", help: "rebase branch onto " + base + " (conflicts go to an agent)"},
-		{key: "m", label: "merge", help: "squash-merge branch into " + base + " (review & approve the drafted message)"},
-		{key: "z", label: "squash", help: "collapse the branch to one commit in place (review & approve the drafted message)"},
+		{key: "r", label: "rebase", help: "rebase the branch onto " + base + " (conflicts go to an agent)"},
+		{key: "m", label: "merge", help: "land the branch on " + base + " as one commit — you read the message"},
+		{key: "z", label: "squash", help: "collapse the branch to one commit — you read the message"},
 		{key: "c", label: "clean up", help: "clean up a landed branch"},
 		// C beside c on purpose: c tidies THIS card, C closes out the
 		// session — land what is ready, then sweep what landing left.
@@ -285,8 +282,8 @@ func (m *Shell) boardBindings() []binding {
 		{key: "P", label: "profiles", help: "profiles — the agent and model each role runs on; add, edit, delete, make default"},
 		{key: "n", label: "new", help: "new session — say what you want done, or paste an issue link to import one", bar: true},
 		{key: "f", label: "fold archive", help: "fold or unfold the archive of cards that settled a while ago"},
-		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},
-		{key: "D", label: "delete", help: "delete card (uppercase: it destroys work)"},
+		{key: "T", label: "stack on top", help: "new session whose branch forks from this one's — gummi replays it whenever this one changes"},
+		{key: "D", label: "delete", help: "delete it (uppercase: it destroys work)"},
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},
 	}

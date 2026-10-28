@@ -595,8 +595,8 @@ func TestThreadDecisionOwnsThePickerKeys(t *testing.T) {
 	if !ok {
 		t.Fatalf("↑ on the first option opened %T, want the action inventory", m.Overlay.Top())
 	}
-	if top.feature != string(m.rows[m.sel].F.ID) {
-		t.Errorf("inventory opened for %q, want %q", top.feature, m.rows[m.sel].F.ID)
+	if want := m.rows[m.sel].F.Name(); top.feature != want {
+		t.Errorf("inventory opened for %q, want %q", top.feature, want)
 	}
 }
 

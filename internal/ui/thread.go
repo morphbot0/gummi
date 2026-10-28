@@ -675,7 +675,7 @@ func trimTrailingBlanks(lines []string) []string {
 func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	f := r.F
 
-	id := s.Title.Render(string(f.ID))
+	id := s.Title.Render(f.ID.Ref())
 	title := s.Base.Render("· " + f.Title)
 
 	profile := ""
@@ -739,7 +739,7 @@ func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 	// reader of this row actually wants, since it is what they will check
 	// out, and the closest thing a freeform card has to "how far along".
 	if f.IsFreeform() {
-		pill := s.StagePill(f.Stage).Render("freeform")
+		pill := s.StagePill(f.Stage).Render("session")
 		branch := f.BranchName()
 		if f.MainCheckout {
 			branch = "main checkout"

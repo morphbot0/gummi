@@ -57,8 +57,8 @@ func freeformShell(t *testing.T, w, h int, wt bool) *Shell {
 func TestAFreeformCardsStripNamesItsBranch(t *testing.T) {
 	m := freeformShell(t, 120, 34, true)
 	out := ansi.Strip(m.threadView(120, 34))
-	if !strings.Contains(out, "freeform") {
-		t.Errorf("the masthead never says the card is freeform:\n%s", out)
+	if !strings.Contains(out, "session  · ff/drop-the-leaked-pty-fd") {
+		t.Errorf("the masthead never says the card is a session:\n%s", out)
 	}
 	if !strings.Contains(out, "ff/drop-the-leaked-pty-fd") {
 		t.Errorf("the masthead never names the card's branch:\n%s", out)
@@ -182,7 +182,7 @@ func TestTheComposerOnAFreeformCardNamesWhatItCanDo(t *testing.T) {
 	if got == placeholderText {
 		t.Fatal("a freeform card gets the workflow composer's placeholder")
 	}
-	for _, want := range []string{"branch", "alt+d", "land"} {
+	for _, want := range []string{"branch", "alt+d", "actions"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the freeform placeholder never mentions %q: %q", want, got)
 		}
@@ -317,31 +317,6 @@ func TestHandOffIsOfferedOnAFreeformCard(t *testing.T) {
 	m.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if strings.Contains(m.notice.text, "hand-off ends a verified card") {
 		t.Errorf("hand-off was refused on a freeform card: %q", m.notice.text)
-	}
-}
-
-// TestTheFreeformCommandIsInTheVocabulary: the kind row of `n` reaches a
-// freeform card, but a reader who knows what they want types the word. The
-// entry has no accelerator, so the menu and the composer's slash line are
-// the only places it can be found.
-func TestTheFreeformCommandIsInTheVocabulary(t *testing.T) {
-	m := freeformShell(t, 120, 34, true)
-	var found *command
-	for _, c := range m.globalCommands() {
-		if c.name == "freeform" {
-			found = &c
-			break
-		}
-	}
-	if found == nil {
-		t.Fatal("no freeform entry in the command vocabulary")
-	}
-	if found.key != "" {
-		t.Errorf("the freeform command took the accelerator %q", found.key)
-	}
-	m.runCommand(found.id)
-	if m.draft == nil {
-		t.Fatalf("the freeform command did not open a new session's draft")
 	}
 }
 
@@ -586,5 +561,18 @@ func TestRenameHandsTheComposerTheSessionsTitle(t *testing.T) {
 	m.runCardAction(cardAction{id: "rename", label: "rename…"})
 	if got := m.threadInput.Value(); got != "/rename drop the leaked pty fd" {
 		t.Fatalf("the composer reads %q", got)
+	}
+}
+
+// TestAnInboxRowOfASessionNamesNoStage: a session holds "open" all its
+// life, so its inbox row says "question", never "open question".
+func TestAnInboxRowOfASessionNamesNoStage(t *testing.T) {
+	m := freeformShell(t, 120, 34, true)
+	id := m.rows[m.sel].F.ID
+	if got := inboxRowLabel(m.inboxStage(id), attnQuestion); got != "question" {
+		t.Errorf("a session's inbox row reads %q, want %q", got, "question")
+	}
+	if got := inboxRowText(m.inboxStage(id), "open the PR?"); got != "open the PR?" {
+		t.Errorf("a session's question lost its first word: %q", got)
 	}
 }
