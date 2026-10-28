@@ -57,11 +57,6 @@ func TestPropertyRenderedChecksReadBackAsWritten(t *testing.T) {
 				v := b == 1
 				c.Baseline = &v
 			}
-			if skipTagRe.MatchString(c.Name + c.Cmd) {
-				// a skip tag is stripped on purpose (repairChecksBlock):
-				// TestPropertyASkipTagNeverRunsAsPartOfACheck holds that
-				continue
-			}
 			checks = append(checks, c)
 			if strings.TrimSpace(c.Cmd) == "" {
 				continue
@@ -79,20 +74,25 @@ func TestPropertyRenderedChecksReadBackAsWritten(t *testing.T) {
 	})
 }
 
-// TestPropertyASkipTagNeverRunsAsPartOfACheck: a [ci-only] or [env: …]
-// tag in a check's command, however it got there, is not part of the
-// command read back — it would run as part of it.
-func TestPropertyASkipTagNeverRunsAsPartOfACheck(t *testing.T) {
+// TestPropertyASkipTagGluedToAWrittenCommandNeverRuns: a [ci-only] or
+// [env: …] tag an agent glues to a command it writes by hand, unquoted,
+// is not part of the command read back — it would run as part of it.
+// (A quoted command is taken as written; gummi quotes one that holds a
+// tag as its own text, and TestPropertyRenderedChecksReadBackAsWritten
+// holds that.)
+func TestPropertyASkipTagGluedToAWrittenCommandNeverRuns(t *testing.T) {
 	props(t, func(ht *hegel.T) {
-		c := domain.Check{Name: drawText(ht, 0), Cmd: drawText(ht, 1) + hegel.Draw(ht, hegel.SampledFrom([]string{"[ci-only]", "[CI-only]", "[env: docker]"})) + drawText(ht, 0)}
-		block := RenderChecks([]domain.Check{c})
+		cmd := hegel.Draw(ht, hegel.SampledFrom([]string{"go test ./...", "make e2e", "-", "x: y", "#x", "a"}))
+		tag := hegel.Draw(ht, hegel.SampledFrom([]string{"[ci-only]", "[CI-only]", "[env: docker]"}))
+		sep := hegel.Draw(ht, hegel.SampledFrom([]string{"", " ", "  "}))
+		block := "```gummi-checks\n- name: t\n  cmd: " + cmd + sep + tag + "\n```"
 		got, _, err := ParseChecks(inSpec(block))
 		if err != nil {
-			ht.Fatalf("rendered:\n%s\nread back error %v", block, err)
+			return // a block that does not parse runs nothing
 		}
 		for _, g := range got {
 			if skipTagRe.MatchString(g.Cmd) {
-				ht.Fatalf("rendered:\n%s\nread back command %q", block, g.Cmd)
+				ht.Fatalf("written:\n%s\nread back command %q", block, g.Cmd)
 			}
 		}
 	})
@@ -158,6 +158,156 @@ func TestPropertyDoneWhenItemsSetReadBackAsSet(t *testing.T) {
 		got, found, err := ParseDoneWhen(doc)
 		if err != nil || !found || !reflect.DeepEqual(got, items) {
 			ht.Fatalf("doc:\n%s\nread back %#v (found %v, err %v)\nwant %#v", doc, got, found, err, items)
+		}
+	})
+}
+
+// docLines are the lines a commented spec is made of: content, an
+// indented continuation, a thread's markers, a blank.
+var docLines = []string{"text", "  cont", "%% @a(d): q", "%% @b(d): resolved", "", "more text"}
+
+func drawDoc(ht *hegel.T) []string {
+	lines := hegel.Draw(ht, hegel.Lists(hegel.SampledFrom(docLines)).MinSize(1).MaxSize(12))
+	for i, l := range lines {
+		if l == "text" || l == "more text" {
+			lines[i] = fmt.Sprintf("%s %d", l, i) // a content line is its own
+		}
+	}
+	return lines
+}
+
+// TestPropertyANewCommentEndsItsThread: a comment added under a content
+// line threads there, below every marker already threaded there — so a
+// resolution further down the thread cannot close it as it is written.
+func TestPropertyANewCommentEndsItsThread(t *testing.T) {
+	props(t, func(ht *hegel.T) {
+		lines := drawDoc(ht)
+		var content []int
+		for i, l := range lines {
+			if strings.HasPrefix(l, "text") || strings.HasPrefix(l, "more") {
+				content = append(content, i+1)
+			}
+		}
+		if len(content) == 0 {
+			return
+		}
+		at := hegel.Draw(ht, hegel.SampledFrom(content))
+		next := at
+		for next < len(lines) && lines[next] == "" {
+			next++
+		}
+		if next < len(lines) && strings.HasPrefix(lines[next], " ") {
+			// a known limit of the %% grammar, not of AddComment: a marker
+			// put between a line and the indented line under it (blank
+			// lines between or not) makes that line its continuation, and
+			// whatever threaded there moves with it. No place to put the
+			// comment avoids it.
+			return
+		}
+		doc := strings.Join(lines, "\n")
+		out, err := AddComment(doc, at, "user", "now", "the new one")
+		if err != nil {
+			ht.Fatalf("AddComment: %v", err)
+		}
+		var added Marker
+		for _, m := range Parse(out).Markers {
+			if m.Text == "the new one" {
+				added = m
+			}
+		}
+		if added.Anchor != at {
+			ht.Fatalf("doc:\n%s\nthe comment on line %d threads on %d:\n%s", doc, at, added.Anchor, out)
+		}
+		for _, m := range Parse(out).Markers {
+			if m.Anchor == at && m.Line > added.Line {
+				ht.Fatalf("doc:\n%s\nthe comment on line %d sits above %q (line %d):\n%s", doc, at, m.Text, m.Line, out)
+			}
+		}
+	})
+}
+
+// TestPropertyFindAnchorAgreesWithParse: a snippet only a marker holds
+// finds that marker exactly when Parse gives it a line to thread on.
+func TestPropertyFindAnchorAgreesWithParse(t *testing.T) {
+	props(t, func(ht *hegel.T) {
+		lines := drawDoc(ht)
+		var markers []int
+		for i, l := range lines {
+			if IsMarkerLine(l) {
+				markers = append(markers, i)
+			}
+		}
+		if len(markers) == 0 {
+			return
+		}
+		i := hegel.Draw(ht, hegel.SampledFrom(markers))
+		lines[i] = "%% @a(d): the one to find"
+		doc := strings.Join(lines, "\n")
+		var anchor int
+		for _, m := range Parse(doc).Markers {
+			if m.Line == i+1 {
+				anchor = m.Anchor
+			}
+		}
+		line, ok := FindAnchor(doc, "the one to find")
+		if ok != (anchor != 0) || (ok && line != i+1) {
+			ht.Fatalf("doc:\n%s\nFindAnchor = %d, %v; Parse threads line %d on %d", doc, line, ok, i+1, anchor)
+		}
+	})
+}
+
+// TestPropertyAHeadingInACodeFenceIsNotASection: a `## ` line inside a
+// fenced example is the example's text — not a heading, not the end of
+// the section it sits in — and replacing a section with its own body
+// leaves the document as it was.
+func TestPropertyAHeadingInACodeFenceIsNotASection(t *testing.T) {
+	props(t, func(ht *hegel.T) {
+		n := hegel.Draw(ht, hegel.Integers(1, 3))
+		var b strings.Builder
+		var titles []string
+		for i := range n {
+			title := fmt.Sprintf("Part %d", i+1)
+			titles = append(titles, title)
+			fmt.Fprintf(&b, "## %s\n\nprose\n", title)
+			if hegel.Draw(ht, hegel.Booleans()) {
+				b.WriteString("```md\n## Not a section\n```\n")
+			}
+		}
+		// newline-terminated: a body is (normalizeSectionBody, and its
+		// round-trip promise is for one)
+		doc := b.String()
+		if got := Headings(doc); strings.Join(got, "|") != strings.Join(titles, "|") {
+			ht.Fatalf("doc:\n%s\nheadings %q, want %q", doc, got, titles)
+		}
+		for _, title := range titles {
+			body, ok := ViewSection(doc, title)
+			if !ok {
+				ht.Fatalf("no section %q", title)
+			}
+			again, _, err := ReplaceSection(doc, title, body)
+			if err != nil || again != doc {
+				ht.Fatalf("doc:\n%s\nreplacing %q with its own body: %v\n%s", doc, title, err, again)
+			}
+		}
+	})
+}
+
+// TestPropertyDoneWhenReadsBackWithWindowsLineEndings: a spec saved with
+// CRLF line endings reads its done-when items as the same items.
+func TestPropertyDoneWhenReadsBackWithWindowsLineEndings(t *testing.T) {
+	props(t, func(ht *hegel.T) {
+		n := hegel.Draw(ht, hegel.Integers(1, 3))
+		var items []domain.DoneWhen
+		for i := range n {
+			items = append(items, domain.DoneWhen{ID: fmt.Sprintf("DW-%d", i+1), Says: "it holds", Check: "go test ./..."})
+		}
+		doc, err := SetDoneWhen(SessionTemplate("t"), items)
+		if err != nil {
+			ht.Fatalf("SetDoneWhen: %v", err)
+		}
+		got, found, err := ParseDoneWhen(strings.ReplaceAll(doc, "\n", "\r\n"))
+		if err != nil || !found || !reflect.DeepEqual(got, items) {
+			ht.Fatalf("read back %#v (found %v, err %v), want %#v", got, found, err, items)
 		}
 	})
 }

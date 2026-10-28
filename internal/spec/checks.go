@@ -161,7 +161,8 @@ var checkKeyRe = regexp.MustCompile(`^(\s*)(-\s+)?(name|cmd|timeout|baseline):[ 
 // artifact — and leaves everything else to fail loudly:
 //
 //	%% markers inside the fence      dropped (they are section prose)
-//	[env: …] / [CI-only] in a value  stripped (tags are not commands)
+//	[env: …] / [CI-only] in a value  stripped (tags are not commands),
+//	                                 when the value is plain, not quoted
 //	an unquoted value holding ": "   single-quoted
 //	a tab-indented continuation      re-indented with spaces
 //
@@ -215,7 +216,10 @@ func repairChecksBlock(body string) (string, bool) {
 			indent = "  "
 			changed = true
 		}
-		if stripped := strings.TrimSpace(skipTagRe.ReplaceAllString(val, "")); stripped != val {
+		// a quoted value was written as it stands — the form gummi renders a
+		// command holding a literal tag in — so only a plain one is stripped
+		quoted := strings.HasPrefix(val, "'") || strings.HasPrefix(val, `"`)
+		if stripped := strings.TrimSpace(skipTagRe.ReplaceAllString(val, "")); !quoted && stripped != val {
 			if stripped == "" { // the value was nothing but a tag
 				changed = true
 				continue
@@ -405,7 +409,10 @@ func blockNode(v reflect.Value) (*yaml.Node, error) {
 		return n, nil
 	case reflect.String:
 		n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v.String()}
-		if strings.ContainsAny(n.Value, "\n\t\r") {
+		// a [ci-only] or [env: …] in a value gummi writes is the value's own
+		// text: quoted, the repair that strips a tag glued to a hand-written
+		// command leaves it be
+		if strings.ContainsAny(n.Value, "\n\t\r") || skipTagRe.MatchString(n.Value) {
 			n.Style = yaml.DoubleQuotedStyle
 		}
 		return n, nil

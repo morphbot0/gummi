@@ -22,7 +22,7 @@ const doneWhenScaffold = "```gummi-done-when\n" +
 	"  check: \"\"\n" +
 	"```"
 
-var doneWhenFenceRe = regexp.MustCompile("(?s)```gummi-done-when[ \\t]*\\n(.*?)(?m:^)[ ]{0,3}```")
+var doneWhenFenceRe = regexp.MustCompile("(?s)```gummi-done-when[ \\t]*\\r?\\n(.*?)(?m:^)[ ]{0,3}```")
 
 // fenceBody finds the first block matching re in the named section,
 // falling back to anywhere in the document so a block that drifted out of
