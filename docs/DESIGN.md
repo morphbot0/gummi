@@ -8409,8 +8409,11 @@ Where the code differs from, or adds to, the text above:
   on an unchanged head is a new event, not a loop. A pass that changed
   nothing asks as written.
 - **An unreadable trust filter asks at once**, not only when an event
-  stands: feedback is withheld while the filter cannot be read, so an
-  event could never stand.
+  stands, and while a check is still pending: feedback is withheld while
+  the filter cannot be read, so an event could never stand.
+- **`green-approved` on a head with no checks** reads it as green once
+  nothing has changed for five minutes, so a repository without CI ends
+  the watch, and a push CI has not reached yet does not.
 - **`base-moved`** fetches the base with the person's credential before
   the pass (a failed fetch asks the person to read again); the handler
   merges the local ref the event names. The bundled `merge-base` recipe

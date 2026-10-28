@@ -100,6 +100,11 @@ func TestWatchAsksThePerson(t *testing.T) {
 			w.Observed.Unreadable = "members of @acme/core could not be read"
 			return w
 		}, t0, AskWatch, AskUnreadable},
+		{"unreadable while a check is pending", domain.Watch{}, func() *domain.WatchState {
+			w := &domain.WatchState{Observed: facts("h1", "pending"), LastChange: t0}
+			w.Observed.Unreadable = "members of @acme/core could not be read"
+			return w
+		}, t0, AskWatch, AskUnreadable},
 		{"quiet", domain.Watch{Quiet: time.Hour}, func() *domain.WatchState {
 			w := &domain.WatchState{Observed: facts("h1", "pass"), LastChange: t0}
 			return w
@@ -166,6 +171,17 @@ func TestWatchEnds(t *testing.T) {
 	}
 	w.Observed.ReviewDecision = "APPROVED"
 	only(t, Decide(watchSnap(g, w)), EndWatch)
+	// a head with no checks at all is green once it has stood a while: a
+	// repository without CI ends the watch, a push CI has not reached yet
+	// does not
+	w = &domain.WatchState{Observed: facts("h1"), LastChange: t0}
+	w.Observed.ReviewDecision = "APPROVED"
+	if got := Decide(watchSnap(g, w)); len(got) != 0 {
+		t.Errorf("no checks, just pushed: %v", got)
+	}
+	snap0 := watchSnap(g, w)
+	snap0.Now = t0.Add(noChecksGrace)
+	only(t, Decide(snap0), EndWatch)
 	// the plain watch is not met by approval
 	w2 := &domain.WatchState{Observed: facts("h1", "pass"), LastChange: t0}
 	w2.Observed.ReviewDecision = "APPROVED"

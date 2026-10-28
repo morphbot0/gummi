@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -63,7 +64,7 @@ func (d *decider) watch(prefix string, s domain.Step) (outcome, string) {
 			}
 			return pending, ""
 		}
-		if open == nil && spec.UntilOr() == domain.UntilGreenApproved && greenApproved(f) {
+		if open == nil && spec.UntilOr() == domain.UntilGreenApproved && greenApproved(f, d.in.Now.Sub(w.LastChange)) {
 			end(domain.StepDone, "green and approved")
 			return pending, ""
 		}
@@ -88,13 +89,14 @@ func (d *decider) watch(prefix string, s domain.Step) (outcome, string) {
 		return pending, ""
 	}
 	d.waiting = true
-	if f.ChecksHead != f.Head || anyBucket(f, domain.WatchCheckPending) {
-		return pending, ""
-	}
 	// feedback is withheld while the filter cannot be read, so the person is
-	// asked whether or not an event stands: nothing is acted on meanwhile
+	// asked at once, whether or not an event stands or a check is pending:
+	// nothing is acted on meanwhile
 	if f.Unreadable != "" {
 		ask(AskUnreadable, "unreadable", f.Unreadable)
+		return pending, ""
+	}
+	if f.ChecksHead != f.Head || anyBucket(f, domain.WatchCheckPending) {
 		return pending, ""
 	}
 	standing := d.standing(spec, w, f)
@@ -235,9 +237,21 @@ func anyBucket(f *domain.WatchFacts, bucket string) bool {
 	return false
 }
 
-func greenApproved(f *domain.WatchFacts) bool {
-	if f.ReviewDecision != "APPROVED" || f.ChecksHead != f.Head || len(f.Checks) == 0 {
+// noChecksGrace is how long a head with no checks at all must stand
+// before green-approved reads it as green: a repository's CI registers its
+// checks a little after a push, and a head read in that moment has none.
+const noChecksGrace = 5 * time.Minute
+
+// greenApproved reports whether every check on the head passed and the
+// review decision is APPROVED. A head with no checks is green once nothing
+// has changed for noChecksGrace (still is how long), so a repository
+// without CI ends the watch too.
+func greenApproved(f *domain.WatchFacts, still time.Duration) bool {
+	if f.ReviewDecision != "APPROVED" || f.ChecksHead != f.Head {
 		return false
+	}
+	if len(f.Checks) == 0 {
+		return still >= noChecksGrace
 	}
 	for _, c := range f.Checks {
 		if c.Bucket != domain.WatchCheckPass && c.Bucket != domain.WatchCheckSkipping {
