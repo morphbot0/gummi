@@ -241,6 +241,7 @@ type WatchFacts struct {
 	KeptOut        int
 	KeptOutByKind  map[string]int // review, thread, comment
 	Threads        int            // unresolved threads seen
+	Unread         int            // top-level comments and reviews past the first 100, not read
 	Unreadable     string         // why the trust filter could not be read
 	ReadError      string         // why the PR could not be read
 }

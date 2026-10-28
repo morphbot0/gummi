@@ -905,6 +905,9 @@ func WatchLine(w *domain.WatchState) string {
 		}
 		parts = append(parts, what+" from outside the filter")
 	}
+	if f.Unread > 0 {
+		parts = append(parts, domain.WatchWords(f.Unread, "item")+" past the first 100 not read")
+	}
 	if f.Unreadable != "" {
 		parts = append(parts, "the trust filter could not be read")
 	}

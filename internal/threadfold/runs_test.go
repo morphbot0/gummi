@@ -543,3 +543,12 @@ func TestFoldRunDrawsAWatch(t *testing.T) {
 		t.Error("the revision did not move when a check settled")
 	}
 }
+
+// TestWatchLineSaysWhatWasNotRead: feedback past the first 100 is named on
+// the strip, never dropped silently.
+func TestWatchLineSaysWhatWasNotRead(t *testing.T) {
+	w := &domain.WatchState{Observed: &domain.WatchFacts{Head: "h", ChecksHead: "h", Unread: 3}}
+	if got, want := WatchLine(w), "waiting on the PR: 3 items past the first 100 not read"; got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}

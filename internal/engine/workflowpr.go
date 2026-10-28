@@ -332,14 +332,16 @@ func (e *Engine) readWatch(ctx context.Context, sess domain.Feature, spec *domai
 	if prev == nil || prev.UpdatedAt != facts.UpdatedAt || prev.Head != facts.Head || prev.Unreadable != "" ||
 		facts.ReadAt.Sub(prev.FetchedAt) > watchPollMax {
 		facts.FetchedAt = facts.ReadAt
-		items, err := pr.FetchFeedback(ctx, gh, ref)
+		items, unread, err := pr.FetchFeedback(ctx, gh, ref)
 		if err != nil {
 			facts.ReadError = "reading the PR's feedback: " + err.Error()
 			return facts, true
 		}
 		e.applyTrust(ctx, gh, ref, w.Trust, items, &facts)
+		facts.Unread = unread
 	} else {
 		facts.Feedback, facts.KeptOut, facts.KeptOutByKind, facts.Threads = prev.Feedback, prev.KeptOut, prev.KeptOutByKind, prev.Threads
+		facts.Unread = prev.Unread
 	}
 	return facts, false
 }
@@ -423,7 +425,8 @@ func (e *Engine) applyTrust(ctx context.Context, gh string, ref domain.PullReque
 		if it.Kind == "review" && it.State != "CHANGES_REQUESTED" && strings.TrimSpace(it.Body) == "" {
 			continue // an approval or a plain review without words says nothing to act on
 		}
-		ok := true
+		// a thread read only in part has people the filter never saw: kept out
+		ok := !it.Partial
 		for _, who := range it.People {
 			if !trusted(who) {
 				ok = false

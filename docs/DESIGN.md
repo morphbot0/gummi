@@ -8422,9 +8422,14 @@ Where the code differs from, or adds to, the text above:
 - **Questions are `RunDecideWatch`**; `gummi run` answers each with its
   first option, and the quiet question with stop, so a drive cannot wait
   forever.
-- **A planner's revised plan** that adds a `pr:` or `watch:` step to a
-  session that may not publish is not refused at the revision: the step
-  fails at run time, naming the switch.
+- **A planner's revised plan** adds no `pr:` or `watch:` step, as it adds
+  no command or dispatch: the planner is told so and the plan the person
+  allowed runs on. What a run does to the PR is what its proposal named.
+- **Feedback is read to a cap.** Threads are read in full, each to its
+  first 100 comments; a thread with more is kept out, since the filter
+  cannot see everyone in it. Top-level comments and reviews are read to
+  the first 100 each, and the strip names how many past that were not
+  read.
 - Not built: a person's "forward this filtered-out comment", and web
   styling of the watch row beyond the existing classes.
 - **A pass's steps commit.** A step under a watch (not a reading role) is

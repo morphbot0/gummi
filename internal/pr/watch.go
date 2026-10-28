@@ -51,6 +51,9 @@ type FeedbackItem struct {
 	ID, Kind, URL, Body, State string
 	// People holds the login of every author and last editor in the item.
 	People []string
+	// Partial marks a thread with more comments than were read: its
+	// People are not all known, so the trust filter keeps it out.
+	Partial bool
 }
 
 const feedbackQuery = `query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
@@ -60,12 +63,12 @@ const feedbackQuery = `query($owner:String!,$repo:String!,$number:Int!,$endCurso
         nodes{
           id
           isResolved
-          comments(first:100){ nodes{ id url body author{login} editor{login} } }
+          comments(first:100){ totalCount nodes{ id url body author{login} editor{login} } }
         }
         pageInfo{ hasNextPage endCursor }
       }
-      comments(first:100){ nodes{ id url body author{login} editor{login} } }
-      reviews(first:100){ nodes{ id url body state author{login} editor{login} } }
+      comments(first:100){ totalCount nodes{ id url body author{login} editor{login} } }
+      reviews(first:100){ totalCount nodes{ id url body state author{login} editor{login} } }
     }
   }
 }`
@@ -93,18 +96,19 @@ func (n feedbackNode) people() []string {
 
 // FetchFeedback reads ref's reviews, unresolved threads and top-level
 // comments for a watch. Unlike FetchReviewThreads it keeps each item's id
-// and last editor, which the trust filter needs.
-func FetchFeedback(ctx context.Context, ghBinary string, ref domain.PullRequestRef) ([]FeedbackItem, error) {
+// and last editor, which the trust filter needs. Threads are read in full;
+// top-level comments and reviews only the first 100 of each, and unread
+// counts those past them, so a face can say they were not read.
+func FetchFeedback(ctx context.Context, ghBinary string, ref domain.PullRequestRef) (items []FeedbackItem, unread int, err error) {
 	owner, repoName, ok := strings.Cut(ref.Repo, "/")
 	if !ok || owner == "" || repoName == "" {
-		return nil, fmt.Errorf("pull request repo %q is not in owner/repo form", ref.Repo)
+		return nil, 0, fmt.Errorf("pull request repo %q is not in owner/repo form", ref.Repo)
 	}
 	out, err := run(ctx, ghBinary, "", "api", "graphql", "--paginate",
 		"-f", "query="+feedbackQuery, "-F", "owner="+owner, "-F", "repo="+repoName, "-F", "number="+strconv.Itoa(ref.Number))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	var items []FeedbackItem
 	first := true
 	dec := json.NewDecoder(bytes.NewReader(out))
 	for dec.More() {
@@ -117,29 +121,32 @@ func FetchFeedback(ctx context.Context, ghBinary string, ref domain.PullRequestR
 								ID         string `json:"id"`
 								IsResolved bool   `json:"isResolved"`
 								Comments   struct {
-									Nodes []feedbackNode `json:"nodes"`
+									TotalCount int            `json:"totalCount"`
+									Nodes      []feedbackNode `json:"nodes"`
 								} `json:"comments"`
 							} `json:"nodes"`
 						} `json:"reviewThreads"`
 						Comments struct {
-							Nodes []feedbackNode `json:"nodes"`
+							TotalCount int            `json:"totalCount"`
+							Nodes      []feedbackNode `json:"nodes"`
 						} `json:"comments"`
 						Reviews struct {
-							Nodes []feedbackNode `json:"nodes"`
+							TotalCount int            `json:"totalCount"`
+							Nodes      []feedbackNode `json:"nodes"`
 						} `json:"reviews"`
 					} `json:"pullRequest"`
 				} `json:"repository"`
 			} `json:"data"`
 		}
 		if err := dec.Decode(&page); err != nil {
-			return nil, fmt.Errorf("parsing gh api graphql output: %w", err)
+			return nil, 0, fmt.Errorf("parsing gh api graphql output: %w", err)
 		}
 		p := page.Data.Repository.PullRequest
 		for _, t := range p.ReviewThreads.Nodes {
 			if t.IsResolved || len(t.Comments.Nodes) == 0 {
 				continue
 			}
-			it := FeedbackItem{ID: t.ID, Kind: "thread", URL: t.Comments.Nodes[0].URL}
+			it := FeedbackItem{ID: t.ID, Kind: "thread", URL: t.Comments.Nodes[0].URL, Partial: t.Comments.TotalCount > len(t.Comments.Nodes)}
 			var bodies []string
 			for _, c := range t.Comments.Nodes {
 				it.People = append(it.People, c.people()...)
@@ -149,6 +156,7 @@ func FetchFeedback(ctx context.Context, ghBinary string, ref domain.PullRequestR
 			items = append(items, it)
 		}
 		if first {
+			unread = max(0, p.Comments.TotalCount-len(p.Comments.Nodes)) + max(0, p.Reviews.TotalCount-len(p.Reviews.Nodes))
 			for _, c := range p.Comments.Nodes {
 				items = append(items, FeedbackItem{ID: c.ID, Kind: "comment", URL: c.URL, Body: c.Body, People: c.people()})
 			}
@@ -161,7 +169,7 @@ func FetchFeedback(ctx context.Context, ghBinary string, ref domain.PullRequestR
 			first = false
 		}
 	}
-	return items, nil
+	return items, unread, nil
 }
 
 // Viewer is the login the credential gh runs with belongs to.

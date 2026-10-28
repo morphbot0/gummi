@@ -468,7 +468,7 @@ func (e *Engine) plannerEnded(ctx context.Context, run *domain.Run, inst *domain
 	if err == nil {
 		workflowrecipe.Walk(entries, func(s domain.Step, _ []domain.Entry) {
 			if s.Agentless() {
-				problems = append(problems, fmt.Sprintf("step %s: a revised plan adds no command or dispatch: the person allowed the recipe's own", s.ID))
+				problems = append(problems, fmt.Sprintf("step %s: a revised plan adds no command, dispatch, pr or watch step: the person allowed the recipe's own", s.ID))
 			}
 		})
 	}
