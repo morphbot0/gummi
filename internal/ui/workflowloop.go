@@ -134,6 +134,8 @@ func workflowDecisionWord(d *domain.RunDecision) string {
 		return "run budget"
 	case domain.RunDecideResume:
 		return "run parked"
+	case domain.RunDecideWatch:
+		return "PR asks"
 	}
 	return "run asks"
 }

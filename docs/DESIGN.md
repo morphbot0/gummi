@@ -8379,3 +8379,67 @@ the same from `threadfold`'s fold.
 gummi never merges, retargets, force-pushes, resolves or replies to a
 thread, or lands. A watch ends on a merge a person made. A question the
 watch cannot settle reaches the person.
+
+### 28.9 As built
+
+Where the code differs from, or adds to, the text above:
+
+- **The watch's stored state is `watching`**, not `waiting`: `waiting`
+  already means "a row not started", and the conductor starts any step
+  in it. The faces still say "waiting on the PR". The row is live, so a
+  stop interrupts it and the run cannot end around it.
+- **The row keeps its memory as JSON** (`workflow_steps.watch`,
+  `domain.WatchState`): the PR, the parsed trust filter, the last read
+  (`WatchFacts`), the feedback ids handed to passes, the passes, and the
+  person's answers. `workflowpolicy.Decide` reads it from the snapshot,
+  with `Snapshot.Now` as its only clock.
+- **The cheap read is `pr.WatchStatus`** (state, head, base, mergeability,
+  review decision, `updatedAt`), not `LiveStatus`, which does not move on
+  a new review or thread. The checks are read again when the head moved,
+  one was pending, none had reported, the PR was touched or a while has
+  passed; the feedback when the PR was touched. Three failed reads in a
+  row are put down to the network before the person is asked.
+- **A pass's steps sit at `<watch>/<n>/…`.** A `goto` pass leaves `pr:`
+  steps out, so it cannot open the PR again.
+- **After a push the watch forgets what it read** and ignores reads that
+  still show the head from before the push (for two minutes), so GitHub
+  lagging behind does not read as "the same event on the same head".
+- **"The same event after a pass"** compares the event's key (which
+  carries the head for checks and the ids for feedback), so a new comment
+  on an unchanged head is a new event, not a loop. A pass that changed
+  nothing asks as written.
+- **An unreadable trust filter asks at once**, not only when an event
+  stands: feedback is withheld while the filter cannot be read, so an
+  event could never stand.
+- **`base-moved`** fetches the base with the person's credential before
+  the pass (a failed fetch asks the person to read again); the handler
+  merges the local ref the event names. The bundled `merge-base` recipe
+  does it, and `fix-until-green` takes an optional `event` input.
+- **A spent pool does not pause a watch that is only waiting.**
+- **Questions are `RunDecideWatch`**; `gummi run` answers each with its
+  first option, and the quiet question with stop, so a drive cannot wait
+  forever.
+- **A planner's revised plan** that adds a `pr:` or `watch:` step to a
+  session that may not publish is not refused at the revision: the step
+  fails at run time, naming the switch.
+- Not built: a person's "forward this filtered-out comment", and web
+  styling of the watch row beyond the existing classes.
+- **A pass's steps commit.** A step under a watch (not a reading role) is
+  briefed to commit its changes on the branch, since gummi pushes only
+  what the branch holds and never commits for it; the bundled `ship` and
+  `merge-base` prompts say so too.
+- **`base-moved` stands only when GitHub says the branch conflicts or is
+  behind** (`mergeable` CONFLICTING, merge state BEHIND). A base that moved
+  without either, on a repository that does not require up-to-date
+  branches, raises nothing.
+- **`checks:` narrows which logs are read, not which failures count**: any
+  failing check raises `checks-failed`; one outside the list reaches the
+  pass without its log.
+- **The role filter reads `role_name`** (maintain and triage show there;
+  `permission` alone reads write for them), falling back to `permission`;
+  a feedback item with no author is outside every filter.
+- **The checks and feedback are read in full again** after `watchPollMax`
+  since the last full read (`WatchFacts.FetchedAt`), even when the PR
+  shows no change.
+- Feedback past the first 100 reviews, comments or inner comments of a
+  thread is not read.

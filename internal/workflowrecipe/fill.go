@@ -25,6 +25,11 @@ type Vars struct {
 	// RunDiff is the path of the file holding the diff from the run's
 	// starting tree to now.
 	RunDiff string
+	// Event is the event a watch handler's pass was started for, as a text
+	// of facts; WatchEvent is the same text where a goto pass re-runs the
+	// recipe's own steps (DESIGN §28.5).
+	Event      string
+	WatchEvent string
 }
 
 // Fill fills a prompt's templates. A step's output is wrapped in
@@ -37,6 +42,8 @@ func Fill(prompt string, v Vars) (string, error) {
 		switch {
 		case r.step != "":
 			return Wrap(r.step, r.text)
+		case r.input == "watch.event" && strings.TrimSpace(r.text) == "":
+			return ""
 		case r.input != "":
 			return WrapInput(r.input, r.text)
 		}
@@ -92,6 +99,10 @@ func (v Vars) resolve(name string) (ref, error) {
 			return ref{}, fmt.Errorf("{{run.diff}}: no diff file was written")
 		}
 		return ref{text: v.RunDiff}, nil
+	case "event":
+		return ref{input: "event", text: v.Event}, nil
+	case "watch.event":
+		return ref{input: "watch.event", text: v.WatchEvent}, nil
 	case "previous.output":
 		if v.Previous == "" {
 			return ref{}, fmt.Errorf("{{previous.output}}: no step ran before this one")

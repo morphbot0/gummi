@@ -31,6 +31,9 @@ const (
 	// StripPaused: paused by a person, or stopping; Resume carries a
 	// paused run on.
 	StripPaused = "paused"
+	// StripWatching: the only thing live is a watch waiting on the run's
+	// PR, with no model working (DESIGN §28.7).
+	StripWatching = "watching"
 )
 
 // RunStrip is an open run's live strip.
@@ -79,9 +82,13 @@ func liveStrip(in RunInput, r Run, steps []domain.RunStep) *RunStrip {
 	}
 	s := &RunStrip{Name: RunLine(r), Mood: StripRunning, CanResume: r.CanResume}
 	var asking *domain.RunStep
+	var watching *domain.WatchState
 	var action string
 	for i := range steps {
 		st := steps[i]
+		if st.State == domain.StepWatching && st.Watch != nil {
+			watching = st.Watch
+		}
 		if !st.State.Live() || st.Card == "" {
 			continue
 		}
@@ -130,6 +137,8 @@ func liveStrip(in RunInput, r Run, steps []domain.RunStep) *RunStrip {
 			s.Line += " · " + why
 		}
 		s.Line += " · resume to carry on"
+	case watching != nil && len(s.Steps) == 0:
+		s.Mood, s.Line = StripWatching, WatchLine(watching)
 	case asking != nil:
 		s.Mood, s.Card, s.Action = StripAsking, string(asking.Card), ""
 		s.Who = s.idOf(asking.Path)

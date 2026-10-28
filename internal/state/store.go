@@ -1052,6 +1052,8 @@ var migrations = []string{
 	// The paths a reading step changed, flagged in its row and the run's
 	// report (DESIGN §25.4).
 	`ALTER TABLE workflow_steps ADD COLUMN changed TEXT NOT NULL DEFAULT 'null'`,
+	// A watch step's memory (DESIGN §28.2), as JSON; 'null' on every other.
+	`ALTER TABLE workflow_steps ADD COLUMN watch TEXT NOT NULL DEFAULT 'null'`,
 	// A workflow run's baseline: the done-when checks run before its first
 	// step (DESIGN §25.5). Empty is no baseline, as on every run from before.
 	`ALTER TABLE workflow_runs ADD COLUMN baseline TEXT NOT NULL DEFAULT ''`,

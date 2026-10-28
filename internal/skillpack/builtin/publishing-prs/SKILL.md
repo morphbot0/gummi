@@ -73,3 +73,8 @@ Every failure is `error: <code>: text — fix`.
   `unresolved-annotations`: the diff has open review comments. Either
   refuses `pr_ready`; a push to a ready PR returns it to draft first and
   says so.
+
+To hand the waiting to gummi without spending turns, propose the `ship`
+recipe (or one with `pr:` and `watch:` steps): it opens the PR, polls it
+with no model, runs a pass per red check, trusted review or comment,
+pushes after each, and ends when a person merges.

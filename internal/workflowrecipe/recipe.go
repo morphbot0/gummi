@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -106,6 +107,8 @@ type rawEntry struct {
 	Run           string            `yaml:"run,omitempty"`
 	QuietExit     *int              `yaml:"quietExit,omitempty"`
 	Dispatch      *rawDispatch      `yaml:"dispatch,omitempty"`
+	PR            *rawPR            `yaml:"pr,omitempty"`
+	Watch         *rawWatch         `yaml:"watch,omitempty"`
 	Parallel      *rawParallel      `yaml:"parallel,omitempty"`
 	Repeat        *rawRepeat        `yaml:"repeat,omitempty"`
 }
@@ -120,6 +123,95 @@ type rawDispatch struct {
 	Recipe     string   `yaml:"recipe,omitempty"`
 	RecipeYAML string   `yaml:"recipeYAML,omitempty"`
 	Envelope   dollars  `yaml:"envelope"`
+}
+
+// rawPR is a pr step's act (DESIGN §28.1).
+type rawPR struct {
+	Act   string `yaml:"act"`
+	Draft bool   `yaml:"draft,omitempty"`
+}
+
+// rawWatch is a watch step (DESIGN §28.2). Quiet is a Go duration, with d
+// for days: 7d, 12h, 30m.
+type rawWatch struct {
+	Until    string                `yaml:"until,omitempty"`
+	Trust    string                `yaml:"trust,omitempty"`
+	Max      int                   `yaml:"max,omitempty"`
+	Quiet    string                `yaml:"quiet,omitempty"`
+	OnClosed string                `yaml:"onClosed,omitempty"`
+	Checks   []string              `yaml:"checks,omitempty"`
+	On       map[string]rawHandler `yaml:"on"`
+}
+
+// rawHandler is a watch event's handler: a YAML sequence is inline steps; a
+// mapping holds recipe (and recipeYAML), goto or steps, and a max.
+type rawHandler struct {
+	Steps      []rawEntry `yaml:"steps,omitempty"`
+	Recipe     string     `yaml:"recipe,omitempty"`
+	RecipeYAML string     `yaml:"recipeYAML,omitempty"`
+	Goto       string     `yaml:"goto,omitempty"`
+	Max        int        `yaml:"max,omitempty"`
+}
+
+func (h *rawHandler) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.SequenceNode {
+		return n.Decode(&h.Steps)
+	}
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: a handler is a list of steps, or a mapping of steps, recipe or goto", n.Line)
+	}
+	for i := 0; i < len(n.Content); i += 2 {
+		switch k := n.Content[i].Value; k {
+		case "steps", "recipe", "recipeYAML", "goto", "max":
+		default:
+			return fmt.Errorf("line %d: a handler takes steps, recipe, goto and max, not %q", n.Content[i].Line, k)
+		}
+	}
+	type plain rawHandler
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*h = rawHandler(p)
+	return nil
+}
+
+func (h rawHandler) MarshalYAML() (any, error) {
+	if len(h.Steps) > 0 && h.Recipe == "" && h.RecipeYAML == "" && h.Goto == "" && h.Max == 0 {
+		return h.Steps, nil
+	}
+	type plain rawHandler
+	return plain(h), nil
+}
+
+// ParseQuiet reads a watch's quiet: a Go duration, or whole days as 7d.
+func ParseQuiet(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("quiet %q is not a duration like 7d, 12h or 30m", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("quiet %q is not a duration like 7d, 12h or 30m", s)
+	}
+	return d, nil
+}
+
+func formatQuiet(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	if d%(24*time.Hour) == 0 {
+		return strconv.Itoa(int(d/(24*time.Hour))) + "d"
+	}
+	return d.String()
 }
 
 // dollars is a budget a recipe writes the way a person types one —
@@ -265,7 +357,7 @@ func entries(raw []rawEntry) ([]domain.Entry, error) {
 func (re rawEntry) hasStepFields() bool {
 	return re.Role != "" || re.Prompt != "" || re.Slot != "" || re.Tier != nil || re.Envelope != nil ||
 		len(re.Artifacts) > 0 || re.CaptureOutput != nil ||
-		re.Run != "" || re.QuietExit != nil || re.Dispatch != nil
+		re.Run != "" || re.QuietExit != nil || re.Dispatch != nil || re.PR != nil || re.Watch != nil
 }
 
 func entry(re rawEntry) (domain.Entry, error) {
@@ -333,7 +425,21 @@ func entry(re rawEntry) (domain.Entry, error) {
 			Envelope: int(rd.Envelope),
 		}
 	}
+	var pr *domain.PRAct
+	if re.PR != nil {
+		pr = &domain.PRAct{Act: strings.ToLower(strings.TrimSpace(re.PR.Act)), Draft: re.PR.Draft}
+	}
+	var watch *domain.Watch
+	if re.Watch != nil {
+		w, err := watchOf(name, *re.Watch)
+		if err != nil {
+			return domain.Entry{}, err
+		}
+		watch = &w
+	}
 	return domain.Entry{Step: &domain.Step{
+		PR:            pr,
+		Watch:         watch,
 		ID:            id,
 		Role:          domain.WorkflowRole(strings.ToLower(strings.TrimSpace(re.Role))),
 		Prompt:        re.Prompt,
@@ -346,6 +452,44 @@ func entry(re rawEntry) (domain.Entry, error) {
 		QuietExit:     re.QuietExit,
 		Dispatch:      d,
 	}}, nil
+}
+
+func watchOf(name string, rw rawWatch) (domain.Watch, error) {
+	quiet, err := ParseQuiet(rw.Quiet)
+	if err != nil {
+		return domain.Watch{}, fmt.Errorf("%s: %w", name, err)
+	}
+	w := domain.Watch{
+		Until: strings.TrimSpace(rw.Until), Trust: strings.TrimSpace(rw.Trust), Max: rw.Max,
+		Quiet: quiet, OnClosed: strings.TrimSpace(rw.OnClosed), Checks: trimAll(rw.Checks),
+	}
+	for ev, rh := range rw.On {
+		h := domain.Handler{
+			Recipe: strings.TrimSpace(rh.Recipe), RecipeYAML: rh.RecipeYAML,
+			Goto: strings.TrimSpace(rh.Goto), Max: rh.Max,
+		}
+		for _, b := range rh.Steps {
+			if b.Parallel != nil || b.Repeat != nil || b.Watch != nil {
+				return domain.Watch{}, fmt.Errorf("%s: a handler's inline steps are plain steps", name)
+			}
+			e, err := entry(b)
+			if err != nil {
+				return domain.Watch{}, err
+			}
+			h.Steps = append(h.Steps, *e.Step)
+		}
+		if strings.TrimSpace(h.RecipeYAML) != "" {
+			// a handler recipe that does not parse is Check's to report
+			if r, err := Parse([]byte(h.RecipeYAML)); err == nil {
+				h.Entries = r.Steps
+			}
+		}
+		if w.On == nil {
+			w.On = map[domain.WatchEvent]domain.Handler{}
+		}
+		w.On[domain.WatchEvent(strings.TrimSpace(ev))] = h
+	}
+	return w, nil
 }
 
 // Marshal writes a recipe back as YAML that Parse reads to the same
@@ -452,6 +596,23 @@ func rawStep(s domain.Step) rawEntry {
 		Artifacts: s.Artifacts, CaptureOutput: s.CaptureOutput,
 		Run: s.Run, QuietExit: s.QuietExit,
 	}
+	if s.PR != nil {
+		re.PR = &rawPR{Act: s.PR.Act, Draft: s.PR.Draft}
+	}
+	if w := s.Watch; w != nil {
+		rw := &rawWatch{
+			Until: w.Until, Trust: w.Trust, Max: w.Max, Quiet: formatQuiet(w.Quiet),
+			OnClosed: w.OnClosed, Checks: w.Checks, On: map[string]rawHandler{},
+		}
+		for ev, h := range w.On {
+			rh := rawHandler{Recipe: h.Recipe, RecipeYAML: h.RecipeYAML, Goto: h.Goto, Max: h.Max}
+			for _, st := range h.Steps {
+				rh.Steps = append(rh.Steps, rawStep(st))
+			}
+			rw.On[string(ev)] = rh
+		}
+		re.Watch = rw
+	}
 	if d := s.Dispatch; d != nil {
 		re.Dispatch = &rawDispatch{
 			Repo: d.Repo, Repos: d.Repos, Title: d.Title, Spec: d.Spec, Prompt: d.Prompt,
@@ -494,6 +655,13 @@ func walk(es []domain.Entry, within []domain.Entry, fn func(domain.Step, []domai
 		switch {
 		case e.Step != nil:
 			fn(*e.Step, within)
+			if w := e.Step.Watch; w != nil {
+				for _, ev := range domain.WatchEvents {
+					for _, hs := range w.On[ev].Steps {
+						fn(hs, append(append([]domain.Entry{}, within...), e))
+					}
+				}
+			}
 		case e.Parallel != nil:
 			in := append(append([]domain.Entry{}, within...), e)
 			for _, s := range e.Parallel.Steps {

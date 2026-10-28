@@ -193,6 +193,13 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 			Verdict: row.Verdict, Waiting: row.Waiting, Started: row.Started, Ended: row.Ended, Model: row.Model,
 		}
 		w.Question = webQuestion(row.Question)
+		w.Pass, w.Event = row.Pass, row.Event
+		if wr := row.Watch; wr != nil {
+			w.Watch = &webapi.RunWatch{
+				PR: wr.PR, URL: wr.URL, Until: wr.Until, Pending: wr.Pending, Threads: wr.Threads,
+				KeptOut: wr.KeptOut, Passes: wr.Passes, Held: wr.Held,
+			}
+		}
 		out.Rows = append(out.Rows, w)
 	}
 	if p := r.Pending; p != nil {

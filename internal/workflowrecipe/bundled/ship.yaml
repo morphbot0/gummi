@@ -1,0 +1,27 @@
+name: ship
+description: Build the spec, open a draft PR, then wait on it without a model and fix what its checks and reviewers raise, until a person merges it
+inputs:
+  trust:
+    hint: "who may steer the run from the PR: @login, @org/team, role:maintain"
+    default: "role:maintain"
+steps:
+  - id: build
+    role: implementer
+    prompt: "Implement the spec and commit your work. If the PR raised something below, address that and commit.\n\n{{spec}}\n\n{{watch.event}}"
+  - id: open
+    pr: { act: create, draft: true }
+  - id: shepherd
+    watch:
+      until: merged
+      trust: "{{inputs.trust}}"
+      max: 6
+      quiet: 7d
+      onClosed: abort
+      on:
+        checks-failed: { recipe: fix-until-green }
+        changes-requested: { goto: build }
+        comment:
+          - id: answer
+            role: implementer
+            prompt: "Address this and commit. Do not reply on GitHub.\n\n{{event}}"
+        base-moved: { recipe: merge-base }

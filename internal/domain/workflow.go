@@ -132,6 +132,12 @@ type Step struct {
 	// Dispatch makes the step mint a session in a named repository (DESIGN
 	// §26.4), with no role and no model of its own.
 	Dispatch *Dispatch
+	// PR makes the step gummi's own publish act on the session's pull
+	// request (DESIGN §28.1): no role, no model, no prompt.
+	PR *PRAct
+	// Watch makes the step wait on the session's pull request without a
+	// model, and run its handlers on what happens to it (DESIGN §28.2).
+	Watch *Watch
 }
 
 // Captures reports whether the step's output is kept for later steps.
@@ -139,7 +145,9 @@ func (s Step) Captures() bool { return s.CaptureOutput == nil || *s.CaptureOutpu
 
 // Agentless reports whether the step is gummi's own act — a command or a
 // dispatch — rather than a fresh-context agent.
-func (s Step) Agentless() bool { return s.Run != "" || s.Dispatch != nil }
+func (s Step) Agentless() bool {
+	return s.Run != "" || s.Dispatch != nil || s.PR != nil || s.Watch != nil
+}
 
 // Kind names what the step is where a role would: its role, or "run" or
 // "dispatch".
@@ -149,6 +157,10 @@ func (s Step) Kind() string {
 		return "run"
 	case s.Dispatch != nil:
 		return "dispatch"
+	case s.PR != nil:
+		return "pr"
+	case s.Watch != nil:
+		return "watch"
 	}
 	return string(s.Role)
 }
@@ -318,10 +330,17 @@ const (
 	StepFailed StepState = "failed"
 	// StepStopped was interrupted: a stop, or a join that settled without it.
 	StepStopped StepState = "stopped"
+	// StepWatching is a watch step waiting on its pull request (DESIGN
+	// §28.2). The faces say "waiting on the PR"; it is stored apart from
+	// StepWaiting, which means a row not yet started.
+	StepWatching StepState = "watching"
 )
 
-// Live reports whether the step's agent is at work or waiting on a person.
-func (s StepState) Live() bool { return s == StepRunning || s == StepAsking }
+// Live reports whether the step's agent is at work or waiting on a person,
+// or a watch is waiting on its pull request.
+func (s StepState) Live() bool {
+	return s == StepRunning || s == StepAsking || s == StepWatching
+}
 
 // Settled reports whether the step will do no more work in its run.
 func (s StepState) Settled() bool { return s == StepDone || s == StepFailed || s == StepStopped }
@@ -505,6 +524,10 @@ const (
 	// when gummi came back. A parked run never resumes itself (§25.7): the
 	// person resumes it or stops it.
 	RunDecideResume RunDecisionKind = "resume"
+	// RunDecideWatch: a watch step's question (DESIGN §28.4) — a loop on
+	// the same event, a pass that changed nothing, a max, a trust filter
+	// that could not be read, a push that failed, a quiet PR.
+	RunDecideWatch RunDecisionKind = "watch"
 )
 
 // RunDecision is a run's one open question to its person. A step's own
@@ -555,6 +578,8 @@ type RunStep struct {
 	Reason    string
 	StartedAt time.Time
 	EndedAt   time.Time
+	// Watch is a watch step's memory (DESIGN §28.2); nil on every other.
+	Watch *WatchState
 }
 
 // StepPath joins path segments: a repeat's id and iteration, a parallel's

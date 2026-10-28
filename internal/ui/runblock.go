@@ -740,7 +740,13 @@ func stepRowLines(s *theme.Styles, row threadfold.StepRow, selected bool, spin s
 	}
 	name, role := row.ID, row.Role
 	line := row.Line
-	if row.Folded {
+	if row.Folded && row.Pass > 0 {
+		// a watch's pass: the event it ran for, how it ended, what ran in it
+		role, line = "", row.Event+" · "+row.Line
+		if row.Steps != "" {
+			line += " — " + row.Steps
+		}
+	} else if row.Folded {
 		role = ""
 		line = row.Steps
 		if row.Verdict != "" {
@@ -825,6 +831,8 @@ func stepGlyph(state string) string {
 		return "?"
 	case "running":
 		return "●"
+	case string(domain.StepWatching):
+		return "◷"
 	case threadfold.RowPaused:
 		return "‖"
 	}

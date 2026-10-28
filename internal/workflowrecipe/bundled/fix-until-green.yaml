@@ -1,6 +1,9 @@
 name: fix-until-green
 description: Fix the tree until every done-when check of the spec passes
-inputs: {}
+inputs:
+  event:
+    hint: "what a PR watch saw fail, when it hands this recipe an event"
+    default: ""
 steps:
   - id: fix
     repeat:
@@ -13,5 +16,7 @@ steps:
           prompt: |
             Run the done-when checks of the spec below, and fix the code
             until they pass. Do not weaken a check to make it pass.
+
+            {{inputs.event}}
 
             {{spec}}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -46,6 +47,17 @@ func check(r domain.Recipe, frozen bool) (problems, warnings []string) {
 		ids:       map[string]string{},
 		artifacts: map[string]bool{},
 	}
+	for i, e := range r.Steps {
+		if e.Step != nil && e.Step.Watch != nil && c.watchID == "" {
+			c.watchID = e.Step.ID
+			c.watchAt = i
+		}
+	}
+	if c.watchID != "" {
+		for _, e := range r.Steps[:c.watchAt] {
+			c.topIDs = append(c.topIDs, e.ID())
+		}
+	}
 	if len(r.Steps) > 0 && r.Steps[0].Step != nil {
 		c.firstID = r.Steps[0].Step.ID
 	}
@@ -76,6 +88,16 @@ type checker struct {
 	// checked; last is the plain step that ran just before it.
 	earlier []string
 	last    string
+	// watchID is the recipe's first top-level watch, watchAt its index;
+	// afterWatch is set once the walk has passed it.
+	watchID    string
+	watchAt    int
+	afterWatch bool
+	inParallel bool
+	inRepeat   bool
+	inHandler  bool
+	topIDs     []string // the top-level ids before the watch
+	seenWatch  bool
 }
 
 func (c *checker) problem(format string, args ...any) {
@@ -107,6 +129,9 @@ func (c *checker) entries(es []domain.Entry) {
 			c.step(*e.Step, c.last)
 			c.earlier = append(c.earlier, e.Step.ID)
 			c.last = e.Step.ID
+			if e.Step.Watch != nil {
+				c.afterWatch = true
+			}
 		case e.Parallel != nil:
 			c.parallel(*e.Parallel)
 		case e.Repeat != nil:
@@ -127,6 +152,8 @@ func (c *checker) parallel(p domain.Parallel) {
 	}
 	before := c.last
 	writers := 0
+	c.inParallel = true
+	defer func() { c.inParallel = false }()
 	for _, s := range p.Steps {
 		c.step(s, before)
 		if s.Role.Writes() {
@@ -173,12 +200,14 @@ func (c *checker) repeat(rp domain.Repeat) {
 			c.problem("repeat %s: until reads artifact %q, which no step in its body declares", name, rp.Until.In)
 		}
 	}
+	c.inRepeat = true
 	c.entries(rp.Steps)
+	c.inRepeat = false
 }
 
 func (c *checker) step(s domain.Step, previous string) {
 	name := c.id(s.ID, "step")
-	if s.Run != "" || s.Dispatch != nil || s.QuietExit != nil {
+	if s.Run != "" || s.Dispatch != nil || s.QuietExit != nil || s.PR != nil || s.Watch != nil {
 		c.agentless(s, name, previous)
 		return
 	}
@@ -222,6 +251,9 @@ func (c *checker) agentless(s domain.Step, name, previous string) {
 	case s.Dispatch != nil && c.frozen:
 		c.problem("step %s: a dispatched recipe cannot dispatch in turn", name)
 		return
+	case s.PR != nil && s.Watch != nil, (s.PR != nil || s.Watch != nil) && (s.Run != "" || s.Dispatch != nil):
+		c.problem("step %s: a step is exactly one of a command (run), a dispatch, a pr act or a watch", name)
+		return
 	}
 	if s.Role != "" || s.Slot != "" || strings.TrimSpace(s.Prompt) != "" || len(s.Artifacts) > 0 {
 		c.problem("step %s: a %s step has no role, slot, prompt or artifacts of its own", name, s.Kind())
@@ -235,6 +267,10 @@ func (c *checker) agentless(s domain.Step, name, previous string) {
 				c.problem("step %s: %s {{%s}} %s", name, field, m[1], why)
 			}
 		}
+	}
+	if s.PR != nil || s.Watch != nil {
+		c.prOrWatch(s, name)
+		return
 	}
 	if s.Run != "" {
 		if q := s.QuietExit; q != nil {
@@ -313,6 +349,16 @@ func (c *checker) template(ref, self, previous string) string {
 	switch ref {
 	case "spec", "run.diff":
 		return ""
+	case "event":
+		if !c.inHandler {
+			return "belongs to a watch handler's steps"
+		}
+		return ""
+	case "watch.event":
+		if c.watchID == "" || c.afterWatch || c.inHandler {
+			return "belongs to a step before the recipe's watch"
+		}
+		return ""
 	case "previous.output":
 		if previous == "" {
 			return "has no step before it"
@@ -343,7 +389,7 @@ func (c *checker) template(ref, self, previous string) string {
 		}
 		return "names no earlier step"
 	}
-	return "is not a template: spec, inputs.<name>, artifacts.<name>, previous.output, <step>.output or run.diff"
+	return "is not a template: spec, inputs.<name>, artifacts.<name>, previous.output, <step>.output, run.diff, or in a watch's handler event"
 }
 
 // templateQuoted reports whether a {{template}} in a shell command sits
@@ -367,4 +413,182 @@ func templateQuoted(command string) bool {
 		}
 	}
 	return false
+}
+
+// prOrWatch checks a pr step (§28.1) or a watch step (§28.2).
+func (c *checker) prOrWatch(s domain.Step, name string) {
+	if s.Role != "" || s.Slot != "" || strings.TrimSpace(s.Prompt) != "" || len(s.Artifacts) > 0 {
+		c.problem("step %s: a %s step has no role, slot, prompt or artifacts of its own", name, s.Kind())
+	}
+	if s.StaleEnvelope {
+		c.problem("step %s: a %s step has no envelope of its own", name, s.Kind())
+	}
+	if s.PR != nil {
+		switch {
+		case c.inHandler:
+			c.problem("step %s: a handler never publishes; gummi pushes after each pass", name)
+		case c.inParallel:
+			c.problem("step %s: a pr step acts on the PR alone, never inside a parallel", name)
+		}
+		known := false
+		for _, a := range domain.PRActs {
+			known = known || a == s.PR.Act
+		}
+		if !known {
+			c.problem("step %s: pr act %q is not push, create, update or ready", name, s.PR.Act)
+		}
+		if s.PR.Draft && s.PR.Act != "create" {
+			c.problem("step %s: draft belongs to pr act create", name)
+		}
+		return
+	}
+	w := s.Watch
+	switch {
+	case c.inHandler:
+		c.problem("step %s: a handler cannot hold a watch", name)
+		return
+	case c.inParallel:
+		c.problem("step %s: a watch waits alone, never inside a parallel", name)
+		return
+	case c.inRepeat:
+		c.problem("step %s: a watch sits at the top level, never inside a repeat", name)
+		return
+	case c.seenWatch:
+		c.problem("step %s: a recipe waits on its PR in one watch step; %s is already one", name, c.watchID)
+		return
+	}
+	c.seenWatch = true
+	switch w.Until {
+	case "", domain.UntilMerged, domain.UntilGreenApproved:
+	default:
+		c.problem("step %s: watch until %q is not merged or green-approved", name, w.Until)
+	}
+	switch w.OnClosed {
+	case "", domain.OnClosedAbort, domain.OnClosedContinue:
+	default:
+		c.problem("step %s: watch onClosed %q is not abort or continue", name, w.OnClosed)
+	}
+	if w.Max < 0 {
+		c.problem("step %s: watch max must be zero or more", name)
+	}
+	for _, ch := range w.Checks {
+		if ch == "" {
+			c.problem("step %s: watch checks names a check", name)
+		}
+	}
+	c.trust(w.Trust, name)
+	if len(w.On) == 0 {
+		c.problem("step %s: a watch names at least one event under on", name)
+	}
+	var evs []string
+	for ev := range w.On {
+		evs = append(evs, string(ev))
+	}
+	sort.Strings(evs)
+	for _, e := range evs {
+		ev := domain.WatchEvent(e)
+		h := w.On[ev]
+		if !ev.Known() {
+			c.problem("step %s: event %q is not base-moved, checks-failed, changes-requested or comment", name, ev)
+			continue
+		}
+		c.handler(name, ev, h)
+	}
+}
+
+// trust checks a watch's trust: a literal, or one {{inputs.x}}.
+func (c *checker) trust(t, name string) {
+	t = strings.TrimSpace(t)
+	if !strings.Contains(t, "{{") {
+		if _, err := ParseTrust(t); err != nil {
+			c.problem("step %s: trust: %v", name, err)
+		}
+		return
+	}
+	m := templateRe.FindStringSubmatch(t)
+	head, input, ok := strings.Cut(m[1], ".")
+	if m[0] != t || !ok || head != "inputs" {
+		c.problem("step %s: trust is a literal or one {{inputs.<name>}}", name)
+		return
+	}
+	if _, declared := c.r.Inputs[input]; !declared {
+		c.problem("step %s: trust {{inputs.%s}} names no input of the recipe", name, input)
+		return
+	}
+	if d, has := c.r.InputDefaults[input]; has {
+		if _, err := ParseTrust(d); err != nil {
+			c.problem("step %s: trust input %s's default: %v", name, input, err)
+		}
+	}
+}
+
+func (c *checker) handler(name string, ev domain.WatchEvent, h domain.Handler) {
+	if h.Max < 0 {
+		c.problem("step %s: watch max must be zero or more", name)
+	}
+	var forms []string
+	if len(h.Steps) > 0 {
+		forms = append(forms, "steps")
+	}
+	if h.Recipe != "" || strings.TrimSpace(h.RecipeYAML) != "" {
+		forms = append(forms, "a recipe")
+	}
+	if h.Goto != "" {
+		forms = append(forms, "a goto")
+	}
+	switch {
+	case len(forms) == 0:
+		c.problem("step %s: the %s handler names steps, a recipe or a goto", name, ev)
+		return
+	case len(forms) > 1:
+		c.problem("step %s: the %s handler is one of steps, a recipe or a goto, not %s", name, ev, strings.Join(forms, " and "))
+		return
+	}
+	switch h.Form() {
+	case "goto":
+		found := false
+		for _, id := range c.topIDs {
+			found = found || id == h.Goto
+		}
+		if !found {
+			c.problem("step %s: the %s handler's goto %q names no earlier top-level step", name, ev, h.Goto)
+		}
+	case "recipe":
+		if h.Recipe == "" {
+			c.problem("step %s: the %s handler's frozen recipe comes with the name of the recipe it froze", name, ev)
+		} else if err := CheckName(h.Recipe); err != nil {
+			c.problem("step %s: the %s handler's recipe: %v", name, ev, err)
+		}
+		if y := strings.TrimSpace(h.RecipeYAML); y != "" {
+			r, err := Parse([]byte(y))
+			if err != nil {
+				c.problem("step %s: the %s handler's recipe %s: %v", name, ev, h.Recipe, err)
+				break
+			}
+			held := ""
+			Walk(r.Steps, func(st domain.Step, _ []domain.Entry) {
+				switch {
+				case st.Watch != nil:
+					held = "watch"
+				case st.PR != nil && held == "":
+					held = "pr"
+				case st.Dispatch != nil && held == "":
+					held = "dispatch"
+				}
+			})
+			if held != "" {
+				c.problem("step %s: the %s handler's recipe %s holds a %s step of its own, and a handler cannot", name, ev, h.Recipe, held)
+			} else if p, _ := check(r, true); len(p) > 0 {
+				c.problem("step %s: the %s handler's recipe cannot run: %s", name, ev, strings.Join(p, "; "))
+			}
+		}
+	case "steps":
+		saved, savedLast := c.inHandler, c.last
+		c.inHandler = true
+		for _, hs := range h.Steps {
+			c.step(hs, c.last)
+			c.last = hs.ID
+		}
+		c.inHandler, c.last = saved, savedLast
+	}
 }
