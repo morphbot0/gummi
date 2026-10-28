@@ -202,7 +202,7 @@ func TestCardPageJKStepsCards(t *testing.T) {
 	if next == first {
 		t.Fatal("J did not move to another card")
 	}
-	if !strings.Contains(ansi.Strip(m.View().Content), string(next)) {
+	if !strings.Contains(ansi.Strip(m.View().Content), next.Ref()) {
 		t.Errorf("the page still shows %s after stepping to %s", first, next)
 	}
 
@@ -235,8 +235,8 @@ func TestBacklogListMovesSelection(t *testing.T) {
 func TestBacklogKeepsTheCardVerbs(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, key('n'))
-	if m.Overlay.Top() == nil {
-		t.Error("n should still raise the new-feature form from the backlog list")
+	if m.draft == nil {
+		t.Error("n should still open a new session's draft from the backlog list")
 	}
 }
 

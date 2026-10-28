@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
@@ -162,7 +163,7 @@ func TestTheScheduleDialogSavesACompiledCron(t *testing.T) {
 	_, d := openScheduleFormOn(t, m, nil)
 
 	d.name.SetValue("nightly triage")
-	d.every.SetValue("1h")
+	d.when.SetValue("1h")
 	d.prompt.SetValue("triage new issues")
 	d.env.SetValue("0.50")
 	d.refresh()
@@ -184,6 +185,32 @@ func TestTheScheduleDialogSavesACompiledCron(t *testing.T) {
 	}
 }
 
+// TestTheScheduleDialogTakesACronInItsOneField: the when row takes a
+// cron line as readily as a preset, and with no name the schedule is
+// named after what it asks.
+func TestTheScheduleDialogTakesACronInItsOneField(t *testing.T) {
+	m := scheduleFormBoard(t)
+	_, d := openScheduleFormOn(t, m, nil)
+
+	d.when.SetValue("0 9 * * 1-5")
+	d.prompt.SetValue("Check CI and fix what broke.")
+	d.env.SetValue("0.50")
+	d.refresh()
+	if d.preview.Err != nil || d.preview.Cron != "0 9 * * 1-5" {
+		t.Fatalf("the preview read %+v, want the cron as typed", d.preview)
+	}
+	done, cmd := d.submit()
+	if !done {
+		t.Fatalf("save refused: %s", d.errText)
+	}
+	m = pump(t, m, cmd)
+
+	sc := scheduleRowReads(t, m, "check-ci-and-fix-what")
+	if sc.Cron != "0 9 * * 1-5" || sc.Name != "Check CI and fix what" {
+		t.Errorf("stored row = name %q cron %q", sc.Name, sc.Cron)
+	}
+}
+
 // TestTheScheduleDialogRefusesAPairNoSessionCouldRun: the session
 // picker's pre-save refusal is the dialog's too — a pair the engine
 // would refuse is blocked before save, and nothing is stored.
@@ -192,7 +219,7 @@ func TestTheScheduleDialogRefusesAPairNoSessionCouldRun(t *testing.T) {
 	_, d := openScheduleFormOn(t, m, nil)
 
 	d.name.SetValue("bad pair")
-	d.every.SetValue("1h")
+	d.when.SetValue("1h")
 	d.prompt.SetValue("p")
 	d.env.SetValue("10")
 	for i, b := range d.backends {
@@ -216,7 +243,7 @@ func TestTheScheduleDialogRefusesAPairNoSessionCouldRun(t *testing.T) {
 	// would run
 	m2, d2 := openScheduleFormOn(t, m, nil)
 	d2.name.SetValue("good pair")
-	d2.every.SetValue("1h")
+	d2.when.SetValue("1h")
 	d2.prompt.SetValue("p")
 	d2.env.SetValue("10")
 	for i, b := range d2.backends {
@@ -305,8 +332,8 @@ func TestTheScheduleDialogPrefillsAndEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, d := openScheduleFormOn(t, m, &stored)
-	if d.name.Value() != "nightly triage" || d.cron.Value() != "0 5 * * *" {
-		t.Fatalf("the rows read name=%q cron=%q", d.name.Value(), d.cron.Value())
+	if d.name.Value() != "nightly triage" || d.when.Value() != "0 5 * * *" {
+		t.Fatalf("the rows read name=%q when=%q", d.name.Value(), d.when.Value())
 	}
 	if d.zone.Value() != "local" {
 		t.Errorf("the empty stored timezone reads back %q, want local", d.zone.Value())
@@ -315,7 +342,7 @@ func TestTheScheduleDialogPrefillsAndEdits(t *testing.T) {
 		t.Errorf("the budget reads back %q", d.env.Value())
 	}
 
-	d.cron.SetValue("30 5 * * *")
+	d.when.SetValue("30 5 * * *")
 	d.refresh()
 	done, cmd := d.submit()
 	if !done {
@@ -346,7 +373,7 @@ func TestTheScheduleDialogRefusesWhatTheStoreWouldRefuse(t *testing.T) {
 	_, d := openScheduleFormOn(t, m, nil)
 
 	d.name.SetValue("no brake")
-	d.every.SetValue("1h")
+	d.when.SetValue("1h")
 	d.prompt.SetValue("p")
 	d.env.SetValue("")
 	d.refresh()
@@ -496,7 +523,7 @@ func TestTheScheduleDialogHintsTheEnvelope(t *testing.T) {
 
 	// the profile default is not priced here: the brake, in words
 	d.refresh()
-	if !strings.Contains(d.envHint, "caps what one minted card may spend") {
+	if !strings.Contains(d.envHint, "caps what each session it starts may spend") {
 		t.Errorf("the unpriced hint = %q, want the brake words", d.envHint)
 	}
 
@@ -524,7 +551,7 @@ func TestTheScheduleDialogPreviewsBeforeSave(t *testing.T) {
 	_, d := openScheduleFormOn(t, m, nil)
 
 	d.name.SetValue("never fires")
-	d.cron.SetValue("0 0 30 2 *")
+	d.when.SetValue("0 0 30 2 *")
 	d.prompt.SetValue("p")
 	d.env.SetValue("10")
 	d.refresh()
@@ -545,7 +572,7 @@ func TestTheScheduleDialogPreviewsBeforeSave(t *testing.T) {
 	// an unknown zone refuses in the preview, before save
 	d2 := newScheduleForm(m, nil)
 	d2.zone.SetValue("Mars/Olympus")
-	d2.every.SetValue("1h")
+	d2.when.SetValue("1h")
 	d2.prompt.SetValue("p")
 	d2.env.SetValue("10")
 	d2.refresh()
@@ -577,5 +604,19 @@ func TestTheCardMenuOpensAHeartbeatAimedAtTheCard(t *testing.T) {
 	sc := scheduleRowReads(t, m, strings.ToLower(string(card.ID))+"-heartbeat")
 	if !sc.Enabled || sc.NextRun.IsZero() || sc.Target != card.ID {
 		t.Errorf("stored row = enabled %v next %v target %s, want it on and aimed at %s", sc.Enabled, sc.NextRun, sc.Target, card.ID)
+	}
+}
+
+// TestTheScheduleDialogShowsWhatItAsksWhole: the prompt is a sentence, and
+// a fixed narrow field scrolled its first words out of sight once it ran
+// a little long — it read as if they had never been typed.
+func TestTheScheduleDialogShowsWhatItAsksWhole(t *testing.T) {
+	m := scheduleFormBoard(t)
+	_, d := openScheduleFormOn(t, m, nil)
+	const asks = "Check CI and fix whatever broke overnight, then say what"
+	d.prompt.SetValue(asks)
+	d.setFocus(schedStopWhen)
+	if view := ansi.Strip(d.View(m.styles, 120, 34)); !strings.Contains(view, asks) {
+		t.Errorf("the prompt is cut in the dialog:\n%s", view)
 	}
 }

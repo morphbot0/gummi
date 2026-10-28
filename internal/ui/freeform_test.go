@@ -57,8 +57,8 @@ func freeformShell(t *testing.T, w, h int, wt bool) *Shell {
 func TestAFreeformCardsStripNamesItsBranch(t *testing.T) {
 	m := freeformShell(t, 120, 34, true)
 	out := ansi.Strip(m.threadView(120, 34))
-	if !strings.Contains(out, "freeform") {
-		t.Errorf("the masthead never says the card is freeform:\n%s", out)
+	if !strings.Contains(out, "session  · ff/drop-the-leaked-pty-fd") {
+		t.Errorf("the masthead never says the card is a session:\n%s", out)
 	}
 	if !strings.Contains(out, "ff/drop-the-leaked-pty-fd") {
 		t.Errorf("the masthead never names the card's branch:\n%s", out)
@@ -182,7 +182,7 @@ func TestTheComposerOnAFreeformCardNamesWhatItCanDo(t *testing.T) {
 	if got == placeholderText {
 		t.Fatal("a freeform card gets the workflow composer's placeholder")
 	}
-	for _, want := range []string{"branch", "alt+d", "land"} {
+	for _, want := range []string{"branch", "alt+d", "actions"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the freeform placeholder never mentions %q: %q", want, got)
 		}
@@ -196,7 +196,7 @@ func TestCreatingAFreeformCardMintsItOutsideTheGraph(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -231,7 +231,7 @@ func TestLandingAFreeformCardFromTheBoard(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -320,33 +320,6 @@ func TestHandOffIsOfferedOnAFreeformCard(t *testing.T) {
 	}
 }
 
-// TestTheFreeformCommandIsInTheVocabulary: the kind row of `n` reaches a
-// freeform card, but a reader who knows what they want types the word. The
-// entry has no accelerator, so the menu and the composer's slash line are
-// the only places it can be found.
-func TestTheFreeformCommandIsInTheVocabulary(t *testing.T) {
-	m := freeformShell(t, 120, 34, true)
-	var found *command
-	for _, c := range m.globalCommands() {
-		if c.name == "freeform" {
-			found = &c
-			break
-		}
-	}
-	if found == nil {
-		t.Fatal("no freeform entry in the command vocabulary")
-	}
-	if found.key != "" {
-		t.Errorf("the freeform command took the accelerator %q", found.key)
-	}
-	if cmd := m.runCommand(found.id); cmd != nil {
-		t.Error("opening the creation dialog should need no command")
-	}
-	if _, ok := m.Overlay.Top().(*cardForm); !ok {
-		t.Fatalf("the freeform command did not open the creation dialog")
-	}
-}
-
 // TestTheStatsTabReportsAFreeformCardsBill: a freeform card has no passes
 // — nothing mirrors a stage enter for it — but it has a real bill, and the
 // pty drive caught this surface saying "nothing has run on this card yet"
@@ -423,7 +396,7 @@ func TestDeletingAFreeformCardLeavesTheWorkspaceStanding(t *testing.T) {
 	m, root := newWorkspace(t)
 	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Drop the leaked pty fd")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
@@ -588,5 +561,18 @@ func TestRenameHandsTheComposerTheSessionsTitle(t *testing.T) {
 	m.runCardAction(cardAction{id: "rename", label: "rename…"})
 	if got := m.threadInput.Value(); got != "/rename drop the leaked pty fd" {
 		t.Fatalf("the composer reads %q", got)
+	}
+}
+
+// TestAnInboxRowOfASessionNamesNoStage: a session holds "open" all its
+// life, so its inbox row says "question", never "open question".
+func TestAnInboxRowOfASessionNamesNoStage(t *testing.T) {
+	m := freeformShell(t, 120, 34, true)
+	id := m.rows[m.sel].F.ID
+	if got := inboxRowLabel(m.inboxStage(id), attnQuestion); got != "question" {
+		t.Errorf("a session's inbox row reads %q, want %q", got, "question")
+	}
+	if got := inboxRowText(m.inboxStage(id), "open the PR?"); got != "open the PR?" {
+		t.Errorf("a session's question lost its first word: %q", got)
 	}
 }

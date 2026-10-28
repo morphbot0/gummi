@@ -82,17 +82,12 @@ const stageJoin = " ─ "
 // thread is rendered at and the height its scroll clamp is measured
 // against can never disagree — a clamp computed from a different budget
 // than the render uses stops paging in the wrong place.
-// crumb counts the rows the way-back line costs: one for the line, and
-// one above it so it does not sit flush against the tab bar — the same
-// separation the composer gets from the status bar at the other end of
-// the page. That row is the first of the page's chrome to go, since a
-// line you can read without air is worth more than air.
+// crumb counts the rows the way-back line costs: one. The row of air
+// between it and the tab bar is the layout's, which every surface gets
+// (layout.Compute), so the page does not spend one of its own.
 func cardPageChrome(h int) (crumb, blank int) {
 	if h >= cardCrumbRows {
 		crumb = 1
-		if h > cardCrumbRows {
-			crumb++
-		}
 	}
 	if h-crumb >= composerBlankRows {
 		blank = 1
@@ -675,7 +670,7 @@ func trimTrailingBlanks(lines []string) []string {
 func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	f := r.F
 
-	id := s.Title.Render(string(f.ID))
+	id := s.Title.Render(f.ID.Ref())
 	title := s.Base.Render("· " + f.Title)
 
 	profile := ""
@@ -739,7 +734,7 @@ func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 	// reader of this row actually wants, since it is what they will check
 	// out, and the closest thing a freeform card has to "how far along".
 	if f.IsFreeform() {
-		pill := s.StagePill(f.Stage).Render("freeform")
+		pill := s.StagePill(f.Stage).Render("session")
 		branch := f.BranchName()
 		if f.MainCheckout {
 			branch = "main checkout"

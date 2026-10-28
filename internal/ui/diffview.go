@@ -31,6 +31,17 @@ type diffView struct {
 	located map[int][]int           // diff line index → annotation indices anchored there
 	orphans []int                   // annotation indices whose anchor no longer matches
 	cursor  int                     // 1-based diff line
+
+	// how the lines read, from parseDiffLines: git's own bookkeeping a
+	// person has no use for is hidden, each file opens with a heading,
+	// and a line is numbered by where it sits in the new file rather than
+	// in the diff
+	hidden map[int]bool   // line index → not drawn (and skipped by the cursor)
+	heads  map[int]string // line index of a "diff --git" → the file it opens
+	newNum []int          // line index → its line in the new file, 0 for none
+	files  []int          // line indexes of the file heads, in order
+	adds   int
+	dels   int
 }
 
 // diffLoadedMsg delivers a (re)loaded diff plus its annotations.
@@ -115,7 +126,124 @@ func newDiffView(f domain.Feature, diff string, anns []domain.DiffAnnotation) *d
 			dv.orphans = append(dv.orphans, i)
 		}
 	}
+	dv.parseDiffLines()
+	// a comment written on a line now hidden stays where it can be read
+	for idx := range dv.located {
+		delete(dv.hidden, idx)
+	}
 	return dv
+}
+
+// diffMetaPrefixes are the lines git writes between a file's "diff --git"
+// and its first hunk: what a person reads is said by the file's heading.
+var diffMetaPrefixes = []string{
+	"index ", "--- ", "+++ ", "new file mode", "deleted file mode",
+	"old mode", "new mode", "similarity index", "dissimilarity index",
+	"rename from", "rename to", "copy from", "copy to",
+}
+
+// parseDiffLines reads the unified diff into what the view draws: which
+// lines are git's bookkeeping, the heading each file opens with, and each
+// line's number in the new file.
+func (dv *diffView) parseDiffLines() {
+	dv.hidden, dv.heads = map[int]bool{}, map[int]string{}
+	dv.newNum = make([]int, len(dv.lines))
+	head, inHunk, next := -1, false, 0
+	for i, l := range dv.lines {
+		switch {
+		case strings.HasPrefix(l, "diff --git "):
+			head, inHunk = i, false
+			dv.heads[i] = diffFileName(l)
+			dv.files = append(dv.files, i)
+		case !inHunk && head >= 0 && hasAnyPrefix(l, diffMetaPrefixes):
+			dv.hidden[i] = true
+			switch {
+			case strings.HasPrefix(l, "new file mode"):
+				dv.heads[head] += " (new)"
+			case strings.HasPrefix(l, "deleted file mode"):
+				dv.heads[head] += " (deleted)"
+			}
+		case strings.HasPrefix(l, "@@"):
+			// a file's first hunk with no enclosing function to name is a
+			// break between nothing and the file's first lines: not drawn
+			if !inHunk && strings.HasSuffix(strings.TrimSpace(l), "@@") {
+				dv.hidden[i] = true
+			}
+			inHunk = true
+			next = hunkNewStart(l)
+		case inHunk && strings.HasPrefix(l, "+"):
+			dv.newNum[i] = next
+			next++
+			dv.adds++
+		case inHunk && strings.HasPrefix(l, "-"):
+			dv.dels++
+		case inHunk && strings.HasPrefix(l, " "):
+			dv.newNum[i] = next
+			next++
+		}
+	}
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// diffFileName is the file a "diff --git a/x b/y" line names: the new
+// path, or "old → new" for a rename.
+func diffFileName(l string) string {
+	rest := strings.TrimPrefix(l, "diff --git ")
+	a, b, ok := strings.Cut(rest, " b/")
+	if !ok {
+		return rest
+	}
+	a = strings.TrimPrefix(a, "a/")
+	if a != b {
+		return a + " → " + b
+	}
+	return b
+}
+
+// hunkNewStart is where "@@ -a,b +c,d @@" starts in the new file: c.
+func hunkNewStart(l string) int {
+	_, rest, ok := strings.Cut(l, " +")
+	if !ok {
+		return 0
+	}
+	n := 0
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+// jumpFile moves the cursor to the next or previous file's heading.
+func (dv *diffView) jumpFile(dir int) {
+	if len(dv.files) == 0 {
+		return
+	}
+	cur := dv.cursor - 1
+	target := -1
+	for _, f := range dv.files {
+		if dir > 0 && f > cur {
+			target = f
+			break
+		}
+		if dir < 0 && f < cur {
+			target = f
+		}
+	}
+	if target < 0 {
+		return
+	}
+	dv.cursor = target + 1
 }
 
 // openCount is the number of unresolved annotations (located or orphaned).
@@ -148,7 +276,22 @@ func (dv *diffView) openOrphanCount() int {
 // lines plus one slot per orphaned annotation in the footer (so x/D can
 // reach a comment whose line changed).
 func (dv *diffView) setCursor(n int) {
-	dv.cursor = min(max(n, 1), len(dv.lines)+len(dv.orphans))
+	dir := 1
+	if n < dv.cursor {
+		dir = -1
+	}
+	n = min(max(n, 1), len(dv.lines)+len(dv.orphans))
+	// step over what is not drawn, onward first, then back
+	for _, d := range []int{dir, -dir} {
+		k := n
+		for k >= 1 && k <= len(dv.lines) && dv.hidden[k-1] {
+			k += d
+		}
+		if k >= 1 && k <= len(dv.lines)+len(dv.orphans) {
+			dv.cursor = k
+			return
+		}
+	}
 }
 
 // jumpAnn moves the cursor to the next/previous annotated position —
@@ -307,6 +450,7 @@ func (dv *diffView) bindings() []binding {
 		{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
 		{key: "D", label: "delete", help: "delete the annotation at the cursor"},
 		{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
+		{key: "{ }", label: "files", help: "jump to the previous / next file", bar: true},
 		{key: "[ ]", label: "repository", help: "show the diff of the previous / next repository a session spans", bar: false},
 		{key: "L", label: "land repo", help: "land the attached repository shown (see [ and ])"},
 		{key: "?", label: "help", bar: true},
@@ -342,6 +486,10 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 		dv.setCursor(dv.cursor + m.mainPage())
 	case "pgup":
 		dv.setCursor(dv.cursor - m.mainPage())
+	case "}":
+		dv.jumpFile(1)
+	case "{":
+		dv.jumpFile(-1)
 	case "n":
 		dv.jumpAnn(1)
 	case "p":

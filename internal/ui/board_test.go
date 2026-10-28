@@ -333,15 +333,6 @@ func TestCardLineNarrowWidthGolden(t *testing.T) {
 	golden.RequireEqual(t, []byte(b.String()))
 }
 
-func TestFormOverlay(t *testing.T) {
-	m := populatedShell(100, 30)
-	form := newCardForm(nil, nil, false, "", 2400, func(formResult) tea.Cmd { return nil })
-	form.SetText("dark mode toggle")
-	form.text.Blur()
-	m.Overlay.Push(form)
-	golden.RequireEqual(t, []byte(m.View().Content))
-}
-
 func TestBoardCostColumnGolden(t *testing.T) {
 	m := populatedShell(120, 34)
 	m.rows[1].F.Spend = domain.Spend{Credits: 12.4, InputTokens: 3200, OutputTokens: 1800} // FD-042

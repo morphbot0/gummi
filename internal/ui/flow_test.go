@@ -126,17 +126,17 @@ func typeString(t *testing.T, m *Shell, str string) *Shell {
 func TestFormValidationBlocksEmptyTitle(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
-	m.Overlay.Push(m.openCardForm())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.Overlay.HasDialogs() {
-		t.Fatal("form closed despite empty title")
+	if m.draft == nil {
+		t.Fatal("the draft closed despite an empty message")
 	}
 	if len(m.rows) != 0 {
-		t.Fatal("feature created from empty title")
+		t.Fatal("a session was created from an empty message")
 	}
-	// esc cancels
+	// esc leaves
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.Overlay.HasDialogs() {
-		t.Fatal("esc did not close the form")
+	if m.draft != nil {
+		t.Fatal("esc did not leave the draft")
 	}
 }

@@ -437,6 +437,8 @@ func (d *profileForm) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString(s.Faint.Render("default ") + choice(profileFieldDefault, def) + "\n\n")
 	backends := profileBackends()
+	labels := make([]string, len(d.rows))
+	col := 20
 	for i, r := range d.rows {
 		bf := profileFieldRoles + 2*i
 		backend := backends[r.backend]
@@ -448,7 +450,15 @@ func (d *profileForm) View(s *theme.Styles, w, h int) string {
 		case backend == "":
 			backend = d.defName + " (default)"
 		}
-		line := s.Faint.Render(fmt.Sprintf("%-14s", r.role)) + choice(bf, fmt.Sprintf("%-20s", backend)) + " " + r.model.View()
+		labels[i] = backend
+		col = max(col, ansi.StringWidth(backend))
+	}
+	for i, r := range d.rows {
+		bf := profileFieldRoles + 2*i
+		// one column for every row's agent, as wide as the widest, so the
+		// models line up under each other however long an agent's name is
+		backend := labels[i] + strings.Repeat(" ", col-ansi.StringWidth(labels[i]))
+		line := s.Faint.Render(fmt.Sprintf("%-14s", r.role)) + choice(bf, backend) + " " + r.model.View()
 		b.WriteString(ansi.Truncate(line, max(min(w-10, 100), 40), "…") + "\n")
 		if d.focus == bf || d.focus == bf+1 {
 			b.WriteString(s.Faint.Render(fmt.Sprintf("%14s%s", "", r.help)) + "\n")

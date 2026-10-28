@@ -485,12 +485,7 @@ func (m *Shell) cardPageView(w, h int) string {
 		s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" board") +
 		s.Faint.Render("  ·  "+strconv.Itoa(pos)+" of "+strconv.Itoa(len(order))) +
 		"  " + s.KeyHint.Render(step) + s.Faint.Render(" prev/next card")
-	line := ansi.Truncate(crumb, w, "…")
-	if crumbRows > 1 {
-		// the row above it, when the page can spare one
-		line = "\n" + line
-	}
-	return line + "\n" + out
+	return ansi.Truncate(crumb, w, "…") + "\n" + out
 }
 
 // backlogBindings is the list level's key table: the board's own table
@@ -507,7 +502,7 @@ func (m *Shell) backlogBindings() []binding {
 		case "j/k ↓↑":
 			b.label, b.help, b.bar = "select", "select card", false
 		case "enter":
-			b.label, b.help, b.bar = "open card", "open the card page — full width, with the card's actions", true
+			b.label, b.help, b.bar = "open card", "open its page — the thread, its diff and its actions", true
 			lead = append(lead, b)
 			continue
 		}

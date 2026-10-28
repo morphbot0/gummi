@@ -38,6 +38,18 @@ type Result struct {
 // Valid reports whether the previewed cadence would store and fire.
 func (r Result) Valid() bool { return r.Err == nil }
 
+// SplitWhen reads the one cadence field a form offers — "1h", "@daily"
+// or "0 5 * * *" alike — into Preview's two inputs: a preset Compile
+// accepts is a preset, anything else is the expression itself, which
+// Parse then judges.
+func SplitWhen(when string) (every, cronExpr string) {
+	when = strings.TrimSpace(when)
+	if _, err := Compile(when); err == nil {
+		return when, ""
+	}
+	return "", when
+}
+
 // Preview is what both faces show before a schedule is stored: given the
 // cadence inputs a form holds — a preset, an expression, either optional
 // when the other is present — and a timezone, it answers with the
@@ -56,7 +68,7 @@ func Preview(every, cronExpr, tz string, now time.Time) Result {
 	if expr == "" {
 		preset := strings.TrimSpace(every)
 		if preset == "" {
-			return Result{Err: fmt.Errorf("give the cadence: cron %q or every 5m", "0 * * * *")}
+			return Result{Err: fmt.Errorf("say when: 1h, @daily or a cron line like %q", "0 5 * * *")}
 		}
 		compiled, err := Compile(preset)
 		if err != nil {

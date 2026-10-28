@@ -25,21 +25,26 @@ func TestPasteIntoFeatureForm(t *testing.T) {
 	m = typeString(t, m, "mo")
 	m = paste(t, m, "de")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.Overlay.HasDialogs() {
-		t.Fatal("form did not close on submit")
+	if m.draft != nil {
+		t.Fatal("the draft did not start the session")
 	}
 	if len(m.rows) != 1 || m.rows[0].F.Slug != "dark-mode" {
 		t.Fatalf("rows after paste+create: %+v", m.rows)
 	}
 
-	// paste while the options row is focused must not touch the input
+	// a paste is prose: with a setting that takes no text focused, it is
+	// the message, and the cursor goes back to the composer with it
+	m.cardOpen = false
 	m = openSessionForm(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
-	m = paste(t, m, "stray")
-	form := m.Overlay.Top().(*cardForm)
-	if got := form.Text(); got != "" {
-		t.Fatalf("paste landed in a blurred input: %q", got)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if !m.draft.chips || m.draft.chip == chipBudget {
+		t.Fatalf("shift+tab focused chips=%v chip=%d, want a setting that takes no text", m.draft.chips, m.draft.chip)
 	}
+	m = paste(t, m, "stray")
+	if got := m.draft.form.Text(); got != "stray" || m.draft.chips {
+		t.Fatalf("paste on a setting: composer=%q chips=%v, want the message focused", got, m.draft.chips)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// a dialog without an input swallows the paste instead of leaking it

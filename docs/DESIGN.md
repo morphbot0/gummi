@@ -881,6 +881,18 @@ to disambiguate which pane owns them. Every card verb (`g`, `v`, `m`,
 route through the one guarded `boardVerb`; only movement, `enter` and
 `esc` differ, and each level's binding table says which (`keymap.go`).
 
+**The session rail.** With a card page or a new session's draft open, a
+terminal wide enough for both (the page keeps at least 80 columns, so
+110 and up) draws the board's rows again in a 30-column rail on the
+left — the web page's rail, in the terminal (`ui/rail.go`,
+`layout.WithRail`). It is the backlog drawn small, not a second list:
+the same order, groups and marks (`backlogEntries`), two lines a card —
+the title, then what it is doing and what it has spent — and no cursor
+or keys of its own. The board's selection is its band, so `alt+j`/`alt+k`
+walk it, and the arrow keys stay aimed at the page. Beside the full-width
+backlog it would be the same list twice, so it is drawn only beside a
+page; below the width it steps aside and the page takes the terminal.
+
 The board sits behind a one-row tab bar shared with the status bar:
 `gummi │ board │ stats │ inbox │`. `tab` cycles all three;
 `alt+1`/`alt+2`/`alt+3` jump straight to one — alt-prefixed
@@ -2421,7 +2433,7 @@ piece of machinery doc-ingest didn't need, and what makes GitHub polling safe.
 The gate lives on two surfaces, mirroring §11.4, and both pick a **single**
 issue out of one fetch rather than gating a batch — an entire repo's issues
 should never land in todo from one keystroke. In the TUI the gate *is* the
-new-card dialog: a pasted issue reference is imported into it with `alt+g`
+new session's draft (§19.8; it was the new-card dialog): a pasted issue reference is imported into it with `alt+g`
 (the title and body land in the box, editable, with the labels reported
 beside the reference and the severity read from them), and the issue
 picker — `alt+g` with no reference, or `G` from the board — lists the
@@ -3709,27 +3721,23 @@ hand-off `internal/ui/rebase.go` already had.
 ### 18.4 Setting one up
 
 A stack is **created by the act of stacking**, not by a dialog: `T` on a
-card opens the ordinary new-card form with its `stack` row pre-answered,
-and creating that second card is what brings the stack into being, named
-after the card at the bottom. The common case costs one key, and a stack of
-one card — which nobody wants — never exists. The row itself lives in the
-folded run options, because the overwhelming majority of cards are
-standalone and a row every reader tabs past to say "no" costs more than it
-gives; what keeps the gesture legible is the always-visible `becomes`
-readout, which names the branch the card will fork from.
+card opens a new session's draft with its `from` setting already on that
+card, and creating that second card is what brings the stack into being,
+named after the card at the bottom. The common case costs one key, and a
+stack of one card — which nobody wants — never exists.
 
-The row is **answerable on its own**, not only by `T`. It cycles the
-cards on the board that have a branch to fork from — most recently
-touched first, so the card the reader just left is one `→` away — and a
-dialog opened with `n` by someone who only then thought of the card
-below is not told to cancel and start again. `T` remains the one-key
-path; all it does now is preselect a cell. What keeps the row from
-collapsing into the dependency picker it must not become is its *shape*:
-`runs after` is a filtered list because it names a set out of the whole
-workspace, while `stack` is a cycle because it names one card out of a
-short, repo-local one. A stack position is topology and a dependency is
-scheduling (§18.1), and two rows that set them must not be operated the
-same way.
+The setting is **answerable on its own**, not only by `T`. A branch to fork
+from and a card to stack on answer one question — what this branch forks
+from — so they are one `from` chip in the draft's strip (§19.8), changed
+with `/from` or by stepping through it with `←`/`→`: the
+repository's branches, then the cards on the board that have a branch to
+fork from, most recently touched first, so the card the reader just left is
+close by. Someone who opened a draft with `n` and only then thought of the
+card below is not told to leave and start again; `T` remains the one-key
+path, and all it does is preset the chip. What keeps it from collapsing
+into a dependency picker is what it names: one branch, out of a short,
+repo-local list. A stack position is topology and a dependency is
+scheduling (§18.1).
 
 The row's candidates are the cards that could actually carry the fork:
 no research card (no branch), no goal and no card inside one (a goal's
@@ -3737,8 +3745,8 @@ cards share the goal's branch, §18.5), and only the chosen repository's,
 since a stack is one repository. A card already **done** stays on offer —
 done is a verified branch, not a landed one, so putting the next slice on
 top of one waiting for review is the case stacks exist for. Because the
-repo row can move after a card has been chosen, the form re-checks at
-submit and refuses; the store refuses it too (`ErrStackRepoMismatch`), but
+repository can move after a card has been chosen, the draft re-checks at
+send and refuses; the store refuses it too (`ErrStackRepoMismatch`), but
 only once the card has been created, as a warning about a stack that did
 not happen.
 
@@ -4296,6 +4304,22 @@ the card (`POST /api/cards`, kind freeform, no title needed; the title is
 its first line) and is its first turn verbatim (`KickoffWith`). The card
 itself keeps only that first line, so before this a multi-line opening
 was cut to its title.
+
+The terminal does the same (`ui/sessiondraft.go`). `n`, the command
+menu's New session and `T` open no dialog. The board tab's pane becomes
+an empty session, with the thread's own composer at its foot and one
+strip of settings above it, already holding the defaults: repository,
+where it works (its own worktree, the main checkout, an agent's home),
+what it forks from (a branch, or a card to stack on: one setting), model,
+budget and profile. shift+tab moves into the strip. A setting can also
+be typed as a slash command (`/repo`, `/from`, `/main`, `/budget 5`, …).
+Enter on a message creates the session and starts it. esc puts a draft
+with words in it away for the next `n`. A workspace with one named
+repository has nothing to choose, so the strip names it without making
+it a setting. The draft has no rules of its own: its model is
+`cardForm`, which draws nothing and reads no keys, and the web's create
+drives the same model, so both faces validate and create through one
+path. The new-card dialog that came before the draft is gone.
 
 **Writing a spec continues the work on a branch of the spec's own.** The
 session is handed off: its branch kept, and the one floor it has (open

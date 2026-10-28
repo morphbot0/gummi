@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -104,5 +105,25 @@ profiles:
 	}
 	if !slices.Equal(m.profileNames, []string{"claude", "cheap"}) {
 		t.Errorf("the new-card form offers %v", m.profileNames)
+	}
+}
+
+// TestProfileFormAlignsItsModels: an agent named longer than the column it
+// used to be padded to pushed its row's model out of line with the rest;
+// the column is as wide as its widest agent now.
+func TestProfileFormAlignsItsModels(t *testing.T) {
+	m := populatedShell(120, 40)
+	p := engine.ProfileView{Name: "thrifty", Roles: []engine.ProfileRoleView{{Role: "implementer", Model: "gpt-5-mini"}}}
+	d := newProfileForm(m, engine.ProfilesView{DefaultBackend: "a-very-long-agent-name.py"}, &p)
+	cols := map[int]bool{}
+	for _, l := range strings.Split(ansi.Strip(d.View(m.styles, 120, 40)), "\n") {
+		for _, word := range []string{"gpt-5-mini", "unset"} {
+			if i := strings.Index(l, word); i >= 0 && (strings.Contains(l, "implementer") || strings.Contains(l, "planner")) {
+				cols[ansi.StringWidth(l[:i])] = true
+			}
+		}
+	}
+	if len(cols) != 1 {
+		t.Errorf("the models start at %d different columns, want one: %v", len(cols), cols)
 	}
 }

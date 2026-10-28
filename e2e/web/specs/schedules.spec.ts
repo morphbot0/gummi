@@ -49,7 +49,7 @@ test('a schedule is defined, enabled through its confirm, fired and deleted', as
   await page.getByTestId('schedule-form-name').fill('keep tidy');
   await page.getByTestId('schedule-form-kind-heartbeat').click();
   await page.getByTestId('schedule-form-target').fill(ff);
-  await page.getByTestId('schedule-form-every').fill('15m');
+  await page.getByTestId('schedule-form-when').fill('15m');
   await page.getByTestId('schedule-form-prompt').fill('check the README, keep going');
   await page.getByTestId('schedule-form-submit').click();
   const row = page.getByTestId('schedule-keep-tidy');
@@ -100,7 +100,7 @@ test('a schedule is defined, enabled through its confirm, fired and deleted', as
   await page.getByTestId('schedule-form-name').fill('ghost');
   await page.getByTestId('schedule-form-kind-heartbeat').click();
   await page.getByTestId('schedule-form-target').fill('FF-999');
-  await page.getByTestId('schedule-form-every').fill('15m');
+  await page.getByTestId('schedule-form-when').fill('15m');
   await page.getByTestId('schedule-form-submit').click();
   await expect(page.getByTestId('schedule-form-error')).toContainText('FF-999 is not a card on this board');
   await expect(page.getByTestId('schedule-ghost')).toHaveCount(0);
@@ -135,12 +135,12 @@ test('the schedule form previews its cadence, picks a pair from the catalog, and
 
   // an expression that can never fire is refused in the form, not at
   // the first fire
-  await page.getByTestId('schedule-form-cron').fill('0 0 30 2 *');
+  await page.getByTestId('schedule-form-when').fill('0 0 30 2 *');
   await expect(page.getByTestId('schedule-form-preview-error')).toContainText(/never/i);
 
   // a nonsense timezone is refused; a real one previews in its own wall
   // clock
-  await page.getByTestId('schedule-form-cron').fill('');
+  await page.getByTestId('schedule-form-when').fill('1h');
   await page.getByTestId('schedule-form-tz').fill('Mars/Olympus');
   await expect(page.getByTestId('schedule-form-preview-error')).toContainText(/timezone/i);
   await page.getByTestId('schedule-form-tz').fill('Europe/Berlin');
@@ -152,7 +152,7 @@ test('the schedule form previews its cadence, picks a pair from the catalog, and
   await page.getByTestId('model-search').fill('e2e-implementer');
   await page.getByTestId('model-headless-e2e-implementer').click();
   await expect(pair).toHaveAttribute('data-model', 'e2e-implementer');
-  await expect(page.getByTestId('schedule-form-envelope-hint')).toContainText(/envelope/i);
+  await expect(page.getByTestId('schedule-form-envelope-hint')).toContainText(/budget/i);
 
   await page.getByTestId('schedule-form-name').fill('previewed mint');
   await page.getByTestId('schedule-form-prompt').fill('triage new issues');
@@ -166,9 +166,9 @@ test('the schedule form previews its cadence, picks a pair from the catalog, and
   await row.getByTestId('schedule-previewed-mint-edit').click();
   await expect(form).toBeVisible();
   await expect(page.getByTestId('schedule-form-name')).toHaveValue('previewed mint');
-  await expect(page.getByTestId('schedule-form-cron')).toHaveValue('0 * * * *');
-  await expect(page.getByTestId('schedule-form-kind-fixed')).toContainText('mint');
-  await page.getByTestId('schedule-form-cron').fill('30 5 * * *');
+  await expect(page.getByTestId('schedule-form-when')).toHaveValue('0 * * * *');
+  await expect(page.getByTestId('schedule-form-kind-fixed')).toContainText('start a session');
+  await page.getByTestId('schedule-form-when').fill('30 5 * * *');
   await page.getByTestId('schedule-form-submit').click();
   await expect(row).toHaveAttribute('data-enabled', 'false');
   await expect(row.locator('.sch-cron')).toHaveText('30 5 * * *');
@@ -195,7 +195,7 @@ test('a session\'s menu opens a heartbeat aimed at it, and saving turns it on', 
   await expect(page.getByTestId('schedule-form')).toBeVisible();
   await expect(page.getByTestId('schedule-form-target')).toHaveValue(id);
   await expect(page.getByTestId('schedule-form-name')).toHaveValue(`${id.toLowerCase()} heartbeat`);
-  await expect(page.getByTestId('schedule-form-every')).toHaveValue('1h');
+  await expect(page.getByTestId('schedule-form-when')).toHaveValue('1h');
   await page.getByTestId('schedule-form-prompt').fill('check the rounding, keep going');
   await page.getByTestId('schedule-form-submit').click();
 

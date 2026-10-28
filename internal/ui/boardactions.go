@@ -91,11 +91,7 @@ func (m *Shell) syncActionFocus() {
 func (m *Shell) globalCommands() []command {
 	attached := m.attached()
 	cmds := []command{
-		{id: "n", name: "new", label: "New session", key: "n", available: attached},
-		// No accelerator: `n` already reaches this. The entry exists so the
-		// word itself is in the vocabulary — a reader who knows what they
-		// want types "/freeform".
-		{id: "new-freeform", name: "freeform", label: "New session — a coding agent on a branch of its own", key: "", available: attached},
+		{id: "n", name: "new", label: "New session — a coding agent on a branch of its own", key: "n", available: attached},
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "L", name: "schedules", label: "Schedules and heartbeats", key: "L", available: attached},
 		{id: "E", name: "skills", label: "Skill pack and its curator", key: "E", available: attached},
@@ -257,9 +253,6 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		return nil
 	case "model":
 		return m.openCardModelPicker()
-	case "new-freeform":
-		m.Overlay.Push(m.openCardForm())
-		return nil
 	}
 	return m.boardVerb(id)
 }

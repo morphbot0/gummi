@@ -133,7 +133,7 @@
   {
     "card": "FF-013",
     "kind": "budget",
-    "question": "open ran out of budget.",
+    "question": "It ran out of budget.",
     "anchor": "thread",
     "options": [
       {

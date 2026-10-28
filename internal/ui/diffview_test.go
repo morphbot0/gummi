@@ -15,6 +15,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/threadfold"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // diffWorkspace creates a session with a worktree that has an uncommitted
@@ -382,5 +383,60 @@ func TestOpenDiffCommentHoldsTheLanding(t *testing.T) {
 	m = pump(t, m, m.loadRows)
 	if why := m.landingRefusal(m.rows[0].F); why != "" {
 		t.Fatalf("a resolved comment still holds the landing: %q", why)
+	}
+}
+
+// TestTheDiffReadsByFile: git's own bookkeeping is not drawn, each file
+// opens with its name, a hunk break names its function, a line is
+// numbered where it sits in the new file, and } and { step files.
+func TestTheDiffReadsByFile(t *testing.T) {
+	diff := strings.Join([]string{
+		"diff --git a/main.go b/main.go",
+		"index 1111111..2222222 100644",
+		"--- a/main.go",
+		"+++ b/main.go",
+		"@@ -10,3 +12,3 @@ func main() {",
+		" \ta := 1",
+		"-\tb := 2",
+		"+\tb := 3",
+		" \tc := 4",
+		"diff --git a/old.txt b/new.txt",
+		"similarity index 90%",
+		"rename from old.txt",
+		"rename to new.txt",
+		"--- a/old.txt",
+		"+++ b/new.txt",
+		"@@ -1 +1 @@",
+		"-x",
+		"+y",
+	}, "\n") + "\n"
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	dv := newDiffView(domain.Feature{ID: "FF-001", Num: 1}, diff, nil)
+	out := ansi.Strip(dv.render(m, 100, 40))
+	for _, gone := range []string{"diff --git", "index 111", "+++ b/", "--- a/", "rename from", "@@"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the diff still draws %q:\n%s", gone, out)
+		}
+	}
+	for _, want := range []string{"▌ main.go", "▌ old.txt → new.txt", "⋯ func main() {", "13  +", "b := 3", "14   "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the diff never draws %q:\n%s", want, out)
+		}
+	}
+	if dv.adds != 2 || dv.dels != 2 {
+		t.Errorf("counted +%d −%d, want +2 −2", dv.adds, dv.dels)
+	}
+	dv.jumpFile(1)
+	if got := dv.lines[dv.cursor-1]; got != "diff --git a/old.txt b/new.txt" {
+		t.Errorf("} landed on %q, want the second file's heading", got)
+	}
+	dv.setCursor(dv.cursor + 1)
+	if got := dv.lines[dv.cursor-1]; got != "-x" {
+		t.Errorf("j from a heading landed on %q, want the file's first change", got)
+	}
+	dv.jumpFile(-1) // inside a file, { goes to its own heading first
+	dv.jumpFile(-1)
+	if dv.cursor != 1 {
+		t.Errorf("{ landed on line %d, want the first file's heading", dv.cursor)
 	}
 }

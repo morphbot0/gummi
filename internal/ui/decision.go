@@ -420,6 +420,11 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		}
 		return r.F.Name() + " is closed — " + endingWord(in.ending) + "."
 	case decisionBudget:
+		if r.F.IsFreeform() {
+			// a session's stage is the "open" it holds all its life, not
+			// a stop on the way: "open ran out of budget" reads as nonsense
+			return "It ran out of budget."
+		}
 		return string(r.F.Stage) + " ran out of budget."
 	case decisionFailure:
 		// names what happened rather than reusing the idle sentence

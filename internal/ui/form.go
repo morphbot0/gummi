@@ -83,18 +83,6 @@ func fieldRow(s *theme.Styles, focused bool, label string) string {
 	return "  " + s.Faint.Render(label)
 }
 
-// The envelope hints: the label drawn beside the new-card dialog's
-// envelope input, and the unit on its collapsed readout.
-//
-// The number is a credit figure and 0 is a meaningful value, and the only
-// thing that ever said so was the input's Placeholder — which a text input
-// renders only while it is empty, and this field is prefilled from
-// envelopePrefill() every single time it opens. So the modal a first-time
-// user meets showed a bare "> 2400": no unit, and no sign that 0 means
-// anything but a rejected entry. A caption is drawn whatever the field
-// holds, which is the whole reason it is one and not a placeholder.
-const envelopeHintCapped = "dollars · 0 = uncapped"
-
 // repoUnset is repoPicker.idx while no repository has been chosen. A
 // picker with a real choice to make starts here and can never return:
 // choosing is one-way, because there is nothing sensible to go back to.
