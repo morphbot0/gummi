@@ -280,6 +280,15 @@ worktrees and specs still work — the board just stays static. Key env vars are
   running; only landing is ordered, because git orders it. See DESIGN
   §18.1; `internal/stack` enforces it and `TestAStackNeverBlocksWork`
   asserts it.
+- **`docs/workflows.md` is the user's guide and reference to workflow
+  recipes, and it is always kept current.** Any change to what a recipe
+  may say or how a run reads it — a field, a step kind, a role or its
+  slot fallback, a template, an `until`, `onMax` or `join`, a watch
+  event or handler form, a line a step's output may carry, a `Check`
+  problem or warning, a bundled recipe, or how a person runs one —
+  updates `docs/workflows.md` in the same commit, beside the builtin
+  `workflows` and `workflow-recipes` skills. Write it for the person
+  writing a recipe, not for the code.
 - **Formatting:** `gofumpt` + `goimports` (enforced by golangci-lint v2).
 - **Errors on cleanup paths** (`Close`, `os.Remove` in defer) are
   intentionally unchecked per the linter's `exclude-functions` — match
