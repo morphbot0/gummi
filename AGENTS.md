@@ -261,9 +261,11 @@ worktrees and specs still work — the board just stays static. Key env vars are
   (`internal/credentials`: lent to gummi's own `gh` and push commands,
   never put in an agent's environment). It is optional, detected rather
   than switched on, and absent where `gh`/push access is not set up. No
-  workflow run, schedule, goal, MCP tool or `gummi run` may reach the publish code
+  schedule, goal, MCP tool or `gummi run` may reach the publish code
   (decision 25, DESIGN §22); a session reaches it only once a person
-  allowed it to publish, and only through `agentpublish` (decision 31).
+  allowed it to publish, and only through `agentpublish` (decision 31),
+  and so does a workflow run of that session through its `pr:` and
+  `watch:` steps (decision 32, DESIGN §28).
   Stacks (§18) still replay branches locally and print the `git push
   --force-with-lease` they need; publishing a stacked card is refused
   until §18.5's deferral is done.

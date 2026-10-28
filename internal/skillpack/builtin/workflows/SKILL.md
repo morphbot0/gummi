@@ -95,6 +95,8 @@ one's YAML.
 |---|---|
 | `deliver` | a feature or change: design, then implement and two reviewers until a verdict says APPROVED (at most 3 rounds), then validate every item |
 | `fix-until-green` | checks that fail and a fix that needs no design: one implementer, round until the checks pass (at most 5) |
+| `ship` | build, open a draft PR, then wait on it with no model and fix its red checks and trusted reviews until a person merges (the session must be allowed to publish; `trust` input) |
+| `merge-base` | a handler recipe: merge a PR's moved base into the branch |
 | `investigate` | a question, no change: a scout maps, a scribe writes `report.md` |
 
 If none fits — no design needed, a tester before the implementer, a

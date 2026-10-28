@@ -171,7 +171,7 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 		Strip: []webapi.RunStripEntry{}, Rows: []webapi.RunStepRow{},
 		Files: r.Files, Commits: r.Commits, Report: r.Report,
 		CanPause: r.CanPause, CanResume: r.CanResume, CanStop: r.CanStop, CanRevert: r.CanRevert,
-		CanWithdraw: r.CanWithdraw, CanRetry: r.CanRetry, AlwaysAllowed: r.AlwaysAllowed,
+		CanWithdraw: r.CanWithdraw, CanRetry: r.CanRetry, CanForward: r.CanForward, AlwaysAllowed: r.AlwaysAllowed,
 		CanSave: r.CanSave, SaveName: r.SaveName, SavedAs: r.SavedAs,
 		Mark: r.Mark, Line: r.Line, Folded: r.Folded,
 	}
@@ -193,6 +193,13 @@ func webRunBlock(r *threadfold.Run) *webapi.RunBlock {
 			Verdict: row.Verdict, Waiting: row.Waiting, Started: row.Started, Ended: row.Ended, Model: row.Model,
 		}
 		w.Question = webQuestion(row.Question)
+		w.Pass, w.Event = row.Pass, row.Event
+		if wr := row.Watch; wr != nil {
+			w.Watch = &webapi.RunWatch{
+				PR: wr.PR, URL: wr.URL, Until: wr.Until, Pending: wr.Pending, Threads: wr.Threads,
+				KeptOut: wr.KeptOut, Passes: wr.Passes, Held: wr.Held,
+			}
+		}
 		out.Rows = append(out.Rows, w)
 	}
 	if p := r.Pending; p != nil {
@@ -483,9 +490,10 @@ func (d *WebDocs) StepAnswer(ctx context.Context, card, call, answer, person str
 // ---------------------------------------------------------------- the run
 
 // RunAct is POST /api/cards/{id}/runs/{n}/{pause,resume,stop,withdraw,
-// askagain}: a person pausing, resuming or stopping the session's open
-// run, which must be run n; withdrawing run n while it is queued; or taking
-// back their always-allow of the session's runs.
+// askagain,forward}: a person pausing, resuming or stopping the session's
+// open run, which must be run n; withdrawing run n while it is queued;
+// taking back their always-allow of the session's runs; or forwarding to
+// run n's watch what its trust filter kept out.
 func (d *WebDocs) RunAct(ctx context.Context, n int, act, person string) error {
 	if !isRunSession(d.f) {
 		return ErrNoCard
@@ -504,6 +512,8 @@ func (d *WebDocs) RunAct(ctx context.Context, n int, act, person string) error {
 		return engineRefusal(d.eng.WorkflowAskAgain(ctx, d.f.ID))
 	case "retry":
 		return engineRefusal(d.eng.WorkflowRetry(ctx, d.f.ID, n))
+	case "forward":
+		return engineRefusal(d.eng.WorkflowForward(ctx, d.f.ID, n, personWord(person)))
 	}
 	if open == nil || open.N != n {
 		return &conflictError{msg: fmt.Sprintf("run %d is not open", n)}

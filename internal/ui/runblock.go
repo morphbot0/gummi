@@ -573,6 +573,9 @@ func runBlockLines(s *theme.Styles, r threadfold.Run, sel string, stepsOpen, hin
 	if sel == "head" && r.CanRetry {
 		tail = append(tail, s.KeyHint.Render("t")+s.Faint.Render(" retries its failed steps"))
 	}
+	if sel == "head" && r.CanForward {
+		tail = append(tail, s.KeyHint.Render("F")+s.Faint.Render(" forwards what the filter kept out"))
+	}
 	if ended && sel == "head" {
 		tail = append(tail, s.KeyHint.Render("enter")+s.Faint.Render(" folds it"))
 	}
@@ -740,7 +743,13 @@ func stepRowLines(s *theme.Styles, row threadfold.StepRow, selected bool, spin s
 	}
 	name, role := row.ID, row.Role
 	line := row.Line
-	if row.Folded {
+	if row.Folded && row.Pass > 0 {
+		// a watch's pass: the event it ran for, how it ended, what ran in it
+		role, line = "", row.Event+" · "+row.Line
+		if row.Steps != "" {
+			line += " — " + row.Steps
+		}
+	} else if row.Folded {
 		role = ""
 		line = row.Steps
 		if row.Verdict != "" {
@@ -825,6 +834,8 @@ func stepGlyph(state string) string {
 		return "?"
 	case "running":
 		return "●"
+	case string(domain.StepWatching):
+		return "◷"
 	case threadfold.RowPaused:
 		return "‖"
 	}

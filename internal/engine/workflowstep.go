@@ -146,7 +146,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	if err != nil || inst == nil {
 		return fmt.Errorf("step %s is gone", path)
 	}
-	step, ok := workflowrecipe.Find(run.Recipe, inst.StepID)
+	step, ok := e.stepDef(ctx, run, inst.Path, inst.StepID)
 	if !ok {
 		return fmt.Errorf("the recipe has no step %s", inst.StepID)
 	}
@@ -166,6 +166,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	text, _ := e.frozenSpec(ctx, run)
 	vars := workflowrecipe.Vars{Spec: text, Inputs: run.Inputs, Artifacts: e.runArtifacts(run)}
 	vars.Outputs, vars.Previous, vars.PreviousOutput = stepOutputs(run.Recipe, steps, path)
+	e.passVars(ctx, run, path, &vars)
 	if strings.Contains(step.Prompt, "run.diff") {
 		if vars.RunDiff, err = e.writeRunDiff(ctx, run, path, startTree); err != nil {
 			return fmt.Errorf("writing the run's diff: %w", err)
@@ -326,8 +327,16 @@ func stepBrief(run *domain.Run, step domain.Step, path, filled string) string {
 		recipe = "the " + run.RecipeName + " recipe"
 	}
 	fmt.Fprintf(&b, "You are step %s of workflow run %d (%s) in gummi: a %s. %s\n\n", path, run.N, recipe, step.Role, workflowRoleDuty(step.Role))
-	b.WriteString("You work in the session's own tree, which the run's other steps share. Do not commit: " +
-		"the run leaves its changes in the tree, and the session commits what it keeps.\n")
+	if w, ok := run.Recipe.WatchStep(); ok && strings.HasPrefix(path, w.ID+"/") && !step.Role.Reads() {
+		// a watch pass: gummi pushes what the branch holds once the pass
+		// ends, and a change left uncommitted would never reach the PR
+		b.WriteString("You work in the session's own tree, which the run's other steps share. This step answers " +
+			"what the pull request raised: commit your changes on the branch (gummi pushes it when the pass ends; " +
+			"never push yourself).\n")
+	} else {
+		b.WriteString("You work in the session's own tree, which the run's other steps share. Do not commit: " +
+			"the run leaves its changes in the tree, and the session commits what it keeps.\n")
+	}
 	if step.Role.Reads() {
 		b.WriteString("You have a full shell, like every step: read the code, and build and run what you need — " +
 			"the tests included. Do not change files in the tree: you read, run and report. gummi compares the tree " +
@@ -459,7 +468,7 @@ func (e *Engine) plannerEnded(ctx context.Context, run *domain.Run, inst *domain
 	if err == nil {
 		workflowrecipe.Walk(entries, func(s domain.Step, _ []domain.Entry) {
 			if s.Agentless() {
-				problems = append(problems, fmt.Sprintf("step %s: a revised plan adds no command or dispatch: the person allowed the recipe's own", s.ID))
+				problems = append(problems, fmt.Sprintf("step %s: a revised plan adds no command, dispatch, pr or watch step: the person allowed the recipe's own", s.ID))
 			}
 		})
 	}

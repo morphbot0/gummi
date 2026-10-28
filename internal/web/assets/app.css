@@ -1407,6 +1407,15 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .rb-row.asking,.rb-row.waiting{background:color-mix(in srgb,var(--q-needs) 6%,var(--panel))}
 .rb-row.asking .dot,.rb-row.waiting .dot{background:var(--q-needs);box-shadow:0 0 0 3px color-mix(in srgb,var(--q-needs) 22%,transparent)}
 .rb-row.sel{box-shadow:inset 3px 0 0 var(--accent);background:var(--accent-soft)}
+/* a watch waits on its PR without a model: a steady ring, not a spinner */
+.rb-row.rb-watch .dot{background:transparent;border:2px solid var(--accent);box-sizing:border-box}
+.rb-row.rb-watch.s-watching{box-shadow:inset 3px 0 0 var(--accent)}
+.rb-row.rb-watch .ti small{color:var(--fg2)}
+.rb-row .rb-pr{font-size:11.5px;color:var(--accent);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-row .rb-pr:hover{text-decoration:underline}
+/* each pass a watch ran heads its steps, named by its event */
+.rb-row.rb-pass{background:color-mix(in srgb,var(--line) 35%,var(--panel));border-top-color:var(--line2)}
+.rb-row.rb-pass .ti .n{font-size:12px;color:var(--fg2);font-weight:600}
 .rb-row .at{color:var(--fg4);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rb-row .ti{min-width:0;display:flex;flex-direction:column}
 .rb-row .ti .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

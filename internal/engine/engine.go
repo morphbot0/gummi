@@ -75,6 +75,9 @@ var errSessionDied = errors.New("agent session died without finishing")
 // backend is the entry stored under the "" key in Agents (matched by
 // agentFor's fallback).
 type Config struct {
+	// WatchPollEvery is how often a workflow watch reads its PR; zero is
+	// the default (30s, backing off to 5m while nothing changes).
+	WatchPollEvery time.Duration
 	// Agents maps a backend name (matching a profile role's `backend:`)
 	// to its adapter. The empty-string key "" designates the default
 	// backend used when no profile applies or a role omits `backend:`.

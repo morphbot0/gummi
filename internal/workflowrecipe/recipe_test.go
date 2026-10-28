@@ -119,7 +119,7 @@ func TestMarshalRoundTrips(t *testing.T) {
 		},
 	}
 	recipes := []domain.Recipe{extra}
-	for _, n := range []string{"deliver", "investigate", "fix-until-green"} {
+	for _, n := range []string{"deliver", "investigate", "fix-until-green", "ship", "merge-base"} {
 		recipes = append(recipes, mustLoad(t, n))
 	}
 	for _, r := range recipes {
@@ -161,7 +161,7 @@ func TestBundledRecipesPassCheck(t *testing.T) {
 			t.Errorf("%s: problems %q, warnings %q", f.Name, problems, warnings)
 		}
 	}
-	if want := []string{"deliver", "fix-until-green", "investigate"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"deliver", "fix-until-green", "investigate", "merge-base", "ship"}; !reflect.DeepEqual(names, want) {
 		t.Errorf("bundled = %v, want %v", names, want)
 	}
 }
@@ -438,7 +438,7 @@ func TestLoadPrefersTheWorkspace(t *testing.T) {
 			t.Errorf("%s: err %v", f.Name, f.Err)
 		}
 	}
-	want := map[string]Source{"broken": SourceWorkspace, "deliver": SourceWorkspace, "fix-until-green": SourceBundled, "investigate": SourceBundled, "mine": SourceWorkspace}
+	want := map[string]Source{"broken": SourceWorkspace, "deliver": SourceWorkspace, "fix-until-green": SourceBundled, "investigate": SourceBundled, "merge-base": SourceBundled, "mine": SourceWorkspace, "ship": SourceBundled}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("List = %v, want %v", got, want)
 	}

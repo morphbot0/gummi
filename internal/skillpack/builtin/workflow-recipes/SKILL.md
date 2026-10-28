@@ -11,8 +11,8 @@ Start from a bundled recipe, not a blank page: `references/` holds
 `deliver.yaml`, `fix-until-green.yaml` and `investigate.yaml` as gummi
 ships them, and `workflow_recipes` with a `name` shows any recipe,
 the workspace's own included. Pass yours to `workflow_run` as
-`recipe_yaml`. A recipe that cannot run comes back as a list of
-problems, with nothing proposed: fix them and call again.
+`recipe_yaml`. A recipe that cannot run comes back as problems, with nothing
+proposed: fix them and call again.
 
 ## The shape
 
@@ -74,13 +74,10 @@ steps:
 | `reviewer` | reads the work against the spec | reads |
 
 Every step has a full shell; a reader is told to change nothing, and
-one that did is flagged in the report. gummi gives each step its role's
-preamble: do not repeat it in the prompt. A step's model is the person's
-choice, made in their profile per role: a step runs on its role's slot
-(`reviewer`, `scribe`, …). `slot: <name>` puts one on another slot the
-profile may declare — a second reviewer on `reviewer-alt` — falling back
-to its role's when the profile has none. Do not name a slot to ask for a
-bigger or cheaper model; the profile decides that.
+one that did is flagged. gummi gives each step its role's preamble: do
+not repeat it. A step's model is the person's profile choice per role;
+`slot: <name>` puts one on another profile slot (a second reviewer on
+`reviewer-alt`). Do not name a slot to ask for a bigger or cheaper model.
 
 ## Templates
 
@@ -130,85 +127,26 @@ is one. Tell the implementer to read the last review first:
 | `allSettled` | waits for all; fails only if all fail |
 | `any` | settles on the first success, stopping the rest |
 
-Put readers side by side (two reviewers, one on `slot: reviewer-alt`). Two
-writers in one tree overwrite each other: gummi warns, and you should
-split them into steps in order instead.
+Put readers side by side. Two writers in one tree overwrite each other:
+gummi warns; make them steps in order instead.
 
 ## Other shapes
 
-A light review loop: implement, then one reviewer, round until it says
-so.
-
-```yaml
-name: build-and-review
-description: Implement, then review until a reviewer passes it
-steps:
-  - id: loop
-    repeat:
-      max: 3
-      until: { contains: "VERDICT: PASS" }
-      steps:
-        - id: implement
-          role: implementer
-          prompt: |
-            Implement the spec below. If there is a review below, fix
-            its findings first.
-
-            {{spec}}
-        - id: review
-          role: reviewer
-          prompt: |
-            Review {{run.diff}} against the spec; run its checks. List
-            findings, then end with VERDICT: PASS or VERDICT: CHANGES.
-
-            {{spec}}
-  - id: validate
-    role: reviewer
-    prompt: |
-      End with MET: DW-n or UNMET: DW-n <why> for each done-when item.
-
-      {{spec}}
-```
-
-`contains` matches anywhere in the output: pick a marker the step
-writes only when it means it, and ask for it on the last line.
+A light review loop: a `repeat` of an implementer and one reviewer with
+`until: { contains: "VERDICT: PASS" }`, then a validating reviewer.
+`contains` matches anywhere in the output: pick a marker the step writes
+only when it means it, and ask for it on the last line.
 
 A planner who decides the steps: a `planner` step that ends its output
-with a fenced `gummi-workflow` block of entries replaces the run's
-remaining steps with them, once they pass the same checks and the
-person allows the revised plan.
+with a fenced `gummi-workflow` block of entries (a YAML list of steps,
+as under `steps:`) replaces the run's remaining steps, once they pass
+the same checks and the person allows the revised plan. 
 
-````yaml
-name: planned
-description: Scout, then let a planner lay out the build
-steps:
-  - id: scout
-    role: scout
-    prompt: |
-      Map what the spec below touches: files, tests, risks.
-
-      {{spec}}
-  - id: plan
-    role: planner
-    prompt: |
-      Plan the build from the map below. End with a gummi-workflow
-      block listing the steps, like:
-
-      ```gummi-workflow
-      - id: implement
-        role: implementer
-        prompt: "…"
-      ```
-
-      {{scout.output}}
-
-      {{spec}}
-````
-
-## Command and dispatch steps (an agent's recipe)
+## Command and dispatch steps
 
 A step may be gummi's own act, not a model: `run:` a command or
-`dispatch:` a session. An agent's watch is a gate, then a dispatch.
+`dispatch:` a session (an agent's only). Neither has a role, slot or
+prompt.
 
 ```yaml
 name: watch-foo
@@ -222,20 +160,61 @@ steps:
       title: "Bump foo to {{check.output}}"
       envelope: 5
       recipe: fix-until-green
-      spec: |
-        Upstream foo released {{check.output}}. Bump the dependency.
+      spec: "Upstream foo released {{check.output}}. Bump it."
 ```
 
 - `run` goes through `sh -c` in the run's tree. Exit 0 passes stdout on
   as `{{check.output}}`; `quietExit` (1–255, first step only) ends the
-  run with no trace; any other exit fails it. A `{{…}}` in a command is
-  one quoted word: never put it in quotes. One check, never a wait.
-- `dispatch` is an agent's only. `repo` is a literal; `envelope` is
-  dollars, out of the agent's own. With a `recipe` give a `spec` (the
-  run starts at once), else a `prompt`. `repos: [lib]` attaches more
-  repositories of the pool.
-- Neither has a role, slot or prompt. A dispatched recipe may not
-  dispatch.
+  run with no trace; any other exit fails it. A `{{…}}` is one quoted
+  word: never put it in quotes.
+- `dispatch`: `repo` is a literal, `envelope` dollars out of the
+  agent's own. With a `recipe` give a `spec`, else a `prompt`.
+
+## Open the PR and wait on it
+
+Needs the session's "agent may publish". `pr: {act: push|create|update|ready,
+draft: true}` is one publish act (never forced). `watch:` is at most one,
+top level, and waits on the PR with no model, then runs a handler per
+event, one at a time, and gummi pushes after each pass.
+
+```yaml
+name: ship-it
+inputs:
+  trust: {hint: "who may steer: @login, @org/team, role:maintain", default: "role:maintain"}
+steps:
+  - id: build
+    role: implementer
+    prompt: "Build and commit.\n\n{{spec}}\n{{watch.event}}"
+  - id: open
+    pr: {act: create, draft: true}
+  - id: shepherd
+    watch:
+      until: merged
+      trust: "{{inputs.trust}}"
+      max: 6
+      quiet: 7d
+      onClosed: abort
+      on:
+        checks-failed: {recipe: fix-until-green}
+        changes-requested: {goto: build}
+        comment:
+          - id: answer
+            role: implementer
+            prompt: "Address this and commit.\n\n{{event}}"
+        base-moved: {recipe: merge-base}
+```
+
+- `until`: `merged` or `green-approved`. Events: `base-moved`,
+  `checks-failed`, `changes-requested`, `comment`. A handler is steps,
+  `recipe: name` (no watch or pr inside) or `goto: id` (an earlier
+  top-level step: the steps from it to the watch run again); it may add
+  `max`. `checks: [ci]` limits whose logs are read.
+- `trust` is `@login`, `@org/team`, `role:write|maintain|admin`,
+  comma-separated; empty is the publishing login. Other people's
+  feedback is counted, never read. 
+- `{{event}}` (handler steps, and `{{inputs.event}}` of a handler recipe
+  that declares `event`) is the event's facts as data; `{{watch.event}}`
+  is empty until a `goto` pass. The bundled `ship` is this recipe.
 
 ## Before you propose
 
@@ -246,5 +225,4 @@ steps:
 - Each loop has a `max` and one `until`; an `until` verdict's artifact is
   declared inside the loop.
 - The last step judges the `judge: true` items.
-- If it worked, ask the person to keep it with **Save as recipe…** on
-  the run's block.
+- If it worked, offer **Save as recipe…** on the run's block.

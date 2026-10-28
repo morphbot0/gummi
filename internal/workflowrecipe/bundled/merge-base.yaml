@@ -1,0 +1,18 @@
+name: merge-base
+description: Merge a PR's moved base into the branch and resolve what conflicts
+inputs:
+  event:
+    hint: "the moved base, as the watch saw it"
+    default: ""
+steps:
+  - id: merge
+    role: implementer
+    prompt: |
+      The pull request's base moved. gummi has fetched it; merge the ref
+      named below into this branch with `git merge` (never rebase, never
+      reset), resolve every conflict, run the spec's checks, and commit
+      the merge. Do not push.
+
+      {{inputs.event}}
+
+      {{spec}}

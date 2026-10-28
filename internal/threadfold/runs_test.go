@@ -3,6 +3,7 @@ package threadfold
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -459,5 +460,95 @@ func TestARunEndedBeforeTheConversationIsNotDrawn(t *testing.T) {
 	}
 	if n := len(CurrentRuns(ins, ConversationStart(nil))); n != 3 {
 		t.Errorf("with no conversation, %d runs drawn, want all 3", n)
+	}
+}
+
+func TestFoldRunDrawsAWatch(t *testing.T) {
+	impl := func(id string) domain.Step { return domain.Step{ID: id, Role: domain.RoleImplementer} }
+	recipe := domain.Recipe{Name: "ship", Steps: []domain.Entry{
+		{Step: &domain.Step{ID: "build", Role: domain.RoleImplementer}},
+		{Step: &domain.Step{ID: "open", PR: &domain.PRAct{Act: "create"}}},
+		{Step: &domain.Step{ID: "shepherd", Watch: &domain.Watch{On: map[domain.WatchEvent]domain.Handler{
+			domain.EventChecksFailed: {Steps: []domain.Step{impl("fix")}},
+			domain.EventComment:      {Steps: []domain.Step{impl("answer")}},
+		}}}},
+	}}
+	w := &domain.WatchState{
+		PR: domain.PullRequestRef{Repo: "me/widget", Number: 12, URL: "https://github.com/me/widget/pull/12"},
+		Observed: &domain.WatchFacts{
+			Head: "h", ChecksHead: "h", Threads: 2, KeptOut: 1, KeptOutByKind: map[string]int{"comment": 1},
+			Checks: []domain.WatchCheck{{Name: "a", Bucket: "pending"}, {Name: "b", Bucket: "pending"}, {Name: "c", Bucket: "pending"}, {Name: "d", Bucket: "pass"}},
+		},
+		Passes: []domain.WatchPass{
+			{N: 1, Event: domain.EventChecksFailed, Settled: "done", Pushed: true, PushedSHA: "abc1234def"},
+			{N: 2, Event: domain.EventComment, Settled: "done", Pushed: true},
+		},
+	}
+	watch := step("shepherd", "", domain.StepWatching, 6, 0, "")
+	watch.Card, watch.Watch = "", w
+	in := RunInput{
+		Run: domain.Run{Session: "FF-001", N: 2, RecipeName: "ship", Recipe: recipe, State: domain.RunRunning, StartedAt: runAt},
+		Steps: []domain.RunStep{
+			step("build", domain.RoleImplementer, domain.StepDone, 0, 10, "built"),
+			step("open", "", domain.StepDone, 5, 0, "opened"),
+			watch,
+			step("shepherd/1/fix", domain.RoleImplementer, domain.StepDone, 10, 5, "fixed"),
+			step("shepherd/2/answer", domain.RoleImplementer, domain.StepDone, 15, 5, "answered"),
+		},
+	}
+	r := FoldRun(in)
+	const line = "waiting on the PR: 3 checks pending · 2 threads seen · 1 comment from outside the filter"
+	var got []string
+	var watchRow *StepRow
+	for i, row := range r.Rows {
+		got = append(got, row.ID+"|"+row.Event)
+		if row.Watch != nil {
+			watchRow = &r.Rows[i]
+		}
+	}
+	if watchRow == nil || watchRow.Line != line || watchRow.State != "watching" || watchRow.Watch.Pending != 3 || watchRow.Watch.KeptOut != 1 {
+		t.Fatalf("watch row = %+v", watchRow)
+	}
+	want := []string{"build|", "open|", "shepherd|", "pass 1|checks-failed", "fix|checks-failed", "pass 2|comment", "answer|comment"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("rows = %v, want %v", got, want)
+	}
+	for _, row := range r.Rows {
+		switch row.ID {
+		case "pass 1":
+			if row.Line != "pushed abc1234" {
+				t.Errorf("pass 1 = %+v", row)
+			}
+		case "pass 2":
+			if row.Line != "nothing to push" {
+				t.Errorf("pass 2 = %+v", row)
+			}
+		case "answer":
+			if row.Repeat != "" || row.Pass != 2 {
+				t.Errorf("answer = %+v", row)
+			}
+		}
+	}
+	if r.Live == nil || r.Live.Mood != StripWatching || r.Live.Line != line {
+		t.Errorf("strip = %+v", r.Live)
+	}
+	// a read that changes nothing drawn does not move the block's revision
+	before := r.Rev
+	w.Observed.ReadAt = w.Observed.ReadAt.Add(time.Minute)
+	if again := FoldRun(in); again.Rev != before {
+		t.Error("the revision moved on a read that changed nothing drawn")
+	}
+	w.Observed.Checks[0].Bucket = "pass"
+	if again := FoldRun(in); again.Rev == before {
+		t.Error("the revision did not move when a check settled")
+	}
+}
+
+// TestWatchLineSaysWhatWasNotRead: feedback past the first 100 is named on
+// the strip, never dropped silently.
+func TestWatchLineSaysWhatWasNotRead(t *testing.T) {
+	w := &domain.WatchState{Observed: &domain.WatchFacts{Head: "h", ChecksHead: "h", Unread: 3}}
+	if got, want := WatchLine(w), "waiting on the PR: 3 items past the first 100 not read"; got != want {
+		t.Errorf("line = %q, want %q", got, want)
 	}
 }

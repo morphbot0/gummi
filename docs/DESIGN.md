@@ -2121,6 +2121,26 @@ Decided in the design interview (2026-07-03):
     per-act confirm), **§22.7** and **§22.11**. Merge, retarget,
     force-push, resolving a thread and landing stay a person's, and no
     tool offers them. Decision 28's three rules are unchanged.
+32. **A run may publish its session's PR and wait on it, on the same
+    allowance**, decided 2026-10-28 (§28). A recipe may carry `pr:` steps
+    (push, open, update, mark ready) and one `watch:` step that waits on
+    the session's PR without spending a model turn: gummi polls it,
+    sorts what changed into a closed set of events, and runs the
+    recipe's handler for each — inline steps, a named recipe, or a
+    `goto` back to an earlier step — pushing after each pass. Such a run
+    may be proposed only for a session whose "agent may publish" is on
+    (decision 31), and its proposal names every PR act and the
+    resolved trust filter, so allowing the run allows exactly those.
+    This **amends decision 25** (a run reaches the publish code, through
+    `internal/agentpublish` alone), **§22.14** (gummi now polls, for a
+    run), **§25.7** (a run waiting only in a watch resumes its polling
+    by itself after a restart; its next handler waits for a person's
+    Resume) and **§25.13** (the waiting step is decided). Merge,
+    retarget, force-push, resolving a thread and landing stay a
+    person's; a watch ends on a merge a person made, or on green and
+    approved, as its recipe says. Decision 28's three rules are
+    unchanged: a handler at the watch's max, a repeated event, an
+    unreadable trust filter and a long silence all reach the person.
 
 Still open:
 
@@ -5681,7 +5701,10 @@ wants that can now say so once.
     with the pushed commits.
   A person who needs more gives the allowance only to a session whose
   backend is confined, or publishes by hand.
-- **Watching without a watcher.** gummi adds no poller, no webhook and
+- **Watching without a watcher.** *Amended by decision 32 (§28): a
+  workflow run's `watch:` step is a poller gummi runs for that run; a
+  session outside a run still watches by itself, as below.*
+  gummi adds no poller, no webhook and
   no attention event on a red check. The loop is the session's — push,
   `pr_checks`, on a failure read the logs and the commit they ran on,
   fix, commit, `git_push`, `pr_checks` again — and the bundled
@@ -7156,7 +7179,10 @@ not started yet sees the note in its prompt. A spec edit's note names the
 file in the run's directory holding the edited spec, rather than copying
 the whole spec into every step again.
 
-**Nothing resumes itself.** A quit parks a running run, keeping its state
+**Nothing resumes itself.** *Amended by decision 32 (§28.6): a run
+waiting only in a `watch:` resumes its polling by itself; the first
+handler after the restart waits for a person's Resume.*
+A quit parks a running run, keeping its state
 and stopping its steps. A run is parked by the first tick of a gummi
 that did not start or resume it — at once, when a board starts — and
 asks its person: **Resume the run** or **Stop the run**, the session's
@@ -7425,11 +7451,12 @@ Review, checks and design are what a recipe chooses, and the bundled
 - **Waiting on a command** without spending model turns, as a step kind
   (Kiro's `watch` node). *A single command step, `run:`, is decided in
   §26.3; a step that polls a command inside an open run stays deferred,
-  since long waits belong to a schedule.*
+  since long waits belong to a schedule.* *A wait on the session's own
+  PR is decided in §28 (decision 32); a wait on any other command stays
+  deferred.*
 - **Narrowing a step's tools**, per step: a step has every tool its
   role's session has, and a reading role is told, not caged, to change
   no files.
-  A wait on a PR is a person's publishing (§22), never a run's.
 - **Recipes kept outside the workspace**, per person.
 - **Isolated parallel writers**, as an option a recipe asks for: §24's
   branches and owns check, kept in history.
@@ -8170,3 +8197,261 @@ What was built follows §27. Where it chose, or departs:
   directories, resuming its own conversation where the backend can.
 - A run's done-when checks run in the primary tree only; a check that
   needs an attached repository names its path.
+
+## 28. A run that publishes its PR and waits on it
+
+Decision 32. A session allowed to publish (§22.14) can open its PR and
+watch its checks, but every minute it waits is a turn it pays for, and
+what it does about a red check or a review is whatever the model decides
+that turn. A recipe can now say it once: open the PR, wait without a
+model, and on each thing that happens run the steps the recipe names for
+it, until a person merges.
+
+### 28.1 The steps
+
+```yaml
+name: ship
+inputs:
+  trust:
+    hint: "who may steer the run from the PR: @login, @org/team, role:maintain"
+    default: "role:maintain"
+steps:
+  - id: build
+    role: implementer
+    prompt: "Implement the spec and commit your work.\n\n{{spec}}"
+  - id: open
+    pr: { act: create, draft: true }
+  - id: shepherd
+    watch:
+      until: merged                 # or green-approved
+      trust: "{{inputs.trust}}"
+      max: 6                        # handler passes, all kinds together
+      quiet: 7d                     # nothing at all this long: ask the person
+      onClosed: abort               # closed unmerged: the run ends partial
+      on:
+        checks-failed: { recipe: fix-until-green }
+        changes-requested: { goto: build }
+        comment:
+          - id: answer
+            role: implementer
+            prompt: "Address this and commit. Do not reply on GitHub.\n\n{{event}}"
+        base-moved: { recipe: merge-base }
+```
+
+- **`pr:`** is gummi's own act, like `run:` and `dispatch` (§26.3,
+  §26.4): no role, no model, no prompt. `act` is `push`, `create`,
+  `update` or `ready`; `create` takes `draft`. Each goes through
+  `internal/agentpublish` with every refusal a session's `pr_*` tool
+  meets (a dirty tree, a stacked or landed card, a planted hook or
+  steering configuration, a moved target). A refusal fails the step.
+  The step's output is the act's answer.
+- **`watch:`** is one step, at the top level of a recipe, at most one
+  per recipe, after a step that pushes. It waits on the session's PR.
+  `until` is `merged` (a person merged it) or `green-approved` (every
+  check passed and the review decision is APPROVED). It succeeds when
+  its `until` holds, and the run goes on to the steps after it.
+
+`Check` refuses: a second `watch`, a `watch` inside a `parallel` or a
+`repeat`, a `pr:` step inside a `parallel`, a handler event outside the
+closed set, a handler with more than one form, a `goto` that names no
+earlier top-level step, a `recipe` handler whose recipe holds a `watch`
+or a `pr:` step of its own, a `trust` that does not parse (§28.3), and
+`{{event}}` outside a handler.
+
+### 28.2 Waiting without a model
+
+- **The step's state is `waiting`.** Its row keeps the PR's reference and
+  what it has seen: the head commit, the checks and their buckets per
+  head, the review and thread ids, the base commit. Nothing else is
+  remembered.
+- **gummi polls.** `Engine.WorkflowTick` asks for a watch's PR at most
+  once a poll interval, backing off while nothing changes: a cheap read
+  of the PR's state and head first (`pr.LiveStatus`), the checks and
+  threads only when that changed. The reads go through the person's
+  credential, as `pr_checks`' do. A watch spends no money.
+- **`workflowpolicy.Decide` stays pure.** The engine writes what it read
+  into the snapshot; `Decide` compares it with what the row has seen and
+  returns the actions: still waiting, an event's handler to start, the
+  watch met, the run to end partial, a question for the person.
+
+### 28.3 Events and the trust filter
+
+gummi sorts what changed into five events, in this order, and starts at
+most one handler at a time:
+
+| event | when |
+|---|---|
+| `base-moved` | the PR cannot merge cleanly against its base, or its base moved under a required up-to-date check |
+| `checks-failed` | every check on the head has settled and one failed |
+| `changes-requested` | a trusted review asks for changes, or a trusted unresolved thread is new |
+| `comment` | a trusted top-level comment is new |
+| merged / closed | ends the watch: met, or `onClosed` |
+
+- **A failure is read once its head has settled.** While a check on the
+  head is pending, no `checks-failed` starts, so one push brings at most
+  one fix pass.
+- **The trust filter** is `trust:`, a comma-separated list, usually an
+  input so the run's caller sets it: `@login`, `@org/team` (read through
+  the organisation's team members, which needs `read:org`) and
+  `role:write`, `role:maintain` or `role:admin` (the collaborator's
+  permission on the repository). Empty means the login gummi publishes
+  as. The proposal shows it resolved: "acts on feedback from @alice,
+  members of @acme/core, repository maintainers".
+- **It fails closed.** A team or a permission gummi cannot read is never
+  guessed: the watch asks the person and acts on nothing meanwhile.
+  Membership is read again at each event.
+- **What it covers.** Reviews, threads and comments. A review, thread or
+  comment whose author is outside it, or that someone outside it last
+  edited, is not an event and never reaches an agent. Check logs are not
+  people: a recipe may name the checks it reads (`checks: [ci, lint]`),
+  and every other check's log is left out.
+- **Nothing is dropped silently.** The watch's strip counts what the
+  filter kept out ("2 comments from outside the filter, not read"), and
+  a person may forward one to the run by hand, as they forward failing
+  checks (§22.11).
+- **What gets through is data.** `{{event}}` is the event's facts —
+  checks and their log tails, or each comment's author, URL and body —
+  wrapped as a recipe's inputs are, so its text cannot pose as
+  instructions.
+
+### 28.4 Handlers
+
+An event's handler is one of three forms:
+
+- **inline steps**, a list of plain steps under the event;
+- **`recipe: <name>`**, a recipe frozen into the proposal as a dispatch's
+  is (`engine/freeze.go`), run as a nested block of the same run: the same
+  tree, the same pool, the same frozen spec, `{{event}}` given as its
+  input `event` when it declares one;
+- **`goto: <id>`**, an earlier top-level step: the steps from it up to
+  the watch run again as a new pass, reading `{{watch.event}}`, which is
+  empty on the first pass.
+
+After each pass gummi pushes (never forced; a remote that moved fails
+the push and the watch asks the person) and the watch waits again.
+
+- **Bounded.** `max` counts every pass of every kind; an event may name
+  a `max` of its own. At either, the watch asks the person: one more
+  pass, go on waiting without acting, or stop.
+- **No loops on the same thing.** The same event on the same head after
+  a pass, or a pass that changed nothing and leaves its event standing,
+  asks the person.
+- **A moved base is merged, never rebased.** A `base-moved` handler
+  merges the base into the branch and resolves what conflicts; the push
+  stays a plain one. gummi never force-pushes for a run.
+- **Money** is the session's pool, as for every step: a spent pool
+  pauses the run.
+
+### 28.5 Who may
+
+- A run with a `pr:` or `watch:` step is proposed only for a session
+  whose "agent may publish" is on, and is refused at the proposal
+  otherwise, naming the switch. The allowance's repository is the only
+  target; every act is checked against it.
+- Taking the allowance back while the run waits fails its next act or
+  read, and the watch asks the person.
+- The proposal names every `pr:` act, the watch's `until`, its events
+  and handlers, and the resolved trust filter. Allowing the run allows
+  exactly those; a planner's revision that adds or changes one is a
+  revised plan the person allows (§25.4).
+- `agentpublish` lets the run's own act through where it refuses
+  `agent-busy` for a session's tool while a run works the tree.
+- Under `gummi run`, the trust filter is the `--input` its caller gives.
+
+### 28.6 Restarts
+
+A run waiting only in a watch — no handler running, no question open —
+is not parked by a board that did not start it: its polling resumes by
+itself, since polling spends nothing. The first handler it would start
+after that restart waits for a person's **Resume**, the run's pinned
+decision as for any parked run. A run doing anything else is parked as
+§25.7 says.
+
+### 28.7 Faces
+
+The run's block draws the watch as a row with a live strip: "waiting on
+the PR: 3 checks pending · 2 threads seen · 1 comment outside the
+filter", and each pass under it, named by its event. The web page draws
+the same from `threadfold`'s fold.
+
+### 28.8 What does not bend
+
+gummi never merges, retargets, force-pushes, resolves or replies to a
+thread, or lands. A watch ends on a merge a person made. A question the
+watch cannot settle reaches the person.
+
+### 28.9 As built
+
+Where the code differs from, or adds to, the text above:
+
+- **The watch's stored state is `watching`**, not `waiting`: `waiting`
+  already means "a row not started", and the conductor starts any step
+  in it. The faces still say "waiting on the PR". The row is live, so a
+  stop interrupts it and the run cannot end around it.
+- **The row keeps its memory as JSON** (`workflow_steps.watch`,
+  `domain.WatchState`): the PR, the parsed trust filter, the last read
+  (`WatchFacts`), the feedback ids handed to passes, the passes, and the
+  person's answers. `workflowpolicy.Decide` reads it from the snapshot,
+  with `Snapshot.Now` as its only clock.
+- **The cheap read is `pr.WatchStatus`** (state, head, base, mergeability,
+  review decision, `updatedAt`), not `LiveStatus`, which does not move on
+  a new review or thread. The checks are read again when the head moved,
+  one was pending, none had reported, the PR was touched or a while has
+  passed; the feedback when the PR was touched. Three failed reads in a
+  row are put down to the network before the person is asked.
+- **A pass's steps sit at `<watch>/<n>/…`.** A `goto` pass leaves `pr:`
+  steps out, so it cannot open the PR again.
+- **After a push the watch forgets what it read** and ignores reads that
+  still show the head from before the push (for two minutes), so GitHub
+  lagging behind does not read as "the same event on the same head".
+- **"The same event after a pass"** compares the event's key (which
+  carries the head for checks and the ids for feedback), so a new comment
+  on an unchanged head is a new event, not a loop. A pass that changed
+  nothing asks as written.
+- **An unreadable trust filter asks at once**, not only when an event
+  stands, and while a check is still pending: feedback is withheld while
+  the filter cannot be read, so an event could never stand.
+- **`green-approved` on a head with no checks** reads it as green once
+  nothing has changed for five minutes, so a repository without CI ends
+  the watch, and a push CI has not reached yet does not.
+- **`base-moved`** fetches the base with the person's credential before
+  the pass (a failed fetch asks the person to read again); the handler
+  merges the local ref the event names. The bundled `merge-base` recipe
+  does it, and `fix-until-green` takes an optional `event` input.
+- **A spent pool does not pause a watch that is only waiting.**
+- **Questions are `RunDecideWatch`**; `gummi run` answers each with its
+  first option, and the quiet question with stop, so a drive cannot wait
+  forever.
+- **A planner's revised plan** adds no `pr:` or `watch:` step, as it adds
+  no command or dispatch: the planner is told so and the plan the person
+  allowed runs on. What a run does to the PR is what its proposal named.
+- **Feedback is read to a cap.** Threads are read in full, each to its
+  first 100 comments; a thread with more is kept out, since the filter
+  cannot see everyone in it. Top-level comments and reviews are read to
+  the first 100 each, and the strip names how many past that were not
+  read.
+- **Forwarding is all or nothing.** A person forwards everything the
+  filter kept out at once (TUI `F` on the run's head, the run block's
+  **Forward kept-out feedback** on the page), after reading it on the PR.
+  Each item is forwarded by its print — its id and a hash of its body and
+  everyone in it — so an edit after the forward, by anyone, keeps it out
+  again. A forward makes the watch read the feedback again at once.
+- **A pass's steps commit.** A step under a watch (not a reading role) is
+  briefed to commit its changes on the branch, since gummi pushes only
+  what the branch holds and never commits for it; the bundled `ship` and
+  `merge-base` prompts say so too.
+- **`base-moved` stands only when GitHub says the branch conflicts or is
+  behind** (`mergeable` CONFLICTING, merge state BEHIND). A base that moved
+  without either, on a repository that does not require up-to-date
+  branches, raises nothing.
+- **`checks:` narrows which logs are read, not which failures count**: any
+  failing check raises `checks-failed`; one outside the list reaches the
+  pass without its log.
+- **The role filter reads `role_name`** (maintain and triage show there;
+  `permission` alone reads write for them), falling back to `permission`;
+  a feedback item with no author is outside every filter.
+- **The checks and feedback are read in full again** after `watchPollMax`
+  since the last full read (`WatchFacts.FetchedAt`), even when the PR
+  shows no change.
+- Feedback past the first 100 reviews, comments or inner comments of a
+  thread is not read.

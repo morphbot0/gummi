@@ -51,6 +51,13 @@ func (e *Engine) startAgentless(ctx context.Context, run *domain.Run, sess domai
 		e.runNote(run.Session, fmt.Sprintf("run %d: %s (dispatch) started", run.N, inst.Path))
 		return e.dispatchStep(ctx, run, sess, cur, step, vars)
 	}
+	switch {
+	case step.PR != nil:
+		e.runNote(run.Session, fmt.Sprintf("run %d: %s (pr %s) started", run.N, inst.Path, step.PR.Act))
+		return e.runPRStep(ctx, run, sess, cur, step)
+	case step.Watch != nil:
+		return e.startWatch(ctx, run, sess, cur, step, vars)
+	}
 	return e.runCommandStep(ctx, run, cur, step, vars)
 }
 

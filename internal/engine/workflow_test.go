@@ -872,6 +872,43 @@ func TestAPlannerReplacesTheRemainingSteps(t *testing.T) {
 	}
 }
 
+// TestARevisedPlanAddsNoPRStep: a planner's block that adds a pr: or a
+// watch: step goes back to the planner, and the plan the person allowed runs on:
+// what a run does to the PR is what the person allowed at the proposal.
+func TestARevisedPlanAddsNoPRStep(t *testing.T) {
+	for name, block := range map[string]string{
+		"pr":    "- id: open\n  pr: { act: create }\n",
+		"watch": "- id: shepherd\n  watch:\n    until: merged\n    on:\n      comment: { goto: plan }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			wf := newWFFake()
+			wf.on("plan", func(string, string, int) wfReply {
+				return wfReply{text: "Here is the plan.\n\n```gummi-workflow\n" + block + "```\n", credits: 1}
+			})
+			e, _, f, _ := wfEngine(t, wf)
+			run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: planned\nsteps:\n" +
+				"  - { id: plan, role: planner, prompt: plan it }\n  - { id: stale, role: scribe, prompt: old }\n"})
+			tickRuns(t, e, f.ID, run.N, "ended", ended)
+			paths := stepPaths(t, e, f.ID, run.N)
+			if _, ran := paths["open"]; ran {
+				t.Fatalf("the revised pr step ran: %+v", paths)
+			}
+			if _, ran := paths["shepherd"]; ran {
+				t.Fatalf("the revised watch ran: %+v", paths)
+			}
+			if paths["stale"].State != domain.StepDone {
+				t.Fatalf("the plan the person allowed did not run on: %+v", paths)
+			}
+			wf.mu.Lock()
+			told := strings.Join(wf.stepT["plan#"], "\n")
+			wf.mu.Unlock()
+			if !strings.Contains(told, "adds no command, dispatch, pr or watch step") {
+				t.Fatal("the planner was not told why its block was refused")
+			}
+		})
+	}
+}
+
 // TestAQuitParksTheRun: a run that was running when gummi stopped is
 // parked by the next engine's first tick, and resumes only when a person
 // resumes it.

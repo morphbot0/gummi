@@ -114,6 +114,13 @@ type Args struct {
 	BaseRepo    string
 }
 
+// Act is a publish act, and Timeout how long one network read may take,
+// for the engine's watch, which may not import publish itself.
+type Act = publish.Act
+
+// Timeout bounds one act or read.
+const Timeout = publish.Timeout
+
 // Acts the agent may start. Nothing else is reachable from here.
 const (
 	ActPush   = publish.ActPush
@@ -501,4 +508,31 @@ func statusLine(ref domain.PullRequestRef, c pr.Checks) string {
 		return fmt.Sprintf("no failing checks on %s#%d%s, but %d still running (%d passed): not green yet, check again later", ref.Repo, ref.Number, on, pend, pass)
 	}
 	return fmt.Sprintf("all checks green on %s#%d%s: %d passed, %d skipped", ref.Repo, ref.Number, on, pass, c.Count(pr.CheckSkip))
+}
+
+// WatchTarget is the door a workflow run's watch reads its PR through
+// (DESIGN §28.2): the session's linked PR, once a person has allowed the
+// session to publish and only on the repository the allowance names. The
+// reads themselves (pr.WatchStatus and the rest) are the engine's, under
+// the same credential `pr_checks` uses.
+func WatchTarget(ctx context.Context, h Host, f domain.Feature) (domain.PullRequestRef, *Error) {
+	st := h.Store()
+	if cur, err := st.GetFeature(ctx, f.ID); err == nil {
+		f = cur
+	}
+	on, err := st.AgentPublish(ctx, f.ID)
+	if err != nil || !on {
+		return domain.PullRequestRef{}, NotAllowed()
+	}
+	if f.PullRequest.Empty() {
+		return domain.PullRequestRef{}, &Error{Code: string(publish.CodeNoPR), Text: "this session has no linked pull request", Fix: "open one with a pr: create step"}
+	}
+	allowed, err := st.AgentPublishRepo(ctx, f.ID)
+	if err != nil {
+		return domain.PullRequestRef{}, fromPublish(publish.AsError(err))
+	}
+	if allowed != "" && !strings.EqualFold(f.PullRequest.Repo, allowed) {
+		return domain.PullRequestRef{}, targetChanged(f.PullRequest.Repo, allowed)
+	}
+	return f.PullRequest, nil
 }

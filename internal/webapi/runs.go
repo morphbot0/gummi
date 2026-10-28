@@ -72,6 +72,9 @@ type RunBlock struct {
 	// CanRetry offers to run an ended run's failed and stopped steps again
 	// (POST …/runs/{n}/retry), keeping every step that finished.
 	CanRetry bool `json:"canRetry,omitempty"`
+	// CanForward offers to forward to the open run's watch the feedback its
+	// trust filter kept out (POST .../runs/{n}/forward).
+	CanForward bool `json:"canForward,omitempty"`
 	// AlwaysAllowed, on the session's newest run, says a person always
 	// allows its runs: Ask again (POST …/runs/{n}/askagain) takes it back.
 	AlwaysAllowed bool `json:"alwaysAllowed,omitempty"`
@@ -203,6 +206,24 @@ type RunStepRow struct {
 	// Question is the step's own question, its recommended answer first,
 	// answered with POST /api/cards/{id}/steps/{card}/answer.
 	Question *StepQuestion `json:"question,omitempty"`
+	// Watch summarises a watch step's PR (its Line is the strip's words);
+	// Pass and Event place a row inside one of its passes, and on a pass's
+	// header row name the event it ran for.
+	Watch *RunWatch `json:"watch,omitempty"`
+	Pass  int       `json:"pass,omitempty"`
+	Event string    `json:"event,omitempty"`
+}
+
+// RunWatch is what a watch step shows of its pull request.
+type RunWatch struct {
+	PR      string `json:"pr"`
+	URL     string `json:"url,omitempty"`
+	Until   string `json:"until,omitempty"`
+	Pending int    `json:"pending"`
+	Threads int    `json:"threads"`
+	KeptOut int    `json:"keptOut"`
+	Passes  int    `json:"passes"`
+	Held    bool   `json:"held,omitempty"`
 }
 
 // StepQuestion is a step's ask_user question. Call names it: an answer

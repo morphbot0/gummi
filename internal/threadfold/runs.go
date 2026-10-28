@@ -142,6 +142,9 @@ type Run struct {
 	// CanRetry offers to run an ended run's failed and stopped steps again
 	// (domain.RetryRefusal), set where all the session's runs are folded.
 	CanRetry bool `json:"canRetry,omitempty"`
+	// CanForward offers to forward to the open run's watch what its trust
+	// filter kept out (DESIGN §28.3).
+	CanForward bool `json:"canForward,omitempty"`
 	// AlwaysAllowed is set on the session's newest run while a person
 	// always allows its runs: the block says so, with Ask again.
 	AlwaysAllowed bool `json:"alwaysAllowed,omitempty"`
@@ -220,6 +223,12 @@ type StepRow struct {
 	Verdict string `json:"verdict,omitempty"`
 	// Waiting marks the row the run's open decision is about.
 	Waiting bool `json:"waiting,omitempty"`
+	// Watch is a watch step's summary (DESIGN §28.7); Pass and Event place
+	// a row inside one of its passes, and on a pass's own header row (ID
+	// "pass 2") name the event it ran for.
+	Watch *WatchRow `json:"watch,omitempty"`
+	Pass  int       `json:"pass,omitempty"`
+	Event string    `json:"event,omitempty"`
 	// Started and Ended bound the step's time; Model is what its agent
 	// runs on, while it works.
 	Started time.Time `json:"started,omitzero"`
@@ -582,7 +591,7 @@ func FoldRun(in RunInput) Run {
 		// a paused run's steps have no backend: none of them works now,
 		// whatever its row last said
 		for i := range r.Rows {
-			if row := &r.Rows[i]; !row.Folded && domain.StepState(row.State).Live() && row.Line != "its revised plan waits on you" {
+			if row := &r.Rows[i]; !row.Folded && row.Watch == nil && domain.StepState(row.State).Live() && row.Line != "its revised plan waits on you" {
 				row.State, row.Line = RowPaused, "stopped where it was · carries on when the run resumes"
 			}
 		}
@@ -619,6 +628,13 @@ func FoldRun(in RunInput) Run {
 	r.CanStop = run.State.Open() && !run.Stopping && !ending
 	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0 && run.State != domain.RunRunning && r.Phase == ""
 	r.CanWithdraw = run.State == domain.RunQueued
+	if run.State.Open() && !run.Stopping {
+		for _, s := range in.Steps {
+			if s.State == domain.StepWatching && s.Watch != nil && s.Watch.Observed != nil && len(s.Watch.Observed.KeptOutPrints) > 0 {
+				r.CanForward = true
+			}
+		}
+	}
 	r.SavedAs = Sanitize(run.SavedAs)
 	if r.CanSave = engine.RunSaveRefusal(run) == ""; r.CanSave {
 		if workflowrecipe.CheckName(run.Recipe.Name) == nil {
@@ -838,6 +854,136 @@ func finished(run domain.Run, it iteration, steps []domain.RunStep) bool {
 	return judged || later || run.State.Ended()
 }
 
+// WatchRow is what a watch step shows of its PR.
+type WatchRow struct {
+	PR      string `json:"pr"`
+	URL     string `json:"url,omitempty"`
+	Until   string `json:"until,omitempty"`
+	Pending int    `json:"pending"`
+	Threads int    `json:"threads"`
+	KeptOut int    `json:"keptOut"`
+	Passes  int    `json:"passes"`
+	Held    bool   `json:"held,omitempty"`
+}
+
+func foldWatch(w *domain.WatchState, until string) *WatchRow {
+	row := &WatchRow{
+		PR: fmt.Sprintf("%s#%d", w.PR.Repo, w.PR.Number), URL: w.PR.URL, Until: until,
+		Passes: len(w.Passes), Held: w.Held,
+	}
+	if f := w.Observed; f != nil {
+		row.Threads, row.KeptOut = f.Threads, f.KeptOut
+		for _, c := range f.Checks {
+			if c.Bucket == domain.WatchCheckPending {
+				row.Pending++
+			}
+		}
+	}
+	return row
+}
+
+// WatchLine is a watching row's words, and the live strip's: what the
+// watch has seen of the PR and how much the trust filter kept out.
+func WatchLine(w *domain.WatchState) string {
+	f := w.Observed
+	if f == nil {
+		return "waiting on the PR: not read yet"
+	}
+	var parts []string
+	pending := 0
+	for _, c := range f.Checks {
+		if c.Bucket == domain.WatchCheckPending {
+			pending++
+		}
+	}
+	if pending > 0 {
+		parts = append(parts, domain.WatchWords(pending, "check")+" pending")
+	}
+	if f.Threads > 0 {
+		parts = append(parts, domain.WatchWords(f.Threads, "thread")+" seen")
+	}
+	if f.KeptOut > 0 {
+		var kinds []string
+		for _, k := range []string{"review", "thread", "comment"} {
+			if n := f.KeptOutByKind[k]; n > 0 {
+				kinds = append(kinds, domain.WatchWords(n, k))
+			}
+		}
+		what := strings.Join(kinds, " and ")
+		if what == "" {
+			what = domain.WatchWords(f.KeptOut, "item")
+		}
+		parts = append(parts, what+" from outside the filter")
+	}
+	if f.Unread > 0 {
+		parts = append(parts, domain.WatchWords(f.Unread, "item")+" past the first 100 not read")
+	}
+	if f.Unreadable != "" {
+		parts = append(parts, "the trust filter could not be read")
+	}
+	line := "waiting on the PR: "
+	if len(parts) == 0 {
+		line += "green, no feedback"
+		if hasBucketFail(f) {
+			line = "waiting on the PR: a check failed"
+		}
+	} else {
+		line += strings.Join(parts, " · ")
+	}
+	if w.Held {
+		line += " · acts on nothing until you resume"
+	}
+	return line
+}
+
+func hasBucketFail(f *domain.WatchFacts) bool {
+	for _, c := range f.Checks {
+		if c.Bucket == domain.WatchCheckFail {
+			return true
+		}
+	}
+	return false
+}
+
+// passHeader is the folded row that heads one pass of a watch.
+func passHeader(watchPath string, p domain.WatchPass, steps []domain.RunStep) StepRow {
+	line := "running"
+	state := string(domain.StepRunning)
+	switch {
+	case p.Settled == "failed":
+		line, state = "failed", string(domain.StepFailed)
+	case p.PushError != "":
+		line, state = "push failed: "+Sanitize(firstLineOf(p.PushError)), string(domain.StepFailed)
+	case p.Pushed && p.PushedSHA != "":
+		line, state = "pushed "+short(p.PushedSHA), string(domain.StepDone)
+	case p.Pushed:
+		line, state = "nothing to push", string(domain.StepDone)
+	case p.Settled == "done":
+		line = "pushing"
+	}
+	var ran []string
+	prefix := watchPath + "/" + strconv.Itoa(p.N) + "/"
+	for _, s := range steps {
+		if rest, ok := strings.CutPrefix(s.Path, prefix); ok {
+			id, _, _ := strings.Cut(rest, "/")
+			if len(ran) == 0 || ran[len(ran)-1] != id {
+				ran = append(ran, id)
+			}
+		}
+	}
+	return StepRow{
+		Key: watchPath + "/" + strconv.Itoa(p.N), Path: watchPath + "/" + strconv.Itoa(p.N), ID: "pass " + strconv.Itoa(p.N),
+		State: state, Line: line, Folded: true, Pass: p.N, Event: string(p.Event), Steps: strings.Join(ran, " · "),
+	}
+}
+
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
 // stepRows draws the run's steps, oldest first, each finished outermost
 // iteration of a repeat folded to one row where its first step stood.
 func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) []StepRow {
@@ -857,6 +1003,7 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 		}
 	}
 	rows := []StepRow{}
+	passed := map[int]bool{}
 	placed := map[string]int{}
 	changed := map[string]int{}
 	for _, s := range steps {
@@ -871,7 +1018,27 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 			}
 		}
 		if into == nil {
-			rows = append(rows, stepRow(s, live))
+			if w, n, ok := passOf(run, steps, s.Path); ok {
+				if !passed[n] {
+					passed[n] = true
+					rows = append(rows, passHeader(w.path, w.state.Passes[n-1], steps))
+				}
+				row := stepRow(s, live)
+				row.Pass, row.Event = n, string(w.state.Passes[n-1].Event)
+				if row.Repeat == w.path {
+					row.Repeat, row.Iter = "", 0
+				}
+				rows = append(rows, row)
+				continue
+			}
+			row := stepRow(s, live)
+			if s.Watch != nil {
+				row.Watch = foldWatch(s.Watch, watchUntil(run, s.StepID))
+				if s.State == domain.StepWatching {
+					row.Line = WatchLine(s.Watch)
+				}
+			}
+			rows = append(rows, row)
 			continue
 		}
 		i, ok := placed[into.path]
@@ -900,6 +1067,42 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 		rows[i].Line = rows[i].Verdict
 	}
 	return rows
+}
+
+type watchAt struct {
+	path  string
+	state *domain.WatchState
+}
+
+// passOf reports whether the step at path is inside a pass of the run's
+// watch, and which.
+func passOf(run domain.Run, steps []domain.RunStep, path string) (watchAt, int, bool) {
+	w, ok := run.Recipe.WatchStep()
+	if !ok {
+		return watchAt{}, 0, false
+	}
+	rest, under := strings.CutPrefix(path, w.ID+"/")
+	if !under {
+		return watchAt{}, 0, false
+	}
+	seg, _, _ := strings.Cut(rest, "/")
+	n, err := strconv.Atoi(seg)
+	if err != nil {
+		return watchAt{}, 0, false
+	}
+	for i := range steps {
+		if steps[i].Path == w.ID && steps[i].Watch != nil && n >= 1 && n <= len(steps[i].Watch.Passes) {
+			return watchAt{path: w.ID, state: steps[i].Watch}, n, true
+		}
+	}
+	return watchAt{}, 0, false
+}
+
+func watchUntil(run domain.Run, id string) string {
+	if w, ok := run.Recipe.WatchStep(); ok && w.ID == id {
+		return w.Watch.UntilOr()
+	}
+	return ""
 }
 
 // stepRow is one step's row.

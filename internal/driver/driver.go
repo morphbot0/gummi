@@ -383,6 +383,14 @@ func (d *Driver) answerDecision(ctx context.Context, id domain.FeatureID, run *d
 		answer = engine.WorkflowContinue
 	case domain.RunDecideResume:
 		answer = engine.WorkflowResumeRun
+	case domain.RunDecideWatch:
+		// the recommended option is the first; a PR that has been quiet for
+		// the recipe's quiet is not waited on forever in a drive
+		answer = dec.Options[0]
+		if row, err := d.store.RunStep(ctx, id, run.N, dec.Step); err == nil && row != nil && row.Watch != nil &&
+			strings.HasPrefix(row.Watch.Asked, "quiet@") {
+			answer = engine.WorkflowStopRun
+		}
 	default:
 		return fmt.Errorf("workflow run %d asks %q, which an unattended run cannot answer", run.N, firstLine(dec.Question))
 	}

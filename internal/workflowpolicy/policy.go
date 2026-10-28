@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -47,6 +48,8 @@ type Step struct {
 	Path  string
 	State domain.StepState
 	Spent float64
+	// Watch is a watch row's memory (DESIGN §28.2); nil on every other.
+	Watch *domain.WatchState
 }
 
 // UntilResult is the engine's judgement of a repeat's until after one
@@ -90,6 +93,9 @@ type Snapshot struct {
 	Left    float64
 	// Stopping marks a workflow_stop or a person's stop.
 	Stopping bool
+	// Now is the engine's clock, the only one Decide reads: a watch's quiet
+	// runs against it.
+	Now time.Time
 }
 
 // Kind names an action.
@@ -118,11 +124,50 @@ const (
 	// End ends the run in State: run the end checks, write the report and
 	// send it to the session.
 	End
+	// StartPass starts pass Pass of the watch at Path for Event; Key names
+	// the event and Seen are the feedback ids the pass takes (DESIGN §28.3).
+	StartPass
+	// PushPass pushes the session's branch once pass Pass of the watch at
+	// Path has run its steps.
+	PushPass
+	// AskWatch puts the watch at Path's question Ask (keyed Key) to the
+	// person.
+	AskWatch
+	// ParkWatch parks the run for a person's Resume before the pass a
+	// restart held.
+	ParkWatch
+	// EndWatch settles the watch at Path in Settle (done or failed).
+	EndWatch
 )
 
 func (k Kind) String() string {
-	return [...]string{"start", "interrupt", "need-until", "ask-on-max", "ask-unjudged", "pause", "end"}[k]
+	return [...]string{
+		"start", "interrupt", "need-until", "ask-on-max", "ask-unjudged", "pause", "end",
+		"start-pass", "push-pass", "ask-watch", "park-watch", "end-watch",
+	}[k]
 }
+
+// WatchAsk is which question a watch puts to the person (DESIGN §28.4).
+type WatchAsk string
+
+const (
+	AskMax        WatchAsk = "max"        // overall or an event's own max
+	AskSame       WatchAsk = "same"       // the same event on the same head after a pass
+	AskUnchanged  WatchAsk = "unchanged"  // a pass changed nothing and its event stands
+	AskFailedPass WatchAsk = "failed"     // a pass's step failed
+	AskPush       WatchAsk = "push"       // the push after a pass failed
+	AskUnreadable WatchAsk = "unreadable" // the trust filter could not be read
+	AskReadError  WatchAsk = "read"       // the PR could not be read
+	AskQuiet      WatchAsk = "quiet"      // nothing happened for the recipe's quiet
+)
+
+// The person's answers to a watch's question.
+const (
+	WatchMore  = "more"  // one more pass
+	WatchWait  = "wait"  // keep waiting without acting
+	WatchAgain = "again" // read or push again
+	WatchStop  = "stop"
+)
 
 // Action is one thing for the engine to do.
 type Action struct {
@@ -136,6 +181,14 @@ type Action struct {
 	Reason string
 	// State is End's: done, partial or stopped.
 	State domain.RunState
+	// A watch's actions: the event, the pass, its key and question, the
+	// feedback ids a pass takes and the state EndWatch settles in.
+	Event  domain.WatchEvent
+	Pass   int
+	Key    string
+	Ask    WatchAsk
+	Seen   []string
+	Settle domain.StepState
 }
 
 func (a Action) String() string {
@@ -167,6 +220,10 @@ type decider struct {
 	byPath map[string]Step
 	settle []Action // rule 3
 	starts []Action // rule 4
+	// acts are a watch's own actions, which cost nothing and so never pause
+	// a spent pool; waiting marks a watch that is only waiting.
+	acts    []Action
+	waiting bool
 }
 
 func newDecider(in Snapshot) *decider {
@@ -199,13 +256,21 @@ func Decide(in Snapshot) []Action {
 	res, why := d.seq("", in.Recipe.Steps)
 	if in.Bounded && in.Left <= 0 {
 		// a spent pool pauses whatever would spend more; a run with nothing
-		// left to start or settle ends, its checks and report costing nothing
-		if res == pending || len(live) > 0 || len(d.starts) > 0 || len(d.settle) > 0 {
+		// left to start or settle ends, its checks and report costing nothing.
+		// A watch only waiting spends nothing (DESIGN §28.2).
+		working := 0
+		for _, s := range live {
+			if s.State != domain.StepWatching {
+				working++
+			}
+		}
+		if (res == pending && !d.waiting) || working > 0 || len(d.starts) > 0 || len(d.settle) > 0 {
 			return []Action{{Kind: Pause, Reason: fmt.Sprintf("the session's budget is spent (the run has spent %s)", domain.FormatDollars(Spent(in)))}}
 		}
 	}
 	var out []Action
 	out = append(out, d.settle...)
+	out = append(out, d.acts...)
 	out = append(out, d.starts...)
 
 	if res == pending || len(d.live()) > 0 {
@@ -256,6 +321,8 @@ func (d *decider) seq(prefix string, es []domain.Entry) (outcome, string) {
 		var res outcome
 		var why string
 		switch {
+		case e.Step != nil && e.Step.Watch != nil:
+			res, why = d.watch(prefix, *e.Step)
 		case e.Step != nil:
 			res, why = d.step(prefix, *e.Step)
 		case e.Parallel != nil:

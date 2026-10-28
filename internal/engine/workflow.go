@@ -487,9 +487,16 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	if len(dispatchesOf(recipe)) > 0 && !sess.Home {
 		return nil, fmt.Errorf("%s is not an agent: only an agent's recipe dispatches sessions", session)
 	}
+	if err := e.checkPublishAllowance(ctx, sess, recipe); err != nil {
+		return nil, err
+	}
+	changedHandlers, err := e.freezeHandlers(&recipe)
+	if err != nil {
+		return nil, err
+	}
 	if changed, err := e.freezeDispatches(&recipe); err != nil {
 		return nil, err
-	} else if changed {
+	} else if changed || changedHandlers {
 		b, err := workflowrecipe.Marshal(recipe)
 		if err != nil {
 			return nil, err
@@ -502,6 +509,9 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	}
 	inputs, err := workflowrecipe.ResolveInputs(recipe, req.Inputs)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkWatchTrust(recipe, inputs); err != nil {
 		return nil, err
 	}
 	n, err := e.runSpec(ctx, sess, req.Spec)
@@ -666,6 +676,7 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 		"a later edit reaches the run as a note.\n\nSteps:\n", recipeLabel(run), run.Spec, title, run.SpecRev)
 	e.writeRecipeTree(&b, sess.Profile, run.Recipe.Steps, "")
 	writeAllowance(&b, run.Recipe)
+	e.writePRAllowance(ctx, &b, run)
 	if len(warnings) > 0 {
 		b.WriteString("\nWarnings:\n- " + strings.Join(warnings, "\n- ") + "\n")
 	}
@@ -704,6 +715,12 @@ func (e *Engine) writeRecipeTree(b *strings.Builder, profile string, es []domain
 			return
 		case s.Dispatch != nil:
 			fmt.Fprintf(b, "%s- %s%s · dispatch → %s\n", indent, mark, s.ID, s.Dispatch.Repo)
+			return
+		case s.PR != nil:
+			fmt.Fprintf(b, "%s- %s%s · pr %s\n", indent, mark, s.ID, s.PR.Act)
+			return
+		case s.Watch != nil:
+			fmt.Fprintf(b, "%s- %s%s · watch the PR until %s\n", indent, mark, s.ID, s.Watch.UntilOr())
 			return
 		}
 		fmt.Fprintf(b, "%s- %s%s · %s · %s\n", indent, mark, s.ID, s.Role, e.stepModelWords(profile, s.Role, s.Slot))
@@ -1010,6 +1027,14 @@ func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n i
 			return e.chatAboutDecision(ctx, session, n, d, answer), nil
 		}
 		e.runNote(session, fmt.Sprintf("run %d: %s at %s", n, strings.ToLower(answer), d.Step))
+	case domain.RunDecideWatch:
+		applied, err := e.answerWatchLocked(ctx, run, d, answer)
+		if err != nil {
+			return nil, err
+		}
+		if !applied {
+			return e.chatAboutDecision(ctx, session, n, d, answer), nil
+		}
 	case domain.RunDecideBudget:
 		switch answer {
 		case WorkflowStopRun:
@@ -1243,6 +1268,7 @@ func (e *Engine) resumeLocked(ctx context.Context, run *domain.Run) error {
 	if err := e.cfg.Store.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	e.releaseHeld(ctx, run)
 	e.carryOnRun(ctx, run)
 	e.runNote(session, fmt.Sprintf("run %d resumed", run.N))
 	e.workflowEvent(session)
@@ -1613,6 +1639,9 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 	// that is gone — this one before a restart, or another that let the card
 	// go: its steps have no backend now. It stays parked until a person
 	// resumes it (§25.7), and asks them to.
+	if run.State == domain.RunRunning && !rt.conducts(session, run.N) && !run.Stopping && e.resumeWatching(ctx, run) {
+		acts = append(acts, "poll after restart")
+	}
 	if run.State == domain.RunRunning && !rt.conducts(session, run.N) && !run.Stopping {
 		if err := e.parkRunLocked(ctx, run, "parked: gummi stopped while it ran"); err != nil {
 			return acts, err
@@ -1660,6 +1689,7 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 	if e.raisePlanDecision(run, steps) {
 		acts = append(acts, "plan")
 	}
+	e.pollWatches(run, steps)
 	byPath := map[string]domain.RunStep{}
 	for _, s := range steps {
 		byPath[s.Path] = s
@@ -1704,6 +1734,14 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 			}
 		case workflowpolicy.End:
 			e.endRunAsync(session, run.N, a.State, a.Reason)
+		case workflowpolicy.StartPass, workflowpolicy.PushPass, workflowpolicy.AskWatch,
+			workflowpolicy.ParkWatch, workflowpolicy.EndWatch:
+			d, err := e.watchActionLocked(ctx, run, a)
+			if err != nil {
+				return acts, err
+			}
+			dirty = d || dirty
+			started = true
 		}
 	}
 	if dirty {
@@ -1789,7 +1827,7 @@ func (e *Engine) raisePlanDecision(run *domain.Run, steps []domain.RunStep) bool
 // newStepLocked writes a step instance's row as running, so the next tick
 // does not start it again; its card, snapshot and prompt follow.
 func (e *Engine) newStepLocked(ctx context.Context, run *domain.Run, a workflowpolicy.Action, have map[string]domain.RunStep) error {
-	def, ok := workflowrecipe.Find(run.Recipe, a.Step)
+	def, ok := e.stepDef(ctx, run, a.Path, a.Step)
 	if !ok {
 		return fmt.Errorf("the recipe has no step %s", a.Step)
 	}
@@ -1812,7 +1850,7 @@ func (e *Engine) runSnapshot(ctx context.Context, run *domain.Run) (workflowpoli
 		return workflowpolicy.Snapshot{}, nil, err
 	}
 	in := workflowpolicy.Snapshot{
-		State: run.State, Recipe: run.Recipe, Stopping: run.Stopping,
+		State: run.State, Recipe: run.Recipe, Stopping: run.Stopping, Now: e.now(),
 		Until: map[string]workflowpolicy.UntilResult{}, OnMax: map[string]workflowpolicy.OnMaxAnswer{},
 	}
 	spent := 0.0
@@ -1839,7 +1877,7 @@ func (e *Engine) runSnapshot(ctx context.Context, run *domain.Run) (workflowpoli
 			}
 		}
 		spent += s.Spent
-		in.Steps = append(in.Steps, workflowpolicy.Step{Path: s.Path, State: s.State, Spent: s.Spent})
+		in.Steps = append(in.Steps, workflowpolicy.Step{Path: s.Path, State: s.State, Spent: s.Spent, Watch: s.Watch})
 	}
 	for k, v := range run.Until {
 		in.Until[k] = workflowpolicy.UntilResult{Met: v.Met, Unjudged: v.Unjudged, Detail: v.Detail}
@@ -1909,7 +1947,7 @@ func (e *Engine) judgeUntilAsync(run *domain.Run, iter, repeatID string) {
 // the done-when checks in the tree, an artifact's verdict, or the last
 // step's output.
 func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID string) domain.UntilJudgement {
-	r, ok := findRepeat(run.Recipe.Steps, repeatID)
+	r, ok := findRepeat(e.entriesFor(ctx, run, iter), repeatID)
 	if !ok {
 		return domain.UntilJudgement{Detail: "the recipe has no repeat " + repeatID}
 	}
