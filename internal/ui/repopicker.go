@@ -102,7 +102,7 @@ func repoPickerOptions(s *theme.Styles, candidates []string, idx, width int) []s
 			cells[i] = s.Faint.Render("  " + c)
 		}
 	}
-	return foldChoices(s, cells, idx, width, choiceMaxLines)
+	return foldChoices(s, cells, idx, width, choiceMaxLines, choiceSep)
 }
 
 // setRepoChoices re-offers the candidates after a rescan (repoChoices). The

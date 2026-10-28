@@ -3690,27 +3690,22 @@ hand-off `internal/ui/rebase.go` already had.
 
 A stack is **created by the act of stacking**, not by a dialog: `T` on a
 card opens a new session's draft with its `from` setting already on that
-card,
-and creating that second card is what brings the stack into being, named
-after the card at the bottom. The common case costs one key, and a stack of
-one card — which nobody wants — never exists. The row itself lives in the
-folded run options, because the overwhelming majority of cards are
-standalone and a row every reader tabs past to say "no" costs more than it
-gives; what keeps the gesture legible is the always-visible `becomes`
-readout, which names the branch the card will fork from.
+card, and creating that second card is what brings the stack into being,
+named after the card at the bottom. The common case costs one key, and a
+stack of one card — which nobody wants — never exists.
 
-The row is **answerable on its own**, not only by `T`. It cycles the
-cards on the board that have a branch to fork from — most recently
-touched first, so the card the reader just left is one `→` away — and a
-dialog opened with `n` by someone who only then thought of the card
-below is not told to cancel and start again. `T` remains the one-key
-path; all it does now is preselect a cell. What keeps the row from
-collapsing into the dependency picker it must not become is its *shape*:
-`runs after` is a filtered list because it names a set out of the whole
-workspace, while `stack` is a cycle because it names one card out of a
-short, repo-local one. A stack position is topology and a dependency is
-scheduling (§18.1), and two rows that set them must not be operated the
-same way.
+The setting is **answerable on its own**, not only by `T`. A branch to fork
+from and a card to stack on answer one question — what this branch forks
+from — so they are one `from` chip in the draft's strip (§19.8), changed
+with `/from` or by stepping through it with `←`/`→`: the
+repository's branches, then the cards on the board that have a branch to
+fork from, most recently touched first, so the card the reader just left is
+close by. Someone who opened a draft with `n` and only then thought of the
+card below is not told to leave and start again; `T` remains the one-key
+path, and all it does is preset the chip. What keeps it from collapsing
+into a dependency picker is what it names: one branch, out of a short,
+repo-local list. A stack position is topology and a dependency is
+scheduling (§18.1).
 
 The row's candidates are the cards that could actually carry the fork:
 no research card (no branch), no goal and no card inside one (a goal's
@@ -3718,8 +3713,8 @@ cards share the goal's branch, §18.5), and only the chosen repository's,
 since a stack is one repository. A card already **done** stays on offer —
 done is a verified branch, not a landed one, so putting the next slice on
 top of one waiting for review is the case stacks exist for. Because the
-repo row can move after a card has been chosen, the form re-checks at
-submit and refuses; the store refuses it too (`ErrStackRepoMismatch`), but
+repository can move after a card has been chosen, the draft re-checks at
+send and refuses; the store refuses it too (`ErrStackRepoMismatch`), but
 only once the card has been created, as a warning about a stack that did
 not happen.
 

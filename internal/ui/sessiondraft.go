@@ -772,7 +772,10 @@ func (m *Shell) draftStrip(w int) []string {
 		}
 		cells = append(cells, " "+s.Faint.Render(label)+" "+value+" ")
 	}
-	return foldChoices(s, cells, sel, max(w, 1), 3)
+	// a faint dot between settings, not the form's wide gap: the cells
+	// carry a space each side already, so the strip reads as one line of
+	// settings rather than columns of a table
+	return foldChoices(s, cells, sel, max(w, 1), 3, s.Faint.Render("·"))
 }
 
 // chipText is a chip's label and its value as the strip shows it.

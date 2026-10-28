@@ -743,7 +743,7 @@ func choiceCells(s *theme.Styles, focused bool, opts []string, idx int, unsetLab
 // packChoices folds cells into lines at most width columns wide, and
 // reports the line each cell landed on. A cell wider than the whole
 // budget is truncated rather than allowed to set the width.
-func packChoices(cells []string, width int) (lines []string, lineOf []int) {
+func packChoices(cells []string, width int, sep string) (lines []string, lineOf []int) {
 	if width < 1 {
 		width = 1
 	}
@@ -758,9 +758,9 @@ func packChoices(cells []string, width int) (lines []string, lineOf []int) {
 		switch {
 		case cur == "":
 			cur, curW = c, cw
-		case curW+len(choiceSep)+cw <= width:
-			cur += choiceSep + c
-			curW += len(choiceSep) + cw
+		case curW+ansi.StringWidth(sep)+cw <= width:
+			cur += sep + c
+			curW += ansi.StringWidth(sep) + cw
 		default:
 			lines = append(lines, cur)
 			cur, curW = c, cw
@@ -778,18 +778,18 @@ func packChoices(cells []string, width int) (lines []string, lineOf []int) {
 // at sel — the selected option is the one that must always be on screen
 // — and tails the last line with how many the window leaves off, so a
 // short row never reads as the whole list.
-func foldChoices(s *theme.Styles, cells []string, sel, width, maxLines int) []string {
+func foldChoices(s *theme.Styles, cells []string, sel, width, maxLines int, sep string) []string {
 	if len(cells) == 0 {
 		return nil
 	}
-	lines, _ := packChoices(cells, width)
+	lines, _ := packChoices(cells, width, sep)
 	if len(lines) <= maxLines {
 		return lines
 	}
 	// the tail's room has to come out of the cells' budget, so pack again
 	// against the narrower width before choosing the window.
 	var lineOf []int
-	lines, lineOf = packChoices(cells, width-ansi.StringWidth(choiceTail(s, len(cells))))
+	lines, lineOf = packChoices(cells, width-ansi.StringWidth(choiceTail(s, len(cells))), sep)
 	if len(lines) <= maxLines {
 		return lines
 	}
@@ -824,7 +824,7 @@ func choiceRowLines(s *theme.Styles, focused bool, label string, opts []string, 
 // (indent, which differs between the top-level rows and the expanded
 // option rows under "runs as").
 func foldedRow(s *theme.Styles, prefix string, indent int, cells []string, sel, width, maxLines int) []string {
-	lines := foldChoices(s, cells, sel, max(width-indent, choiceMinWidth), maxLines)
+	lines := foldChoices(s, cells, sel, max(width-indent, choiceMinWidth), maxLines, choiceSep)
 	if len(lines) == 0 {
 		return []string{prefix}
 	}
