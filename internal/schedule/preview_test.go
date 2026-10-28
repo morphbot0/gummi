@@ -138,3 +138,20 @@ func TestPreviewEmptyZoneIsHostZone(t *testing.T) {
 		t.Errorf("fires came in %v, want the host zone", zone)
 	}
 }
+
+// TestSplitWhenTellsAPresetFromACronLine: the one field a form offers is
+// a preset when Compile takes it, and the expression itself otherwise.
+func TestSplitWhenTellsAPresetFromACronLine(t *testing.T) {
+	for _, c := range []struct{ in, every, cron string }{
+		{"1h", "1h", ""},
+		{" @daily ", "@daily", ""},
+		{"0 5 * * *", "", "0 5 * * *"},
+		{"7m", "", "7m"}, // no preset: Parse refuses it as a cron line
+		{"", "", ""},
+	} {
+		every, cron := SplitWhen(c.in)
+		if every != c.every || cron != c.cron {
+			t.Errorf("SplitWhen(%q) = %q, %q; want %q, %q", c.in, every, cron, c.every, c.cron)
+		}
+	}
+}

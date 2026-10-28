@@ -40,24 +40,23 @@ import (
 // model row only exists when a backend is picked. stops() is the live
 // list; focus always names one of its entries.
 const (
-	schedStopName = iota
+	schedStopPrompt = iota
 	schedStopKind
+	schedStopWhen
+	schedStopZone
 	schedStopTarget
 	schedStopRepo
-	schedStopEvery
-	schedStopCron
-	schedStopZone
-	schedStopPrompt
 	schedStopBackend
 	schedStopModel
 	schedStopEnvelope
+	schedStopName
 	schedStopButtons
 )
 
 // The kind row's cycle, labels beside it.
 var (
 	scheduleKinds      = []domain.ScheduleKind{domain.ScheduleMint, domain.ScheduleHeartbeat}
-	scheduleKindLabels = []string{"mint a card", "heartbeat a session"}
+	scheduleKindLabels = []string{"start a session", "wake a session"}
 )
 
 // scheduleZones is the timezone row's shortlist: the zones a schedule is
@@ -99,9 +98,9 @@ type scheduleForm struct {
 	m    *Shell
 	edit *domain.Schedule // nil creates
 
-	name, every, cron, zone, prompt, target textinput.Model
-	model, env                              textinput.Model
-	repo                                    repoPicker
+	name, when, zone, prompt, target textinput.Model
+	model, env                       textinput.Model
+	repo                             repoPicker
 
 	kind int // an index into scheduleKinds
 
@@ -138,19 +137,19 @@ func newScheduleForm(m *Shell, edit *domain.Schedule) *scheduleForm {
 	d := &scheduleForm{
 		m:       m,
 		edit:    edit,
-		name:    in("nightly triage", 100, 32),
-		every:   in("1h, 15m, @daily", 24, 14),
-		cron:    in("0 5 * * *", 64, 16),
+		name:    in("from what it asks", 100, 32),
+		when:    in("1h, 15m, @daily or 0 5 * * *", 64, 32),
 		zone:    in("local", 48, 18),
 		prompt:  in("what the session is asked", 2000, 40),
 		target:  in("FF-001", 16, 10),
 		model:   in("the agent's default", 120, 22),
 		env:     in("100", 9, 7),
 		zoneIdx: -1,
-		focus:   schedStopName,
+		focus:   schedStopPrompt,
 		buttons: newButtonRow(button{label: "Cancel"}, button{label: "Save"}),
 	}
-	d.name.Focus()
+	d.prompt.Focus()
+	d.when.SetValue("1h")
 	d.env.SetValue(domain.DollarsInput(100))
 	// the backend cycle: the profile default first, then every backend a
 	// session could be pointed at, with the static frame of the session
@@ -200,7 +199,7 @@ func (d *scheduleForm) prefill(sc *domain.Schedule) {
 			}
 		}
 	}
-	d.cron.SetValue(sc.Cron)
+	d.when.SetValue(sc.Cron)
 	if sc.Timezone == "" {
 		d.zone.SetValue("local")
 	} else {
@@ -230,11 +229,11 @@ func (d *scheduleForm) backendName() string {
 // edit keeps the kind — the row renders, frozen — so it is not a stop
 // there, the way the web form shows the kind fixed on edit.
 func (d *scheduleForm) stops() []int {
-	out := []int{schedStopName}
+	out := []int{schedStopPrompt}
 	if d.edit == nil {
 		out = append(out, schedStopKind)
 	}
-	out = append(out, schedStopEvery, schedStopCron, schedStopZone, schedStopPrompt)
+	out = append(out, schedStopWhen, schedStopZone)
 	if d.kindIsHeartbeat() {
 		out = append(out, schedStopTarget)
 	} else {
@@ -244,7 +243,7 @@ func (d *scheduleForm) stops() []int {
 		}
 		out = append(out, schedStopEnvelope)
 	}
-	return append(out, schedStopButtons)
+	return append(out, schedStopName, schedStopButtons)
 }
 
 // advanceFocus moves focus by dir (±1) over the live stops, wrapping.
@@ -263,16 +262,14 @@ func (d *scheduleForm) advanceFocus(dir int) {
 // setFocus moves the text cursors: one input focused at a time.
 func (d *scheduleForm) setFocus(f int) {
 	d.focus = f
-	for _, in := range []*textinput.Model{&d.name, &d.every, &d.cron, &d.zone, &d.prompt, &d.target, &d.model, &d.env} {
+	for _, in := range []*textinput.Model{&d.name, &d.when, &d.zone, &d.prompt, &d.target, &d.model, &d.env} {
 		in.Blur()
 	}
 	switch f {
 	case schedStopName:
 		d.name.Focus()
-	case schedStopEvery:
-		d.every.Focus()
-	case schedStopCron:
-		d.cron.Focus()
+	case schedStopWhen:
+		d.when.Focus()
 	case schedStopZone:
 		d.zone.Focus()
 	case schedStopPrompt:
@@ -385,11 +382,8 @@ func (d *scheduleForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case schedStopName:
 		d.name, _ = d.name.Update(key)
 		d.errText = ""
-	case schedStopEvery:
-		d.every, _ = d.every.Update(key)
-		d.refresh()
-	case schedStopCron:
-		d.cron, _ = d.cron.Update(key)
+	case schedStopWhen:
+		d.when, _ = d.when.Update(key)
 		d.refresh()
 	case schedStopPrompt:
 		d.prompt, _ = d.prompt.Update(key)
@@ -405,7 +399,7 @@ func (d *scheduleForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 // focused input.
 func (d *scheduleForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	rows := map[int]*textinput.Model{
-		schedStopName: &d.name, schedStopEvery: &d.every, schedStopCron: &d.cron,
+		schedStopName: &d.name, schedStopWhen: &d.when,
 		schedStopZone: &d.zone, schedStopPrompt: &d.prompt, schedStopTarget: &d.target,
 		schedStopModel: &d.model, schedStopEnvelope: &d.env,
 	}
@@ -487,7 +481,8 @@ type scheduleModelsMsg struct {
 // read — the same composition the write boundary applies — so they run
 // per keystroke rather than per submit.
 func (d *scheduleForm) refresh() {
-	d.preview = schedule.Preview(d.every.Value(), d.cron.Value(), scheduleZoneStored(d.zone.Value()), d.m.now())
+	every, cron := schedule.SplitWhen(d.when.Value())
+	d.preview = schedule.Preview(every, cron, scheduleZoneStored(d.zone.Value()), d.m.now())
 	d.envHint = scheduleEnvelopeHint(d.m.engine, d.backendName(), strings.TrimSpace(d.model.Value()))
 }
 
@@ -506,14 +501,11 @@ func (d *scheduleForm) submit() (bool, tea.Cmd) {
 		Kind:     string(scheduleKinds[d.kind]),
 		Target:   strings.ToUpper(strings.TrimSpace(d.target.Value())),
 		Repo:     d.repo.name(),
-		Cron:     strings.TrimSpace(d.cron.Value()),
+		When:     strings.TrimSpace(d.when.Value()),
 		Timezone: scheduleZoneStored(d.zone.Value()),
 		Prompt:   strings.TrimSpace(d.prompt.Value()),
 		Backend:  d.backendName(),
 		Model:    strings.TrimSpace(d.model.Value()),
-	}
-	if req.Cron == "" {
-		req.Every = strings.TrimSpace(d.every.Value())
 	}
 	if !d.kindIsHeartbeat() {
 		if v, err := domain.ParseDollars(d.env.Value()); err == nil {
@@ -575,7 +567,6 @@ func (m *Shell) openHeartbeatForm(f domain.Feature) tea.Cmd {
 	}
 	d.target.SetValue(string(f.ID))
 	d.name.SetValue(strings.ToLower(string(f.ID)) + " heartbeat")
-	d.every.SetValue("1h")
 	d.onSave = m.scheduleSaveAndEnable
 	d.refresh()
 	m.Overlay.Push(d)
@@ -648,7 +639,7 @@ func (d *scheduleForm) View(s *theme.Styles, w, h int) string {
 		b.WriteString(strings.Join(foldReadout(line, 12, width), "\n") + "\n")
 	}
 
-	input(schedStopName, "name", d.name)
+	input(schedStopPrompt, "asks", d.prompt)
 	if d.edit != nil {
 		// an edit keeps the kind: the row is a readout, off the walk —
 		// the same fixed field the web form shows
@@ -658,6 +649,8 @@ func (d *scheduleForm) View(s *theme.Styles, w, h int) string {
 	} else {
 		cycle(schedStopKind, "kind", scheduleKindLabels, d.kind)
 	}
+	input(schedStopWhen, "when", d.when)
+	input(schedStopZone, "zone", d.zone)
 	if d.kindIsHeartbeat() {
 		input(schedStopTarget, "target", d.target)
 	} else {
@@ -672,10 +665,7 @@ func (d *scheduleForm) View(s *theme.Styles, w, h int) string {
 		input(schedStopEnvelope, "budget", d.env)
 		b.WriteString(s.Faint.Render(ansi.Wrap(d.envHint, width, "  ")) + "\n")
 	}
-	input(schedStopEvery, "every", d.every)
-	input(schedStopCron, "cron", d.cron)
-	input(schedStopZone, "zone", d.zone)
-	input(schedStopPrompt, "prompt", d.prompt)
+	input(schedStopName, "name", d.name)
 
 	b.WriteString("\n" + d.previewLine(s, width) + "\n")
 	b.WriteString("\n" + d.buttons.ViewWidth(s, d.focus == schedStopButtons, width) + "\n")

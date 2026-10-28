@@ -346,9 +346,9 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
   const editing = !!row
   const kind = { value: row?.kind || (seed ? 'heartbeat' : 'mint') }
   const err = h('div', { class: 'sch-form-error', role: 'alert', testid: 'schedule-form-error' })
-  const name = h('input', { type: 'text', testid: 'schedule-form-name', placeholder: 'nightly triage', required: true, value: row?.name || (seed ? `${seed.target.toLowerCase()} heartbeat` : '') })
-  const every = h('input', { type: 'text', testid: 'schedule-form-every', placeholder: '1h, 15m, @daily', value: editing ? '' : '1h' })
-  const cron = h('input', { type: 'text', testid: 'schedule-form-cron', placeholder: '0 5 * * *', value: row?.cron || '' })
+  const name = h('input', { type: 'text', testid: 'schedule-form-name', placeholder: 'from what it asks', value: row?.name || (seed ? `${seed.target.toLowerCase()} heartbeat` : '') })
+  // one cadence field: a preset or a cron line, told apart by the server
+  const when = h('input', { type: 'text', testid: 'schedule-form-when', placeholder: '1h, @daily or 0 5 * * *', value: row?.cron || '1h' })
   const tz = h('input', {
     type: 'text', testid: 'schedule-form-tz', placeholder: 'local',
     list: 'schedule-tz-list', value: row?.timezone || 'local', autocomplete: 'off'
@@ -363,16 +363,16 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
     value: { backend: row?.backend, model: row?.model },
     testid: 'schedule-form-pair',
     blank: { label: 'profile default', sub: "the profile's implementer" },
-    note: 'Each minted card runs on this agent and model.',
+    note: 'Each session it starts runs on this agent and model.',
     onchange: () => askPreview()
   })
   const envelope = h('input', { type: 'text', inputmode: 'decimal', testid: 'schedule-form-envelope', value: dollarsInput(row?.envelope ?? 100) })
   const tzList = h('datalist', { id: 'schedule-tz-list' }, timezones.map(z => h('option', { value: z })))
 
-  const targetField = field('Heartbeat target (FF card)', target)
+  const targetField = field('Session to wake', target)
   const repoField = field('Repository', repo)
   const pairFieldEl = field('Agent and model', pair.el, { testid: 'schedule-form-pair-field', hint: "optional — the profile's implementer by default" })
-  const envelopeField = field('Budget per card (dollars)', envelope, { hint: 'the brake — what one minted card may spend' })
+  const envelopeField = field('Budget per session (dollars)', envelope, { hint: 'the brake — what each session it starts may spend' })
 
   // ---- the cadence preview: the server answers what the store would
   // hold and when it would fire; the page parses no cron of its own.
@@ -381,8 +381,7 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
   const askPreview = debounce(async () => {
     const seq = ++previewSeq
     const body = {
-      every: cron.value.trim() ? undefined : (every.value.trim() || undefined),
-      cron: cron.value.trim() || undefined,
+      when: when.value.trim() || undefined,
       timezone: tzStored(tz.value)
     }
     if (kind.value === 'mint') {
@@ -431,8 +430,7 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
       clear(err)
       const body = {
         name: name.value.trim(),
-        cron: cron.value.trim() || undefined,
-        every: cron.value.trim() ? undefined : (every.value.trim() || undefined),
+        when: when.value.trim() || undefined,
         timezone: tzStored(tz.value),
         prompt: prompt.value.trim()
       }
@@ -466,30 +464,28 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
       done()
     }
   },
+  field('Asks', prompt, { hint: 'the opening turn of each session it starts, or the turn it wakes a session with' }),
   h('div', { class: 'sch-form-row' },
-    field('Name', name),
     editing
       ? field('Kind', h('span', { class: 'sch-kind-fixed', testid: 'schedule-form-kind-fixed' },
-          kind.value === 'heartbeat' ? 'heartbeat' : 'mint'), { hint: 'an edit keeps the kind' })
+          kind.value === 'heartbeat' ? 'wake a session' : 'start a session'), { hint: 'an edit keeps the kind' })
       : field('Kind', segmented([
-          { value: 'mint', label: 'Mint a card' },
-          { value: 'heartbeat', label: 'Heartbeat a session' }
+          { value: 'mint', label: 'Start a session' },
+          { value: 'heartbeat', label: 'Wake a session' }
         ], kind.value, (picked) => { kind.value = picked; drawKind() }, { testid: 'schedule-form-kind' }))),
   targetField, repoField,
   h('div', { class: 'sch-form-row' },
-    field('Cadence — preset', every, { hint: '5m, 15m, 1h, 6h, @daily, @weekly' }),
-    field('…or cron', cron, { hint: 'minute hour day month weekday' }),
+    field('When', when, { hint: '5m, 1h, @daily, @weekly, or minute hour day month weekday' }),
     field('Timezone', tz, { hint: 'type any IANA zone' }), tzList),
   preview,
-  field('Prompt', prompt, { hint: 'the opening turn of each minted card, or the recurring turn of the heartbeat' }),
   pairFieldEl, envelopeField,
+  field('Name', name, { hint: 'optional — taken from what it asks' }),
   err,
   h('div', { class: 'sch-form-foot' },
     h('button', { class: 'btn', type: 'button', testid: 'schedule-form-cancel', onclick: done }, 'Cancel'),
     h('button', { class: 'btn pri', type: 'submit', testid: 'schedule-form-submit' }, editing ? 'Save changes' : 'Add schedule')))
 
-  every.addEventListener('input', askPreview)
-  cron.addEventListener('input', askPreview)
+  when.addEventListener('input', askPreview)
   tz.addEventListener('input', askPreview)
 
   drawKind()

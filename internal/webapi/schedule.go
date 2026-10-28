@@ -74,9 +74,13 @@ type Schedules struct {
 // is re-enabled). Kind selects which fields mean what: a mint names
 // repo/backend/model/envelope, a heartbeat names target. Every is a
 // cadence preset (`5m`, `1h`, `@daily`) compiled to cron at the boundary;
-// Cron is the expression itself, and one of the two must be set.
+// Cron is the expression itself, and one of the two must be set — or
+// When, the one field a form offers, which takes either and is read as
+// a preset when it is one (schedule.SplitWhen). Name is optional: an
+// empty one is taken from the prompt.
 type ScheduleRequest struct {
 	Name     string `json:"name"`
+	When     string `json:"when,omitempty"`
 	Kind     string `json:"kind,omitempty"`
 	Target   string `json:"target,omitempty"`
 	Repo     string `json:"repo,omitempty"`
@@ -96,8 +100,10 @@ type ScheduleRequest struct {
 // either may be empty when the other is present, and with both set the
 // cron wins — the same precedence the store write applies. Timezone is
 // a zone name, empty for the host's zone. Backend and Model, when the
-// form has already picked a pair, shape the envelope hint.
+// form has already picked a pair, shape the envelope hint. When is the
+// one-field form of the two, as ScheduleRequest reads it.
 type SchedulePreviewRequest struct {
+	When     string `json:"when,omitempty"`
 	Every    string `json:"every,omitempty"`
 	Cron     string `json:"cron,omitempty"`
 	Timezone string `json:"timezone,omitempty"`

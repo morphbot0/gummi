@@ -86,9 +86,9 @@ func webScheduleFire(f engine.ScheduleFire) webapi.ScheduleFire {
 // request that names no kind reads as a heartbeat when it names a target
 // and nothing otherwise.
 func scheduleFromRequest(req webapi.ScheduleRequest) (*domain.Schedule, error) {
-	name := strings.TrimSpace(req.Name)
+	name := scheduleNameFor(req)
 	if name == "" {
-		return nil, webErr(WebBadRequest, "name the schedule")
+		return nil, webErr(WebBadRequest, "say what the schedule asks, or name it")
 	}
 	id, err := domain.NewScheduleID(name)
 	if err != nil {
@@ -98,11 +98,14 @@ func scheduleFromRequest(req webapi.ScheduleRequest) (*domain.Schedule, error) {
 	if kind == "" && strings.TrimSpace(req.Target) != "" {
 		kind = domain.ScheduleHeartbeat
 	}
+	if req.Cron == "" && req.Every == "" {
+		req.Every, req.Cron = schedule.SplitWhen(req.When)
+	}
 	cron := strings.TrimSpace(req.Cron)
 	if cron == "" {
 		every := strings.TrimSpace(req.Every)
 		if every == "" {
-			return nil, webErr(WebBadRequest, "give the cadence: cron \"0 * * * *\" or every 5m")
+			return nil, webErr(WebBadRequest, "say when: 1h, @daily or a cron line like \"0 5 * * *\"")
 		}
 		cron, err = schedule.Compile(every)
 		if err != nil {
@@ -122,6 +125,31 @@ func scheduleFromRequest(req webapi.ScheduleRequest) (*domain.Schedule, error) {
 			return 0
 		}(),
 	}, nil
+}
+
+// scheduleNameFor is the schedule's name: the one a person gave, else
+// the first words of what it asks, else — a heartbeat with no prompt of
+// its own — the session it wakes. Both faces leave the name optional, so
+// the rule lives here, behind both.
+func scheduleNameFor(req webapi.ScheduleRequest) string {
+	if name := strings.TrimSpace(req.Name); name != "" {
+		return name
+	}
+	words := strings.Fields(req.Prompt)
+	var name string
+	for _, w := range words {
+		if len(name)+1+len(w) > 32 || len(strings.Fields(name)) == 5 {
+			break
+		}
+		name = strings.TrimSpace(name + " " + w)
+	}
+	if name == "" && len(words) > 0 {
+		name = string([]rune(words[0])[:min(len([]rune(words[0])), 32)])
+	}
+	if name == "" && strings.TrimSpace(req.Target) != "" {
+		name = strings.ToLower(strings.TrimSpace(req.Target)) + " heartbeat"
+	}
+	return strings.TrimRight(name, ".,;:!?")
 }
 
 // scheduleFromForm validates a request-shaped definition against what
@@ -426,7 +454,7 @@ func webScheduleErr(err error) error {
 
 // scheduleBrakeWords is the envelope field's guidance when the workspace
 // cannot price the pair a mint names: what the brake is for, in words.
-const scheduleBrakeWords = "the envelope caps what one minted card may spend; the session stops when it is spent"
+const scheduleBrakeWords = "the budget caps what each session it starts may spend; one stops when it is spent"
 
 // scheduleEnvelopeHint is the envelope field's guidance for the pair the
 // form picked: where the workspace can price the pair (a BYOK backend's
@@ -455,6 +483,9 @@ func scheduleEnvelopeHint(eng *engine.Engine, backend, model string) string {
 // beside the board's now and the engine's rate read, none of which may
 // race a render — and costs no IO.
 func (m *Shell) schedulePreview(req webapi.SchedulePreviewRequest) webapi.SchedulePreview {
+	if req.Cron == "" && req.Every == "" {
+		req.Every, req.Cron = schedule.SplitWhen(req.When)
+	}
 	res := schedule.Preview(req.Every, req.Cron, req.Timezone, m.now())
 	out := webapi.SchedulePreview{Cron: res.Cron, Fires: []time.Time{}}
 	if res.Err != nil {
