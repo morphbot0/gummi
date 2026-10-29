@@ -274,7 +274,7 @@ func (d *Driver) loop(ctx context.Context, id domain.FeatureID) (Outcome, error)
 		case <-ctx.Done():
 			return d.fail(ctx, id, ctx.Err())
 		case <-quiet:
-			return d.timeout(id), nil
+			return d.timeout(ctx, id), nil
 		case <-poll.C:
 			tick = true
 		case ev, ok := <-d.eng.Events():
@@ -332,7 +332,7 @@ func (d *Driver) check(ctx context.Context, id domain.FeatureID) (Outcome, bool,
 	case open != nil && open.State == domain.RunPaused && open.OutOfBudget:
 		return d.exhausted(ctx, id, open), true, nil
 	case open != nil && open.State == domain.RunPaused && !open.Stopping:
-		return d.paused(id, open), true, nil
+		return d.paused(ctx, id, open), true, nil
 	case snap.Exhausted:
 		return d.exhausted(ctx, id, nil), true, nil
 	case snap.Err != nil && !snap.Busy:
@@ -585,14 +585,14 @@ func (d *Driver) exhausted(ctx context.Context, id domain.FeatureID, run *domain
 
 // paused is a run a person paused from the board while it was driven: only
 // a person runs it again.
-func (d *Driver) paused(id domain.FeatureID, run *domain.Run) Outcome {
-	d.out.Emit(pausedEvent{Event: "paused", ID: string(id), Run: run.N, Reason: run.Reason})
+func (d *Driver) paused(ctx context.Context, id domain.FeatureID, run *domain.Run) Outcome {
+	d.out.Emit(pausedEvent{Event: "paused", ID: string(id), Run: run.N, Reason: run.Reason, Spent: d.spent(ctx, id)})
 	return Outcome{Status: StatusPaused, ID: id}
 }
 
-func (d *Driver) timeout(id domain.FeatureID) Outcome {
+func (d *Driver) timeout(ctx context.Context, id domain.FeatureID) Outcome {
 	d.out.Emit(timeoutEvent{
-		Event: "timeout", ID: string(id), After: d.opts.Timeout.String(),
+		Event: "timeout", ID: string(id), After: d.opts.Timeout.String(), Spent: d.spent(ctx, id),
 		Hint: "nothing happened on the session or its workflow run for the whole --timeout window: " +
 			"the backend stalled or lost auth, or the work needs a larger --timeout",
 	})
@@ -601,9 +601,24 @@ func (d *Driver) timeout(id domain.FeatureID) Outcome {
 
 // fail emits the error line and returns the StatusError outcome beside the
 // error.
-func (d *Driver) fail(_ context.Context, id domain.FeatureID, err error) (Outcome, error) {
-	d.out.Emit(errorEvent{Event: "error", ID: string(id), Error: err.Error()})
+func (d *Driver) fail(ctx context.Context, id domain.FeatureID, err error) (Outcome, error) {
+	ev := errorEvent{Event: "error", ID: string(id), Error: err.Error()}
+	if id != "" {
+		ev.Spent = d.spent(ctx, id)
+	}
+	d.out.Emit(ev)
 	return Outcome{Status: StatusError, ID: id}, err
+}
+
+// spent is the session's spend so far, its runs' steps included, for an
+// end line: an eval charges a run that timed out or failed for what it
+// spent as surely as one that finished.
+func (d *Driver) spent(ctx context.Context, id domain.FeatureID) float64 {
+	f, err := d.store.GetFeature(context.WithoutCancel(ctx), id)
+	if err != nil {
+		return 0
+	}
+	return d.eng.SessionPoolSpent(context.WithoutCancel(ctx), f)
 }
 
 func firstLine(s string) string {

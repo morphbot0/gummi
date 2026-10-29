@@ -184,21 +184,26 @@ type exhaustedEvent struct {
 
 // pausedEvent: a person paused the session's run from the board.
 type pausedEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Run    int    `json:"run"`
-	Reason string `json:"reason,omitempty"`
+	Event  string  `json:"event"`
+	ID     string  `json:"id"`
+	Run    int     `json:"run"`
+	Reason string  `json:"reason,omitempty"`
+	Spent  float64 `json:"spent_credits"`
 }
 
 type timeoutEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id"`
-	After string `json:"after"`
-	Hint  string `json:"hint,omitempty"`
+	Event string  `json:"event"`
+	ID    string  `json:"id"`
+	After string  `json:"after"`
+	Hint  string  `json:"hint,omitempty"`
+	Spent float64 `json:"spent_credits"`
 }
 
+// errorEvent: the drive could not go on. Spent is the session's spend so
+// far, when there is a session.
 type errorEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id,omitempty"`
-	Error string `json:"error"`
+	Event string  `json:"event"`
+	ID    string  `json:"id,omitempty"`
+	Error string  `json:"error"`
+	Spent float64 `json:"spent_credits,omitempty"`
 }

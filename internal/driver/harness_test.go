@@ -252,6 +252,9 @@ func (sf *sessionFake) respond(opts agent.SessionOpts, msg string) []agent.Event
 		return say("ok: " + firstLine(msg))
 	}
 	switch sf.first {
+	case "hang":
+		// spends, then never goes idle: the drive times out on it
+		return []agent.Event{usage()}
 	case "spend":
 		return []agent.Event{
 			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 5000, Model: "m"}},
