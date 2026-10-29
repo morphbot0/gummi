@@ -678,10 +678,13 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 		profile = headerGap + s.ProfileTag.Render("["+f.Profile+"]")
 	}
 	budget := ""
+	sp, live := m.envelopeSpend(f)
 	if f.Budget.Envelope > 0 {
-		budget = headerGap + s.Faint.Render(budgetSummary(f, m.liveCardSpent(f.ID)))
-	} else if !f.Spend.Zero() {
-		budget = headerGap + s.Faint.Render(featureSpend(f.Spend))
+		pooled := f
+		pooled.Spend = sp
+		budget = headerGap + s.Faint.Render(budgetSummary(pooled, live))
+	} else if !sp.Zero() {
+		budget = headerGap + s.Faint.Render(featureSpend(sp))
 	}
 	badges := func() string { return profile + budget }
 	// budget/spend is deliberately absent from this list — it is never

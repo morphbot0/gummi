@@ -107,8 +107,8 @@ func (m *Shell) railLines(idx int, selected bool, w int) []string {
 	if word != "" {
 		meta = append(meta, word)
 	}
-	if live := m.liveCardSpent(r.F.ID); !r.F.Spend.Zero() || live > 0 {
-		meta = append(meta, spendTick(r.F.Spend, live))
+	if sp, live := m.envelopeSpend(r.F); !sp.Zero() || live > 0 {
+		meta = append(meta, spendTick(sp, live))
 	}
 	lead := " " + mark + " "
 	one := lead + s.CardTitle.Render(ansi.Truncate(sanitize(r.F.Title), max(w-ansi.StringWidth(lead), 4), "…"))

@@ -103,6 +103,43 @@ func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 	return live
 }
 
+// envelopeSpend is what f's envelope has paid for, as the engine's pool
+// counts it (engine.SessionPoolSpent): the card's own spend and, for a
+// session, its hidden children's — every step card of its workflow runs,
+// and an old database's crew cards — which are never on the board and so
+// would otherwise be counted nowhere a person looks. live is
+// liveCardSpent's figure, with the children's added when there is one.
+// A child live mid-step counts the fresher of its row and its session.
+func (m *Shell) envelopeSpend(f domain.Feature) (sp domain.Spend, live float64) {
+	sp = f.Spend
+	fresher := func(id domain.FeatureID, row float64) (float64, bool) {
+		if l := m.liveCardSpent(id); l > row {
+			return l, true
+		}
+		return row, false
+	}
+	total, anyLive := fresher(f.ID, f.Spend.CreditEquivalent())
+	for id, c := range m.children {
+		if c.Child.Of != f.ID {
+			continue
+		}
+		addSpend(&sp, c.Spend)
+		v, l := fresher(id, c.Spend.CreditEquivalent())
+		total += v
+		anyLive = anyLive || l
+	}
+	if anyLive {
+		live = total
+	}
+	return sp, live
+}
+
+// addSpend adds a child card's spend to its session's.
+func addSpend(sp *domain.Spend, c domain.Spend) {
+	sp.Add(c.Credits, c.InputTokens, c.OutputTokens)
+	sp.EstimatedCredits += c.EstimatedCredits
+}
+
 // liveCardContext returns the context-window occupancy of the session
 // live on id, or the zero value when none is live or the
 // backend never reported one. Unlike liveCardSpent there is no stored

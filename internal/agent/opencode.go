@@ -281,6 +281,11 @@ type opencodeSession struct {
 	// "reasoning") by id, so a message.part.delta — which carries only the
 	// part id — knows what it streams. Dropped when the part finishes.
 	partKind map[string]string
+	// children holds the server sessions descended from this one — the
+	// task tool's subagents, and theirs — learned from session.created.
+	// Their parts are not this session's to surface, but what their steps
+	// cost is spend this session ran up.
+	children map[string]bool
 	// announced holds the tool calls announced while running, so their
 	// finished part reports only the outcome.
 	announced map[string]bool
@@ -975,6 +980,8 @@ func (s *opencodeSession) dispatch(data []byte) {
 		return // a keep-alive or something the grammar does not know; ignore quietly
 	}
 	switch ev.Type {
+	case "session.created":
+		s.adoptChild(ev.Properties.Info.ID, ev.Properties.Info.ParentID)
 	case "message.part.updated":
 		s.relayPart(ev.Properties.Part)
 	case "message.part.delta":
@@ -1043,16 +1050,48 @@ func (s *opencodeSession) dispatch(data []byte) {
 	}
 }
 
+// adoptChild records a server session created under this one, or under
+// one of its children: a task subagent whose steps this session pays for.
+func (s *opencodeSession) adoptChild(id, parentID string) {
+	if id == "" || parentID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if parentID != s.sessionID && !s.children[parentID] {
+		return
+	}
+	if s.children == nil {
+		s.children = map[string]bool{}
+	}
+	s.children[id] = true
+}
+
+func (s *opencodeSession) isChild(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.children[id]
+}
+
 // relayPart maps one message-part event through the CLI-line grammar when
 // the part is one the CLI would have printed, and relays the result. A
 // part from another session on this server (a task child's) is not ours
-// to surface. A text or reasoning part that is still open (no end time
+// to surface, but a child's step-finish still carries spend: that is
+// relayed as usage alone. So is a step-finish that arrives with no turn
+// open — a compaction's summarize call, or a step the turn's end raced
+// past — since the spend was run up all the same. A text or reasoning part that is still open (no end time
 // yet) only announces its kind: its text streams as message.part.delta
 // events (relayDelta), and the finished part relays whatever the deltas
 // did not. A tool part is announced when it starts running and resolved
 // when it completes or errors.
 func (s *opencodeSession) relayPart(p ocPart) {
-	if p.SessionID == "" || p.SessionID != s.sessionIDValue() {
+	if p.SessionID == "" {
+		return
+	}
+	if p.SessionID != s.sessionIDValue() {
+		if p.Type == "step-finish" && s.isChild(p.SessionID) {
+			s.relaySpend(p)
+		}
 		return
 	}
 	var kind string
@@ -1092,9 +1131,42 @@ func (s *opencodeSession) relayPart(p ocPart) {
 	finishing := t == nil || t.finishing
 	s.mu.Unlock()
 	if finishing {
+		if kind == "step_finish" {
+			s.relaySpend(p)
+		}
 		return
 	}
 	s.relayEvents(t, s.mapOcEvent(&ocEvent{Type: kind, SessionID: p.SessionID, Part: p}, &t.msg))
+}
+
+// relaySpend relays a step-finish's cost alone: no context size, which
+// would be another conversation's (a child's, or the history a compaction
+// summarized), and no turn activity.
+func (s *opencodeSession) relaySpend(p ocPart) {
+	if u, ok := s.stepUsage(p); ok {
+		s.emit(Event{Kind: EventUsage, Usage: u})
+	}
+}
+
+// stepUsage is what one step-finish part cost, and whether it reports any.
+func (s *opencodeSession) stepUsage(p ocPart) (Usage, bool) {
+	tok := p.Tokens
+	// Usage's convention: InputTokens is fresh input plus cache writes,
+	// CachedTokens the cache reads. opencode reports the three apart.
+	u := Usage{
+		Model:        s.model,
+		InputTokens:  tok.Input + tok.Cache.Write,
+		OutputTokens: tok.Output,
+		CachedTokens: tok.Cache.Read,
+		// opencode prices each step itself from its catalog, so its
+		// figure is the metered one even at zero — a free or
+		// subscription model must not be re-priced by the engine's
+		// token fallback into spend nobody charged.
+		Metered: true,
+		// opencode cost is USD; gummi credits are $0.01 units.
+		Credits: p.Cost * 100,
+	}
+	return u, u.Credits != 0 || u.InputTokens != 0 || u.OutputTokens != 0 || u.CachedTokens != 0
 }
 
 // relayDelta streams one message.part.delta into the turn: a slice of an
@@ -1198,6 +1270,11 @@ type ocBusEvent struct {
 		Patterns   []string `json:"patterns"`
 		ID         string   `json:"id"`
 		Part       ocPart   `json:"part"`
+		// session.created: the new session, and the one it was made under
+		Info struct {
+			ID       string `json:"id"`
+			ParentID string `json:"parentID"`
+		} `json:"info"`
 		// message.part.delta: a slice of an open part's field
 		PartID string `json:"partID"`
 		Field  string `json:"field"`
@@ -1256,23 +1333,8 @@ func (s *opencodeSession) mapOcEvent(e *ocEvent, msg ocMsgText) []Event {
 		return append(s.toolCallEvents(e, msg), toolResultEvents(e)...)
 	case "step_finish":
 		tok := e.Part.Tokens
-		// Usage's convention: InputTokens is fresh input plus cache writes,
-		// CachedTokens the cache reads. opencode reports the three apart.
-		u := Usage{
-			Model:        s.model,
-			InputTokens:  tok.Input + tok.Cache.Write,
-			OutputTokens: tok.Output,
-			CachedTokens: tok.Cache.Read,
-			// opencode prices each step itself from its catalog, so its
-			// figure is the metered one even at zero — a free or
-			// subscription model must not be re-priced by the engine's
-			// token fallback into spend nobody charged.
-			Metered: true,
-		}
-		// opencode cost is USD; gummi credits are $0.01 units.
-		u.Credits = e.Part.Cost * 100
 		var out []Event
-		if u.Credits != 0 || u.InputTokens != 0 || u.OutputTokens != 0 || u.CachedTokens != 0 {
+		if u, ok := s.stepUsage(e.Part); ok {
 			out = append(out, Event{Kind: EventUsage, Usage: u})
 		}
 		// the step's whole prompt — fresh, cache-read and cache-written —

@@ -1415,7 +1415,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 	case agent.EventUsage:
 		sess.addSpend(ev.Usage)
 		e.recordUsage(sess, ff.id, domain.StageOpen, agent.RoleImplementer, ev.Usage)
-		if sess.overBudget() {
+		if sess.overBudget() || e.sessionPoolSpentUnder(sess) {
 			e.exhaustFreeform(ff, sess)
 		}
 		if sess.Feature.IsChild() {
@@ -1489,6 +1489,18 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		return
 	}
 	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+}
+
+// sessionPoolSpentUnder reports whether a session's envelope is spent
+// though its backend's own cap is not: the cap was what the envelope had
+// left when the backend spawned, and the session's workflow runs have
+// spent from the same envelope since (§24.7a). A step's card is held by
+// checkRunPool instead.
+func (e *Engine) sessionPoolSpentUnder(sess *Session) bool {
+	if sess.Feature.IsChild() || sess.Feature.Budget.Envelope <= 0 || sess.Budget() <= 0 {
+		return false
+	}
+	return e.sessionBudget(sess.Feature, sess.rate()) <= 0
 }
 
 // exhaustFreeform is the envelope running out on a freeform card. It

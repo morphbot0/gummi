@@ -237,7 +237,7 @@ func TestTheStatsTabReadsTheRecord(t *testing.T) {
 	}
 
 	rows := []featureRow{{F: f}}
-	rep, err := buildWsReport(ctx, store, rows, wsTestBase.Add(-time.Minute), wsTestBase.Add(2*time.Hour))
+	rep, err := buildWsReport(ctx, store, rows, nil, wsTestBase.Add(-time.Minute), wsTestBase.Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestTheStatsTabReadsTheRecord(t *testing.T) {
 
 	// The window is what makes the lane: the same card measured against
 	// a window its life falls outside of draws nothing.
-	empty, err := buildWsReport(ctx, store, rows, wsTestBase.Add(48*time.Hour), wsTestBase.Add(72*time.Hour))
+	empty, err := buildWsReport(ctx, store, rows, nil, wsTestBase.Add(48*time.Hour), wsTestBase.Add(72*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,6 +262,64 @@ func TestTheStatsTabReadsTheRecord(t *testing.T) {
 	}
 	if empty.AllTime.Cards != 1 {
 		t.Errorf("all-time lost the quiet card: %d cards", empty.AllTime.Cards)
+	}
+}
+
+// TestTheStatsTabCountsASessionsRuns: a workflow step's card is never a
+// board row, but what it spent came out of its session's envelope. The
+// stats fold it into the session — its lane, the window and the all-time
+// total — without counting the step as a card of its own; and the
+// session's own figure on the board says the same.
+func TestTheStatsTabCountsASessionsRuns(t *testing.T) {
+	_, store, _ := uiRepo(t)
+	ctx := context.Background()
+	spend := func(f domain.Feature, credits float64) domain.Feature {
+		t.Helper()
+		if err := store.AddSpend(ctx, f.ID, credits, 0, 100, 10); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.RecordStageSpend(ctx, f.ID, state.SpendSample{
+			Stage: domain.StageImplement, Session: "gen-" + string(f.ID), Role: "implementer", Model: "m",
+			Credits: credits, InputTokens: 100, OutputTokens: 10,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.GetFeature(ctx, f.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	sess := spend(mkFeature(t, store, 1, "session", domain.StageImplement), 10)
+	step := spend(mkFeature(t, store, 2, "step", domain.StageImplement), 30)
+	step.Child = domain.ChildLink{Of: sess.ID, Seq: 1, Node: "one"}
+	children := map[domain.FeatureID]domain.Feature{step.ID: step}
+	bd, err := store.StageBreakdown(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []featureRow{{F: sess, StageSpend: bd}}
+	now := time.Now()
+	w := fleetrun.Window{From: now.Add(-time.Hour), To: now.Add(time.Hour)}
+	rep, err := buildFleetReport(ctx, store, rows, children, w, now, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Lanes) != 1 || rep.Lanes[0].ID != sess.ID || rep.Lanes[0].Credits != 40 {
+		t.Errorf("lanes = %+v, want the session's one, at its own 10 and its step's 30", rep.Lanes)
+	}
+	if rep.Credits != 40 || rep.AllTime.Credits != 40 || rep.AllTime.Cards != 1 {
+		t.Errorf("window %.2f, all-time %.2f over %d cards; want 40 over the one session",
+			rep.Credits, rep.AllTime.Credits, rep.AllTime.Cards)
+	}
+	if rows[0].F.Spend.Credits != 10 || len(rows[0].StageSpend) != len(bd) {
+		t.Error("the fold wrote into the board's own row")
+	}
+
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	m.children = children
+	if sp, live := m.envelopeSpend(sess); sp.Credits != 40 || live != 0 {
+		t.Errorf("the session's envelope spend = %.2f (live %.2f), want its own and its step's 40", sp.Credits, live)
 	}
 }
 
@@ -299,7 +357,7 @@ func TestTheStatsTabCountsSpendThatLogsNoEvent(t *testing.T) {
 	rows := []featureRow{{F: f, StageSpend: bd}, {F: quiet}}
 	now := time.Now()
 	w := fleetrun.Window{From: now.Add(-time.Hour), To: now.Add(time.Hour)}
-	rep, err := buildFleetReport(ctx, store, rows, w, now, map[domain.FeatureID]bool{f.ID: true}, nil)
+	rep, err := buildFleetReport(ctx, store, rows, nil, w, now, map[domain.FeatureID]bool{f.ID: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

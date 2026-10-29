@@ -61,7 +61,6 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 		Type:      f.TypeName(),
 		Title:     f.Title,
 		Stage:     string(f.Stage),
-		Spend:     f.Spend.Credits,
 		Envelope:  f.Budget.Envelope,
 		Profile:   f.Profile,
 		Repo:      f.Repo,
@@ -76,7 +75,9 @@ func (m *Shell) webRow(r featureRow) webapi.Row {
 		row.DispatchedBy = string(r.DispatchedBy)
 		row.DispatchedByTitle = m.cardName(r.DispatchedBy)
 	}
-	if live := m.liveCardSpent(f.ID); live > 0 {
+	sp, live := m.envelopeSpend(f)
+	row.Spend = sp.Credits
+	if live > 0 {
 		row.Spend = live
 	}
 	if c := m.liveCardContext(f.ID); c.Tokens > 0 {
@@ -225,6 +226,9 @@ func (m *Shell) measureToday() tea.Cmd {
 	for _, r := range m.rows {
 		total += r.F.Spend.Credits
 	}
+	for _, c := range m.children {
+		total += c.Spend.Credits
+	}
 	if wait := todayEvery - now.Sub(m.today.at); m.today.measured && total == m.today.total && wait > 0 && m.today.day == now.Format(time.DateOnly) {
 		if m.today.due {
 			return nil
@@ -234,10 +238,10 @@ func (m *Shell) measureToday() tea.Cmd {
 		return subscription(tea.Tick(wait, func(time.Time) tea.Msg { return todayDueMsg{} }))
 	}
 	m.today.running = true
-	store, rows := m.store, append([]featureRow(nil), m.rows...)
+	store, rows, children := m.store, append([]featureRow(nil), m.rows...), m.children
 	return func() tea.Msg {
 		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		rep, err := buildWsReport(context.Background(), store, rows, midnight, now)
+		rep, err := buildWsReport(context.Background(), store, rows, children, midnight, now)
 		if err != nil {
 			return todaySpentMsg{err: err, at: now}
 		}

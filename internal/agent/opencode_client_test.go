@@ -845,6 +845,59 @@ func TestOpencodeServerPermissionFromChildSession(t *testing.T) {
 	waitTurnEnd(t, sess)
 }
 
+// TestOpencodeServerCountsChildAndOffTurnSpend: a task tool's subagent
+// runs as a child session, and its grandchildren under it; what their
+// steps cost is this session's spend, though their parts are not shown.
+// Another session's steps are not. A step-finish that arrives with no turn
+// open — a compaction's — is spend too, relayed without a context size.
+func TestOpencodeServerCountsChildAndOffTurnSpend(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "delegate the search"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	root := f.lastSession()
+	created := func(id, parent string) string {
+		return fmt.Sprintf(`{"type":"session.created","properties":{"sessionID":%q,"info":{"id":%q,"parentID":%q}}}`, id, id, parent)
+	}
+	stepIn := func(sid string) string {
+		return fmt.Sprintf(`{"type":"message.part.updated","properties":{"sessionID":%q,"part":%s}}`, sid,
+			partJSON("step-finish", "sf_"+sid, sid, ""))
+	}
+	f.push(created("ses_child", root))
+	f.push(created("ses_grand", "ses_child"))
+	f.push(created("ses_other", "ses_elsewhere"))
+	f.push(stepIn("ses_child"))
+	f.push(stepIn("ses_grand"))
+	f.push(stepIn("ses_other"))
+	f.push(f.partEvent("text", "p", "done"))
+	f.releaseTurn()
+	var credits float64
+	for _, e := range waitTurnEnd(t, sess) {
+		switch e.Kind {
+		case EventUsage:
+			credits += e.Usage.Credits
+		case EventContext:
+			t.Errorf("a child's step set the context size: %+v", e.Context)
+		}
+	}
+	if credits != 10 {
+		t.Errorf("turn spend = %v credits, want 10 (child and grandchild, not the other session)", credits)
+	}
+
+	f.push(f.partEvent("step-finish", "sf_off", ""))
+	select {
+	case e := <-sess.Events():
+		if e.Kind != EventUsage || e.Usage.Credits != 5 {
+			t.Errorf("off-turn step-finish = %+v, want its usage", e)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no usage for a step-finish with no turn open")
+	}
+}
+
 // TestOpencodeServerStreamsPartDeltas: opencode 1.2.16 streams a part's
 // text as message.part.delta events between the part's opening and its
 // finish, so text and reasoning reach the caller as they are written. The
