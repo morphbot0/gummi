@@ -41,14 +41,11 @@ func TestWebTranscriptOnlyTheCallInFlightRuns(t *testing.T) {
 
 // A long conversation's live block carries its newest LiveTurns and says
 // how many came before; the rest is served on request, a window at a time,
-// numbered the same way — the pinned task list is no turn of either.
+// numbered the same way.
 func TestWebTranscriptALongConversationIsServedInWindows(t *testing.T) {
 	var tr []engine.Message
 	for i := range 450 {
 		tr = append(tr, engine.Message{Author: engine.AuthorAssistant, Content: "t" + strconv.Itoa(i)})
-		if i == 100 {
-			tr = append(tr, engine.Message{Author: engine.AuthorTasks, Content: "tasks"})
-		}
 	}
 	snap := engine.Snapshot{Transcript: tr}
 	turns, omitted, _, _ := webTranscript(snap)

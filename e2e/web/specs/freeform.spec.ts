@@ -42,12 +42,6 @@ test('a freeform turn is sent by one enter and ends on the page when it ends', a
   const turns = JSON.stringify(live.freeform?.turns ?? []);
   expect(turns).toContain('"author":"thinking"');
   expect(turns).toContain('"status":"ok"');
-  // the agent's checklist is pinned under the conversation, not in its turns
-  const tasks = page.getByTestId('tasks');
-  await expect(tasks).toContainText('tasks 1/2');
-  await expect(tasks).toContainText('Say what was done');
-  expect(live.freeform?.tasks?.length).toBe(2);
-  expect(turns).not.toContain('Note the fix');
   const card = (await api('GET', `/api/cards/${id}`)).json;
   expect(JSON.stringify(card.decision ?? {})).not.toContain('working on a turn');
 });

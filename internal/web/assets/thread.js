@@ -95,10 +95,9 @@ function applyFold (el, key, def) {
 }
 
 // recordFold is the toggle listener's writer, and says whether the toggle
-// was the person's. The page sets rows' open
-// state itself wherever it renders — a builder re-applying the memory, the
-// running stage's divider pinned open, a task list open while anything is
-// left — and notes what it set (foldSet): a toggle that matches it is the
+// was the person's. The page sets rows' open state itself wherever it
+// renders — a builder re-applying the memory, the running stage's divider
+// pinned open — and notes what it set (foldSet): a toggle that matches it is the
 // page's own doing, not the person's, and is never recorded as their
 // choice.
 function recordFold (d) {
@@ -731,7 +730,7 @@ function renderLive () {
 }
 
 // talk is a conversation as the thread draws it under its head: its
-// turns (runs placed among them), the line on its way to it, its tasks,
+// turns (runs placed among them), the line on its way to it,
 // the working line while it works — what it is doing, the call in flight,
 // what it has cost and how full it is — and its error. own marks the
 // card's own session, whose watches, objective and queued lines are the
@@ -739,7 +738,6 @@ function renderLive () {
 function talk (key, c, { role, stage, runs = null, busy, own = false }) {
   const parts = conversation(key, c, role, stage, runs)
   if (c.sending) parts.push(cached(`${key}:sending`, c.sending, () => you({ text: c.sending, via: 'sending' })))
-  if (c.tasks?.length) parts.push(cached(`${key}:tasks`, JSON.stringify(c.tasks), () => tasks(c.tasks, key)))
   if (own && c.watches?.length) parts.push(cached(`${key}:watches`, JSON.stringify(c.watches), () => watches(c.watches)))
   if (own && c.objective) parts.push(cached(`${key}:objective`, JSON.stringify(c.objective), () => objectiveStrip(state.sel, c.objective)))
   if (own && c.queued?.length) parts.push(cached(`${key}:queued`, JSON.stringify(c.queued), () => queued(state.sel, c.queued)))
@@ -841,21 +839,6 @@ function watches (lines) {
   return h('div', { class: 'queued', testid: 'watches' },
     ...lines.map(text => h('div', { class: 'queued-line watch' },
       h('span', { class: 'via' }, 'watching'), h('span', { class: 'text' }, text))))
-}
-
-// tasks is the agent's own checklist, pinned under the conversation: open
-// while anything is left, folded to its count once all of it is done. Its
-// fold is remembered by the conversation's kind — tasks render only for a
-// consult and a freeform session, one of each per card.
-const TASK_MARK = { completed: '✓', in_progress: '▸', pending: '○' }
-function tasks (list, kind) {
-  const done = list.filter(t => t.status === 'completed').length
-  const el = h('details', { class: 'tools tasks', testid: 'tasks' },
-    h('summary', null, `tasks ${done}/${list.length}`),
-    h('ul', { class: 'body' }, ...list.map(t =>
-      h('li', { class: ['task', t.status] }, `${TASK_MARK[t.status] || '○'} ${t.text}`))))
-  applyFold(el, kind, done < list.length)
-  return el
 }
 
 // activityItems shapes a live run of tool and thinking turns the way the

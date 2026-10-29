@@ -7280,7 +7280,7 @@ An ended run folds to:
 proposed, among the history, in both faces, and `threadfold` alone says
 where: `RunPlace` puts it before the first turn of the session's
 conversation written after its proposal that is no part of an activity
-row (a tool call, a thought, the task list), after every turn when nothing
+row (a tool call, a thought), after every turn when nothing
 came since, and among the thread's settled items (`placeRuns`, by time)
 when it predates every turn shown. The terminal draws the whole
 conversation and places each block by `RunPlace`. The page's live block

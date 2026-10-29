@@ -81,8 +81,7 @@ containing [watch] starts a Monitor watch it leaves open, a line
 [call <tool> <json args>] calls that gummi tool and says what it answered,
 one containing
 [ask] asks the person which way with ask_user and says back what they
-answered, one containing [spec] writes the session's spec before its edit,
-and one containing [tasks-done] completes its checklist.
+answered, and one containing [spec] writes the session's spec before its edit.
 
 A session turn containing [workflow] proposes a workflow run (DESIGN §25):
 it starts a spec (spec_start), writes its Done when as two items -- one
@@ -272,9 +271,6 @@ class Turn:
 
     def tool_result(self, call_id, name, ok=True, result=""):
         emit({"type": "tool_result", "id": call_id, "name": name, "ok": ok, "result": result})
-
-    def tasks(self, *items):
-        emit({"type": "tasks", "tasks": [{"text": t, "status": st} for t, st in items]})
 
     def say(self, text):
         """A finished assistant message. A [slow] card streams it first."""
@@ -750,8 +746,6 @@ def freeform_turn(turn, text):
     turn.tool("edit", "NOTES.md", "ff-edit")
     git(wd, "add", "--", "NOTES.md")
     turn.tool_result("ff-edit", "edit")
-    second = "completed" if "[tasks-done]" in text else "in_progress"
-    turn.tasks(("Note the fix", "completed"), ("Say what was done", second))
     turn.say("Done: noted it in NOTES.md.")
 
 

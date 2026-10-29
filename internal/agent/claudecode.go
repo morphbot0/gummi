@@ -991,9 +991,6 @@ func (s *claudeSession) mapAssistant(raw json.RawMessage, parent string) []Event
 					s.toolNames[b.ID] = b.Name
 				}
 				out = append(out, Event{Kind: EventToolCall, Tool: b.Name, Detail: toolDetail(s.workdir, b.Input), CallID: b.ID, Parent: parent})
-				if parent == "" {
-					out = append(out, tasksEvent(b.Name, b.Input)...)
-				}
 			}
 		}
 	}

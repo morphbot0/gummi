@@ -16,7 +16,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/threadfold"
@@ -110,9 +109,6 @@ func transcriptLinesWith(s *theme.Styles, snap engine.Snapshot, w int, showOutpu
 			lines = append(lines, thinkingLines(s, msg.Content, w, showOutput)...)
 			continue
 		}
-		if msg.Author == engine.AuthorTasks {
-			continue // pinned below the conversation, not in its flow
-		}
 		var label string
 		style := s.Base
 		switch msg.Author {
@@ -183,7 +179,6 @@ func transcriptLinesWith(s *theme.Styles, snap engine.Snapshot, w int, showOutpu
 		lines = append(lines, "")
 	}
 	place(len(snap.Transcript))
-	lines = append(lines, taskLines(s, snap.Tasks, w)...)
 	lines = append(lines, watchLines(s, snap.Watches, w)...)
 	lines = append(lines, objectiveLines(s, snap.Objective, w)...)
 	return append(lines, queuedLines(s, snap.Queued, w)...)
@@ -240,38 +235,6 @@ func watchLines(s *theme.Styles, watches []string, w int) []string {
 	lines := []string{s.Faint.Render("watching")}
 	for _, x := range watches {
 		lines = append(lines, "  "+s.Subtle.Render(ansi.Truncate(sanitize(x), max(w-4, 8), "…")))
-	}
-	return append(lines, "")
-}
-
-// taskLines renders the agent's checklist after the conversation, where
-// the thread's window opens: what it is doing and what is left stays in
-// view however long the turn runs, the way a coding agent pins its todo
-// list. A finished list folds to its count.
-func taskLines(s *theme.Styles, ts []agent.Task, w int) []string {
-	if len(ts) == 0 {
-		return nil
-	}
-	done := 0
-	for _, t := range ts {
-		if t.Status == agent.TaskDone {
-			done++
-		}
-	}
-	lines := []string{s.Faint.Render(fmt.Sprintf("tasks %d/%d", done, len(ts)))}
-	if done == len(ts) {
-		return append(lines, "")
-	}
-	for _, t := range ts {
-		text := ansi.Truncate(sanitize(t.Text), max(w-6, 8), "…")
-		switch t.Status {
-		case agent.TaskDone:
-			lines = append(lines, "  "+s.Faint.Render("✓ "+text))
-		case agent.TaskInProgress:
-			lines = append(lines, "  "+s.Title.Render("▸ "+text))
-		default:
-			lines = append(lines, "  "+s.Subtle.Render("○ "+text))
-		}
 	}
 	return append(lines, "")
 }

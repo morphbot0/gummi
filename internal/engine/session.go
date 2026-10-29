@@ -106,11 +106,6 @@ const (
 	// part of the conversation (replayLine), nor of the card's record
 	// (persist skips it).
 	AuthorThinking Author = "thinking"
-	// AuthorTasks is the agent's working checklist: one entry, rewritten
-	// in place each time its task tool restates the list, its Content the
-	// list as agent.FormatTasks writes it. Pinned rather than shown in the
-	// flow, and like thinking never replayed nor mirrored to the record.
-	AuthorTasks Author = "tasks"
 )
 
 // ToolStatus is an AuthorTool entry's known outcome. It stays
@@ -230,7 +225,6 @@ type Snapshot struct {
 	Spend          agent.Usage
 	SpentCredits   float64       // Spend as a credit-equivalent at the provider's rate
 	Context        agent.Context // latest context-window occupancy
-	Tasks          []agent.Task  // the agent's checklist, as it last stated it
 	Queued         []string      // a freeform card's lines waiting for the turn in flight
 	Watches        []string      // a freeform card's running gummi watches, "w1 · command"
 	Busy           bool          // agent is mid-turn
@@ -403,7 +397,6 @@ func (s *Session) snapshotLocked() Snapshot {
 		Spend:          s.spend,
 		SpentCredits:   s.spentForBudgetLocked(),
 		Context:        s.context,
-		Tasks:          s.tasksLocked(),
 		Busy:           s.busy,
 		PendingAsk:     s.pendingAsk,
 		Exhausted:      s.exhausted,
@@ -585,30 +578,6 @@ func (s *Session) appendThinking(text string) {
 		s.streamOpen = false
 	}
 	s.transcript = append(s.transcript, Message{Author: AuthorThinking, Content: text, At: time.Now()})
-}
-
-// setTasks records the agent's checklist, replacing the one it had.
-func (s *Session) setTasks(ts []agent.Task) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	body := agent.FormatTasks(ts)
-	for i := range s.transcript {
-		if s.transcript[i].Author == AuthorTasks {
-			s.transcript[i].Content, s.transcript[i].At = body, time.Now()
-			return
-		}
-	}
-	s.transcript = append(s.transcript, Message{Author: AuthorTasks, Content: body, At: time.Now()})
-}
-
-// tasksLocked is the checklist setTasks last recorded, or nil.
-func (s *Session) tasksLocked() []agent.Task {
-	for i := range s.transcript {
-		if s.transcript[i].Author == AuthorTasks {
-			return agent.ParseTasks(s.transcript[i].Content)
-		}
-	}
-	return nil
 }
 
 // finishAssistant finalizes the streaming assistant message with the

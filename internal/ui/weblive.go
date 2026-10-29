@@ -177,9 +177,6 @@ func webConversation(snap engine.Snapshot, sending, verb string) *webapi.Convers
 	if ctx := snap.Context; ctx.Tokens > 0 {
 		c.Context = &webapi.AgentContext{Tokens: ctx.Tokens, Limit: ctx.Limit}
 	}
-	for _, t := range snap.Tasks {
-		c.Tasks = append(c.Tasks, webapi.Task{Text: threadfold.Sanitize(t.Text), Status: string(t.Status)})
-	}
 	for _, x := range snap.Watches {
 		c.Watches = append(c.Watches, boundTail(threadfold.Sanitize(x), webapi.LiveText))
 	}
@@ -252,15 +249,12 @@ func settledTranscript(snap engine.Snapshot) (tr []engine.Message, streaming str
 	return tr, streaming, tool, inflight
 }
 
-// turnIndex is where each turn of tr stands in it: every message but the
-// task list, which Conversation.Tasks pins instead. A turn's number — what
+// turnIndex is where each turn of tr stands in it: every message. A turn's number — what
 // Omitted counts and Earlier's before names — is its place in this list.
 func turnIndex(tr []engine.Message) []int {
 	idx := make([]int, 0, len(tr))
-	for i, msg := range tr {
-		if msg.Author != engine.AuthorTasks {
-			idx = append(idx, i)
-		}
+	for i := range tr {
+		idx = append(idx, i)
 	}
 	return idx
 }
