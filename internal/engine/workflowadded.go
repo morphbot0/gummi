@@ -168,7 +168,7 @@ func (e *Engine) baselineAdded(ctx context.Context, inst *domain.RunStep, output
 	}
 	line := fmt.Sprintf("run %d: %s added %s to the checks", inst.Run, inst.Path, strings.Join(ids, ", "))
 	if len(passing) > 0 {
-		line += "; " + strings.Join(passing, ", ") + " already passes before the run, and proves nothing about it"
+		line += "; " + strings.Join(passing, ", ") + " already passes before the run: a guard of what must keep working, no proof of the change"
 	}
 	e.runNote(inst.Session, line)
 }
