@@ -204,7 +204,9 @@ func (e *Engine) handleSpecStart(s *Session, tc *agent.ToolCall) {
 	}
 	s.appendActivity(fmt.Sprintf("started spec %d: %s", sp.N, sp.Title))
 	e.persist(s)
-	e.resolveNow(s, tc.ID, fmt.Sprintf("created spec %d, %q (revision %d); fill its sections with spec_replace_section, passing spec %d once the session has more than one spec",
+	// The arguments are named here because an agent that defers gummi's
+	// tool schemas calls spec_replace_section next without reading one.
+	e.resolveNow(s, tc.ID, fmt.Sprintf("created spec %d, %q (revision %d); fill its sections with spec_replace_section {section, body}, passing spec %d once the session has more than one spec",
 		sp.N, sp.Title, rev, sp.N))
 }
 

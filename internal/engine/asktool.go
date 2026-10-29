@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -660,17 +661,46 @@ func (e *Engine) handleSpecView(s *Session, tc *agent.ToolCall) {
 	e.resolveNow(s, tc.ID, body)
 }
 
+// replaceSectionArgsRefusal says why spec_replace_section's arguments are
+// refused — an argument it does not know, or no body — or "" when they
+// are not. An empty body is a body: it clears the section.
+func replaceSectionArgsRefusal(args json.RawMessage, hasBody bool) string {
+	var keys map[string]json.RawMessage
+	_ = json.Unmarshal(args, &keys)
+	var unknown []string
+	for k := range keys {
+		if k != "section" && k != "body" && k != "spec" {
+			unknown = append(unknown, k)
+		}
+	}
+	slices.Sort(unknown)
+	switch {
+	case len(unknown) > 0:
+		return "spec_replace_section has no argument " + strings.Join(unknown, ", ") +
+			"; it takes section, body (the section's new text) and spec. Nothing was written."
+	case !hasBody:
+		return "spec_replace_section needs body, the section's new text (an empty one clears it). Nothing was written."
+	}
+	return ""
+}
+
 // handleSpecReplaceSection swaps a section's body under the same
 // lock + atomic-write path as annotate, emits one activity note, and
 // resolves the call immediately. On any error the call resolves with the
 // error and the file on disk is byte-identical.
 func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 	var a struct {
-		Section string `json:"section"`
-		Body    string `json:"body"`
+		Section string  `json:"section"`
+		Body    *string `json:"body"`
 	}
 	if err := json.Unmarshal(tc.Args, &a); err != nil || strings.TrimSpace(a.Section) == "" {
 		e.resolveNow(s, tc.ID, "spec_replace_section needs a section name")
+		return
+	}
+	// A body under another name (claude has sent "content") would
+	// otherwise empty the section and report it updated.
+	if msg := replaceSectionArgsRefusal(tc.Args, a.Body != nil); msg != "" {
+		e.resolveNow(s, tc.ID, msg)
 		return
 	}
 	n, path, err := e.specToolPath(s, tc.Args)
@@ -689,7 +719,7 @@ func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 	// applying this write, so a corrupted artifact recovers through the same
 	// mediated path that once damaged it.
 	raw = []byte(spec.HealWeldedHeadings(string(raw)))
-	out, matchedTitle, err := spec.ReplaceSection(string(raw), a.Section, a.Body)
+	out, matchedTitle, err := spec.ReplaceSection(string(raw), a.Section, *a.Body)
 	if err != nil {
 		e.resolveNow(s, tc.ID, err.Error())
 		return
