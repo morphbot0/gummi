@@ -74,6 +74,11 @@ run only as a note. Before `workflow_run`:
   still passes; the grep catches both.
 - **One behaviour per item**, named by a test that exercises it. Do not
   grep source code for a symbol: it passes on a stub.
+- **Cover the whole bug, and what must keep working.** An item for every
+  place the bug lives — a sibling function, another case of the same
+  type — not only the one reported, and a guard that runs the whole test
+  suite of each package the fix touches: a fix loop goes green on the
+  items it is given, however narrow.
 - **gummi's environment, not your shell's.** The checks run with the
   environment gummi was started in. Name a tool by its absolute path if
   that `PATH` may not have it.

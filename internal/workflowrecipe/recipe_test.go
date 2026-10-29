@@ -53,11 +53,16 @@ func TestParseReadsTheOtherBundledRecipes(t *testing.T) {
 		inv.Steps[1].Step.Role != domain.RoleScribe || inv.Steps[1].Step.Artifacts["report"] != "report.md" {
 		t.Fatalf("investigate = %+v", inv)
 	}
+	// a scout maps the bug and what must keep working, then the loop fixes
 	fix := mustLoad(t, "fix-until-green")
-	rp := fix.Steps[0].Repeat
-	if len(fix.Steps) != 1 || rp == nil || !rp.Until.Checks || rp.Max != 5 || rp.OnMax != domain.OnMaxPause ||
-		len(rp.Steps) != 1 || rp.Steps[0].Step.Role != domain.RoleImplementer {
+	if len(fix.Steps) != 2 || fix.Steps[0].Step == nil || fix.Steps[0].Step.Role != domain.RoleScout {
 		t.Fatalf("fix-until-green = %+v", fix)
+	}
+	rp := fix.Steps[1].Repeat
+	if rp == nil || !rp.Until.Checks || rp.Max != 5 || rp.OnMax != domain.OnMaxPause ||
+		len(rp.Steps) != 1 || rp.Steps[0].Step.Role != domain.RoleImplementer ||
+		!strings.Contains(rp.Steps[0].Step.Prompt, "{{map.output}}") {
+		t.Fatalf("fix-until-green's loop = %+v", rp)
 	}
 }
 
