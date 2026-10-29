@@ -1349,6 +1349,45 @@ func TestTheEnvelopeIsACeilingAcrossARunsSteps(t *testing.T) {
 	}
 }
 
+// TestARunsSpendCountsAgainstTheLiveSessionsCap: a session's backend took
+// its cap from what the envelope had left when it spawned. A run that
+// spent from the same envelope since leaves that cap too high, so the
+// session's own turn must still stop when the envelope, runs and all, is
+// spent.
+func TestARunsSpendCountsAgainstTheLiveSessionsCap(t *testing.T) {
+	wf := newWFFake()
+	wf.on("one", func(_, _ string, _ int) wfReply { return wfReply{text: "looked", credits: 1990} })
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			if msg != "again" {
+				return base(opts, msg)
+			}
+			return []agent.Event{
+				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 10, Model: "m"}},
+				{Kind: agent.EventMessage, Text: "ok"},
+				{Kind: agent.EventIdle},
+			}
+		}
+	}(wf.Responder)
+	e, _, f, ff := wfEngine(t, wf)
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: one\nsteps:\n  - { id: one, role: scout, prompt: look }\n"})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	// the run's report reaches the session as a turn of its own (1 credit)
+	waitUntil(t, "the report reached the session", func() bool {
+		wf.mu.Lock()
+		defer wf.mu.Unlock()
+		return len(wf.sessionT) >= 2
+	})
+	waitFreeformIdle(t, ff)
+	if ff.Session().isExhausted() {
+		t.Fatal("the session is exhausted before the envelope is spent")
+	}
+	if err := ff.Send(context.Background(), "again"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the session stopped on its spent envelope", ff.Session().isExhausted)
+}
+
 // TestAStepStartedIntoAStopOrPauseIsNotBriefed: a step's backend takes a
 // while to come up, and the run may be stopped or paused meanwhile. The
 // step's brief goes only to a step still live in a running run: stopped,
