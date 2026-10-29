@@ -1324,7 +1324,7 @@ func (s *opencodeSession) toolCallEvents(e *ocEvent, msg ocMsgText) []Event {
 		detail = collapseDetail(s.workdir, e.Part.State.Title)
 	}
 	out = append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool, Detail: detail, CallID: e.Part.CallID})
-	return append(out, tasksEvent(e.Part.Tool, e.Part.State.Input)...)
+	return out
 }
 
 // toolResultEvents is a finished tool part's outcome. It is reported

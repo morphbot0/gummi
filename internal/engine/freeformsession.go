@@ -1406,8 +1406,6 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		return
 	case agent.EventContext:
 		sess.setContext(ev.Context)
-	case agent.EventTasks:
-		sess.setTasks(ev.Tasks)
 	case agent.EventTurnStarted:
 		// the backend woke by itself (a watch fired): the session is
 		// working until that turn's idle, so a line sent meanwhile queues

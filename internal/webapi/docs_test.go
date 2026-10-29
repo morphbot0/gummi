@@ -25,7 +25,6 @@ func TestLiveShape(t *testing.T) {
 			Verb: "thinking", Turns: []Turn{{Author: "you", Text: "why two funcs?"}, {Author: "thinking", Text: "one per backend"}},
 			Tool:  &ToolCall{Tool: "Read", Label: "Read  main.go", Detail: "main.go", Status: "running"},
 			Spent: 0.5, Model: "claude-opus", Context: &AgentContext{Tokens: 41000, Limit: 200000},
-			Tasks:  []Task{{Text: "read the adapter", Status: "completed"}, {Text: "Fixing the leak", Status: "in_progress"}},
 			Queued: []string{"also fix the docs"}, Watches: []string{"w1 · go test ./... | grep FAIL"},
 			Objective: &Objective{Text: "the parser is under 10ms", Check: "go test ./parser", State: "active", Turns: 3, Cap: 20, Note: "the lexer is still slow", Auditing: true},
 			Runs:      []RunPlace{{N: 1, Before: 1}, {N: 2, Before: 2}},

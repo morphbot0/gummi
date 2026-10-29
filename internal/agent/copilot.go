@@ -598,9 +598,6 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 	case *copilot.ToolExecutionStartData:
 		args, _ := d.Arguments.(map[string]any)
 		s.emit(Event{Kind: EventToolCall, Tool: d.ToolName, Detail: toolDetail(s.workdir, args), CallID: d.ToolCallID})
-		for _, ev := range tasksEvent(d.ToolName, args) {
-			s.emit(ev)
-		}
 		return
 	case *copilot.ToolExecutionCompleteData:
 		out = Event{Kind: EventToolResult, CallID: d.ToolCallID, Result: toolResult(d)}

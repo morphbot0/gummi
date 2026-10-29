@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1001,60 +1000,6 @@ func TestAnOpenWatchIsListedUntilItSettles(t *testing.T) {
 	ff.Session().resolveToolResult("w1", true, "build failed")
 	if ff.Watching() {
 		t.Error("a settled watch still reads as watching")
-	}
-}
-
-// TestAFreeformSessionKeepsOneChecklist: each restatement of the agent's
-// task list replaces the last in one transcript entry, which a restart
-// restores and a replay never hands back to the agent as conversation.
-func TestAFreeformSessionKeepsOneChecklist(t *testing.T) {
-	first := []agent.Task{{Text: "read", Status: agent.TaskInProgress}, {Text: "fix", Status: agent.TaskPending}}
-	second := []agent.Task{{Text: "read", Status: agent.TaskDone}, {Text: "fix", Status: agent.TaskInProgress}}
-	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
-		return []agent.Event{
-			{Kind: agent.EventTasks, Tasks: first},
-			{Kind: agent.EventMessage, Text: "reading"},
-			{Kind: agent.EventTasks, Tasks: second},
-			{Kind: agent.EventIdle},
-		}
-	}}
-	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-	t.Cleanup(func() { e.Close() })
-	ctx := context.Background()
-	f := freeformCard(1, "fix the leak")
-	createFeature(t, store, f)
-	ff, err := e.OpenFreeform(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ff.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	waitFreeformIdle(t, ff)
-
-	snap := ff.Session().Snapshot()
-	if !reflect.DeepEqual(snap.Tasks, second) {
-		t.Errorf("Tasks = %#v, want %#v", snap.Tasks, second)
-	}
-	var lists []Message
-	for _, m := range snap.Transcript {
-		if m.Author == AuthorTasks {
-			lists = append(lists, m)
-		}
-	}
-	if len(lists) != 1 {
-		t.Fatalf("%d checklist entries, want one", len(lists))
-	}
-	if got := replayLine(lists[0]); got != "" {
-		t.Errorf("the checklist was replayed as %q", got)
-	}
-	restored := restoredFreeformSession(f, state.SessionSnapshot{
-		Transcript: []state.SessionMessage{{Author: string(AuthorTasks), Content: lists[0].Content}},
-	})
-	if got := restored.Snapshot().Tasks; !reflect.DeepEqual(got, second) {
-		t.Errorf("restored Tasks = %#v, want %#v", got, second)
 	}
 }
 

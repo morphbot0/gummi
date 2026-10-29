@@ -362,19 +362,14 @@ func (ff *FreeformSession) finishHandoff(ctx context.Context, sess *Session) (se
 	return ff.SendTurn(ctx, handoffOpening+brief, nil) == nil
 }
 
-// truncateAll drops the whole conversation but the pinned checklist,
-// reporting whether anything had been said in it: a cleared
+// truncateAll drops the whole conversation, reporting whether anything had been said in it: a cleared
 // conversation's own note alone is nothing to clear.
 func (s *Session) truncateAll() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var tasks *Message
 	said := false
 	for i := range s.transcript {
 		switch s.transcript[i].Author {
-		case AuthorTasks:
-			m := s.transcript[i]
-			tasks = &m
 		case AuthorUser, AuthorAssistant:
 			said = true
 		case AuthorSystem:
@@ -386,9 +381,6 @@ func (s *Session) truncateAll() bool {
 		return false
 	}
 	s.transcript = nil
-	if tasks != nil {
-		s.transcript = append(s.transcript, *tasks)
-	}
 	s.streamOpen = false
 	return true
 }

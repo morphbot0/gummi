@@ -261,9 +261,6 @@ type Conversation struct {
 	Spent   float64       `json:"spent,omitempty"`
 	Model   string        `json:"model,omitempty"`
 	Context *AgentContext `json:"context,omitempty"`
-	// Tasks is the agent's own checklist as it last stated it, pinned
-	// above the composer rather than in the flow of turns.
-	Tasks []Task `json:"tasks,omitempty"`
 	// Queued is what the person said while the agent was mid-turn, oldest
 	// first, waiting to go to it together as the next turn. Each can be
 	// taken back by its index (POST /api/cards/{id}/queue/{n}/take).
@@ -312,13 +309,6 @@ type Rewound struct {
 // taken back before it was sent, for the composer to offer for editing.
 type Unqueued struct {
 	Text string `json:"text"`
-}
-
-// Task is one item of an agent's checklist. Status is "pending",
-// "in_progress" or "completed".
-type Task struct {
-	Text   string `json:"text"`
-	Status string `json:"status"`
 }
 
 // Elsewhere is a run of the card another gummi process owns: read-only

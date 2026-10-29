@@ -76,17 +76,7 @@ func (s *Session) truncateBeforeUser(n int) (string, bool) {
 		return "", false
 	}
 	text := s.transcript[at].Content
-	var tasks *Message
-	for i := at; i < len(s.transcript); i++ {
-		if s.transcript[i].Author == AuthorTasks {
-			m := s.transcript[i]
-			tasks = &m
-		}
-	}
 	s.transcript = s.transcript[:at:at]
-	if tasks != nil {
-		s.transcript = append(s.transcript, *tasks)
-	}
 	s.streamOpen = false
 	return text, true
 }

@@ -382,7 +382,6 @@ type headlessEvent struct {
 	Result  string          `json:"result"` // tool_result: captured output
 	Tokens  int64           `json:"tokens"` // context: tokens in the window
 	Limit   int64           `json:"limit"`  // context: window size (0 = unknown)
-	Tasks   []Task          `json:"tasks"`  // tasks: the whole checklist, replacing the last
 }
 
 func decodeHeadless(line []byte) (Event, bool) {
@@ -406,12 +405,6 @@ func decodeHeadless(line []byte) (Event, bool) {
 		return Event{Kind: EventToolResult, Tool: m.Name, CallID: m.ID, Result: &ToolResult{OK: ok, Output: boundTail(m.Result, ok)}}, true
 	case "context":
 		return Event{Kind: EventContext, Context: Context{Tokens: m.Tokens, Limit: m.Limit}}, true
-	case "tasks":
-		ts := make([]Task, 0, len(m.Tasks))
-		for _, t := range m.Tasks {
-			ts = append(ts, Task{Text: t.Text, Status: taskStatus(string(t.Status))})
-		}
-		return Event{Kind: EventTasks, Tasks: ts}, true
 	case "ask":
 		// the ask payload is passed through verbatim; the orchestrator
 		// parses it into a question (name defaults to ask_user).

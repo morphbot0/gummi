@@ -120,37 +120,6 @@ func TestTranscriptShowsThinkingCollapsed(t *testing.T) {
 	}
 }
 
-// TestTranscriptPinsTheChecklist: the agent's task list renders after the
-// conversation rather than where it was first stated, marking each item's
-// state, and folds to its count once all of it is done.
-func TestTranscriptPinsTheChecklist(t *testing.T) {
-	s := theme.New(theme.GummiDark())
-	snap := engine.Snapshot{
-		Role: agent.RoleImplementer,
-		Transcript: []engine.Message{
-			{Author: engine.AuthorTasks, Content: "- [x] read\n- [~] fixing\n"},
-			{Author: engine.AuthorAssistant, Content: "on it"},
-		},
-		Tasks: []agent.Task{{Text: "read", Status: agent.TaskDone}, {Text: "fixing", Status: agent.TaskInProgress}, {Text: "test", Status: agent.TaskPending}},
-	}
-	got := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
-	for _, want := range []string{"tasks 1/3", "✓ read", "▸ fixing", "○ test"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q:\n%s", want, got)
-		}
-	}
-	if strings.Index(got, "on it") > strings.Index(got, "tasks 1/3") || strings.Contains(got, "[~]") {
-		t.Errorf("checklist not pinned below the conversation:\n%s", got)
-	}
-	for i := range snap.Tasks {
-		snap.Tasks[i].Status = agent.TaskDone
-	}
-	got = stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
-	if !strings.Contains(got, "tasks 3/3") || strings.Contains(got, "✓ read") {
-		t.Errorf("a finished list should fold to its count:\n%s", got)
-	}
-}
-
 // TestTranscriptShowsQueuedLines: lines waiting for the turn in flight
 // show after the conversation, with the key that takes one back.
 func TestTranscriptShowsQueuedLines(t *testing.T) {

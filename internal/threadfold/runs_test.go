@@ -405,9 +405,9 @@ func TestARunIsPlacedAmongTheTurnsWhereItWasProposed(t *testing.T) {
 	if got := RunPlace(nil, runAt); got != 0 {
 		t.Errorf("no turns: %d", got)
 	}
-	// a transcript's tool calls, thoughts and task lists are activity
-	marks := TranscriptMarks([]engine.Message{{Author: engine.AuthorTool}, {Author: engine.AuthorThinking}, {Author: engine.AuthorTasks}, {Author: engine.AuthorAssistant}})
-	if !marks[0].Activity || !marks[1].Activity || !marks[2].Activity || marks[3].Activity {
+	// a transcript's tool calls and thoughts are activity
+	marks := TranscriptMarks([]engine.Message{{Author: engine.AuthorTool}, {Author: engine.AuthorThinking}, {Author: engine.AuthorAssistant}})
+	if !marks[0].Activity || !marks[1].Activity || marks[2].Activity {
 		t.Errorf("marks %+v", marks)
 	}
 }
@@ -439,7 +439,6 @@ func TestARunEndedBeforeTheConversationIsNotDrawn(t *testing.T) {
 	t0 := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	cleared := t0.Add(time.Hour)
 	tr := []engine.Message{
-		{Author: engine.AuthorTasks, At: t0},
 		{Author: engine.AuthorSystem, Content: "Cleared the conversation.", At: cleared},
 	}
 	start := ConversationStart(tr)

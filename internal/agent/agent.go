@@ -507,10 +507,6 @@ const (
 	// EventPermission reports a pending tool-call approval (guarded
 	// mode); the orchestrator answers via the queue.
 	EventPermission EventKind = "permission"
-	// EventTasks carries the agent's whole working checklist (Tasks
-	// populated), replacing any earlier one: what the backend's own
-	// task tool last said, mapped by TaskList.
-	EventTasks EventKind = "tasks"
 	// EventUsage carries per-turn spend (Usage populated).
 	EventUsage EventKind = "usage"
 	// EventContext reports the conversation's context-window usage
@@ -600,6 +596,5 @@ type Event struct {
 	Result   *ToolResult // populated for EventToolResult
 	Usage    Usage       // populated for EventUsage
 	Context  Context     // populated for EventContext
-	Tasks    []Task      // populated for EventTasks
 	Err      error       // populated for EventError
 }

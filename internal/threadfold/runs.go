@@ -389,11 +389,10 @@ func PersonSaid(tr []engine.Message) time.Time {
 }
 
 // ConversationStart is when a session's conversation as it stands began:
-// its first turn's moment, past the pinned task list a /clear or /handoff
-// keeps. Zero when no turn carries one.
+// its first turn's moment. Zero when no turn carries one.
 func ConversationStart(tr []engine.Message) time.Time {
 	for _, msg := range tr {
-		if msg.Author != engine.AuthorTasks && !msg.At.IsZero() {
+		if !msg.At.IsZero() {
 			return msg.At
 		}
 	}
@@ -436,7 +435,7 @@ type TurnMark struct {
 func TranscriptMarks(tr []engine.Message) []TurnMark {
 	out := make([]TurnMark, len(tr))
 	for i, msg := range tr {
-		out[i] = TurnMark{At: msg.At, Activity: msg.Author == engine.AuthorTool || msg.Author == engine.AuthorThinking || msg.Author == engine.AuthorTasks}
+		out[i] = TurnMark{At: msg.At, Activity: msg.Author == engine.AuthorTool || msg.Author == engine.AuthorThinking}
 	}
 	return out
 }
