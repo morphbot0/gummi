@@ -564,6 +564,13 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	if err != nil {
 		return nil, err
 	}
+	// a run is judged against the done-when items it can read, and items
+	// it cannot read would leave it judged against none
+	if text, ok := e.SessionSpec(sess, n); ok {
+		if why := spec.DoneWhenRefusal(text); why != "" {
+			return nil, fmt.Errorf("spec %d cannot be run: %s", n, why)
+		}
+	}
 
 	unlock := e.lockRuns(session)
 	defer unlock()

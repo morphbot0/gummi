@@ -214,3 +214,25 @@ func TestReplaceSectionRefusesABodyUnderAnotherName(t *testing.T) {
 		t.Errorf("an empty body left %q", p)
 	}
 }
+
+// TestReplaceSectionRefusesADoneWhenItCannotRead: Done when items written
+// as a plain list would be read as none, so the write is refused with the
+// block's shape and nothing is written; the block form is taken.
+func TestReplaceSectionRefusesADoneWhenItCannotRead(t *testing.T) {
+	e, s, _ := specToolsSession(t)
+	if got := specCall(t, e, s, "s1", specStartToolName, `{"title":"Export as JSON"}`); !strings.Contains(got, "created spec 1") {
+		t.Fatalf("spec_start = %q", got)
+	}
+	before := specCall(t, e, s, "v1", specViewToolName, `{}`)
+	got := specCall(t, e, s, "r1", specReplaceSectionToolName, `{"section":"Done when","body":"- DW-1: export works. check: `+"`go test ./...`"+`\n"}`)
+	if !strings.Contains(got, "```gummi-done-when") || !strings.Contains(got, "Nothing was written") {
+		t.Fatalf("a plain-list Done when = %q", got)
+	}
+	if after := specCall(t, e, s, "v2", specViewToolName, `{}`); after != before {
+		t.Errorf("the refused write changed the spec:\n%s", after)
+	}
+	block := `{"section":"Done when","body":"` + "```gummi-done-when\\n- id: DW-1\\n  says: export works\\n  check: go test ./...\\n```\\n" + `"}`
+	if got := specCall(t, e, s, "r2", specReplaceSectionToolName, block); got != "updated Done when section" {
+		t.Fatalf("the block form = %q", got)
+	}
+}

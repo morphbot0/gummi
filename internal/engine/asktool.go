@@ -724,6 +724,12 @@ func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 		e.resolveNow(s, tc.ID, err.Error())
 		return
 	}
+	if strings.EqualFold(matchedTitle, spec.SessionSectionDoneWhen) {
+		if why := spec.DoneWhenRefusal(out); why != "" {
+			e.resolveNow(s, tc.ID, why+"\nNothing was written.")
+			return
+		}
+	}
 	if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
 		e.resolveNow(s, tc.ID, "could not write the spec: "+err.Error())
 		return
