@@ -21,7 +21,8 @@ import (
 // Engine.stepRole says. A profile may name others — a slot a recipe of the
 // workspace's names — and they are kept as written.
 var RoleSlots = []struct{ Role, Help string }{
-	{"implementer", "a session's own model, unless the session picks one; an implementer step's; any role's last fallback"},
+	{"implementer", "a session's own model when the profile has no session slot; an implementer step's; any role's last fallback"},
+	{"session", "a session's own model, unless the session picks one: the one that writes its specs and proposes its runs; the implementer when unset"},
 	{"architect", "consult sessions, and planner and contractor steps when they have no slot of their own"},
 	{"planner", "a workflow's planner step"},
 	{"contractor", "a workflow's contractor step: design, interfaces, stubs"},

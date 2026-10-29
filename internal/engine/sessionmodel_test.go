@@ -90,6 +90,32 @@ func TestASessionRunsOnTheModelItNamed(t *testing.T) {
 	}
 }
 
+// TestAProfilesSessionSlotIsTheSessionsModel: a profile with a session
+// slot runs its sessions there, apart from the implementer its steps run
+// on; one without runs them on the implementer, as before.
+func TestAProfilesSessionSlotIsTheSessionsModel(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{
+		Agents: map[string]agent.Agent{"": recordingAgent()}, Store: store, Worktrees: wt, Workspace: ws, Model: "fallback",
+		Profiles: config.Profiles{Default: "split", Profiles: map[string]config.Profile{
+			"split": {"session": {Model: "opus"}, "implementer": {Model: "haiku"}},
+			"plain": {"implementer": {Model: "haiku"}},
+		}},
+	})
+	t.Cleanup(func() { e.Close() })
+	f := freeformCard(1, "plan it")
+	if _, model := e.SessionModel(f); model != "opus" {
+		t.Errorf("a session under the split profile runs on %q, want its session slot's opus", model)
+	}
+	if rc, _ := e.resolveRole("split", agent.RoleImplementer); rc.Model != "haiku" {
+		t.Errorf("the split profile's implementer is %q", rc.Model)
+	}
+	f.Profile = "plain"
+	if _, model := e.SessionModel(f); model != "haiku" {
+		t.Errorf("a session under a profile with no session slot runs on %q, want its implementer's haiku", model)
+	}
+}
+
 // TestSwitchingASessionsModelCarriesTheConversation: switching mid-session
 // stores the new pair on the card, and the next turn runs on it with the
 // conversation so far replayed rather than resumed, since the old

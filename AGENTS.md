@@ -69,7 +69,7 @@ session ──talk──▶ spec n ──workflow_run──▶ proposal ──yo
   role's slot (`scout`, `planner`, `contractor`, `implementer`, `tester`,
   `scribe`, `reviewer`) or one its recipe names (`slot:`), falling back
   to `architect` for design work and then `implementer`; the session
-  itself runs on `implementer`. A person edits profiles from the board
+  itself runs on `session`, else `implementer`. A person edits profiles from the board
   (`P` in the TUI, Profiles on the web page).
 
 Cards of the retired workflow kinds (feature, bug, research, goal) may

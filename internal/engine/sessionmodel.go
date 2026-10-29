@@ -35,15 +35,19 @@ var SessionBackends = []string{"claude", "copilot", "opencode", "headless"}
 var ErrSessionBusy = errors.New("the session is mid-turn; stop the turn or wait for it before switching models")
 
 // sessionRole is a freeform card's role config and backend: the agent and
-// model its person chose when it names them, else the profile's
-// implementer exactly as every freeform card resolved before a session
-// could choose.
+// model its person chose when it names them, else the profile's session
+// slot — a stronger model to write the specs and plan the runs whose
+// steps run cheaper — else its implementer, as every freeform card
+// resolved before either.
 func (e *Engine) sessionRole(f domain.Feature) (config.RoleConfig, string) {
 	if f.SessionBackend != "" || f.SessionModel != "" {
 		return config.RoleConfig{Model: f.SessionModel, Backend: f.SessionBackend}, f.SessionBackend
 	}
-	return e.resolveRole(f.Profile, agent.RoleImplementer)
+	return e.resolveRoleWithFallback(f.Profile, roleSession, agent.RoleImplementer)
 }
+
+// roleSession is the profile slot a session's own model is read from.
+const roleSession agent.Role = "session"
 
 // SessionModel reports the backend and model a freeform card's session
 // runs on, resolved the way its next spawn will resolve them. An empty
