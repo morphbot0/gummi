@@ -360,7 +360,8 @@ func stepBrief(run *domain.Run, step domain.Step, path, filled string) string {
 		}
 	}
 	b.WriteString("\nIf something your task and the spec do not settle blocks you, ask with ask_user. " +
-		"If you cannot do the task, make your last line FAILED: <why>. Your final message is your output, " +
+		"If you cannot do the task, make your last line FAILED: <why>; only then, since a finding, however bad, " +
+		"is not a failure. Your final message is your output, " +
 		"which the steps after you read; DECISION: lines (a choice your task did not make for you) and " +
 		"OPEN: lines (what you left) go into the run's report.\n")
 	if step.Role == domain.RolePlanner {
