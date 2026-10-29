@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -118,6 +119,7 @@ func (m *Shell) measureWsStats() tea.Cmd {
 	}
 	store := m.store
 	rows := append([]featureRow(nil), m.rows...)
+	children := m.children
 	busy := m.boardBusy()
 	eng := m.engine
 	v := m.wsstats
@@ -128,7 +130,7 @@ func (m *Shell) measureWsStats() tea.Cmd {
 	}
 	return func() tea.Msg {
 		ctx := context.Background()
-		rep, err := buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now, busy, curatorRuns(eng))
+		rep, err := buildFleetReport(ctx, store, rows, children, fleetrun.Window{From: from, To: now}, now, busy, curatorRuns(eng))
 		if err != nil {
 			return wsStatsLoadedMsg{err: err}
 		}
@@ -142,8 +144,8 @@ func (m *Shell) measureWsStats() tea.Cmd {
 // failing the page: a reader asking how the workspace ran must still
 // get the part of the answer that is readable. It reads running off the
 // record (fleetrun.Input.Busy nil) — its reader wants money, not lanes.
-func buildWsReport(ctx context.Context, store *state.Store, rows []featureRow, from, now time.Time) (*fleetrun.Report, error) {
-	return buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now, nil, nil)
+func buildWsReport(ctx context.Context, store *state.Store, rows []featureRow, children map[domain.FeatureID]domain.Feature, from, now time.Time) (*fleetrun.Report, error) {
+	return buildFleetReport(ctx, store, rows, children, fleetrun.Window{From: from, To: now}, now, nil, nil)
 }
 
 // curatorRuns is the skill curator's ledger (DESIGN §23.4) as the fold
@@ -171,7 +173,11 @@ func curatorRuns(eng *engine.Engine) []fleetrun.CuratorRun {
 // reading of which cards are running (boardBusy), nil to read it off the
 // record. curator is the skill curator's ledger (curatorRuns), whole: the
 // fold windows it.
-func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow, w fleetrun.Window, now time.Time, busy map[domain.FeatureID]bool, curator []fleetrun.CuratorRun) (*fleetrun.Report, error) {
+//
+// children are the sessions' hidden child cards (Shell.children): never
+// board rows, their spend is folded into their session's (withChildren).
+func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow, children map[domain.FeatureID]domain.Feature, w fleetrun.Window, now time.Time, busy map[domain.FeatureID]bool, curator []fleetrun.CuratorRun) (*fleetrun.Report, error) {
+	rows, kids := withChildren(ctx, store, rows, children)
 	from := w.From
 	evs, err := store.WorkspaceEvents(ctx, from)
 	if err != nil {
@@ -215,6 +221,11 @@ func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow
 		if err != nil {
 			spend = nil
 		}
+		for _, kid := range kids[r.F.ID] {
+			if bd, err := store.SessionBreakdown(ctx, kid); err == nil {
+				spend = append(spend, bd...)
+			}
+		}
 		cards = append(cards, fleetrun.Card{
 			Feature:  r.F,
 			Landed:   r.Landed,
@@ -231,6 +242,45 @@ func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow
 	}
 	rep := fleetrun.Fold(fleetrun.Input{Now: now, Window: w, Cards: cards, Rows: all, Busy: busy, Curator: curator})
 	return &rep, nil
+}
+
+// withChildren folds every session's hidden children — its workflow runs'
+// step cards, and an old database's crew cards — into the session's row:
+// what they spent came out of the session's envelope
+// (engine.SessionPoolSpent), so the stats count it under the session, not
+// nowhere. The rows it changes are copies; kids names each session's
+// children, for the window's per-card reads.
+func withChildren(ctx context.Context, store *state.Store, rows []featureRow, children map[domain.FeatureID]domain.Feature) (out []featureRow, kids map[domain.FeatureID][]domain.FeatureID) {
+	if len(children) == 0 {
+		return rows, nil
+	}
+	at := make(map[domain.FeatureID]int, len(rows))
+	for i, r := range rows {
+		at[r.F.ID] = i
+	}
+	ids := make([]domain.FeatureID, 0, len(children))
+	for id := range children {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	out = append([]featureRow(nil), rows...)
+	kids = map[domain.FeatureID][]domain.FeatureID{}
+	for _, id := range ids {
+		c := children[id]
+		i, ok := at[c.Child.Of]
+		if !ok {
+			continue
+		}
+		r := &out[i]
+		addSpend(&r.F.Spend, c.Spend)
+		if bd, err := store.StageBreakdown(ctx, id); err == nil {
+			// a full slice: the append copies, never writing into the
+			// board's own row
+			r.StageSpend = append(r.StageSpend[:len(r.StageSpend):len(r.StageSpend)], bd...)
+		}
+		kids[c.Child.Of] = append(kids[c.Child.Of], id)
+	}
+	return out, kids
 }
 
 // boardBusy is the board's own set of running cards: every row whose web

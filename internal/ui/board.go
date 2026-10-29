@@ -280,9 +280,8 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		disp = " " + faint.Render(fmt.Sprintf("%d dispatched", r.Dispatched))
 	}
 	cost := ""
-	live := m.liveCardSpent(r.F.ID)
-	if !r.F.Spend.Zero() || live > 0 {
-		cost = " " + faint.Render(spendTick(r.F.Spend, live))
+	if sp, live := m.envelopeSpend(r.F); !sp.Zero() || live > 0 {
+		cost = " " + faint.Render(spendTick(sp, live))
 	}
 	// The row used to be assembled title-first and cut from the right by a
 	// single ansi.Truncate: at narrow widths the title (the one field the

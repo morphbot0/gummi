@@ -1125,7 +1125,10 @@ type WebFleet struct {
 	// busy is the board's running set at capture (Shell.boardBusy), so
 	// the page's "running now" is the header pill's count.
 	busy map[domain.FeatureID]bool
-	now  func() time.Time
+	// children are the sessions' hidden child cards, folded into their
+	// session's row (withChildren).
+	children map[domain.FeatureID]domain.Feature
+	now      func() time.Time
 	// eng reads the skill curator's ledger (curatorRuns); nil on a board
 	// with no engine.
 	eng *engine.Engine
@@ -1136,7 +1139,7 @@ func (m *Shell) WebFleet() (*WebFleet, error) {
 	if !m.attached() || m.store == nil {
 		return nil, ErrDetached
 	}
-	return &WebFleet{store: m.store, rows: append([]featureRow(nil), m.rows...), busy: m.boardBusy(), now: m.now, eng: m.engine}, nil
+	return &WebFleet{store: m.store, rows: append([]featureRow(nil), m.rows...), children: m.children, busy: m.boardBusy(), now: m.now, eng: m.engine}, nil
 }
 
 // FleetDefaultWindow is the window the fleet opens on when the page asks
@@ -1154,7 +1157,7 @@ func (w *WebFleet) Report(ctx context.Context, from, to time.Time) (webapi.Fleet
 	if !from.IsZero() && !from.Before(to) {
 		return webapi.Fleet{}, invalid("the window must start before it ends")
 	}
-	rep, err := buildFleetReport(ctx, w.store, w.rows, fleetrun.Window{From: from, To: to}, now, w.busy, curatorRuns(w.eng))
+	rep, err := buildFleetReport(ctx, w.store, w.rows, w.children, fleetrun.Window{From: from, To: to}, now, w.busy, curatorRuns(w.eng))
 	if err != nil {
 		return webapi.Fleet{}, err
 	}

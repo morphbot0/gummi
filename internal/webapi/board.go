@@ -73,8 +73,9 @@ type Row struct {
 	// "2 open comments", "nothing committed yet"), said by the server so the page
 	// tells cards apart without guessing; "" for any other card or status.
 	Word string `json:"word,omitempty"`
-	// Spend is the card's credits so far (live while a session runs);
-	// Envelope its budget, 0 when uncapped.
+	// Spend is the card's credits so far, its workflow runs' steps
+	// included (live while a session runs); Envelope its budget, 0 when
+	// uncapped.
 	Spend    float64 `json:"spend"`
 	Envelope int     `json:"envelope"`
 	// Context is the running session's context-window occupancy, when one
