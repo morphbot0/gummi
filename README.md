@@ -35,7 +35,8 @@ proposes a **workflow**: design, build, review and validate, each step a
 fresh agent in the session's own tree, in sequence, in parallel or in a
 loop until the checks pass. You allow the run, follow every step live,
 and revert it in one click. Recipes are plain YAML — use the bundled
-`deliver`, `investigate` and `fix-until-green`, or write your own.
+`deliver`, `investigate` and `fix-until-green`, or write your own:
+[docs/workflows.md](docs/workflows.md) is the guide and the reference.
 
 ## And also
 
