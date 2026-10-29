@@ -7044,6 +7044,22 @@ call returns at once, saying the run is proposed.
     and no run is paused over what it finds. The first step waits only
     for the checks to have run; checks that cannot run at all leave the
     run without a baseline.
+- **Checks a step adds** (`engine/workflowadded.go`). Whoever writes the
+  spec fixes its scope before anyone has looked: a step that maps the
+  work may find the same mistake in a sibling, or a behaviour a fix must
+  keep, that no item names, and the frozen spec could not say so. A step
+  may end its output with a `gummi-done-when` block; each check in it
+  whose command no item already runs joins the run as its next item
+  (`DW-n` after the spec's own, its statement marked "added by" the
+  step). The steps after it are given them under the spec, a repeat's
+  `until: checks` holds until they pass too, and the end checks, the
+  report and the spec's state read them like the frozen ones. When the
+  tree is still the one the run started on, gummi runs them as the step
+  ends and keeps the result as their baseline; once a step has written,
+  there is no before to take. They only add: a step cannot drop, change
+  or weaken a frozen item, the spec is never written, and nothing about
+  the run's plan changes — decision 28's rules stand, a stricter test of
+  the same plan asking nothing new of the person.
 
 - **How a run gets asked for.** An agent left to judge for itself,
   mid-request, whether work is worth a run mostly just starts on it. So

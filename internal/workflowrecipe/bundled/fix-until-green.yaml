@@ -17,7 +17,16 @@ steps:
         it, what its callers expect of it, and what its comments, docs
         and defaults promise. A fix that breaks one of these is wrong.
       End with the list of places to change and the list of behaviour to
-      keep.
+      keep, then a gummi-done-when block with one check command for each
+      place and kept behaviour no done-when item below checks yet (a
+      `go test -run` naming the test, which the fix step will write, or a
+      command that fails now), so the run proves them too:
+
+      ```gummi-done-when
+      - id: DW-1
+        says: <what holds once fixed>
+        check: <a command that exits 0 when it does>
+      ```
 
       {{spec}}
   - id: fix

@@ -74,7 +74,7 @@ steps:
 | `reviewer` | reads the work against the spec | reads |
 
 Every step has a full shell; a reader is told to change nothing, and
-one that did is flagged. gummi gives each step its role's preamble: do
+one that did is flagged in the report. gummi gives each step its role's preamble: do
 not repeat it. A step's model is the person's profile choice per role;
 `slot: <name>` puts one on another profile slot (a second reviewer on
 `reviewer-alt`). Do not name a slot to ask for a bigger or cheaper model.
@@ -101,6 +101,8 @@ needs; it has no other way to know what came before.
 - `MET: DW-n` / `UNMET: DW-n <why>`, in the **run's last step**, judge
   the items without a check. End with a reviewer that writes them, or
   every `judge: true` item stays unjudged.
+- A fenced `gummi-done-when` block of checks adds them to the run, after
+  the spec's items: how a mapping step makes it prove what it found.
 
 ## Loops: `until` and `onMax`
 
