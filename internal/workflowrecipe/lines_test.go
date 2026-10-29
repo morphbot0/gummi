@@ -56,6 +56,12 @@ func TestFailedReadsOnlyTheLastLine(t *testing.T) {
 		{"- failed: no access", true, "no access"},
 		{"**FAILED:** tests time out", true, "tests time out"},
 		{"FAILED: early\nthen fixed it", false, ""},
+		// a finished step that ends saying nothing failed has not failed
+		{"done\nFAILED: none", false, ""},
+		{"done\nFAILED: None.", false, ""},
+		{"found it\nFAILED: not a failure; the cause and fix are identified above.", false, ""},
+		{"FAILED: n/a", false, ""},
+		{"FAILED: nothing to build here", true, "nothing to build here"},
 		{"all good", false, ""},
 		{"", false, ""},
 	} {
