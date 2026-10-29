@@ -16,6 +16,8 @@ steps:
         Each is part of the fix, whatever the spec names: a place you
         would leave out is one you can say what fixing it would break,
         and then ask the person with ask_user, never leave it as a note.
+        Recommend including it unless you found a caller that depends on
+        the mistake: the same bug elsewhere is a bug, not a scope choice.
       - What must keep working around it: the existing tests that cover
         it, what its callers expect of it, and what its comments, docs
         and defaults promise. A fix that breaks one of these is wrong.

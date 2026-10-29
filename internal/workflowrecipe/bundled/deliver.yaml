@@ -13,10 +13,11 @@ steps:
       what its comments, docs and defaults promise. Every place the same
       change belongs is part of it, whatever the spec names: one you would
       leave out is one you can say what changing it would break, and then
-      ask the person with ask_user, never leave it as a note. End your
-      reply with a gummi-done-when block with one check command for each
-      place and kept behaviour no done-when item below checks yet, so the
-      run proves them too. A place's check must fail now, run it to see:
+      ask the person with ask_user, never leave it as a note; recommend
+      including it unless you found a caller that depends on it as it is.
+      End your reply with a gummi-done-when block with one check command
+      for each place and kept behaviour no done-when item below checks
+      yet, so the run proves them too. A place's check must fail now, run it to see:
       name a test the implementer will write rather than one that exists.
       A kept behaviour's check passes now and must keep passing:
 
