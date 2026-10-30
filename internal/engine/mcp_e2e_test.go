@@ -155,6 +155,9 @@ func mcpE2ESetup(t *testing.T) (*Engine, string, *Session) {
 	f := freeformCard(1, "Dark mode")
 	seedDraft(t, e, f)
 	s := attach(t, e, f)
+	// the kickoff turn ending after a test's ask is open would release the
+	// ask as outliving its call
+	waitFreeformIdle(t, e.Freeform(f.ID))
 	socket := mcpSockPath(e.cfg.Workspace, f.ID)
 	t.Cleanup(func() { s.stop() })
 	return e, socket, s
