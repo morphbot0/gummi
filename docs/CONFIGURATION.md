@@ -32,11 +32,13 @@ a run's writing steps, claude for its planner and reviews.
   read. Both degrade silently: a CLI whose `--help` does not advertise
   `--tools` keeps the full roster, and a conversation the CLI no longer
   holds is simply not resumed.
-- **opencode**: the opencode CLI (`GUMMI_OPENCODE_BIN` overrides the
-  binary). Provider and model config is owned by opencode itself
-  (`opencode auth`, `opencode.json`). Conversations carry across gummi
-  processes through `run --session`; a session opencode cannot find is
-  dropped and the turn re-runs on a fresh one. Under `permissions: guarded`, edits and writes inside the card's
+- **opencode**: the opencode CLI, 1.x or 2.x (`GUMMI_OPENCODE_BIN`
+  overrides the binary). gummi reads `opencode --version` once and speaks
+  that version's server API; nothing needs setting. Provider and model
+  config is owned by opencode itself (`opencode auth`, `opencode.json`).
+  Conversations carry across gummi processes by their opencode session
+  id; a session opencode cannot find is dropped and the turn re-runs on a
+  fresh one. Under `permissions: guarded`, edits and writes inside the card's
   worktree are not asked for: the worktree cage allows them outright, and
   guarded asks only for what the cage does not name (the shell, web
   fetches, everything outside the worktree). opencode's own `question`

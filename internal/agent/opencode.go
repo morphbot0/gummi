@@ -37,6 +37,9 @@ var opencodeExecPath = os.Executable
 // the server created rather than scraped from event lines.
 type Opencode struct {
 	bin string
+	// v2 marks a 2.x binary, whose server speaks 2.x's API
+	// (opencode_v2.go); read once from its version when the agent starts.
+	v2 bool
 
 	mu       sync.Mutex
 	sessions []*opencodeSession
@@ -44,7 +47,8 @@ type Opencode struct {
 }
 
 // NewOpencode returns an Agent that drives the opencode binary (default
-// "opencode", found on PATH). It fails fast when the binary is missing.
+// "opencode", found on PATH), 1.x or 2.x. It fails fast when the binary
+// is missing.
 func NewOpencode(bin string) (*Opencode, error) {
 	if bin == "" {
 		bin = "opencode"
@@ -53,7 +57,7 @@ func NewOpencode(bin string) (*Opencode, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opencode binary %q not found: %w", bin, err)
 	}
-	return &Opencode{bin: resolved}, nil
+	return &Opencode{bin: resolved, v2: opencodeMajor(resolved) >= 2}, nil
 }
 
 // Name implements Agent.
@@ -107,21 +111,50 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
 	}
+	// 2.x takes no system field on a prompt: the stage hints ride the
+	// session config as an instruction file instead.
+	var hintsPath string
+	if o.v2 && len(opts.SystemHints) > 0 {
+		hf, err := os.CreateTemp("", "gummi-opencode-hints-*.md")
+		if err != nil {
+			return nil, fmt.Errorf("opencode adapter: creating session hints: %w", err)
+		}
+		hintsPath = hf.Name()
+		_, werr := hf.WriteString(strings.Join(opts.SystemHints, "\n\n"))
+		if cerr := hf.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr == nil {
+			cfg, werr = withInstructions(cfg, hintsPath)
+		}
+		if werr != nil {
+			_ = os.Remove(hintsPath)
+			return nil, fmt.Errorf("opencode adapter: writing session hints: %w", werr)
+		}
+	}
 	cf, err := os.CreateTemp("", "gummi-opencode-*.json")
 	if err != nil {
+		if hintsPath != "" {
+			_ = os.Remove(hintsPath)
+		}
 		return nil, fmt.Errorf("opencode adapter: creating session config: %w", err)
 	}
 	configPath := cf.Name()
+	cleanup := func() {
+		_ = os.Remove(configPath)
+		if hintsPath != "" {
+			_ = os.Remove(hintsPath)
+		}
+	}
 	if _, err := cf.Write(cfg); err != nil {
 		_ = cf.Close()
-		_ = os.Remove(configPath)
+		cleanup()
 		return nil, fmt.Errorf("opencode adapter: writing session config: %w", err)
 	}
 	if err := cf.Close(); err != nil {
-		_ = os.Remove(configPath)
+		cleanup()
 		return nil, fmt.Errorf("opencode adapter: closing session config: %w", err)
 	}
-	cleanup := func() { _ = os.Remove(configPath) }
 	port, err := freeLoopbackPort()
 	if err != nil {
 		cleanup()
@@ -159,8 +192,9 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		mcpSock:        opts.MCPSockPath,
 		outputTokenMax: opts.OutputTokenMax,
 		configPath:     configPath,
+		hintsPath:      hintsPath,
 		featureID:      opts.FeatureID,
-		srv:            opencodeServer{base: proc.url, password: password},
+		srv:            opencodeServer{base: proc.url, password: password, v2: o.v2},
 		proc:           proc,
 		sctx:           srvCtx,
 		srvCancel:      srvCancel,
@@ -251,6 +285,9 @@ type opencodeSession struct {
 	// at NewSession and removed at Close — after the server process is
 	// dead, which is the only reader of it.
 	configPath string
+	// hintsPath is a 2.x session's instruction file of stage hints, named
+	// by its config and removed with it; "" on 1.x.
+	hintsPath string
 	// featureID mirrors SessionOpts.FeatureID, threaded into the config's
 	// mcp.gummi command so the spawned child serves the right feature.
 	featureID string
@@ -308,6 +345,17 @@ type opencodeSession struct {
 	// when the catalog does not know the model.
 	ctxLimit  int64
 	limitOnce sync.Once
+
+	// 2.x only (opencode_v2.go). exec is the execution a turn or a
+	// compaction waits on; modelBound marks that the server session is on
+	// this session's model (2.x keeps it on the session, so a resumed one
+	// is put on it before its first turn); toolNames holds each open call's
+	// name from its input's start; permSession the session each held call
+	// was asked under, which its reply is addressed to.
+	exec        *ocExec
+	modelBound  bool
+	toolNames   map[string]string
+	permSession map[string]string
 }
 
 // ocTurn is one turn in flight: its context (canceled by Interrupt, which
@@ -559,6 +607,9 @@ func (s *opencodeSession) contextLimitValue() int64 {
 // postTurn addresses one message POST at the turn's session, creating the
 // server session first when none is held.
 func (s *opencodeSession) postTurn(t *ocTurn, msg string, imgs []Image) error {
+	if s.srv.v2 {
+		return s.postTurnV2(t, msg, imgs)
+	}
 	id, err := s.sessionForTurn(t.ctx)
 	if err != nil {
 		return err
@@ -576,12 +627,20 @@ func (s *opencodeSession) sessionForTurn(ctx context.Context) (string, error) {
 	if id != "" {
 		return id, nil
 	}
-	created, err := s.srv.create(ctx)
+	var created string
+	var err error
+	if s.srv.v2 {
+		provider, model, _ := strings.Cut(s.model, "/")
+		created, err = s.srv.createV2(ctx, provider, model)
+	} else {
+		created, err = s.srv.create(ctx)
+	}
 	if err != nil {
 		return "", err
 	}
 	s.mu.Lock()
 	s.sessionID = created
+	s.modelBound = true // created on it
 	s.mu.Unlock()
 	return created, nil
 }
@@ -828,6 +887,14 @@ func (s *opencodeSession) Interrupt(ctx context.Context) error {
 	}
 	if cc != nil {
 		cc() // the compaction's summarize call
+		if id := s.sessionIDValue(); id != "" && s.srv.v2 {
+			// a 2.x compaction runs on after its call: stop it server-side
+			go func() {
+				actx, acancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer acancel()
+				_ = s.srv.abort(actx, id)
+			}()
+		}
 	}
 	return nil
 }
@@ -848,7 +915,7 @@ func (s *opencodeSession) ResolvePermission(ctx context.Context, requestID strin
 	if approve {
 		reply = "once"
 	}
-	return s.srv.respond(ctx, requestID, reply)
+	return s.srv.respond(ctx, s.permissionSession(requestID), requestID, reply)
 }
 
 func (s *opencodeSession) interruptedValue() bool {
@@ -887,6 +954,9 @@ func (s *opencodeSession) Close() error {
 		}
 		if s.configPath != "" {
 			_ = os.Remove(s.configPath)
+		}
+		if s.hintsPath != "" {
+			_ = os.Remove(s.hintsPath)
 		}
 		if s.o != nil {
 			s.o.forget(s)
@@ -975,6 +1045,10 @@ func (s *opencodeSession) serverDied() {
 
 // dispatch maps one event-bus payload into gummi Events.
 func (s *opencodeSession) dispatch(data []byte) {
+	if s.srv.v2 {
+		s.dispatchV2(data)
+		return
+	}
 	var ev ocBusEvent
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return // a keep-alive or something the grammar does not know; ignore quietly
@@ -1231,13 +1305,7 @@ type ocPart struct {
 		Start int64 `json:"start"`
 		End   int64 `json:"end"`
 	} `json:"time"`
-	State struct {
-		Title  string         `json:"title"`
-		Input  map[string]any `json:"input"`
-		Status string         `json:"status"` // "completed" | "error" on a tool part
-		Output string         `json:"output"`
-		Error  string         `json:"error"`
-	} `json:"state"` // tool parts: arguments, a pre-rendered title, and the outcome
+	State  ocToolState `json:"state"` // tool parts: arguments, a pre-rendered title, and the outcome
 	Tokens struct {
 		Input     int64 `json:"input"` // uncached input only; cache reads and writes are below
 		Output    int64 `json:"output"`
@@ -1247,6 +1315,15 @@ type ocPart struct {
 			Write int64 `json:"write"`
 		} `json:"cache"`
 	} `json:"tokens"`
+}
+
+// ocToolState is a tool part's state.
+type ocToolState struct {
+	Title  string         `json:"title"`
+	Input  map[string]any `json:"input"`
+	Status string         `json:"status"` // "completed" | "error" on a tool part
+	Output string         `json:"output"`
+	Error  string         `json:"error"`
 }
 
 // ocEvent is one line of the event grammar the mapping reads — the shape

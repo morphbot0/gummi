@@ -46,6 +46,8 @@ type opencodeServer struct {
 	base     string
 	password string
 	client   *http.Client // nil → a client with no timeout; ctx bounds it
+	// v2 speaks opencode 2.x's API (opencode_v2.go) instead of 1.x's.
+	v2 bool
 }
 
 func (o opencodeServer) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -91,7 +93,11 @@ func (o opencodeServer) waitReady(ctx context.Context, within time.Duration, exi
 		default:
 		}
 		pctx, pcancel := context.WithTimeout(ctx, 2*time.Second)
-		resp, err := o.do(pctx, http.MethodGet, "/config", nil)
+		probe := "/config"
+		if o.v2 {
+			probe = "/api/info"
+		}
+		resp, err := o.do(pctx, http.MethodGet, probe, nil)
 		pcancel()
 		if err == nil {
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
@@ -122,7 +128,11 @@ func (o opencodeServer) waitReady(ctx context.Context, within time.Duration, exi
 // open until the server dies or the context ends; a read error on it is
 // the caller's signal to reconnect or to give up on the server.
 func (o opencodeServer) events(ctx context.Context) (io.ReadCloser, error) {
-	resp, err := o.do(ctx, http.MethodGet, "/event", nil)
+	path := "/event"
+	if o.v2 {
+		path = "/api/event"
+	}
+	resp, err := o.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -179,9 +189,14 @@ func (o opencodeServer) message(ctx context.Context, id string, body any) error 
 }
 
 // abort stops the session's in-flight turn server-side. The turn's own
-// POST returns as aborted; partial work is aborted, not lost.
+// POST returns as aborted; partial work is aborted, not lost. On 2.x it
+// is the session's interrupt.
 func (o opencodeServer) abort(ctx context.Context, id string) error {
-	resp, err := o.do(ctx, http.MethodPost, "/session/"+url.PathEscape(id)+"/abort", nil)
+	path := "/session/" + url.PathEscape(id) + "/abort"
+	if o.v2 {
+		path = v2Session(id) + "/interrupt"
+	}
+	resp, err := o.do(ctx, http.MethodPost, path, nil)
 	if err != nil {
 		return err
 	}
@@ -210,19 +225,22 @@ func (o opencodeServer) summarize(ctx context.Context, id, provider, model strin
 }
 
 // respond answers a permission request the server raised: "once" lets
-// this one call through, "reject" refuses it. The request id alone names
-// it — whichever session raised it, a task child's included — on the
-// endpoint that replaced the deprecated session-scoped one.
-func (o opencodeServer) respond(ctx context.Context, requestID, reply string) error {
-	resp, err := o.do(ctx, http.MethodPost,
-		"/permission/"+url.PathEscape(requestID)+"/reply",
-		map[string]string{"reply": reply})
+// this one call through, "reject" refuses it. On 1.x the request id alone
+// names it — whichever session raised it, a task child's included — on
+// the endpoint that replaced the deprecated session-scoped one; 2.x
+// addresses it under sessionID, the session that asked.
+func (o opencodeServer) respond(ctx context.Context, sessionID, requestID, reply string) error {
+	path, body := "/permission/"+url.PathEscape(requestID)+"/reply", map[string]string{"reply": reply}
+	if o.v2 {
+		path, body = v2Session(sessionID)+"/permission/"+url.PathEscape(requestID)+"/reply", map[string]string{"decision": reply}
+	}
+	resp, err := o.do(ctx, http.MethodPost, path, body)
 	if err != nil {
 		return err
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("answering the permission: %s", resp.Status)
 	}
 	return nil
@@ -245,9 +263,23 @@ func (o opencodeServer) rejectQuestion(ctx context.Context, requestID string) er
 }
 
 // providers returns the model ids the server's own catalog offers — the
-// full provider/model pairs under /config/providers, one per model,
-// sorted for a stable picker.
+// full provider/model pairs under /config/providers (2.x: /api/model),
+// one per model, sorted for a stable picker.
 func (o opencodeServer) providers(ctx context.Context) ([]string, error) {
+	if o.v2 {
+		models, err := o.catalogV2(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var ids []string
+		for _, m := range models {
+			if m.ProviderID != "" && m.ID != "" && (m.Enabled == nil || *m.Enabled) {
+				ids = append(ids, m.ProviderID+"/"+m.ID)
+			}
+		}
+		slices.Sort(ids)
+		return slices.Compact(ids), nil
+	}
 	cat, err := o.catalog(ctx)
 	if err != nil {
 		return nil, err
@@ -265,6 +297,18 @@ func (o opencodeServer) providers(ctx context.Context) ([]string, error) {
 // contextLimit returns the context window opencode's catalog declares for
 // one provider/model, or 0 when the catalog does not know the model.
 func (o opencodeServer) contextLimit(ctx context.Context, provider, model string) (int64, error) {
+	if o.v2 {
+		models, err := o.catalogV2(ctx)
+		if err != nil {
+			return 0, err
+		}
+		for _, m := range models {
+			if m.ProviderID == provider && m.ID == model {
+				return m.Limit.Context, nil
+			}
+		}
+		return 0, nil
+	}
 	cat, err := o.catalog(ctx)
 	if err != nil {
 		return 0, err

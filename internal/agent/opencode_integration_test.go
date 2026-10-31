@@ -28,7 +28,7 @@ import (
 // Only compiled with `-tags opencode_integration` so the default suite never
 // spawns a real agent or hits an API.
 func TestOpencodeIntegration(t *testing.T) {
-	if _, err := exec.LookPath("opencode"); err != nil {
+	if _, err := exec.LookPath(ocIntegrationBin()); err != nil {
 		t.Skip("opencode not installed")
 	}
 
@@ -47,7 +47,7 @@ func TestOpencodeIntegration(t *testing.T) {
 	stub, stubSock := newOCStub(t)
 	wt := t.TempDir()
 
-	ag, err := NewOpencode("opencode")
+	ag, err := NewOpencode(ocIntegrationBin())
 	if err != nil {
 		t.Skip(err)
 	}
@@ -399,6 +399,16 @@ func findChildArgv(t *testing.T, own string) string {
 	}
 }
 
+// ocIntegrationBin is the opencode binary the live tests drive: the one
+// GUMMI_OPENCODE_BIN names, as gummi itself reads it — so one run can
+// cover a 1.x and a 2.x install side by side — else "opencode" on PATH.
+func ocIntegrationBin() string {
+	if b := os.Getenv("GUMMI_OPENCODE_BIN"); b != "" {
+		return b
+	}
+	return "opencode"
+}
+
 // ocIntegrationModel is the model the live tests run on: a free one,
 // overridable with GUMMI_OPENCODE_TEST_MODEL since the free list changes.
 func ocIntegrationModel() string {
@@ -414,10 +424,10 @@ func ocIntegrationModel() string {
 // adapter's mapping, not opencode's uptime. Tagged like the rest of this
 // file: the default suite must not depend on a live model.
 func TestOpencodeLiveRoundTrip(t *testing.T) {
-	if _, err := exec.LookPath("opencode"); err != nil {
+	if _, err := exec.LookPath(ocIntegrationBin()); err != nil {
 		t.Skip("opencode not installed")
 	}
-	ag, err := NewOpencode("opencode")
+	ag, err := NewOpencode(ocIntegrationBin())
 	if err != nil {
 		t.Skip(err)
 	}
