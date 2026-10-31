@@ -4,33 +4,65 @@ import (
 	"encoding/json"
 	"io"
 	"sync"
+	"time"
 )
 
-// emitter writes the drive's NDJSON stream: one JSON object per line,
-// each carrying an "event" discriminator and the session's id. Writes are
+// emitter writes the drive's event stream. Each event is a struct carrying
+// an "event" discriminator and the session's id; the emitter fans it out to
+// the sinks the drive was given: the NDJSON stream (one JSON object per
+// line), the human-readable text (textsink.go), or both. Writes are
 // serialized so no two lines interleave.
 type emitter struct {
-	mu      sync.Mutex
-	enc     *json.Encoder
+	mu   sync.Mutex
+	json []*json.Encoder
+	text *textSink
+	// verbose says whether activity lines are produced at all. A JSONL
+	// file asks for them even when the terminal's text does not show them.
 	verbose bool
 }
 
-func newEmitter(w io.Writer, verbose bool) *emitter {
-	return &emitter{enc: json.NewEncoder(w), verbose: verbose}
+// sinks says where a drive's events go. Out takes the text or the NDJSON
+// by Format; JSONL, if set, takes the NDJSON in full whatever Format is;
+// Errs, if set, takes the text form's errors.
+type sinks struct {
+	Out    io.Writer
+	Format string
+	JSONL  io.Writer
+	Errs   io.Writer
 }
 
-// Emit writes v as one line. A write that fails is dropped: the stream is
-// the report, and a reader that has gone cannot be told.
+func newEmitter(s sinks, verbose bool) *emitter {
+	e := &emitter{verbose: verbose}
+	if s.Format == FormatText {
+		e.text = newTextSink(s.Out, s.Errs, verbose, time.Now)
+	} else if s.Out != nil {
+		e.json = append(e.json, json.NewEncoder(s.Out))
+	}
+	if s.JSONL != nil {
+		e.json = append(e.json, json.NewEncoder(s.JSONL))
+		e.verbose = true
+	}
+	return e
+}
+
+// Emit writes v to every sink. A write that fails is dropped: the stream
+// is the report, and a reader that has gone cannot be told.
 func (e *emitter) Emit(v any) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	_ = e.enc.Encode(v)
+	for _, enc := range e.json {
+		_ = enc.Encode(v)
+	}
+	if e.text != nil {
+		e.text.write(v)
+	}
 }
 
-// Verbose says whether activity lines are on the stream.
+// Verbose says whether activity lines are produced.
 func (e *emitter) Verbose() bool { return e.verbose }
 
-// Activity emits one activity line under verbose, and nothing otherwise.
+// Activity emits one activity line when activity is wanted, and nothing
+// otherwise.
 func (e *emitter) Activity(id, source, text string) {
 	if !e.verbose {
 		return

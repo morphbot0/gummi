@@ -91,6 +91,14 @@ func runRun(fl cliFlags, args []string) error {
 	// but cannot drive it at the same time
 	eng.UseCardLocks(state.NewCardLocks(ws))
 
+	if path := fl.String("jsonl"); path != "" {
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("opening --jsonl file: %w", err)
+		}
+		defer f.Close()
+		opts.JSONL = f
+	}
 	out, _ := driver.New(eng, store, ws, os.Stdout, opts).Run(ctx, prompt)
 	if code := out.Status.ExitCode(); code != 0 {
 		// the stream has told the story; exit with its status, quietly
@@ -113,7 +121,12 @@ func runOptions(fl cliFlags) (driver.Options, error) {
 	if err != nil || envelope <= 0 {
 		return driver.Options{}, fmt.Errorf("envelope %q is not a positive dollar amount", raw)
 	}
+	format, err := runFormat(fl.String("format"), os.Stdout)
+	if err != nil {
+		return driver.Options{}, err
+	}
 	opts := driver.Options{
+		Format: format, Errs: os.Stderr,
 		Envelope: envelope, Profile: fl.String("profile"),
 		Repo: fl.String("repo"), Base: fl.String("base"), Ref: fl.String("ref"),
 		Timeout: fl.Duration("timeout"), Verbose: fl.Bool("verbose"),
@@ -231,4 +244,20 @@ func closeAgents(agents map[string]agent.Agent) {
 		seen[a] = struct{}{}
 		_ = a.Close()
 	}
+}
+
+// runFormat picks how run's stdout reads: what --format says, else text on
+// a terminal and NDJSON anywhere else, so a pipe or a CI log keeps the
+// stream scripts parse.
+func runFormat(flag string, stdout *os.File) (string, error) {
+	switch flag {
+	case driver.FormatText, driver.FormatJSONL:
+		return flag, nil
+	case "":
+		if fi, err := stdout.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+			return driver.FormatText, nil
+		}
+		return driver.FormatJSONL, nil
+	}
+	return "", fmt.Errorf("format %q is not text or jsonl", flag)
 }

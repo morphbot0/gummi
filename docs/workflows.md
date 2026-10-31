@@ -66,7 +66,9 @@ its own when the work calls for one, and gummi's triage may suggest a
 recipe for a session's first request — both still wait on your answer.
 
 **Unattended.** `gummi run` runs one workflow with nobody at the
-keyboard and streams NDJSON:
+keyboard. On a terminal it prints readable lines; piped, it streams
+NDJSON (`--format text|jsonl` overrides either), and `--jsonl <file>` also
+writes every event, `--verbose` activity included, to a file:
 
 ```sh
 gummi run --envelope 2 --workflow investigate "Why is startup slow?"
