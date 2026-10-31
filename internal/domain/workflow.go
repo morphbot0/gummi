@@ -308,6 +308,9 @@ const (
 	RunDenied RunState = "denied"
 )
 
+// RevertedToStart is Run.RevertedTo for a revert to the run's start.
+const RevertedToStart = "start"
+
 // Open reports whether the run is under way: it holds the session from
 // landing (Engine.RunHolds), and a session has at most one.
 func (s RunState) Open() bool { return s == RunRunning || s == RunPaused }
@@ -462,6 +465,11 @@ type Run struct {
 	// its report has been written out and sent: a run found ended with it
 	// still set lost the delivery to a crash, and is delivered again.
 	ReportPending bool
+	// RevertedTo is where a person last reverted the run's tree to:
+	// RevertedToStart for the run's start, else the path of the step whose
+	// start it was put back to. Empty until a revert. A run reverted to its
+	// start has nothing of its own left in the tree to revert.
+	RevertedTo string
 	// Schedule is the schedule that started the run (DESIGN §26.2), empty
 	// for a run a session proposed. A quiet end records no-change on it.
 	Schedule ScheduleID

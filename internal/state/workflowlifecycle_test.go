@@ -148,3 +148,71 @@ func TestLiteStepReadAndColumnWritesKeepTheBrief(t *testing.T) {
 		t.Fatalf("PendingRuns = %+v, %v", pending, err)
 	}
 }
+
+// TestUpdateRunRefusesAStaleCopy: a write from a copy read before another
+// writer's is refused, not let undo it; a fresh copy writes.
+func TestUpdateRunRefusesAStaleCopy(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := freeformFeat(1, "one")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(ctx, &domain.Run{Session: f.ID, RecipeName: "x", State: domain.RunRunning, Spec: 1}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := s.Run(ctx, f.ID, 1)
+	b, _ := s.Run(ctx, f.ID, 1)
+	a.Stopping = true
+	if err := s.UpdateRun(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	b.RevertedTo = domain.RevertedToStart
+	if err := s.UpdateRun(ctx, b); !errors.Is(err, ErrRunMoved) {
+		t.Fatalf("a stale write: %v", err)
+	}
+	cur, _ := s.Run(ctx, f.ID, 1)
+	if !cur.Stopping || cur.RevertedTo != "" {
+		t.Fatalf("the stale write landed: %+v", cur)
+	}
+	cur.RevertedTo = domain.RevertedToStart
+	if err := s.UpdateRun(ctx, cur); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Run(ctx, f.ID, 1); got.RevertedTo != domain.RevertedToStart || !got.Stopping {
+		t.Fatalf("the fresh write: %+v", got)
+	}
+	gone := *cur
+	gone.N = 9
+	if err := s.UpdateRun(ctx, &gone); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a missing run: %v", err)
+	}
+}
+
+// TestADispatchedSessionAndItsRecordGoInTogether: the session a dispatch
+// mints and the record that holds it are written in one transaction — a
+// record that cannot be written leaves no session behind.
+func TestADispatchedSessionAndItsRecordGoInTogether(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	agent := freeformFeat(1, "agent")
+	if err := s.CreateFeature(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	d := Dispatch{Agent: agent.ID, Run: 1, Path: "go", Envelope: 5}
+	child := freeformFeat(2, "child")
+	if err := s.CreateDispatchedFeature(ctx, child, d); err != nil {
+		t.Fatal(err)
+	}
+	if rec, ok, err := s.DispatchAt(ctx, agent.ID, 1, "go"); err != nil || !ok || rec.Card != child.ID {
+		t.Fatalf("the record: %+v %v %v", rec, ok, err)
+	}
+	// the same step again: the record is refused, and so is the card
+	twin := freeformFeat(3, "twin")
+	if err := s.CreateDispatchedFeature(ctx, twin, d); err == nil {
+		t.Fatal("a second dispatch of one step was recorded")
+	}
+	if _, err := s.GetFeature(ctx, twin.ID); err == nil {
+		t.Fatal("the card of a dispatch that was not recorded was kept")
+	}
+}

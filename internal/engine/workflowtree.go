@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -735,6 +736,13 @@ func (e *Engine) WorkflowRevertTo(ctx context.Context, session domain.FeatureID,
 	// (the index kept at the start is the primary tree's)
 	if err := worktree.RestoreIndex(ctx, dir, run.StartIndex, primaryPaths); err != nil {
 		return nil, fmt.Errorf("the files are put back, but not the index: %w", err)
+	}
+	run.RevertedTo = step
+	if step == "" {
+		run.RevertedTo = domain.RevertedToStart
+	}
+	if err := st.UpdateRun(ctx, run); err != nil {
+		slog.Warn("recording a run's revert", "session", session, "run", n, "err", err)
 	}
 	e.runNote(session, fmt.Sprintf("run %d reverted to %s: %d path%s put back", n, when, len(paths), plural(len(paths))))
 	e.workflowEvent(session)

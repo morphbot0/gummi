@@ -37,7 +37,7 @@ const runCols = `session_id, n, recipe_name, recipe_yaml, recipe, inputs, spec_n
 	spent, start_tree, end_tree, results, report, reason,
 	stopping, out_of_budget, steers, pending, feedback, revision,
 	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max, commits, baseline, saved_as,
-	start_index, active_ms, resumed_at, schedule_id, report_pending`
+	start_index, active_ms, resumed_at, schedule_id, report_pending, reverted_to`
 
 func scanRun(r rowScanner) (domain.Run, error) {
 	var run domain.Run
@@ -47,7 +47,7 @@ func scanRun(r rowScanner) (domain.Run, error) {
 		&run.Spent, &run.StartTree, &run.EndTree, &results, &run.Report, &run.Reason,
 		&run.Stopping, &run.OutOfBudget, &steers, &pending, &run.Feedback, &run.Revision,
 		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax, &commits, &baseline, &run.SavedAs,
-		&run.StartIndex, &activeMS, &resumed, &sched, &run.ReportPending)
+		&run.StartIndex, &activeMS, &resumed, &sched, &run.ReportPending, &run.RevertedTo)
 	if err != nil {
 		return run, err
 	}
@@ -141,25 +141,33 @@ func (s *Store) CreateRun(ctx context.Context, r *domain.Run) error {
 		r.N = int(last.Int64) + 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_runs (`+runCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(r.Session), r.N, r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State),
 		r.Spent, r.StartTree, r.EndTree, j[2], r.Report, r.Reason,
 		r.Stopping, r.OutOfBudget, j[3], j[4], r.Feedback, r.Revision,
 		r.CreatedAt.UTC().Format(timeFmt), formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), r.UpdatedAt.UTC().Format(timeFmt),
 		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs,
-		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), string(r.Schedule), r.ReportPending); err != nil {
+		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), string(r.Schedule), r.ReportPending, r.RevertedTo); err != nil {
 		return fmt.Errorf("creating run %d on %s: %w", r.N, r.Session, err)
 	}
 	return tx.Commit()
 }
 
-// UpdateRun writes the whole run back and bumps its revision.
+// ErrRunMoved refuses a write from a stale copy of a run: the row's
+// revision moved since the copy was read, so another writer — a second
+// gummi on the same database — changed it, and the write would undo that.
+var ErrRunMoved = errors.New("the run changed since it was read")
+
+// UpdateRun writes the whole run back and bumps its revision, refusing
+// with ErrRunMoved when the stored revision is not r's.
 func (s *Store) UpdateRun(ctx context.Context, r *domain.Run) error {
 	return s.updateRun(ctx, s.db, r)
 }
 
+// execer is what *sql.DB and *sql.Tx both answer.
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 func (s *Store) updateRun(ctx context.Context, db execer, r *domain.Run) error {
@@ -172,18 +180,26 @@ func (s *Store) updateRun(ctx context.Context, db execer, r *domain.Run) error {
 		spec_n=?, spec_rev=?, state=?, spent=?, start_tree=?, end_tree=?,
 		results=?, report=?, reason=?, stopping=?, out_of_budget=?, steers=?, pending=?, feedback=?,
 		revision=?, started_at=?, ended_at=?, updated_at=?, start_head=?, until_results=?, on_max=?, commits=?, baseline=?, saved_as=?,
-		start_index=?, active_ms=?, resumed_at=?, report_pending=?
-		WHERE session_id=? AND n=?`,
+		start_index=?, active_ms=?, resumed_at=?, report_pending=?, reverted_to=?
+		WHERE session_id=? AND n=? AND revision=?`,
 		r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State), r.Spent,
 		r.StartTree, r.EndTree, j[2], r.Report, r.Reason, r.Stopping, r.OutOfBudget,
 		j[3], j[4], r.Feedback, rev, formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), updated.Format(timeFmt),
 		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs,
-		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), r.ReportPending, string(r.Session), r.N)
+		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), r.ReportPending, r.RevertedTo, string(r.Session), r.N, r.Revision)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("run %d on %s: %w", r.N, r.Session, ErrNotFound)
+		var stored int64
+		switch err := db.QueryRowContext(ctx, `SELECT revision FROM workflow_runs WHERE session_id=? AND n=?`,
+			string(r.Session), r.N).Scan(&stored); {
+		case errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("run %d on %s: %w", r.N, r.Session, ErrNotFound)
+		case err != nil:
+			return err
+		}
+		return fmt.Errorf("run %d on %s is at revision %d, not %d: %w", r.N, r.Session, stored, r.Revision, ErrRunMoved)
 	}
 	r.Revision, r.UpdatedAt = rev, updated
 	return nil

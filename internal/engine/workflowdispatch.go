@@ -110,19 +110,13 @@ func (e *Engine) dispatchStep(ctx context.Context, run *domain.Run, agent domain
 			// person is present to retitle a title that is taken
 			MainCheckout: false,
 			Unattended:   true,
-		})
-		if err != nil {
-			unlock()
-			return fmt.Errorf("minting a session in %s: %w", d.Repo, err)
-		}
-		err = st.RecordDispatch(ctx, state.Dispatch{
-			Card: child.ID, Agent: agent.ID, Run: run.N, Path: inst.Path, Envelope: d.Envelope, CreatedAt: e.now(),
+			// the record goes in with the card, so a restart always finds
+			// the session this step minted and never mints a second
+			Dispatch: &state.Dispatch{Agent: agent.ID, Run: run.N, Path: inst.Path, Envelope: d.Envelope, CreatedAt: e.now()},
 		})
 		unlock()
 		if err != nil {
-			// a session no record points to would be found by no restart
-			e.dropStepCard(ctx, child.ID)
-			return err
+			return fmt.Errorf("minting a session in %s: %w", d.Repo, err)
 		}
 	}
 	// the session spans the repositories the person allowed; one an earlier

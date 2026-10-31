@@ -1827,6 +1827,15 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 		byPath[s.Path] = s
 	}
 	dirty := false
+	// every step a tick interrupts settles at the same tree: one snapshot
+	// under the lock, not one per step
+	var settleTree string
+	treeNow := func() string {
+		if settleTree == "" {
+			settleTree, _ = e.snapshotRun(ctx, session, run.N)
+		}
+		return settleTree
+	}
 	for _, a := range workflowpolicy.Decide(in) {
 		acts = append(acts, a.String())
 		switch a.Kind {
@@ -1837,7 +1846,7 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 			started = true
 			e.startStepAsync(session, run.N, a.Path)
 		case workflowpolicy.Interrupt:
-			e.settleStepLocked(ctx, session, run.N, a.Path, domain.StepStopped, a.Reason)
+			e.settleStepLocked(ctx, session, run.N, a.Path, domain.StepStopped, a.Reason, treeNow())
 			e.interruptStep(byPath[a.Path].Card)
 			e.wfRT().cancel(stepKey(session, run.N, a.Path))
 		case workflowpolicy.NeedUntil:

@@ -751,17 +751,20 @@ func overlaps(a, b domain.RunStep) bool {
 func (e *Engine) settleStep(ctx context.Context, session domain.FeatureID, n int, path string, st domain.StepState, why string) {
 	unlock := e.lockRuns(session)
 	defer unlock()
-	e.settleStepLocked(ctx, session, n, path, st, why)
+	e.settleStepLocked(ctx, session, n, path, st, why, "")
 }
 
-func (e *Engine) settleStepLocked(ctx context.Context, session domain.FeatureID, n int, path string, st domain.StepState, why string) {
+func (e *Engine) settleStepLocked(ctx context.Context, session domain.FeatureID, n int, path string, st domain.StepState, why, tree string) {
 	cur, err := e.cfg.Store.RunStep(ctx, session, n, path)
 	if err != nil || cur == nil || cur.State.Settled() {
 		return
 	}
 	cur.State, cur.Reason, cur.EndedAt = st, why, e.now()
 	if cur.EndTree == "" {
-		cur.EndTree, _ = e.snapshotRun(ctx, session, n)
+		cur.EndTree = tree
+		if tree == "" {
+			cur.EndTree, _ = e.snapshotRun(ctx, session, n)
+		}
 	}
 	if cur.Card != "" {
 		if f, err := e.cfg.Store.GetFeature(ctx, cur.Card); err == nil {

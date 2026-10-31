@@ -417,7 +417,7 @@ func (d *Driver) stepAsk(ctx context.Context, id domain.FeatureID) (*domain.RunS
 	if err != nil || open == nil {
 		return nil, nil
 	}
-	steps, err := d.store.RunSteps(ctx, id, open.N)
+	steps, err := d.store.RunStepsLite(ctx, id, open.N)
 	if err != nil {
 		return nil, nil
 	}

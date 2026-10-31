@@ -190,7 +190,7 @@ func (d *Driver) emitEnded(ctx context.Context, id domain.FeatureID, r *domain.R
 			ev.Artifacts[art] = a
 		}
 	}
-	if steps, err := d.store.RunSteps(ctx, id, r.N); err == nil {
+	if steps, err := d.store.RunStepsLite(ctx, id, r.N); err == nil {
 		for _, s := range steps {
 			n := workflowrecipe.GatherNotes(s.Output)
 			for _, x := range n.Decisions {

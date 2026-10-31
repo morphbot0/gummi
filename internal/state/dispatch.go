@@ -26,10 +26,14 @@ const dispatchCols = `card_id, agent_id, run_n, step_path, envelope, created_at`
 // RecordDispatch notes that agent's run n minted card from the step at
 // Path with envelope. One step of one run dispatches once.
 func (s *Store) RecordDispatch(ctx context.Context, d Dispatch) error {
+	return insertDispatch(ctx, s.db, d)
+}
+
+func insertDispatch(ctx context.Context, db execer, d Dispatch) error {
 	if d.CreatedAt.IsZero() {
 		d.CreatedAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO dispatches (`+dispatchCols+`) VALUES (?, ?, ?, ?, ?, ?)`,
 		string(d.Card), string(d.Agent), d.Run, d.Path, d.Envelope, d.CreatedAt.UTC().Format(timeFmt))
 	if err != nil {

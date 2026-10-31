@@ -642,6 +642,9 @@ func TestRevertRunPutsTheTreeBack(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tree, "new")); !os.IsNotExist(err) {
 		t.Errorf("the created file is still there: %v", err)
 	}
+	if r, _ := store.Run(ctx, f.ID, run.N); r == nil || r.RevertedTo != domain.RevertedToStart {
+		t.Errorf("the revert is not recorded on the run: %+v", r)
+	}
 }
 
 // TestARunThatMeetsItsSpecMarksItMet: a run whose checked items all pass
