@@ -178,6 +178,24 @@ func TestWebSendAttachmentsUnknownID(t *testing.T) {
 	}
 }
 
+// composerOf is b.Composer once the board has the card's row: the first
+// board change can come before the rows are loaded.
+func composerOf(t *testing.T, b *Bridge, id domain.FeatureID) webapi.Composer {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		comp, err := b.Composer(context.Background(), string(id), "hello")
+		var werr *WebError
+		if err == nil {
+			return comp
+		}
+		if !errors.As(err, &werr) || werr.Code != WebNotFound || time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestComposerImagesFollowsBackend asserts that Composer.Images tracks
 // the card's live session capability: true on a capable backend, false
 // on one without it.
@@ -189,12 +207,8 @@ func TestComposerImagesFollowsBackend(t *testing.T) {
 	b, log, eng, f, _ := sessionBoard(t, ag)
 	log.waitFor(t, "board", func(c webapi.Change) bool { return c.Kind == webapi.ChangeBoard })
 
-	ctx := context.Background()
 	startSession(t, eng, f)
-	comp, err := b.Composer(ctx, string(f.ID), "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	comp := composerOf(t, b, f.ID)
 	if !comp.Images {
 		t.Errorf("composer.Images = false on a capable backend")
 	}
@@ -206,10 +220,7 @@ func TestComposerImagesFollowsBackend(t *testing.T) {
 	b2, log2, eng2, f2, _ := sessionBoard(t, ag2)
 	log2.waitFor(t, "board", func(c webapi.Change) bool { return c.Kind == webapi.ChangeBoard })
 	startSession(t, eng2, f2)
-	comp2, err := b2.Composer(ctx, string(f2.ID), "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	comp2 := composerOf(t, b2, f2.ID)
 	if comp2.Images {
 		t.Errorf("composer.Images = true on a backend without the capability")
 	}
