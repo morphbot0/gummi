@@ -47,7 +47,10 @@ func lastJSONObject(text string) (string, bool) {
 			continue
 		}
 		end := start + int(dec.InputOffset())
-		last = text[start:end]
+		// an empty {} in prose is not the artifact a step wrote
+		if len(obj) > 0 {
+			last = text[start:end]
+		}
 		i = end
 	}
 	if last == "" {

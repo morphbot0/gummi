@@ -73,6 +73,17 @@ func (e *Engine) runCommandStep(ctx context.Context, run *domain.Run, inst *doma
 	}
 	cctx, cancel := context.WithTimeout(ctx, commandStepTimeout)
 	defer cancel()
+	// a stop or an interrupt cancels the command: it runs in gummi's own
+	// process, where no agent's turn can be interrupted. A pause does not:
+	// a command spends nothing, and one that is not safe to run twice must
+	// not be killed and run again
+	forget := e.wfRT().setCancel(stepKey(run.Session, run.N, inst.Path), cancel)
+	defer forget()
+	// a stop between the claim and the registration above cancelled
+	// nothing: look once the cancel can be reached
+	if !e.commandStepOwed(ctx, run, inst) {
+		return nil
+	}
 	cmd := exec.CommandContext(cctx, "sh", "-c", command) // #nosec G204 -- the recipe a person allowed
 	cmd.Dir = dir
 	var stdout, stderr tailBuffer
@@ -94,6 +105,10 @@ func (e *Engine) runCommandStep(ctx context.Context, run *domain.Run, inst *doma
 	if ctx.Err() != nil {
 		// gummi is shutting down: the gate is not over, it runs again on restart
 		return ctx.Err()
+	}
+	if errors.Is(cctx.Err(), context.Canceled) {
+		// the run stopped it, and settled the step already
+		return nil
 	}
 	if code == 0 && err == nil {
 		e.endStep(ctx, inst, domain.StepDone, "", strings.TrimSpace(stdout.String()), e.endTreeOf(ctx, run))
@@ -119,9 +134,28 @@ func (e *Engine) runCommandStep(ctx context.Context, run *domain.Run, inst *doma
 	return nil
 }
 
+// commandStepOwed reports whether the run still wants inst's command run:
+// the run is open and not stopping, and the step live.
+func (e *Engine) commandStepOwed(ctx context.Context, run *domain.Run, inst *domain.RunStep) bool {
+	st := e.cfg.Store
+	cur, err := st.Run(ctx, run.Session, run.N)
+	if err != nil || cur == nil || !cur.State.Open() || cur.Stopping {
+		return false
+	}
+	s, err := st.RunStep(ctx, run.Session, run.N, inst.Path)
+	return err == nil && s != nil && s.State.Live()
+}
+
 // endTreeOf is the run's tree as it is now.
 func (e *Engine) endTreeOf(ctx context.Context, run *domain.Run) string {
-	tree, _ := e.snapshotRun(ctx, run.Session, run.N)
+	tree, err := e.snapshotRun(ctx, run.Session, run.N)
+	if err != nil {
+		// once more: a step with no end tree reads as a moving live diff
+		if tree, err = e.snapshotRun(ctx, run.Session, run.N); err != nil {
+			e.runNote(run.Session, fmt.Sprintf("run %d: gummi could not snapshot the tree at a step's end: %v", run.N, err))
+			return ""
+		}
+	}
 	return tree
 }
 
@@ -138,12 +172,23 @@ func (e *Engine) quietEnd(ctx context.Context, run *domain.Run) {
 		unlock()
 		return
 	}
+	steps, _ := st.RunSteps(ctx, run.Session, run.N)
+	// the row goes first, so a delete that fails leaves the run with its
+	// directory; the directory goes before the lock lets a new run take
+	// the number
 	err = st.DeleteRun(ctx, run.Session, run.N)
+	if err == nil {
+		_ = rmtree.RemoveAll(e.RunDir(run.Session, run.N))
+	}
 	unlock()
 	if err != nil {
 		return
 	}
-	_ = rmtree.RemoveAll(e.RunDir(run.Session, run.N))
+	for _, s := range steps {
+		if s.Card != "" {
+			e.dropStepCard(ctx, s.Card)
+		}
+	}
 	if cur.Schedule != "" {
 		_ = st.RecordScheduleStatus(ctx, cur.Schedule, e.now(), domain.ScheduleNoChange, "nothing to do")
 	}

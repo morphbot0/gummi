@@ -111,7 +111,7 @@ func (e *Engine) scheduleProposeText(ctx context.Context, agentCard domain.Featu
 		}
 		text = string(b)
 	}
-	if problems, _ := workflowrecipe.Check(recipe); len(problems) > 0 {
+	if problems, _ := safeCheck(recipe); len(problems) > 0 {
 		return "", fmt.Errorf("the recipe cannot run:\n- %s", strings.Join(problems, "\n- "))
 	}
 	if len(workflowrecipe.RequiredInputs(recipe)) > 0 {

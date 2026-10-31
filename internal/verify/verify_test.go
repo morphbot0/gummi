@@ -169,7 +169,50 @@ func TestRunHoldsABoundedOutput(t *testing.T) {
 	if n := len(res[0].Output); n > maxOutput+64 {
 		t.Errorf("output kept %d bytes", n)
 	}
-	if !strings.HasSuffix(res[0].Output, "(truncated)") {
+	if !strings.Contains(res[0].Output, "(truncated)") {
 		t.Errorf("a cut output does not say so: %q", res[0].Output[len(res[0].Output)-40:])
+	}
+}
+
+// TestFailingCheckKeepsOutputTail: a failing check's output keeps its end,
+// where the failure is, beside its head.
+func TestFailingCheckKeepsOutputTail(t *testing.T) {
+	res := Run(context.Background(), t.TempDir(), []domain.Check{
+		{Name: "loud", Cmd: "seq 1 5000; echo FATAL >&2; exit 1"},
+	})
+	if res[0].OK {
+		t.Fatalf("result = %+v", res[0])
+	}
+	if !strings.Contains(res[0].Output, "FATAL") {
+		t.Errorf("the end of the output was lost: ...%q", res[0].Output[len(res[0].Output)-40:])
+	}
+	if !strings.HasPrefix(res[0].Output, "1\n2\n") || !strings.Contains(res[0].Output, "(truncated)") {
+		t.Errorf("head or marker lost: %q", res[0].Output[:20])
+	}
+	if len(res[0].Output) > maxOutput+64 {
+		t.Errorf("output kept %d bytes", len(res[0].Output))
+	}
+}
+
+// TestRanNoTestsSeesLateMarker: the no-tests marker is read wherever in the
+// output it falls, past any bytes that are kept.
+func TestRanNoTestsSeesLateMarker(t *testing.T) {
+	cmd := "head -c 200000 /dev/zero | tr '\\0' x; echo; echo 'ok  \tpkg\t0.1s [no tests to run]'; : go test -run X"
+	res := Run(context.Background(), t.TempDir(), []domain.Check{{Name: "vacuous", Cmd: cmd}})
+	if !res[0].OK || !res[0].RanNoTests {
+		t.Fatalf("a late marker was missed: %+v", res[0].RanNoTests)
+	}
+	cmd = "echo 'ok  \tpkg\t0.1s'; echo 'ok  \tpkg2\t[no tests to run]'; : go test -run X"
+	res = Run(context.Background(), t.TempDir(), []domain.Check{{Name: "real", Cmd: cmd}})
+	if res[0].RanNoTests {
+		t.Error("a check that ran tests read as vacuous")
+	}
+}
+
+func TestRanNoTestsSeesMarkerAfterAnOverlongLine(t *testing.T) {
+	cmd := "head -c 200000 /dev/zero | tr '\\0' x; echo 'ok  \tpkg\t0.1s [no tests to run]'; : go test -run X"
+	res := Run(context.Background(), t.TempDir(), []domain.Check{{Name: "vacuous", Cmd: cmd}})
+	if !res[0].RanNoTests {
+		t.Fatal("a marker at the end of an overlong line was missed")
 	}
 }

@@ -458,6 +458,10 @@ type Run struct {
 	// SavedAs is the workspace recipe a person saved this run's inline
 	// recipe as (.gummi/workflows/<SavedAs>.yaml), empty until one does.
 	SavedAs string
+	// ReportPending is set in the write that ends the run and cleared once
+	// its report has been written out and sent: a run found ended with it
+	// still set lost the delivery to a crash, and is delivered again.
+	ReportPending bool
 	// Schedule is the schedule that started the run (DESIGN §26.2), empty
 	// for a run a session proposed. A quiet end records no-change on it.
 	Schedule ScheduleID
@@ -727,7 +731,7 @@ func RetryRefusal(run Run, steps []RunStep, runs []Run) string {
 		}
 	}
 	for _, s := range steps {
-		if s.State == StepFailed || s.State == StepStopped {
+		if !IsRetriedPath(s.Path) && (s.State == StepFailed || s.State == StepStopped) {
 			return ""
 		}
 	}
@@ -745,3 +749,7 @@ func RetryRefusal(run Run, steps []RunStep, runs []Run) string {
 func RetriedPath(path string, attempt int) string {
 	return fmt.Sprintf("%s@%d", path, attempt)
 }
+
+// IsRetriedPath reports whether path is an earlier attempt a retry kept
+// (RetriedPath), which is never run again nor counted as a step to.
+func IsRetriedPath(path string) bool { return strings.Contains(path, "@") }

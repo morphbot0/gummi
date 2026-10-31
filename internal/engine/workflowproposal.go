@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
@@ -134,10 +135,44 @@ func (e *Engine) WorkflowProposal(ctx context.Context, session domain.FeatureID,
 		(run.Pending.Kind != domain.RunDecideProposal && run.Pending.Kind != domain.RunDecidePlan) {
 		return WorkflowProposal{}, fmt.Errorf("run %d has no proposal waiting", n)
 	}
+	// a proposal can wait for hours while every workflow event asks for it:
+	// the one made for this revision of the run stands for a few seconds,
+	// then the tree is read again (the pool and a dirty tree move)
+	cacheKey := fmt.Sprintf("%s/%d", session, n)
+	rt := e.wfRT()
+	rt.mu.Lock()
+	hit, cached := rt.proposals[cacheKey]
+	rt.mu.Unlock()
+	if cached && hit.rev == run.Revision && time.Since(hit.at) < proposalTTL {
+		return hit.p, nil
+	}
 	sess, err := st.GetFeature(ctx, session)
 	if err != nil {
 		return WorkflowProposal{}, err
 	}
+	p, err := e.buildProposal(ctx, sess, run)
+	if err != nil {
+		return p, err
+	}
+	rt.mu.Lock()
+	rt.proposals[cacheKey] = cachedProposal{rev: run.Revision, p: p, at: time.Now()}
+	rt.mu.Unlock()
+	return p, nil
+}
+
+// proposalTTL is how long WorkflowProposal stands on a proposal it made.
+const proposalTTL = 5 * time.Second
+
+type cachedProposal struct {
+	rev int
+	p   WorkflowProposal
+	at  time.Time
+}
+
+func (e *Engine) buildProposal(ctx context.Context, sess domain.Feature, run *domain.Run) (WorkflowProposal, error) {
+	st := e.cfg.Store
+	session, n := run.Session, run.N
+	var err error
 	d := run.Pending
 	p := WorkflowProposal{
 		Run: run.N, Kind: d.Kind, Recipe: recipeLabel(run), Description: run.Recipe.Description,

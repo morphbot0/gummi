@@ -174,8 +174,8 @@ steps:
 
 Needs the session's "agent may publish". `pr: {act: push|create|update|ready,
 draft: true}` is one publish act (never forced). `watch:` is at most one,
-top level, and waits on the PR with no model, then runs a handler per
-event, one at a time, and gummi pushes after each pass.
+top level (never in a repeat), and waits on the PR with no model, then
+runs a handler per event, one at a time; gummi pushes after each pass.
 
 ```yaml
 name: ship-it
@@ -210,16 +210,16 @@ steps:
   top-level step: the steps from it to the watch run again); it may add
   `max`. `checks: [ci]` limits whose logs are read.
 - `trust` is `@login`, `@org/team`, `role:write|maintain|admin`,
-  comma-separated; empty is the publishing login. Other people's
-  feedback is counted, never read. 
+  comma-separated; empty is the publishing login. Others' feedback is
+  counted, never read. An unterminated `{{` is refused.
 - `{{event}}` (handler steps, and `{{inputs.event}}` of a handler recipe
   that declares `event`) is the event's facts as data; `{{watch.event}}`
-  is empty until a `goto` pass. The bundled `ship` is this recipe.
+  is empty until a `goto` pass. Bundled `ship` is this recipe.
 
 ## Before you propose
 
-- Every id is unique across the recipe, nested ones included, and holds
-  only letters, digits, `-` and `_` — never digits alone.
+- Every id is unique across the recipe, nested and handler recipes
+  included, of letters, digits, `-`, `_` — never digits alone.
 - Every `{{…}}` names an input, an artifact some step declares, or an
   earlier step.
 - Each loop has a `max` and one `until`; an `until` verdict's artifact is

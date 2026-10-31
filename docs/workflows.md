@@ -34,7 +34,9 @@ session ──writes──▶ spec ──proposes──▶ run ──you allow�
   it was proposed on.
 - **You allow every run.** The session proposes; you answer **Allow**,
   **Always allow** (this session's later runs too), **Deny**, or type
-  feedback. No agent allows its own run.
+  feedback. Only the option itself sets the standing allowance: feedback
+  that merely starts with "Always allow" is feedback. No agent allows its
+  own run.
 - **Steps share the session's tree.** gummi snapshots the tree at every
   step boundary, so each step has a diff of its own and you can
   **Revert run** (or revert to before any step) from the run's block.
@@ -44,11 +46,19 @@ session ──writes──▶ spec ──proposes──▶ run ──you allow�
   prompt names.
 - **Money is the session's budget.** Nothing is estimated. A run spends
   from the session's envelope until it is spent, then pauses until you
-  top it up.
+  top it up. Steps at work side by side share what the pool has left,
+  so their caps at the time each starts stay within it. While the pool
+  is far from spent, gummi trusts a step's own headroom for a few
+  seconds between looks, so side-by-side steps can overshoot it by that
+  much spend before the pause.
 - **Questions come to you.** A step's `ask_user`, a loop at its `max`,
   and a loop that cannot judge its own condition all wait on you.
 - **gummi never commits.** At the end it runs the done-when checks,
-  writes the report into the spec and sends it to the session.
+  writes the report into the spec and sends it to the session. A report
+  lost to a crash between the run's end and its delivery is delivered
+  again when gummi next starts. **Retry** runs a failed or stopped step
+  again and keeps the earlier attempt beside it; an earlier attempt is
+  never run again itself.
 
 ## Running a workflow
 
@@ -241,7 +251,12 @@ A `planner` step may end its output with a fenced `gummi-workflow` block
 holding a YAML list of entries, exactly as under `steps:`. Those entries
 replace the run's remaining steps once they pass the recipe checks and
 you allow the revised plan. A step already running is never rewritten. A
-revised plan may not add `pr:` or `watch:` steps.
+revised plan may not add `pr:`, `watch:`, `run:` or `dispatch:` steps,
+and the question you are asked lists every command, dispatch, PR act,
+trust filter and handler it holds, as a proposal does. A fence inside the
+block must be balanced, and a block that is never closed is refused
+rather than cut short (fences inside an indented YAML block scalar are
+just text).
 
 ````
 ```gummi-workflow
@@ -418,6 +433,9 @@ cost. It has no role, slot, prompt or artifacts.
   scheduled check that finds nothing to do. Only the recipe's first step
   may have it.
 - **Any other exit** fails the step.
+- **Stop** kills the command. A **pause** (yours, or a spent pool) does
+  not: a command spends nothing, so it runs to its end, and the run
+  carries on from there when it resumes.
 - A template in a command is filled as one single-quoted shell word:
   write it as a word of its own, never inside quotes. `{{run.diff}}` is
   not allowed in a command.
@@ -521,6 +539,9 @@ a `repeat` or a handler — after a step that pushes.
 | `{ recipe: <name> }` | that recipe as a nested block, on the same tree, budget and spec; it gets the event as its input `event` if it declares one. It may not hold a `watch:`, `pr:` or `dispatch` step |
 | `{ goto: <id> }` | the top-level steps from `<id>` up to the watch again; those steps read the event as `{{watch.event}}` |
 
+A step id in a handler's recipe may not be one the recipe's own steps use
+(`Check` refuses it): a step is found by its id.
+
 A mapping handler may add `max:` to bound that event's passes. After
 each pass gummi pushes (never forced) and the watch waits again. The
 same event on the same head after a pass, or a pass that changed
@@ -571,7 +592,7 @@ A step also fails when its agent errors.
 An artifact is a file in the run's directory
 (`.gummi/runs/<session>/<run>/`), named by the step that declares it.
 If a step ends without writing an artifact it declared, gummi captures
-it from the step's output — the last JSON object for a `.json` file,
+it from the step's output — the last non-empty JSON object for a `.json` file,
 otherwise the last fenced block — and notes that it did. Artifacts are
 shown on the run's block once written.
 
@@ -579,7 +600,8 @@ shown on the run's block once written.
 
 A recipe is refused, with every problem listed, when it has:
 
-- no steps, or an entry that is more than one kind, or an unknown field;
+- no steps, or an entry that is more than one kind, or an unknown field
+  (an inline watch handler's steps included);
 - an id missing, used twice, or not made of letters, digits, `-` and `_`;
 - an unknown role, a malformed slot, or an agent step without a prompt;
 - an artifact file name that is not a plain file name;
@@ -595,10 +617,11 @@ A recipe is refused, with every problem listed, when it has:
   `spec`/`prompt`; a templated or path-like `repo`;
 - a `pr:` with an unknown act, `draft` without `create`, or inside a
   `parallel` or handler;
-- a second `watch:`, one not at the top level, an unknown `until`,
-  `onClosed` or event, a `trust` that does not parse, a handler with no
+- a second `watch:`, one not at the top level (a `repeat`'s body at any
+  depth included), an unknown `until`, `onClosed` or event, a `trust`
+  that does not parse or holds an unterminated `{{`, a handler with no
   form or more than one, or a `goto` that names no earlier top-level
-  step.
+  step, or a handler recipe whose step id repeats one of the recipe's own.
 
 It is warned about, but may run, when a `parallel` holds more than one
 writing role, or a recipe or step still names `tier` or `envelope`.

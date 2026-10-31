@@ -51,7 +51,7 @@ const (
 	WorkflowDeny  = "Deny"
 	// WorkflowAlways allows this run and every later one of the session
 	// without asking: the session's budget is the only cap. An answer that
-	// begins with it (an older "Always allow up to $5") reads the same.
+	// is the same answer; text that only starts with it is feedback (isAlwaysAllow).
 	WorkflowAlways = "Always allow"
 	// a revised plan's
 	WorkflowAllowPlan = "Allow the revised plan"
@@ -92,9 +92,53 @@ type workflowRuntime struct {
 	// diffs caches the diff between two settled snapshots: a run's or a
 	// step's that has ended never changes, and reading it runs git
 	diffs map[string]cachedDiff
+	// diffBytes is the size of the patches diffs holds; diffPathsOnly the
+	// paths two settled snapshots differ in, read without a patch.
+	diffBytes     int
+	proposals     map[string]cachedProposal
+	planBad       map[string]string
+	poolHead      map[domain.FeatureID]poolHeadroom
+	diffPathsOnly map[string][]string
 	// unsent marks each session whose runs' reports this process keeps
 	// from it (KeepReports): the report is written all the same
 	unsent map[domain.FeatureID]bool
+	// cancels stops the work of a step or a baseline that gummi runs in
+	// its own process (a command, the done-when checks), by its key: a
+	// stop or an interrupt cannot reach it as it reaches an agent's turn
+	cancels map[string]context.CancelFunc
+	// reported marks each ended run ("session/n") whose report this
+	// process delivered again after finding it undelivered
+	reported map[string]bool
+	// retryAfter is when a run's end that failed to write may be tried again
+	retryAfter map[string]time.Time
+	// resendOnly marks each ended run ("session/n") whose files, spec and
+	// dispatcher were written already and only the session's turn failed
+	resendOnly map[string]bool
+	// retries counts the failed report turns of each such run, which
+	// lengthens the wait before the next
+	retries map[string]int
+}
+
+// setCancel registers cancel for key, and returns the func that forgets it.
+func (rt *workflowRuntime) setCancel(key string, cancel context.CancelFunc) func() {
+	rt.mu.Lock()
+	rt.cancels[key] = cancel
+	rt.mu.Unlock()
+	return func() {
+		rt.mu.Lock()
+		delete(rt.cancels, key)
+		rt.mu.Unlock()
+	}
+}
+
+// cancel stops the work registered under key, if there is any.
+func (rt *workflowRuntime) cancel(key string) {
+	rt.mu.Lock()
+	c := rt.cancels[key]
+	rt.mu.Unlock()
+	if c != nil {
+		c()
+	}
 }
 
 func newWorkflowRuntime() *workflowRuntime {
@@ -102,8 +146,9 @@ func newWorkflowRuntime() *workflowRuntime {
 		boot: time.Now(), busy: map[string]bool{},
 		locks: map[domain.FeatureID]*sync.Mutex{}, planTries: map[string]int{},
 		held: map[domain.FeatureID]func(){}, conducted: map[string]bool{},
-		stamps: map[string]map[string]time.Time{}, diffs: map[string]cachedDiff{},
-		unsent: map[domain.FeatureID]bool{},
+		stamps: map[string]map[string]time.Time{}, diffs: map[string]cachedDiff{}, diffPathsOnly: map[string][]string{}, poolHead: map[domain.FeatureID]poolHeadroom{}, planBad: map[string]string{}, proposals: map[string]cachedProposal{},
+		unsent: map[domain.FeatureID]bool{}, cancels: map[string]context.CancelFunc{}, reported: map[string]bool{},
+		retryAfter: map[string]time.Time{}, resendOnly: map[string]bool{}, retries: map[string]int{},
 	}
 }
 
@@ -465,7 +510,8 @@ type WorkflowRequest struct {
 // allows the session's runs, is allowed at once: queued behind an open
 // run, or started. Nothing is estimated: the run spends from the session's
 // budget until it is spent.
-func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, req WorkflowRequest) (*domain.Run, error) {
+func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, req WorkflowRequest) (_ *domain.Run, err error) {
+	defer recoverRecipe("reading the proposed recipe", &err)
 	st := e.cfg.Store
 	if st == nil {
 		return nil, errors.New("workflows need the store")
@@ -503,7 +549,7 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		}
 		text = string(b)
 	}
-	problems, warnings := workflowrecipe.Check(recipe)
+	problems, warnings := safeCheck(recipe)
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("the recipe cannot run:\n- %s", strings.Join(problems, "\n- "))
 	}
@@ -609,7 +655,7 @@ func (e *Engine) WorkflowCheck(req WorkflowRequest) (domain.Recipe, error) {
 	if err != nil {
 		return recipe, err
 	}
-	if problems, _ := workflowrecipe.Check(recipe); len(problems) > 0 {
+	if problems, _ := safeCheck(recipe); len(problems) > 0 {
 		return recipe, fmt.Errorf("the recipe cannot run:\n- %s", strings.Join(problems, "\n- "))
 	}
 	_, err = workflowrecipe.ResolveInputs(recipe, req.Inputs)
@@ -883,7 +929,7 @@ func (e *Engine) WorkflowDecision(ctx context.Context, session domain.FeatureID)
 	if e.cfg.Store == nil {
 		return nil, nil
 	}
-	runs, err := e.cfg.Store.SessionRuns(ctx, session)
+	runs, err := e.cfg.Store.PendingRuns(ctx, session)
 	if err != nil {
 		return nil, nil
 	}
@@ -968,7 +1014,7 @@ func (e *Engine) answerLocked(ctx context.Context, session domain.FeatureID, n i
 				return nil, err
 			}
 			return nil, nil
-		case strings.HasPrefix(answer, WorkflowAlways):
+		case isAlwaysAllow(answer):
 			if err := st.SetWorkflowAlwaysAllow(ctx, session, true); err != nil {
 				return nil, err
 			}
@@ -1101,6 +1147,58 @@ func parseCredits(s string) (int, error) {
 	return int(math.Ceil(v)), nil
 }
 
+// isAlwaysAllow reports whether answer is the standing allowance: the exact
+// option, or its older "Always allow up to $N" form. Any other text that
+// merely starts with the words is the person's feedback.
+func isAlwaysAllow(answer string) bool {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(answer), WorkflowAlways)
+	if !ok {
+		return false
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return true
+	}
+	amount, ok := strings.CutPrefix(rest, "up to")
+	if !ok {
+		return false
+	}
+	_, err := parseCredits(amount)
+	return err == nil
+}
+
+// freezePlan freezes what a revised plan's handlers and dispatches name, as
+// a proposal does for a recipe, checks each dispatch's repositories and a
+// watch's trust, and returns the plan as a recipe of its own steps.
+func (e *Engine) freezePlan(run *domain.Run, entries []domain.Entry) (domain.Recipe, error) {
+	plan := run.Recipe
+	plan.Steps = entries
+	if e.pool == nil {
+		return plan, nil
+	}
+	if _, err := e.freezeHandlers(&plan); err != nil {
+		return plan, err
+	}
+	if _, err := e.freezeDispatches(&plan); err != nil {
+		return plan, err
+	}
+	return plan, checkWatchTrust(plan, run.Inputs)
+}
+
+// freezeChanged freezes a revised plan again and reports whether that
+// changed the text it carried.
+func (e *Engine) freezeChanged(run *domain.Run, entries []domain.Entry) (bool, error) {
+	before, err := workflowrecipe.MarshalEntries(entries)
+	if err != nil {
+		return false, err
+	}
+	if _, err := e.freezePlan(run, entries); err != nil {
+		return false, err
+	}
+	after, err := workflowrecipe.MarshalEntries(entries)
+	return string(before) != string(after), err
+}
+
 // spliceLocked makes a planner's revised plan the run's: its steps replace
 // the run's remaining entries.
 func (e *Engine) spliceLocked(ctx context.Context, run *domain.Run, d domain.RunDecision) error {
@@ -1108,11 +1206,30 @@ func (e *Engine) spliceLocked(ctx context.Context, run *domain.Run, d domain.Run
 	if err != nil {
 		return err
 	}
+	var agentless []string
+	workflowrecipe.Walk(entries, func(s domain.Step, _ []domain.Entry) {
+		if s.Agentless() {
+			agentless = append(agentless, s.ID)
+		}
+	})
+	if len(agentless) > 0 {
+		return fmt.Errorf("a revised plan adds no command, dispatch, pr or watch step (%s): the person allowed the recipe's own", strings.Join(agentless, ", "))
+	}
 	steps, err := e.cfg.Store.RunSteps(ctx, run.Session, run.N)
 	if err != nil {
 		return err
 	}
-	r, problems, _ := workflowrecipe.CheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
+	// a proposal freezes what its handlers and dispatches name and checks
+	// their repositories; so does a revised plan, and one whose frozen
+	// copy moved since the person read it is asked about again
+	changed, err := e.freezeChanged(run, entries)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return errors.New("a recipe the revised plan names changed since you read it: ask for the plan again")
+	}
+	r, problems, _ := safeCheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
 	if len(problems) > 0 {
 		return fmt.Errorf("the revised plan no longer passes the check:\n- %s", strings.Join(problems, "\n- "))
 	}
@@ -1304,6 +1421,7 @@ func (e *Engine) WorkflowStop(ctx context.Context, session domain.FeatureID, rea
 			if err := e.cfg.Store.UpdateRun(ctx, &r); err != nil {
 				return err
 			}
+			e.wfRT().cancel(baselineKey(session, r.N))
 			e.runNote(session, fmt.Sprintf("run %d withdrawn: %s", r.N, reason))
 			e.workflowEvent(session)
 			return nil
@@ -1317,6 +1435,7 @@ func (e *Engine) WorkflowStop(ctx context.Context, session domain.FeatureID, rea
 	if err := e.cfg.Store.UpdateRun(ctx, run); err != nil {
 		return err
 	}
+	e.wfRT().cancel(baselineKey(session, run.N))
 	e.runNote(session, fmt.Sprintf("run %d stopping: %s", run.N, reason))
 	e.workflowEvent(session)
 	return nil
@@ -1345,6 +1464,7 @@ func (e *Engine) WorkflowWithdraw(ctx context.Context, session domain.FeatureID,
 	if err := e.cfg.Store.UpdateRun(ctx, r); err != nil {
 		return err
 	}
+	e.wfRT().cancel(baselineKey(session, n))
 	e.runNote(session, fmt.Sprintf("run %d withdrawn %s", n, reason))
 	e.workflowEvent(session)
 	return nil
@@ -1388,7 +1508,7 @@ func (e *Engine) WorkflowRetry(ctx context.Context, session domain.FeatureID, n 
 	}
 	var again []string
 	for _, s := range steps {
-		if s.State != domain.StepFailed && s.State != domain.StepStopped {
+		if s.State != domain.StepFailed && s.State != domain.StepStopped || domain.IsRetriedPath(s.Path) {
 			continue
 		}
 		k := 1
@@ -1528,12 +1648,23 @@ func (e *Engine) WorkflowTick(ctx context.Context) (WorkflowTickResult, error) {
 	if e.cfg.Store == nil {
 		return res, nil
 	}
+	e.redeliverReports(ctx)
 	runs, err := e.cfg.Store.LiveRuns(ctx)
-	if err != nil {
+	var errs []error
+	if errors.Is(err, state.ErrUnreadableRun) {
+		// one run row in trouble is no reason the others stand still; it is
+		// said again only every ten minutes, not on every tick
+		rt := e.wfRT()
+		rt.mu.Lock()
+		if time.Now().After(rt.retryAfter["unreadable-run"]) {
+			rt.retryAfter["unreadable-run"] = time.Now().Add(10 * time.Minute)
+			errs = append(errs, err)
+		}
+		rt.mu.Unlock()
+	} else if err != nil {
 		return res, err
 	}
 	seen := map[domain.FeatureID]bool{}
-	var errs []error
 	for _, r := range runs {
 		e.rebaseline(ctx, r)
 		if seen[r.Session] {
@@ -1578,7 +1709,8 @@ func (e *Engine) WorkflowTickSession(ctx context.Context, session domain.Feature
 
 // tickHeld ticks session's runs when this process holds its card, and
 // lets the hold go once the session has nothing open or queued.
-func (e *Engine) tickHeld(ctx context.Context, session domain.FeatureID) ([]string, error) {
+func (e *Engine) tickHeld(ctx context.Context, session domain.FeatureID) (acts []string, err error) {
+	defer recoverRecipe("conducting the run", &err)
 	st := e.cfg.Store
 	open, err := st.OpenRun(ctx, session)
 	if err != nil {
@@ -1707,6 +1839,7 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 		case workflowpolicy.Interrupt:
 			e.settleStepLocked(ctx, session, run.N, a.Path, domain.StepStopped, a.Reason)
 			e.interruptStep(byPath[a.Path].Card)
+			e.wfRT().cancel(stepKey(session, run.N, a.Path))
 		case workflowpolicy.NeedUntil:
 			e.judgeUntilAsync(run, a.Path, a.Step)
 		case workflowpolicy.AskOnMax:
@@ -1774,6 +1907,21 @@ func (e *Engine) runTopUp(ctx context.Context, session domain.FeatureID) int {
 	return max((env+49)/50*50, 100)
 }
 
+func (e *Engine) planRefused(key, output string) bool {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	h, ok := rt.planBad[key]
+	return ok && h == output
+}
+
+func (e *Engine) notePlanRefused(key, output string) {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	rt.planBad[key] = output
+	rt.mu.Unlock()
+}
+
 // raisePlanDecision puts a planner's revised plan, waiting since its turn
 // ended, to the person once no other decision is open. The caller writes
 // the run when it reports true.
@@ -1785,20 +1933,37 @@ func (e *Engine) raisePlanDecision(run *domain.Run, steps []domain.RunStep) bool
 		if s.Role != domain.RolePlanner || s.State != domain.StepAsking || s.EndTree == "" {
 			continue
 		}
+		// a plan that cannot be put to the person stays so until its
+		// output changes: it is not parsed again on every tick
+		badKey := fmt.Sprintf("plan/%s/%d/%s", run.Session, run.N, s.Path)
+		if e.planRefused(badKey, s.Output) {
+			continue
+		}
 		entries, err := workflowrecipe.ParsePlanBlock(s.Output)
 		if err != nil {
+			e.notePlanRefused(badKey, s.Output)
+			continue
+		}
+		started := startedEntries(run.Recipe, steps)
+		// the question shows, and the decision keeps, the plan as it is
+		// frozen now: what the person reads is what splicing it applies
+		plan, ferr := e.freezePlan(run, entries)
+		if ferr != nil {
+			e.notePlanRefused(badKey, s.Output)
 			continue
 		}
 		text, err := workflowrecipe.MarshalEntries(entries)
 		if err != nil {
+			e.notePlanRefused(badKey, s.Output)
 			continue
 		}
-		started := startedEntries(run.Recipe, steps)
-		_, _, warnings := workflowrecipe.CheckReplacement(run.Recipe, started, entries)
+		_, _, warnings := safeCheckReplacement(run.Recipe, started, entries)
 		var b strings.Builder
 		fmt.Fprintf(&b, "Run %d: step %s (planner) revised the plan. Its steps replace the run's remaining ones:\n\n", run.N, s.Path)
 		profile := e.sessionProfile(run.Session)
 		e.writeRecipeTree(&b, profile, entries, "")
+		writeAllowance(&b, plan)
+		e.writePRAllowanceOf(context.Background(), &b, plan, run.Inputs)
 		if started < len(run.Recipe.Steps) {
 			b.WriteString("\nWhat they replace, which would not run:\n")
 			e.writeRecipeTree(&b, profile, run.Recipe.Steps[started:], "")
@@ -1845,7 +2010,7 @@ func (e *Engine) newStepLocked(ctx context.Context, run *domain.Run, a workflowp
 // whether it waits on a person up to date as it reads them.
 func (e *Engine) runSnapshot(ctx context.Context, run *domain.Run) (workflowpolicy.Snapshot, []domain.RunStep, error) {
 	st := e.cfg.Store
-	steps, err := st.RunSteps(ctx, run.Session, run.N)
+	steps, err := st.RunStepsLite(ctx, run.Session, run.N)
 	if err != nil {
 		return workflowpolicy.Snapshot{}, nil, err
 	}
@@ -1858,9 +2023,13 @@ func (e *Engine) runSnapshot(ctx context.Context, run *domain.Run) (workflowpoli
 		s := &steps[i]
 		changed := false
 		if s.Card != "" {
-			if f, err := st.GetFeature(ctx, s.Card); err == nil {
-				if sp := f.Spend.CreditEquivalent(); sp != s.Spent {
-					s.Spent, changed = sp, true
+			// only a live step's spend moves; a settled step's was read
+			// once, when it settled
+			if s.State.Live() {
+				if f, err := st.GetFeature(ctx, s.Card); err == nil {
+					if sp := f.Spend.CreditEquivalent(); sp != s.Spent {
+						s.Spent, changed = sp, true
+					}
 				}
 			}
 			asking := e.cardAsking(s.Card)
@@ -1872,7 +2041,7 @@ func (e *Engine) runSnapshot(ctx context.Context, run *domain.Run) (workflowpoli
 			}
 		}
 		if changed {
-			if err := st.UpdateRunStep(ctx, s); err != nil {
+			if err := st.UpdateRunStepLive(ctx, s); err != nil {
 				return in, nil, err
 			}
 		}
@@ -1906,7 +2075,7 @@ func (e *Engine) judgeUntilAsync(run *domain.Run, iter, repeatID string) {
 	if !rt.claim(key) {
 		return
 	}
-	if !e.goBrief(func() {
+	if !e.goWorkflow(func() {
 		defer func() {
 			rt.release(key)
 			e.workflowEvent(session)
@@ -2046,10 +2215,13 @@ func findRepeat(es []domain.Entry, id string) (domain.Repeat, bool) {
 func (e *Engine) endRunAsync(session domain.FeatureID, n int, end domain.RunState, why string) {
 	rt := e.wfRT()
 	key := fmt.Sprintf("end/%s/%d", session, n)
-	if !rt.claim(key) {
+	rt.mu.Lock()
+	wait := time.Now().Before(rt.retryAfter[key])
+	rt.mu.Unlock()
+	if wait || !rt.claim(key) {
 		return
 	}
-	if !e.goBrief(func() {
+	if !e.goWorkflow(func() {
 		defer func() {
 			rt.release(key)
 			e.workflowEvent(session)
@@ -2086,14 +2258,20 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 		end, why = domain.RunPartial, "gummi could not read the tree at the end: "+treeErr.Error()
 	}
 	_, items := e.frozenSpec(ctx, run)
-	steps, _ := st.RunSteps(ctx, session, n)
+	steps := e.settleSpends(ctx, session, n)
 	last := ""
 	for _, s := range steps {
 		if s.State == domain.StepDone {
 			last = s.Output
 		}
 	}
-	results := withBaseline(itemResults(items, doneWhenChecks(ctx, dir, items), last), run.Baseline)
+	// a stopped run's tree is half-done and the person stopped it to save
+	// the time: its items read unjudged, its checks are not run
+	checks := map[string]verify.Result{}
+	if end != domain.RunStopped {
+		checks = doneWhenChecks(ctx, dir, items)
+	}
+	results := withBaseline(itemResults(items, checks, last), run.Baseline)
 	pass := checkedPass(results)
 	switch {
 	case end == domain.RunDone && !pass && vacuous(results):
@@ -2105,7 +2283,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	}
 	var paths []string
 	if endTree != "" {
-		_, paths, _ = e.diffTrees(ctx, session, run.StartTree, endTree)
+		paths, _ = e.diffPaths(ctx, session, run.StartTree, endTree)
 	}
 	var commits []string
 	if run.StartHead != "" && dir != "" {
@@ -2129,21 +2307,142 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	e.clockStop(cur)
 	cur.EndTree, cur.Results, cur.Report, cur.Commits = endTree, results, report, commits
 	cur.Stopping, cur.Pending, cur.OutOfBudget = false, nil, false
+	cur.Spent = 0
+	for _, s := range steps {
+		cur.Spent += s.Spent
+	}
+	// the run ends with its report still to deliver: a crash before the
+	// delivery below is made good on the next tick (redeliverReports)
+	cur.ReportPending = true
 	err = st.UpdateRun(ctx, cur)
 	unlock()
 	if err != nil {
+		// not again on the next tick, with its checks and its git: a
+		// minute's wait, then the whole end is tried afresh
+		rt := e.wfRT()
+		rt.mu.Lock()
+		rt.retryAfter[fmt.Sprintf("end/%s/%d", session, n)] = time.Now().Add(time.Minute)
+		rt.mu.Unlock()
 		return
 	}
-	_, _ = e.writeRunFile(session, n, "report.md", report)
-	e.writeRunReport(ctx, cur)
 	e.runNote(session, fmt.Sprintf("run %d ended %s", n, end))
-	e.noteDispatcher(ctx, session, n, end, report)
-	if e.keepsReports(session) {
+	if e.deliverReport(ctx, cur, false) {
+		// the files and the spec are written: only the turn is sent again
+		rt := e.wfRT()
+		rt.mu.Lock()
+		rt.resendOnly[runKey(session, n)] = true
+		rt.mu.Unlock()
+	}
+}
+
+// deliverReport puts an ended run's report where it is read — the run's
+// directory, the spec's Report section, the dispatching agent and the
+// session as a turn — and then clears the run's pending mark. A turn that
+// could not be sent leaves the mark, and the report is delivered again —
+// with turnOnly, the turn alone: the rest is written already. It reports
+// whether the turn is still to send.
+func (e *Engine) deliverReport(ctx context.Context, run *domain.Run, turnOnly bool) (turnFailed bool) {
+	session, n := run.Session, run.N
+	if !turnOnly {
+		_, _ = e.writeRunFile(session, n, "report.md", run.Report)
+		e.writeRunReport(ctx, run)
+		e.noteDispatcher(ctx, session, n, run.State, run.Report)
+	}
+	if !e.keepsReports(session) {
+		msg := fmt.Sprintf("Workflow run %d has reported. Read the report and the diff it left in the tree, tell the person what it means, "+
+			"and commit what you keep — gummi commits nothing.\n\n%s", n, run.Report)
+		if err := e.sendSessionTurn(WithActor(ctx, state.ActorWorkflow), session, msg); err != nil {
+			return true
+		}
+	}
+	unlock := e.lockRuns(session)
+	defer unlock()
+	if cur, err := e.cfg.Store.Run(ctx, session, n); err == nil && cur != nil && cur.ReportPending {
+		cur.ReportPending = false
+		_ = e.cfg.Store.UpdateRun(ctx, cur)
+	}
+	return false
+}
+
+// redeliverReports delivers again the report of each run that ended and
+// never delivered it (a crash between the two), once per run a process
+// lives. A run whose end is still under way in this process is left to it.
+func (e *Engine) redeliverReports(ctx context.Context) {
+	runs, err := e.cfg.Store.UndeliveredReports(ctx)
+	if err != nil {
 		return
 	}
-	msg := fmt.Sprintf("Workflow run %d has reported. Read the report and the diff it left in the tree, tell the person what it means, "+
-		"and commit what you keep — gummi commits nothing.\n\n%s", n, report)
-	_ = e.sendSessionTurn(WithActor(ctx, state.ActorWorkflow), session, msg)
+	rt := e.wfRT()
+	for i := range runs {
+		r := runs[i]
+		key := runKey(r.Session, r.N)
+		rt.mu.Lock()
+		skip := rt.reported[key] || rt.busy[fmt.Sprintf("end/%s/%d", r.Session, r.N)] ||
+			time.Now().Before(rt.retryAfter["report/"+key])
+		turnOnly := rt.resendOnly[key]
+		if !skip {
+			rt.reported[key] = true
+		}
+		rt.mu.Unlock()
+		if skip || !r.State.Ended() {
+			continue
+		}
+		if f, err := e.cfg.Store.GetFeature(ctx, r.Session); err == nil && f.Stage == domain.StageDone {
+			// a closed session is not woken: the report is on the spec and in
+			// its file, and the mark is cleared so nothing asks again
+			unlock := e.lockRuns(r.Session)
+			if cur, err := e.cfg.Store.Run(ctx, r.Session, r.N); err == nil && cur != nil && cur.ReportPending {
+				cur.ReportPending = false
+				_ = e.cfg.Store.UpdateRun(ctx, cur)
+			}
+			unlock()
+			continue
+		}
+		if e.deliverReport(ctx, &r, turnOnly) {
+			// the turn could not be sent: again in a minute, the turn alone
+			rt.mu.Lock()
+			delete(rt.reported, key)
+			rt.resendOnly[key] = true
+			rt.retries[key]++
+			rt.retryAfter["report/"+key] = time.Now().Add(time.Minute << min(rt.retries[key], 6))
+			rt.mu.Unlock()
+			continue
+		}
+		// delivered: nothing about the run is kept
+		rt.mu.Lock()
+		delete(rt.resendOnly, key)
+		delete(rt.retryAfter, "report/"+key)
+		delete(rt.retries, key)
+		rt.mu.Unlock()
+	}
+}
+
+// settleSpends brings every step of run n up to what its card has spent,
+// ending steps' rows included — a stopped step spends after its row was
+// settled — and returns the steps.
+func (e *Engine) settleSpends(ctx context.Context, session domain.FeatureID, n int) []domain.RunStep {
+	st := e.cfg.Store
+	steps, _ := st.RunSteps(ctx, session, n)
+	for i := range steps {
+		s := &steps[i]
+		if s.Card == "" {
+			continue
+		}
+		f, err := st.GetFeature(ctx, s.Card)
+		if err != nil {
+			continue
+		}
+		if sp := f.Spend.CreditEquivalent(); sp != s.Spent {
+			s.Spent = sp
+			unlock := e.lockRuns(session)
+			if cur, err := st.RunStep(ctx, session, n, s.Path); err == nil && cur != nil {
+				cur.Spent = sp
+				_ = st.UpdateRunStep(ctx, cur)
+			}
+			unlock()
+		}
+	}
+	return steps
 }
 
 // runReport writes a run's report: each done-when item's result, the
@@ -2413,11 +2712,16 @@ func (e *Engine) sessionRunsSpent(ctx context.Context, session domain.FeatureID)
 	return t
 }
 
-// stepBudget is a step card's cap: what its session's pool has left, at
-// least one turn's reserve while it has any, 0 once it is spent, or the
+// stepBudget is a step card's cap: its share of what its session's pool
+// has left among the run's steps at work (a share is at least one turn's
+// reserve, never more than the pool has left), 0 once it is spent, or the
 // board's stage budget for a session with no envelope. It is read when the
 // step's backend spawns; the pool is held across all the session's steps
-// as they spend (checkRunPool).
+// as they spend (checkRunPool). A cap is a ceiling read at spawn: a step
+// spawned later, once siblings have ended or spent, may be given a larger
+// share while the earlier ones keep theirs, so the caps need not sum to the
+// pool — what holds the pool is checkRunPool, which pauses the run at once
+// when the session's spend reaches it.
 func (e *Engine) stepBudget(ctx context.Context, f domain.Feature) float64 {
 	sess, err := e.cfg.Store.GetFeature(ctx, f.Step().Session)
 	if err != nil {
@@ -2430,7 +2734,24 @@ func (e *Engine) stepBudget(ctx context.Context, f domain.Feature) float64 {
 	case left <= 0:
 		return 0
 	}
-	return math.Max(left, e.turnReserve())
+	// the steps at work together share what is left: each one's cap is its
+	// share, so the caps together are not past the pool. A turn's reserve
+	// floors a share, never the pool's remainder.
+	live := 1
+	if inst := e.stepOf(ctx, f); inst != nil {
+		if steps, err := e.cfg.Store.RunSteps(ctx, inst.Session, inst.Run); err == nil {
+			live = 0
+			for _, s := range steps {
+				// a watch waits on its pull request and a command step has
+				// no card: neither spends from the pool
+				if s.State.Live() && s.State != domain.StepWatching && s.Card != "" {
+					live++
+				}
+			}
+			live = max(live, 1)
+		}
+	}
+	return math.Min(left, math.Max(left/float64(live), e.turnReserve()))
 }
 
 // errStepPoolSpent refuses a step's backend while its session's pool is
@@ -2455,8 +2776,11 @@ func (e *Engine) stepPoolSpent(ctx context.Context, f domain.Feature) bool {
 // spend lands, and when the session's pool is spent the open run pauses
 // at once and every live step's backend stops — the steps share one pool,
 // and each one's own cap was what the pool had left when it spawned.
-func (e *Engine) checkRunPool(card domain.FeatureID) {
-	e.goBrief(func() {
+func (e *Engine) checkRunPool(card domain.FeatureID, spent float64) {
+	if e.poolClearlyOpen(card, spent) {
+		return
+	}
+	e.goWorkflow(func() {
 		ctx := e.lifetime()
 		f, err := e.cfg.Store.GetFeature(ctx, card)
 		if err != nil || !f.IsChild() {
@@ -2470,7 +2794,9 @@ func (e *Engine) checkRunPool(card domain.FeatureID) {
 		if err != nil {
 			return
 		}
-		if left, bounded := e.sessionPoolLeft(ctx, sess); !bounded || left > 0 {
+		left, bounded := e.sessionPoolLeft(ctx, sess)
+		e.notePoolHeadroom(card, left, bounded)
+		if !bounded || left > 0 {
 			return
 		}
 		unlock := e.lockRuns(inst.Session)
@@ -2486,6 +2812,61 @@ func (e *Engine) checkRunPool(card domain.FeatureID) {
 		why := fmt.Sprintf("the session's budget is spent (the run has spent %s)", domain.FormatDollars(workflowpolicy.Spent(in)))
 		_ = e.pauseForBudgetLocked(ctx, run, why)
 	})
+}
+
+// poolHeadroom is what a step card's last full pool check found: the pool
+// left then, the level below which the next event checks in full, and when.
+type poolHeadroom struct {
+	left, floor float64
+	at          time.Time
+}
+
+// poolHeadroomTTL is how long a pool check stands for the events after
+// it: siblings' spend is not seen between two checks, so it is bounded —
+// a pause for a spent pool can come up to this long after the spend, and
+// no step's own cap is past the pool when it spawns (stepBudget). The
+// overshoot is at most what live steps spend in that time, which is what
+// one turn of the dearest step can cost. Entries
+// past it are dropped as new ones are written.
+const poolHeadroomTTL = 5 * time.Second
+
+// poolClearlyOpen says whether an event of spent credits on a step card
+// leaves the session's pool far from spent, by the last full check less
+// what this card has spent since: only a pool near spent is read again
+// (checkRunPool). It takes the event's spend off the headroom it holds.
+func (e *Engine) poolClearlyOpen(card domain.FeatureID, spent float64) bool {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	h, ok := rt.poolHead[card]
+	if !ok || time.Since(h.at) > poolHeadroomTTL {
+		return false
+	}
+	h.left -= spent
+	rt.poolHead[card] = h
+	return h.left > h.floor
+}
+
+// notePoolHeadroom keeps a full check's finding for poolClearlyOpen: an
+// unbounded pool is clear as far as the next TTL, and a spent one is
+// forgotten so the next event reads again.
+func (e *Engine) notePoolHeadroom(card domain.FeatureID, left float64, bounded bool) {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	for c, h := range rt.poolHead {
+		if time.Since(h.at) > poolHeadroomTTL {
+			delete(rt.poolHead, c)
+		}
+	}
+	switch {
+	case !bounded:
+		rt.poolHead[card] = poolHeadroom{left: 1, floor: 0, at: time.Now()}
+	case left > 0:
+		rt.poolHead[card] = poolHeadroom{left: left, floor: left / 2, at: time.Now()}
+	default:
+		delete(rt.poolHead, card)
+	}
 }
 
 // pauseForBudgetLocked parks a running run whose session's pool is spent:
@@ -2510,10 +2891,16 @@ func (e *Engine) pauseForBudgetLocked(ctx context.Context, run *domain.Run, why 
 func (e *Engine) stopRunSteps(ctx context.Context, run *domain.Run) {
 	steps, _ := e.cfg.Store.RunSteps(ctx, run.Session, run.N)
 	for _, s := range steps {
-		if s.Card != "" && s.State.Live() {
-			if ff := e.Freeform(s.Card); ff != nil {
-				stopStepBackend(ff)
-			}
+		if !s.State.Live() {
+			continue
+		}
+		if s.Card == "" {
+			// a command step spends nothing: it runs to its end while the
+			// run is parked, and only a stop cancels it
+			continue
+		}
+		if ff := e.Freeform(s.Card); ff != nil {
+			stopStepBackend(ff)
 		}
 	}
 }

@@ -14,7 +14,11 @@ import (
 // A session's workflow runs and their step instances (DESIGN §25). A run
 // is keyed by its session and its number there; a step by its run and its
 // path, as in build/2/implement. Every write of a run bumps its revision,
-// so a face redraws only what changed. A run estimates nothing (§25.12):
+// so a face redraws only what changed. The revision is a change mark for
+// the faces, not an optimistic lock: updateRun does not guard on it. Every
+// writer of a run holds the engine's per-session lock (Engine.lockRuns) and
+// reads the row afresh under it, so the store assumes a single writer per
+// run at a time. A run estimates nothing (§25.12):
 // the estimate, warned and allowance columns of a database from before are
 // left in place, unread and unwritten, and so is validated_tree, the
 // validated mark's tree, which gummi no longer keeps.
@@ -23,11 +27,17 @@ import (
 // is one deep (§25.5).
 var ErrRunQueued = errors.New("a run is already queued behind the open one")
 
+// ErrUnreadableRun marks a run row whose JSON no longer decodes. A list of
+// runs skips such a row rather than failing as a whole: the other rows, and
+// so the other sessions, carry on. LiveRuns says so beside the rows it
+// could read; Run, naming one row, returns it as the row's error.
+var ErrUnreadableRun = errors.New("an unreadable run")
+
 const runCols = `session_id, n, recipe_name, recipe_yaml, recipe, inputs, spec_n, spec_rev, state,
 	spent, start_tree, end_tree, results, report, reason,
 	stopping, out_of_budget, steers, pending, feedback, revision,
 	created_at, started_at, ended_at, updated_at, start_head, until_results, on_max, commits, baseline, saved_as,
-	start_index, active_ms, resumed_at, schedule_id`
+	start_index, active_ms, resumed_at, schedule_id, report_pending`
 
 func scanRun(r rowScanner) (domain.Run, error) {
 	var run domain.Run
@@ -37,7 +47,7 @@ func scanRun(r rowScanner) (domain.Run, error) {
 		&run.Spent, &run.StartTree, &run.EndTree, &results, &run.Report, &run.Reason,
 		&run.Stopping, &run.OutOfBudget, &steers, &pending, &run.Feedback, &run.Revision,
 		&created, &started, &ended, &updated, &run.StartHead, &until, &onMax, &commits, &baseline, &run.SavedAs,
-		&run.StartIndex, &activeMS, &resumed, &sched)
+		&run.StartIndex, &activeMS, &resumed, &sched, &run.ReportPending)
 	if err != nil {
 		return run, err
 	}
@@ -51,19 +61,19 @@ func scanRun(r rowScanner) (domain.Run, error) {
 			continue
 		}
 		if err := json.Unmarshal([]byte(j.raw), j.v); err != nil {
-			return run, fmt.Errorf("run %s/%d: %w", session, run.N, err)
+			return run, fmt.Errorf("run %s/%d: %w: %w", session, run.N, ErrUnreadableRun, err)
 		}
 	}
 	if baseline != "" {
 		run.Baseline = &domain.RunBaseline{}
 		if err := json.Unmarshal([]byte(baseline), run.Baseline); err != nil {
-			return run, fmt.Errorf("run %s/%d: %w", session, run.N, err)
+			return run, fmt.Errorf("run %s/%d: %w: %w", session, run.N, ErrUnreadableRun, err)
 		}
 	}
 	if pending != "" {
 		run.Pending = &domain.RunDecision{}
 		if err := json.Unmarshal([]byte(pending), run.Pending); err != nil {
-			return run, fmt.Errorf("run %s/%d: %w", session, run.N, err)
+			return run, fmt.Errorf("run %s/%d: %w: %w", session, run.N, ErrUnreadableRun, err)
 		}
 	}
 	run.CreatedAt, _ = time.Parse(timeFmt, created)
@@ -131,13 +141,13 @@ func (s *Store) CreateRun(ctx context.Context, r *domain.Run) error {
 		r.N = int(last.Int64) + 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_runs (`+runCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(r.Session), r.N, r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State),
 		r.Spent, r.StartTree, r.EndTree, j[2], r.Report, r.Reason,
 		r.Stopping, r.OutOfBudget, j[3], j[4], r.Feedback, r.Revision,
 		r.CreatedAt.UTC().Format(timeFmt), formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), r.UpdatedAt.UTC().Format(timeFmt),
 		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs,
-		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), string(r.Schedule)); err != nil {
+		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), string(r.Schedule), r.ReportPending); err != nil {
 		return fmt.Errorf("creating run %d on %s: %w", r.N, r.Session, err)
 	}
 	return tx.Commit()
@@ -162,13 +172,13 @@ func (s *Store) updateRun(ctx context.Context, db execer, r *domain.Run) error {
 		spec_n=?, spec_rev=?, state=?, spent=?, start_tree=?, end_tree=?,
 		results=?, report=?, reason=?, stopping=?, out_of_budget=?, steers=?, pending=?, feedback=?,
 		revision=?, started_at=?, ended_at=?, updated_at=?, start_head=?, until_results=?, on_max=?, commits=?, baseline=?, saved_as=?,
-		start_index=?, active_ms=?, resumed_at=?
+		start_index=?, active_ms=?, resumed_at=?, report_pending=?
 		WHERE session_id=? AND n=?`,
 		r.RecipeName, r.RecipeYAML, j[0], j[1], r.Spec, r.SpecRev, string(r.State), r.Spent,
 		r.StartTree, r.EndTree, j[2], r.Report, r.Reason, r.Stopping, r.OutOfBudget,
 		j[3], j[4], r.Feedback, rev, formatOptTime(r.StartedAt), formatOptTime(r.EndedAt), updated.Format(timeFmt),
 		r.StartHead, j[5], j[6], j[7], j[8], r.SavedAs,
-		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), string(r.Session), r.N)
+		r.StartIndex, r.Active.Milliseconds(), formatOptTime(r.ResumedAt), r.ReportPending, string(r.Session), r.N)
 	if err != nil {
 		return err
 	}
@@ -217,33 +227,61 @@ func (s *Store) Run(ctx context.Context, session domain.FeatureID, n int) (*doma
 	return &r, nil
 }
 
-func (s *Store) runsWhere(ctx context.Context, where string, args ...any) ([]domain.Run, error) {
+// runsWhere lists the runs a clause selects. A row that cannot be decoded
+// is left out and said in bad (wrapping ErrUnreadableRun); err is a failed
+// query.
+func (s *Store) runsWhere(ctx context.Context, where string, args ...any) (out []domain.Run, bad, err error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+runCols+` FROM workflow_runs WHERE `+where, args...) //nolint:gosec // where is one of this file's constant clauses
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	var out []domain.Run
+	var unreadable []error
 	for rows.Next() {
 		r, err := scanRun(rows)
+		if errors.Is(err, ErrUnreadableRun) {
+			unreadable = append(unreadable, err)
+			continue
+		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	return out, errors.Join(unreadable...), rows.Err()
 }
 
 // SessionRuns lists a session's runs, first to last.
 func (s *Store) SessionRuns(ctx context.Context, session domain.FeatureID) ([]domain.Run, error) {
-	return s.runsWhere(ctx, `session_id=? ORDER BY n`, string(session))
+	runs, _, err := s.runsWhere(ctx, `session_id=? ORDER BY n`, string(session))
+	return runs, err
+}
+
+// PendingRuns lists a session's runs with a decision open, first to last,
+// without reading the rest of its history.
+func (s *Store) PendingRuns(ctx context.Context, session domain.FeatureID) ([]domain.Run, error) {
+	runs, _, err := s.runsWhere(ctx, `session_id=? AND pending<>'' ORDER BY n`, string(session))
+	return runs, err
 }
 
 // LiveRuns lists every run not yet over — proposed, queued, running or
-// paused — across sessions, for the ticks and the restore.
+// paused — across sessions, for the ticks and the restore. A row that
+// cannot be read is left out, and the error wraps ErrUnreadableRun beside
+// the runs that could be: a caller that can go on without it does.
 func (s *Store) LiveRuns(ctx context.Context) ([]domain.Run, error) {
-	return s.runsWhere(ctx, `state IN (?,?,?,?) ORDER BY session_id, n`,
+	runs, bad, err := s.runsWhere(ctx, `state IN (?,?,?,?) ORDER BY session_id, n`,
 		string(domain.RunProposed), string(domain.RunQueued), string(domain.RunRunning), string(domain.RunPaused))
+	if err != nil {
+		return nil, err
+	}
+	return runs, bad
+}
+
+// UndeliveredReports lists the runs that ended with their report still to
+// deliver (Run.ReportPending).
+func (s *Store) UndeliveredReports(ctx context.Context) ([]domain.Run, error) {
+	runs, _, err := s.runsWhere(ctx, `report_pending=1 ORDER BY session_id, n`)
+	return runs, err
 }
 
 // OpenRun is the session's run under way (running or paused), nil when
@@ -259,15 +297,26 @@ func (s *Store) QueuedRun(ctx context.Context, session domain.FeatureID) (*domai
 }
 
 func (s *Store) lastRunIn(ctx context.Context, session domain.FeatureID, a, b domain.RunState) (*domain.Run, error) {
-	runs, err := s.runsWhere(ctx, `session_id=? AND state IN (?,?) ORDER BY n DESC LIMIT 1`, string(session), string(a), string(b))
-	if err != nil || len(runs) == 0 {
+	runs, bad, err := s.runsWhere(ctx, `session_id=? AND state IN (?,?) ORDER BY n DESC LIMIT 1`, string(session), string(a), string(b))
+	if err != nil {
 		return nil, err
+	}
+	if len(runs) == 0 {
+		// a row that cannot be read is not "no run": the session must not
+		// propose a second one beside it
+		return nil, bad
 	}
 	return &runs[0], nil
 }
 
 const stepCols = `session_id, run_n, path, step_id, card_id, role, tier, state, spent,
 	start_tree, end_tree, prompt, output, reason, started_at, ended_at, changed, watch`
+
+// stepLiteCols is stepCols without the step's brief, the largest thing a
+// step holds: a reader that does not draw it (a tick, a pool sum) reads
+// the step with Prompt empty.
+const stepLiteCols = `session_id, run_n, path, step_id, card_id, role, tier, state, spent,
+	start_tree, end_tree, '' AS prompt, output, reason, started_at, ended_at, changed, watch`
 
 func scanStep(r rowScanner) (domain.RunStep, error) {
 	var st domain.RunStep
@@ -349,7 +398,11 @@ func (s *Store) UpdateRunStep(ctx context.Context, st *domain.RunStep) error {
 }
 
 func (s *Store) stepsWhere(ctx context.Context, where string, args ...any) ([]domain.RunStep, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+stepCols+` FROM workflow_steps WHERE `+where, args...) //nolint:gosec // where is one of this file's constant clauses
+	return s.stepsWhereCols(ctx, stepCols, where, args...)
+}
+
+func (s *Store) stepsWhereCols(ctx context.Context, cols, where string, args ...any) ([]domain.RunStep, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+cols+` FROM workflow_steps WHERE `+where, args...) //nolint:gosec // where is one of this file's constant clauses
 	if err != nil {
 		return nil, err
 	}
@@ -368,6 +421,45 @@ func (s *Store) stepsWhere(ctx context.Context, where string, args ...any) ([]do
 // RunSteps lists a run's step instances in the order they were created.
 func (s *Store) RunSteps(ctx context.Context, session domain.FeatureID, n int) ([]domain.RunStep, error) {
 	return s.stepsWhere(ctx, `session_id=? AND run_n=? ORDER BY rowid`, string(session), n)
+}
+
+// RunStepsLite is RunSteps with every step's Prompt left empty. A step
+// read this way is never written back whole (UpdateRunStep would blank
+// its brief); UpdateRunStepLive writes the columns a tick moves.
+func (s *Store) RunStepsLite(ctx context.Context, session domain.FeatureID, n int) ([]domain.RunStep, error) {
+	return s.stepsWhereCols(ctx, stepLiteCols, `session_id=? AND run_n=? ORDER BY rowid`, string(session), n)
+}
+
+// UpdateRunStepLive writes a step's state and spend alone: what a tick
+// moves, without rewriting the brief, output and trees beside them.
+func (s *Store) UpdateRunStepLive(ctx context.Context, st *domain.RunStep) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE workflow_steps SET state=?, spent=? WHERE session_id=? AND run_n=? AND path=?`,
+		string(st.State), st.Spent, string(st.Session), st.Run, st.Path)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("step %s of run %d on %s: %w", st.Path, st.Run, st.Session, ErrNotFound)
+	}
+	return nil
+}
+
+// UpdateRunStepWatch writes a step's state and its watch alone: what a
+// poll moves, without rewriting the brief and output beside them.
+func (s *Store) UpdateRunStepWatch(ctx context.Context, st *domain.RunStep) error {
+	watch, err := json.Marshal(st.Watch)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE workflow_steps SET state=?, watch=?, reason=?, ended_at=? WHERE session_id=? AND run_n=? AND path=?`,
+		string(st.State), string(watch), st.Reason, formatOptTime(st.EndedAt), string(st.Session), st.Run, st.Path)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("step %s of run %d on %s: %w", st.Path, st.Run, st.Session, ErrNotFound)
+	}
+	return nil
 }
 
 // RunStep reads one step instance; nil when the run has none at path.
@@ -443,4 +535,23 @@ func (s *Store) DeleteRun(ctx context.Context, session domain.FeatureID, n int) 
 		return err
 	}
 	return tx.Commit()
+}
+
+// SessionStepCards lists the hidden cards the session's workflow steps ran
+// on, across all its runs.
+func (s *Store) SessionStepCards(ctx context.Context, session domain.FeatureID) ([]domain.FeatureID, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT card_id FROM workflow_steps WHERE session_id=? AND card_id != ''`, string(session))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.FeatureID
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, domain.FeatureID(id))
+	}
+	return out, rows.Err()
 }

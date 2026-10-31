@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -153,8 +154,51 @@ type rawHandler struct {
 	Max        int        `yaml:"max,omitempty"`
 }
 
+// strictKeys refuses a mapping key t does not declare, at any depth.
+// Node.Decode does not carry Parse's KnownFields, so an inline handler
+// step would otherwise take a misspelt flag as its default. A type that
+// reads its own node (rawHandler, rawUntil, dollars) checks itself.
+func strictKeys(n *yaml.Node, t reflect.Type) error {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
+		if t.Kind() == reflect.Slice && n.Kind == yaml.SequenceNode {
+			for _, c := range n.Content {
+				if err := strictKeys(c, t.Elem()); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct || n.Kind != yaml.MappingNode ||
+		reflect.PointerTo(t).Implements(reflect.TypeFor[yaml.Unmarshaler]()) {
+		return nil
+	}
+	fields := map[string]reflect.Type{}
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
+		if name == "" {
+			name = strings.ToLower(t.Field(i).Name)
+		}
+		fields[name] = t.Field(i).Type
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		ft, ok := fields[n.Content[i].Value]
+		if !ok {
+			return fmt.Errorf("line %d: unknown field %q", n.Content[i].Line, n.Content[i].Value)
+		}
+		if err := strictKeys(n.Content[i+1], ft); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (h *rawHandler) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.SequenceNode {
+		if err := strictKeys(n, reflect.TypeOf(h.Steps)); err != nil {
+			return err
+		}
 		return n.Decode(&h.Steps)
 	}
 	if n.Kind != yaml.MappingNode {
@@ -169,6 +213,9 @@ func (h *rawHandler) UnmarshalYAML(n *yaml.Node) error {
 	}
 	type plain rawHandler
 	var p plain
+	if err := strictKeys(n, reflect.TypeOf(p)); err != nil {
+		return err
+	}
 	if err := n.Decode(&p); err != nil {
 		return err
 	}
@@ -657,9 +704,12 @@ func walk(es []domain.Entry, within []domain.Entry, fn func(domain.Step, []domai
 			fn(*e.Step, within)
 			if w := e.Step.Watch; w != nil {
 				for _, ev := range domain.WatchEvents {
-					for _, hs := range w.On[ev].Steps {
-						fn(hs, append(append([]domain.Entry{}, within...), e))
+					h := w.On[ev]
+					in := append(append([]domain.Entry{}, within...), e)
+					for _, hs := range h.Steps {
+						fn(hs, in)
 					}
+					walk(handlerEntries(h), in, fn)
 				}
 			}
 		case e.Parallel != nil:
@@ -671,6 +721,19 @@ func walk(es []domain.Entry, within []domain.Entry, fn func(domain.Step, []domai
 			walk(e.Repeat.Steps, append(append([]domain.Entry{}, within...), e), fn)
 		}
 	}
+}
+
+// handlerEntries is the steps of a handler's recipe: the parsed copy when
+// the handler has one, else its frozen or inline YAML read now, so a command
+// there is seen wherever steps are listed.
+func handlerEntries(h domain.Handler) []domain.Entry {
+	if len(h.Entries) > 0 || strings.TrimSpace(h.RecipeYAML) == "" {
+		return h.Entries
+	}
+	if r, err := Parse([]byte(h.RecipeYAML)); err == nil {
+		return r.Steps
+	}
+	return nil
 }
 
 // Steps lists every plain step of a recipe, in document order.

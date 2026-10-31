@@ -1421,7 +1421,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		if sess.Feature.IsChild() {
 			// a step spends from its session's pool, which its siblings
 			// share: the pool is held across them all
-			e.checkRunPool(ff.id)
+			e.checkRunPool(ff.id, domain.Spend{Credits: ev.Usage.Credits, InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens}.CreditEquivalent())
 		}
 	case agent.EventIdle:
 		// No commit here: a turn ending is not a reason to commit. The agent

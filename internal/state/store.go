@@ -1082,6 +1082,13 @@ var migrations = []string{
 	// The GitHub repository the allowance was given for: a session pushes
 	// there and nowhere else. Empty on every row nobody allowed.
 	`ALTER TABLE features ADD COLUMN agent_publish_repo TEXT NOT NULL DEFAULT ''`,
+	// Whether an ended run's report still has to be delivered: set with the
+	// write that ends it, so a crash before the delivery is redelivered.
+	// 0 on every row from before, which were delivered or lost already.
+	`ALTER TABLE workflow_runs ADD COLUMN report_pending INTEGER NOT NULL DEFAULT 0`,
+	// The pool reads a session's legacy crews' cards by crew_of, on every
+	// tick and every step spawn.
+	`CREATE INDEX IF NOT EXISTS features_crew_of ON features(crew_of)`,
 }
 
 // Close releases the database.

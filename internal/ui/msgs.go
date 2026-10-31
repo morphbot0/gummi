@@ -939,6 +939,10 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 			return err
 		}
 	}
+	if m.engine != nil {
+		// the hidden cards of its runs' steps, and their directories
+		m.engine.ForgetRuns(ctx, f.ID)
+	}
 	if err := m.store.DeleteFeature(ctx, f.ID); err != nil {
 		return err
 	}
@@ -972,7 +976,7 @@ func (m *Shell) stepAsks(ctx context.Context, session domain.FeatureID, run *dom
 	if run == nil || m.engine == nil {
 		return ""
 	}
-	steps, err := m.store.RunSteps(ctx, session, run.N)
+	steps, err := m.store.RunStepsLite(ctx, session, run.N)
 	if err != nil {
 		return ""
 	}
@@ -982,7 +986,7 @@ func (m *Shell) stepAsks(ctx context.Context, session domain.FeatureID, run *dom
 		}
 		if ff := m.engine.Freeform(st.Card); ff != nil {
 			if s := ff.Session(); s != nil {
-				if ask := s.Snapshot().PendingAsk; ask != nil {
+				if ask := s.PendingAsk(); ask != nil {
 					return ask.Question
 				}
 			}

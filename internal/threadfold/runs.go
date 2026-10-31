@@ -339,10 +339,9 @@ func FoldRuns(ins []RunInput, said time.Time) []Run {
 		all[i] = in.Run
 	}
 	for i, in := range ins {
-		out[i] = FoldRun(in)
+		out[i] = foldRun(in)
 		if domain.RetryRefusal(in.Run, in.Steps, all) == "" {
 			out[i].CanRetry = true
-			out[i].Rev = runRev(out[i])
 		}
 		if !in.Run.State.Ended() {
 			continue
@@ -364,8 +363,10 @@ func FoldRuns(ins []RunInput, said time.Time) []Run {
 		}
 		if fold {
 			out[i].Folded = true
-			out[i].Rev = runRev(out[i])
 		}
+	}
+	for i := range out {
+		out[i].Rev = runRev(out[i])
 	}
 	return out
 }
@@ -543,6 +544,14 @@ func placeRuns(items, runs []Item) []Item {
 
 // FoldRun folds one run into its block.
 func FoldRun(in RunInput) Run {
+	r := foldRun(in)
+	r.Rev = runRev(r)
+	return r
+}
+
+// foldRun is FoldRun without the block's Rev, which FoldRuns computes
+// once, after it has settled the fields it moves (Folded, CanRetry).
+func foldRun(in RunInput) Run {
 	run := in.Run
 	r := Run{
 		N: run.N, Recipe: runRecipe(run), Spec: run.Spec, SpecTitle: Sanitize(in.SpecTitle), SpecRev: run.SpecRev,
@@ -644,7 +653,6 @@ func FoldRun(in RunInput) Run {
 	if run.State.Ended() {
 		r.Mark, r.Line = endedLine(r)
 	}
-	r.Rev = runRev(r)
 	return r
 }
 

@@ -8,6 +8,7 @@
 package atomicfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 )
@@ -57,4 +58,43 @@ func Write(path string, data []byte, perm os.FileMode) (err error) {
 		_ = d.Close()
 	}
 	return nil
+}
+
+// WriteNew is Write for a path that must not exist: the content goes to a
+// temp file and is linked into place, which fails with an error satisfying
+// os.ErrExist when another writer got there first, and never replaces a
+// file. Where the filesystem cannot link, the path is created exclusively
+// and written in place.
+func WriteNew(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if _, err = f.Write(data); err == nil {
+		err = f.Chmod(perm)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Link(tmp, path); err == nil || errors.Is(err, os.ErrExist) {
+		return err
+	}
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm) // #nosec G304 -- the caller's own path
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(data)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }

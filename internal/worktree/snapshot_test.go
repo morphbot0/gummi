@@ -401,3 +401,132 @@ func TestAnIgnoredFileStaysOutOfTheRunsSnapshotsAndIsNeverReverted(t *testing.T)
 		t.Errorf(".gitignore was not put back: %q", raw)
 	}
 }
+
+// DiffPaths names the paths two snapshots differ in, as DiffTrees does,
+// without building the patch.
+func TestDiffPathsMatchesDiffTreesPaths(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, "a.txt", "a\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "a")
+	before, err := Snapshot(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "a.txt", "changed\n")
+	writeFile(t, root, "z/new.txt", "new\n")
+	after, err := Snapshot(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, want, err := DiffTrees(ctx, root, before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DiffPaths(ctx, root, before, after)
+	if err != nil || !reflect.DeepEqual(got, want) || len(got) != 2 {
+		t.Fatalf("DiffPaths = %v, %v; want %v", got, err, want)
+	}
+}
+
+// TestSnapshotsKeepingTheirIndexSeeEveryChange: a snapshot that starts from
+// the index the last one left still takes in an edit, a new file and a
+// deletion made since, and matches a snapshot made from nothing.
+func TestSnapshotsKeepingTheirIndexSeeEveryChange(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, "a.txt", "a\n")
+	writeFile(t, root, "new/b.txt", "b\n")
+	first, err := Snapshot(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "a.txt", "a edited\n")
+	writeFile(t, root, "c.txt", "c\n")
+	if err := os.Remove(filepath.Join(root, "new/b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Snapshot(ctx, root)
+	if err != nil || second == first {
+		t.Fatalf("second = %s, %v", second, err)
+	}
+	want := map[string]string{"README.md": "", "a.txt": "a edited", "c.txt": "c"}
+	got := treeFiles(t, root, second)
+	delete(got, "README.md")
+	delete(want, "README.md")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("tree files = %v, want %v", got, want)
+	}
+	// from nothing, the same tree
+	idx := mustGit(t, root, "rev-parse", "--git-path", snapshotIndex)
+	if !filepath.IsAbs(idx) {
+		idx = filepath.Join(root, idx)
+	}
+	if err := os.Remove(idx); err != nil {
+		t.Fatal(err)
+	}
+	if fresh, err := Snapshot(ctx, root); err != nil || fresh != second {
+		t.Errorf("fresh snapshot = %s, %v; want %s", fresh, err, second)
+	}
+}
+
+func TestSnapshotDropsAKeptIndexThatHoldsANowIgnoredPath(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, "keep.txt", "k\n")
+	writeFile(t, root, "later.log", "l\n")
+	if _, err := Snapshot(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, ".gitignore", "*.log\n")
+	tree, err := Snapshot(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := treeFiles(t, root, tree)
+	if _, ok := got["later.log"]; ok {
+		t.Errorf("an ignored path stayed in the tree: %v", got)
+	}
+}
+
+func TestSnapshotKeepsItsIndexWhenATrackedPathMatchesAnIgnorePattern(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, ".gitignore", ".env*\n")
+	writeFile(t, root, ".env.example", "x\n")
+	mustGit(t, root, "add", "-f", ".gitignore", ".env.example")
+	mustGit(t, root, "commit", "-q", "-m", "track the example")
+	if _, err := Snapshot(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	idx := mustGit(t, root, "rev-parse", "--git-path", snapshotIndex)
+	if !filepath.IsAbs(idx) {
+		idx = filepath.Join(root, idx)
+	}
+	// the guard on the kept index does not refuse the tracked path
+	writeFile(t, root, "later.txt", "l\n")
+	if _, err := snapshotFrom(ctx, root, idx, idx, true, nil); err != nil {
+		t.Errorf("the kept index was refused: %v", err)
+	}
+}
+
+func TestSnapshotRecoversFromAKeptIndexNamingAMissingBlob(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, "u.txt", "untracked content\n")
+	if _, err := Snapshot(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	blob := mustGit(t, root, "hash-object", "u.txt")
+	obj := filepath.Join(mustGit(t, root, "rev-parse", "--git-common-dir"), "objects", blob[:2], blob[2:])
+	if !filepath.IsAbs(obj) {
+		obj = filepath.Join(root, obj)
+	}
+	_ = os.Chmod(obj, 0o644)
+	if err := os.Remove(obj); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Snapshot(ctx, root)
+	if err != nil {
+		t.Fatalf("snapshot after the blob was pruned: %v", err)
+	}
+	if got := treeFiles(t, root, tree); got["u.txt"] != "untracked content" {
+		t.Errorf("tree files = %v", got)
+	}
+}

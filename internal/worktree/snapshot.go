@@ -9,7 +9,19 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
+
+// snapshotLocks serialises the snapshots of one checkout: they share the
+// index kept beside git's own (snapshotIndex).
+var snapshotLocks sync.Map // checkout's git dir → *sync.Mutex
+
+// snapshotIndex is the name, in the checkout's git directory, of the index
+// Snapshot keeps between snapshots. `git add -A` hashes an untracked file
+// again only when its stat differs from the entry the index holds, so a
+// run's boundaries re-read what changed, not every file of the tree. It is
+// no part of the checkout's state: git never reads it.
+const snapshotIndex = "gummi-snapshot-index"
 
 // A workflow run's steps share the session's tree (DESIGN §25.6), so gummi
 // records the tree at every step boundary as a tree object: a snapshot.
@@ -37,6 +49,29 @@ func Snapshot(ctx context.Context, dir string, keepOut ...string) (string, error
 	if !filepath.IsAbs(own) {
 		own = filepath.Join(dir, own)
 	}
+	// the index of the last snapshot, when there is one, stands in for the
+	// real one: `add -A` below makes either the tree as it is on disk
+	kept := filepath.Join(filepath.Dir(own), snapshotIndex)
+	mu, _ := snapshotLocks.LoadOrStore(kept, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
+	if _, err := os.Stat(kept); err == nil {
+		tree, err := snapshotFrom(ctx, dir, kept, kept, true, keepOut)
+		if err == nil {
+			return tree, nil
+		}
+		// a kept index that cannot make a tree (a blob it names was
+		// pruned, a path it holds is ignored now) is dropped, and the
+		// snapshot made again from the real one
+		_ = os.Remove(kept)
+	}
+	return snapshotFrom(ctx, dir, own, kept, false, keepOut)
+}
+
+// snapshotFrom makes the tree from a copy of the index at src. fromKept
+// says src is the kept index: one that holds a path .gitignore now ignores
+// is refused, for `add -A` would leave it in.
+func snapshotFrom(ctx context.Context, dir, src, kept string, fromKept bool, keepOut []string) (string, error) {
 	tmp, err := os.MkdirTemp("", "gummi-snapshot-")
 	if err != nil {
 		return "", err
@@ -45,7 +80,7 @@ func Snapshot(ctx context.Context, dir string, keepOut ...string) (string, error
 	index := filepath.Join(tmp, "index")
 	env := []string{"GIT_INDEX_FILE=" + index}
 
-	switch data, err := os.ReadFile(own); { // #nosec G304 -- git's own index path for dir
+	switch data, err := os.ReadFile(src); { // #nosec G304 -- git's own index path for dir
 	case err == nil:
 		if err := os.WriteFile(index, data, 0o600); err != nil { // #nosec G703 -- index is in a directory MkdirTemp just made
 			return "", err
@@ -60,6 +95,29 @@ func Snapshot(ctx context.Context, dir string, keepOut ...string) (string, error
 		}
 	default:
 		return "", err
+	}
+	if fromKept {
+		ignored, err := runGitEnv(ctx, dir, env, "ls-files", "-z", "-c", "-i", "--exclude-standard")
+		if err != nil {
+			return "", err
+		}
+		if ignored != "" {
+			// a tracked file that matches a pattern (a force-added
+			// .env.example) is not what the guard is for
+			tracked, err := runGitRaw(ctx, dir, "ls-files", "-z", "-c", "-i", "--exclude-standard")
+			if err != nil {
+				return "", err
+			}
+			own := map[string]bool{}
+			for _, p := range strings.Split(tracked, "\x00") {
+				own[p] = true
+			}
+			for _, p := range strings.Split(ignored, "\x00") {
+				if p = strings.TrimSpace(p); p != "" && !own[p] {
+					return "", errors.New("the kept index holds an ignored path")
+				}
+			}
+		}
 	}
 	if _, err := runGitEnv(ctx, dir, env, "add", "-A"); err != nil {
 		return "", err
@@ -77,7 +135,20 @@ func Snapshot(ctx context.Context, dir string, keepOut ...string) (string, error
 			return "", err
 		}
 	}
-	return runGitEnv(ctx, dir, env, "write-tree")
+	tree, err := runGitEnv(ctx, dir, env, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	// keep this index for the next snapshot; failing to is no failure
+	if data, err := os.ReadFile(index); err == nil { // #nosec G304 -- index is in a directory MkdirTemp just made
+		tmpKept := kept + ".tmp"
+		if os.WriteFile(tmpKept, data, 0o600) == nil { // #nosec G703 -- beside git's own index
+			if os.Rename(tmpKept, kept) != nil {
+				_ = os.Remove(tmpKept)
+			}
+		}
+	}
+	return tree, nil
 }
 
 // Ignored lists the paths in the tree at dir that git ignores and does
@@ -117,17 +188,28 @@ func DiffTrees(ctx context.Context, dir, a, b string) (patch string, paths []str
 	if err != nil {
 		return "", nil, err
 	}
-	raw, err := runGitRaw(ctx, dir, "diff", "--name-only", "-z", "--no-renames", a, b, "--")
+	paths, err = DiffPaths(ctx, dir, a, b)
 	if err != nil {
 		return "", nil, err
 	}
+	return patch, paths, nil
+}
+
+// DiffPaths names the paths two snapshots differ in, as DiffTrees does,
+// without building the patch.
+func DiffPaths(ctx context.Context, dir, a, b string) ([]string, error) {
+	raw, err := runGitRaw(ctx, dir, "diff", "--name-only", "-z", "--no-renames", a, b, "--")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
 	for _, p := range strings.Split(raw, "\x00") {
 		if p != "" {
 			paths = append(paths, p)
 		}
 	}
 	sort.Strings(paths)
-	return patch, paths, nil
+	return paths, nil
 }
 
 // RevertTo puts each of paths in the tree at dir back to its state in the

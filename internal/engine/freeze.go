@@ -21,6 +21,15 @@ func eachStep(es []domain.Entry, fn func(s *domain.Step)) {
 		switch {
 		case es[i].Step != nil:
 			fn(es[i].Step)
+			// a watch handler's inline steps are plain steps too
+			if w := es[i].Step.Watch; w != nil {
+				for _, ev := range domain.WatchEvents {
+					h := w.On[ev]
+					for j := range h.Steps {
+						fn(&h.Steps[j])
+					}
+				}
+			}
 		case es[i].Parallel != nil:
 			for j := range es[i].Parallel.Steps {
 				fn(&es[i].Parallel.Steps[j])

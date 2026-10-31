@@ -551,3 +551,25 @@ func TestWatchLineSaysWhatWasNotRead(t *testing.T) {
 		t.Errorf("line = %q, want %q", got, want)
 	}
 }
+
+// TestFoldRunsRevIsTheFinishedBlocksHash: the block's Rev is taken once,
+// after Folded and CanRetry are settled, so it moves with them.
+func TestFoldRunsRevIsTheFinishedBlocksHash(t *testing.T) {
+	ended := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	ins := []RunInput{
+		{Run: domain.Run{N: 1, State: domain.RunDone, EndedAt: ended, CreatedAt: ended.Add(-time.Hour)}},
+		{Run: domain.Run{N: 2, State: domain.RunDone, EndedAt: ended.Add(time.Hour), CreatedAt: ended.Add(time.Minute)}},
+	}
+	out := FoldRuns(ins, time.Time{})
+	if !out[0].Folded || out[1].Folded {
+		t.Fatalf("folded = %v %v", out[0].Folded, out[1].Folded)
+	}
+	for i, r := range out {
+		if r.Rev != runRev(r) {
+			t.Errorf("run %d: Rev %q is not the hash of the finished block %q", i+1, r.Rev, runRev(r))
+		}
+	}
+	if out[0].Rev == FoldRun(ins[0]).Rev {
+		t.Error("a folded block keeps the Rev of its unfolded one")
+	}
+}

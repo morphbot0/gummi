@@ -237,7 +237,7 @@ func (e *Engine) pollWatchAsync(run *domain.Run, row domain.RunStep) {
 		return
 	}
 	prev := *row.Watch
-	if !e.goBrief(func() {
+	if !e.goWorkflow(func() {
 		changed := false
 		defer func() {
 			rt.release(key)
@@ -258,7 +258,7 @@ func (e *Engine) pollWatchAsync(run *domain.Run, row domain.RunStep) {
 			return
 		}
 		changed = e.applyRead(cur.Watch, facts, transient)
-		_ = e.cfg.Store.UpdateRunStep(ctx, cur)
+		_ = e.cfg.Store.UpdateRunStepWatch(ctx, cur)
 	}) {
 		rt.release(key)
 	}
@@ -290,14 +290,21 @@ func (e *Engine) readWatch(ctx context.Context, sess domain.Feature, spec *domai
 	if prev != nil && prev.ReadError != "" {
 		prev = nil
 	}
+	checksAt := time.Time{}
 	if prev != nil {
 		facts.FetchedAt = prev.FetchedAt
+		if checksAt = prev.ChecksAt; checksAt.IsZero() {
+			checksAt = prev.FetchedAt
+		}
+		facts.ChecksAt = checksAt
 	}
 	// the checks are read again when the head moved, one was pending, none
 	// had reported, the PR was touched, or a while has passed
 	if prev == nil || prev.ChecksHead != facts.Head || hasBucket(prev.Checks, domain.WatchCheckPending) ||
-		len(prev.Checks) == 0 || prev.UpdatedAt != facts.UpdatedAt || facts.ReadAt.Sub(prev.FetchedAt) > watchPollMax {
-		facts.FetchedAt = facts.ReadAt
+		(len(prev.Checks) == 0 && facts.ReadAt.Sub(checksAt) > time.Minute) ||
+		prev.UpdatedAt != facts.UpdatedAt || facts.ReadAt.Sub(checksAt) > watchPollMax {
+		// a repository with no CI is asked a minute apart, not every poll
+		facts.ChecksAt = facts.ReadAt
 		checks, err := pr.FetchChecks(ctx, gh, ref)
 		if err != nil {
 			facts.ReadError = "reading the PR's checks: " + err.Error()
@@ -308,14 +315,25 @@ func (e *Engine) readWatch(ctx context.Context, sess domain.Feature, spec *domai
 			facts.ChecksHead = facts.Head
 		}
 		if len(checks.Failing()) > 0 && checks.Count(pr.CheckPending) == 0 {
+			// a failing check whose log was read on this same head keeps it:
+			// a comment on a red PR does not download the logs again
+			logs := map[string]string{}
+			if prev != nil && prev.ChecksHead == checks.HeadSHA {
+				for _, c := range prev.Checks {
+					if c.Log != "" {
+						logs[c.Name] = c.Log
+					}
+				}
+			}
 			read := pr.Checks{HeadSHA: checks.HeadSHA}
 			for _, it := range checks.Items {
-				if it.Bucket == pr.CheckFail && (len(spec.Checks) == 0 || slices.Contains(spec.Checks, it.Name)) {
+				if _, have := logs[it.Name]; !have && it.Bucket == pr.CheckFail && (len(spec.Checks) == 0 || slices.Contains(spec.Checks, it.Name)) {
 					read.Items = append(read.Items, it)
 				}
 			}
-			pr.FetchFailedLogs(ctx, gh, &read)
-			logs := map[string]string{}
+			if len(read.Items) > 0 {
+				pr.FetchFailedLogs(ctx, gh, &read)
+			}
 			for _, it := range read.Items {
 				logs[it.Name] = it.Log
 			}
@@ -456,7 +474,7 @@ func (e *Engine) applyTrust(ctx context.Context, gh string, ref domain.PullReque
 		}
 		body := it.Body
 		if len(body) > feedbackCap {
-			body = body[:feedbackCap] + "…"
+			body = body[:runeCut(body, feedbackCap)] + "…"
 		}
 		facts.Feedback = append(facts.Feedback, domain.WatchFeedback{
 			ID: it.ID, Kind: it.Kind, Author: first(it.People), URL: it.URL, Body: body, State: it.State,
@@ -497,9 +515,14 @@ func (e *Engine) applyRead(w *domain.WatchState, f domain.WatchFacts, transient 
 	}
 	prev := w.Observed
 	if f.ReadError != "" && prev != nil {
+		why := f.ReadError
 		f = *prev
 		f.ReadAt = now
-		f.ReadError = "the PR could not be read for " + strconv.Itoa(w.ReadFails) + " reads in a row"
+		if w.ReadFails > 0 {
+			f.ReadError = "the PR could not be read for " + strconv.Itoa(w.ReadFails) + " reads in a row"
+		} else {
+			f.ReadError = why
+		}
 	}
 	changed := prev == nil || watchChanged(prev, &f)
 	w.Observed = &f
@@ -659,7 +682,7 @@ func (e *Engine) prepareBaseAsync(session domain.FeatureID, n int, path string, 
 	if !rt.claim(key) {
 		return
 	}
-	if !e.goBrief(func() {
+	if !e.goWorkflow(func() {
 		defer func() {
 			rt.release(key)
 			e.workflowEvent(session)
@@ -722,7 +745,7 @@ func (e *Engine) pushPassAsync(session domain.FeatureID, n int, path string, pas
 	if !rt.claim(key) {
 		return
 	}
-	if !e.goBrief(func() {
+	if !e.goWorkflow(func() {
 		defer func() {
 			rt.release(key)
 			e.workflowEvent(session)
@@ -821,7 +844,7 @@ func eventText(ev domain.WatchEvent, f *domain.WatchFacts, spec *domain.Watch, i
 	}
 	out := b.String()
 	if len(out) > eventTextCap {
-		out = out[:eventTextCap] + "\n… (cut)\n"
+		out = out[:runeCut(out, eventTextCap)] + "\n… (cut)\n"
 	}
 	return strings.TrimRight(out, "\n")
 }
@@ -1061,7 +1084,13 @@ func checkWatchTrust(r domain.Recipe, inputs map[string]string) error {
 // writePRAllowance lists what allowing a recipe allows on the session's
 // PR: each act, and what the watch waits for, acts on and for whom.
 func (e *Engine) writePRAllowance(ctx context.Context, b *strings.Builder, run *domain.Run) {
-	steps := prSteps(run.Recipe)
+	e.writePRAllowanceOf(ctx, b, run.Recipe, run.Inputs)
+}
+
+// writePRAllowanceOf is writePRAllowance for a recipe and the inputs its
+// templates are filled from: a revised plan's question reads it too.
+func (e *Engine) writePRAllowanceOf(ctx context.Context, b *strings.Builder, recipe domain.Recipe, inputs map[string]string) {
+	steps := prSteps(recipe)
 	if len(steps) == 0 {
 		return
 	}
@@ -1086,13 +1115,13 @@ func (e *Engine) writePRAllowance(ctx context.Context, b *strings.Builder, run *
 		}
 		fmt.Fprintf(b, "- %s: %s\n", s.ID, what)
 	}
-	ws, ok := run.Recipe.WatchStep()
+	ws, ok := recipe.WatchStep()
 	if !ok {
 		return
 	}
 	w := ws.Watch
 	b.WriteString("- after each pass: push the branch\n")
-	text, _ := workflowrecipe.FillPlain(w.Trust, workflowrecipe.Vars{Inputs: run.Inputs})
+	text, _ := workflowrecipe.FillPlain(w.Trust, workflowrecipe.Vars{Inputs: inputs})
 	filter, perr := workflowrecipe.ParseTrust(text)
 	self := ""
 	if filter.Self && perr == nil {
@@ -1119,7 +1148,11 @@ func (e *Engine) writePRAllowance(ctx context.Context, b *strings.Builder, run *
 		}
 		switch h.Form() {
 		case "recipe":
-			fmt.Fprintf(b, "- %s%s: the %s recipe, frozen here\n", ev, when, h.Recipe)
+			name := h.Recipe
+			if name == "" {
+				name = "inline"
+			}
+			fmt.Fprintf(b, "- %s%s: the %s recipe, frozen here\n", ev, when, name)
 		case "goto":
 			fmt.Fprintf(b, "- %s%s: steps from %s again\n", ev, when, h.Goto)
 		default:

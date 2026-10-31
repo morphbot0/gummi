@@ -235,7 +235,11 @@ type WatchFacts struct {
 	ReadAt time.Time
 	// FetchedAt is when the checks and the feedback were last read in full,
 	// as against the cheap status read (ReadAt)
-	FetchedAt      time.Time
+	FetchedAt time.Time
+	// ChecksAt is when the checks alone were last read in full: their timer
+	// is kept apart from the feedback's (zero in a row from before, which
+	// FetchedAt then stands for)
+	ChecksAt       time.Time
 	State          string // OPEN, CLOSED, MERGED
 	Head, Base     string
 	BaseRef        string

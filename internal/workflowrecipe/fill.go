@@ -137,11 +137,22 @@ const (
 	closeInputMark = "<<<end gummi-input name=%q>>>"
 )
 
+// breakDelims breaks every run of "<<<" in s, however long. One pass of
+// ReplaceAll leaves "<<<" behind in a longer run ("<<<<<" becomes
+// "<< <<<"), so it repeats until none is left; each pass only adds spaces,
+// so it ends.
+func breakDelims(s string) string {
+	for strings.Contains(s, "<<<") {
+		s = strings.ReplaceAll(s, "<<<", "<< <")
+	}
+	return s
+}
+
 // Wrap puts a step's output between delimiters naming the step. A
 // delimiter-like run of "<<<" inside the output is broken up, so an output
 // cannot close its own wrapping and speak as gummi.
 func Wrap(step, output string) string {
-	body := strings.TrimSpace(strings.ReplaceAll(output, "<<<", "<< <"))
+	body := strings.TrimSpace(breakDelims(output))
 	if body == "" {
 		body = fmt.Sprintf("(step %s left no output)", step)
 	}
@@ -152,7 +163,7 @@ func Wrap(step, output string) string {
 // a step's output: an input is text from outside the run — a bug report
 // as it was filed — and must not pose as instructions to the step.
 func WrapInput(name, text string) string {
-	body := strings.TrimSpace(strings.ReplaceAll(text, "<<<", "<< <"))
+	body := strings.TrimSpace(breakDelims(text))
 	if body == "" {
 		body = fmt.Sprintf("(input %s was left empty)", name)
 	}
