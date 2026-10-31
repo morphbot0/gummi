@@ -44,6 +44,12 @@ import (
 	"github.com/morphis/gummi/internal/workflowrecipe"
 )
 
+// The formats of a drive's stream on its writer.
+const (
+	FormatJSONL = "jsonl"
+	FormatText  = "text"
+)
+
 // Options configures one drive. Envelope is required.
 type Options struct {
 	// Envelope is the session's credit budget.
@@ -63,6 +69,15 @@ type Options struct {
 	Timeout time.Duration
 	// Verbose adds the session's tool-call activity lines to the stream.
 	Verbose bool
+	// Format is how the drive's events read on the writer given to New:
+	// FormatJSONL (the default) or FormatText, for a person at a terminal.
+	Format string
+	// JSONL, if set, receives every event as NDJSON, activity lines
+	// included, whatever Format is.
+	JSONL io.Writer
+	// Errs, if set, receives the text form's errors in place of the
+	// stream.
+	Errs io.Writer
 
 	// Workflow names the recipe the drive runs itself (a workspace's or a
 	// bundled one), or WorkflowYAML writes it out; at most one is set.
@@ -167,11 +182,12 @@ type Driver struct {
 	partial bool
 }
 
-// New builds a driver writing its NDJSON stream to out. The caller owns
+// New builds a driver writing its event stream to out, as NDJSON unless
+// opts.Format says text. The caller owns
 // the engine and agent lifetime.
 func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out io.Writer, opts Options) *Driver {
 	return &Driver{
-		eng: eng, store: store, ws: ws, out: newEmitter(out, opts.Verbose), opts: opts,
+		eng: eng, store: store, ws: ws, out: newEmitter(sinks{Out: out, Format: opts.Format, JSONL: opts.JSONL, Errs: opts.Errs}, opts.Verbose), opts: opts,
 		poll:      workflowPoll,
 		runStates: map[int]domain.RunState{},
 		seenLive:  map[int]bool{},

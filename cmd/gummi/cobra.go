@@ -23,7 +23,7 @@ var doctorCmd = &cobra.Command{
 // runCmd implements `gummi run "<prompt>"`: one session, driven to its end
 // with no person at the keyboard.
 var runCmd = &cobra.Command{
-	Use:   `run --envelope <dollars> [--workflow name | --workflow-file path] [--input name=value ...] [--profile name] [--repo name] [--base branch] [--ref id] [--timeout d] [--verbose] ["<prompt>"]`,
+	Use:   `run --envelope <dollars> [--workflow name | --workflow-file path] [--input name=value ...] [--profile name] [--repo name] [--base branch] [--ref id] [--timeout d] [--verbose] [--format text|jsonl] [--jsonl file] ["<prompt>"]`,
 	Short: "Run one session from a prompt, or one workflow on its inputs, unattended, streaming NDJSON (for evals and CI)",
 	Long: `Run mints a session from the prompt and drives it to its end with no one at
 the keyboard. Its workflow runs are always allowed, the envelope their only
@@ -117,6 +117,8 @@ func bindRunFlags(fs *pflag.FlagSet) {
 	fs.String("ref", "", "an external id kept on the session and echoed on the created line (an eval case, a CI job)")
 	fs.Duration("timeout", defaultRunTimeout, "stop when nothing has happened for this long (0: never)")
 	fs.Bool("verbose", false, "add the session's tool-call activity lines to the stream")
+	fs.String("format", "", "stdout as text or jsonl (default: text on a terminal, jsonl when piped)")
+	fs.String("jsonl", "", "also write every event, activity included, as NDJSON to this file")
 	fs.String("workflow", "", "run this recipe itself, a workspace's or a bundled one, instead of sending the prompt")
 	fs.String("workflow-file", "", "run the recipe written in this YAML file itself")
 	fs.StringArray("input", nil, "an input of the workflow as name=value, name=@file or name=- (stdin); repeat for each")

@@ -51,7 +51,9 @@ and revert it in one click. Recipes are plain YAML — use the bundled
   time, one pull request each.
 - **Terminal** — the same board as a TUI (`gummi`).
 - **Unattended** — `gummi run --envelope 5 "<prompt>"` runs one session
-  with no one at the keyboard and streams NDJSON, for evals and CI;
+  with no one at the keyboard, for evals and CI: readable text on a
+  terminal, NDJSON when piped (`--format`), and `--jsonl events.jsonl` keeps
+  the full NDJSON in a file beside either;
   `gummi run --envelope 2 --workflow triage --input report=@bug.md` runs a
   workflow on its inputs and streams its report and artifacts.
 
