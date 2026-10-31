@@ -1,0 +1,55 @@
+{
+  "read": {
+    "pending": true,
+    "agents": [
+      {
+        "name": "copilot",
+        "status": "not installed",
+        "hint": "install the copilot CLI — \"copilot\" is not on PATH",
+        "models": []
+      },
+      {
+        "name": "claude",
+        "status": "usable",
+        "models": [
+          "haiku",
+          "opus"
+        ],
+        "strong": "opus",
+        "everyday": "haiku"
+      }
+    ],
+    "agent": "claude",
+    "askAgent": false,
+    "roles": [
+      {
+        "role": "architect",
+        "tier": "strong"
+      },
+      {
+        "role": "implementer",
+        "tier": "everyday"
+      }
+    ],
+    "profile": "default"
+  },
+  "idle": {
+    "pending": false,
+    "agents": [],
+    "agent": "",
+    "askAgent": false,
+    "roles": [],
+    "profile": ""
+  },
+  "request": {
+    "agent": "claude",
+    "strong": "opus",
+    "everyday": "haiku"
+  },
+  "skip": {
+    "skip": true
+  },
+  "done": {
+    "notice": "profile \"default\" in use"
+  }
+}

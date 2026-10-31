@@ -1,0 +1,18 @@
+/* views/firstrun.css — the first-run setup: an agent list, two selects and
+   a role table, in the page's one modal. */
+
+.frs{display:flex;flex-direction:column;gap:12px}
+.frs .grow{flex:1;min-width:0}
+.frs-step{font-size:11.5px;color:var(--fg4)}
+.frs-lede{margin:0;font-size:13px;color:var(--fg2)}
+.frs-agents{display:flex;flex-direction:column;gap:6px}
+.frs-agent{display:grid;grid-template-columns:auto max-content 1fr;align-items:center;gap:2px 10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);cursor:pointer}
+.frs-agent.off{cursor:default;opacity:.7}
+.frs-agent b{font-size:13px;color:var(--fg)}
+.frs-status{font-size:12px;color:var(--fg3)}
+.frs-hint{grid-column:2 / -1;font-size:11.5px;color:var(--fg3);overflow-wrap:anywhere}
+.frs-roles{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0;font-size:12.5px}
+.frs-roles dt{color:var(--fg3)}
+.frs-roles dd{margin:0;color:var(--fg2);overflow-wrap:anywhere}
+.frs-note{margin:0;font-size:11.5px;color:var(--fg4)}
+.frs-foot{display:flex;align-items:center;gap:8px}

@@ -160,6 +160,23 @@ func CheckProfileEdit(edit config.ProfileEdit, def string) error {
 // is checked (CheckProfileEdit), and a backend the board has not started
 // is started first, so the edit applies without a restart.
 func (e *Engine) SaveProfile(ctx context.Context, name string, edit config.ProfileEdit, makeDefault bool) error {
+	return e.writeProfile(ctx, edit, func(path string) error {
+		return config.SaveProfile(path, name, edit, makeDefault)
+	})
+}
+
+// ReplaceProfiles writes profile name as the file's only profile and its
+// default — the first-run wizard's save — checked and applied as
+// SaveProfile is.
+func (e *Engine) ReplaceProfiles(ctx context.Context, name string, edit config.ProfileEdit) error {
+	return e.writeProfile(ctx, edit, func(path string) error {
+		return config.ReplaceProfiles(path, name, edit)
+	})
+}
+
+// writeProfile checks edit, starts every backend it names, runs write on
+// the profiles file and re-reads it.
+func (e *Engine) writeProfile(_ context.Context, edit config.ProfileEdit, write func(path string) error) error {
 	path := e.profilesPath()
 	if path == "" {
 		return errNoProfilesFile
@@ -181,7 +198,7 @@ func (e *Engine) SaveProfile(ctx context.Context, name string, edit config.Profi
 			}
 		}
 	}
-	if err := config.SaveProfile(path, name, edit, makeDefault); err != nil {
+	if err := write(path); err != nil {
 		return err
 	}
 	return e.reloadProfiles()

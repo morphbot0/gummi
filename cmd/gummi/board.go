@@ -67,7 +67,7 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 	if err != nil {
 		return nil, err
 	}
-	ws, err := ensureWorkspace(wsRoot, defaultRoot)
+	ws, freshProfiles, err := seedWorkspace(wsRoot, defaultRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +130,9 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 	} else {
 		shell.SetEngineUnavailable(why)
 	}
+	// the start that seeded profiles.yaml offers the first-run setup
+	shell.SetFirstRun(freshProfiles)
+	shell.SetFirstRunProbe(ui.FirstRunProbe{Prefer: defaultBackendName()})
 	// layer-3 budget: new features get this envelope (dollars, held in
 	// credits), drawn on by every stage until it runs dry and a human gate
 	// offers a top-up.

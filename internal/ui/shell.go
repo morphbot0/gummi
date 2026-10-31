@@ -18,6 +18,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/firstrun"
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/publish"
@@ -344,6 +345,12 @@ type Shell struct {
 	// dialog nobody is answering is never seen, and what the TUI would
 	// have asked in one is asked of the web face instead (webintent.go).
 	headless bool
+	// firstRun is the first-run setup still pending (SetFirstRun);
+	// firstRunWiz is what the web page was last shown of it, so its answer
+	// is checked against what was offered.
+	firstRun      bool
+	firstRunProbe FirstRunProbe
+	firstRunWiz   *firstrun.Wizard
 	// today is the board's spend since local midnight, measured off the
 	// loop after a row load (webboard.go) for the web face's header.
 	today todaySpend
@@ -1148,6 +1155,9 @@ func (m *Shell) Init() tea.Cmd {
 	if m.engine != nil {
 		cmds = append(cmds, m.listenEngineCmd())
 	}
+	if cmd := m.firstRunInit(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	if m.copilotHint {
 		cmds = append(cmds, m.fetchCopilotQuota())
 	}
@@ -1500,6 +1510,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if cmd, ok := m.updateProfiles(msg); ok {
+		return m, cmd
+	}
+	if cmd, ok := m.updateFirstRun(msg); ok {
 		return m, cmd
 	}
 	if cmd, ok := m.updateCurator(msg); ok {

@@ -134,6 +134,9 @@ git -C "$WS" config user.name t; git -C "$WS" config user.email t@e.invalid
 printf '# demo\n' > "$WS/README.md"; printf 'package demo\n' > "$WS/demo.go"
 git -C "$WS" add .; git -C "$WS" commit -q -m init
 ( cd "$WS" && "$BIN" init >/dev/null 2>&1 )
+# a profiles.yaml already there keeps the first-run wizard off the board
+mkdir -p "$WS/.gummi"
+printf 'default: e2e\nprofiles:\n  e2e:\n    implementer: { model: demo-session }\n' > "$WS/.gummi/profiles.yaml"
 
 # FF-001 gets a deep history — its opening turn and fourteen follow-ups,
 # each a real turn through the headless driver — so a body taller than any

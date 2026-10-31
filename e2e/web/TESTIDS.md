@@ -354,6 +354,14 @@ composer's `model-picker`; `model-blank` leaves the role unset),
 `profile-form-default`, `profile-form-error`, `profile-form-error-detail`,
 `profile-form-cancel`, `profile-form-save`.
 
+## First-run setup (`views/firstrun.js`)
+`view-firstrun` (the view, opened on the start that seeded profiles.yaml),
+`firstrun-step` (`n/m`), `firstrun-agent-<name>` (one agent, its radio,
+status and hint), `firstrun-strong`, `firstrun-everyday` (the two model
+selects), `firstrun-roles` (the confirm's role → agent/model list),
+`firstrun-skip`, `firstrun-back`, `firstrun-continue`, `firstrun-save`,
+`firstrun-error`.
+
 ## Schedules (`views/schedules.js`)
 `schedules-list`, `schedules-count`, `schedules-new`, `schedules-empty`,
 `schedules-notice`; form `schedule-form` (create and edit — the same one),

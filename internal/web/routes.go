@@ -40,6 +40,7 @@ func (s *Server) routes() {
 	s.scheduleRoutes()
 	s.curatorRoutes()
 	s.profilesRoutes()
+	s.firstRunRoutes()
 	s.systemRoutes()
 	s.pushRoutes()
 	s.attachmentRoutes()

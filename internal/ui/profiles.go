@@ -61,6 +61,20 @@ func (o profileOps) save(ctx context.Context, name string, edit config.ProfileEd
 	return config.SaveProfile(o.path, name, edit, makeDefault)
 }
 
+// replace leaves profile name as the file's only profile and its default.
+func (o profileOps) replace(ctx context.Context, name string, edit config.ProfileEdit) error {
+	if o.eng != nil {
+		return o.eng.ReplaceProfiles(ctx, name, edit)
+	}
+	if o.path == "" {
+		return errNoProfiles
+	}
+	if err := engine.CheckProfileEdit(edit, ""); err != nil {
+		return err
+	}
+	return config.ReplaceProfiles(o.path, name, edit)
+}
+
 func (o profileOps) delete(name string) error {
 	if o.eng != nil {
 		return o.eng.DeleteProfile(name)

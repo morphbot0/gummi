@@ -101,6 +101,15 @@ ts_authkey: tskey-auth-…
 
 Prefer the terminal? Run `gummi` in the repo; `?` shows every key.
 
+The first time the board starts in a repository it offers a short setup, in
+the terminal and on the web page alike: which agent to run (skipped when
+only one is usable, with a hint for each that is not), a strong and an
+everyday model from that agent's list, and a confirm. Enter on each screen
+takes the preselections. It rewrites `.gummi/profiles.yaml` to one `default`
+profile; Esc or Skip keeps the starter file. `gummi run` and `gummi doctor`
+never show it, and neither does a later start. `P` in the terminal, or
+Profiles on the page, edits the profile afterwards.
+
 ## Docs
 
 [Configuration](docs/CONFIGURATION.md) ·
