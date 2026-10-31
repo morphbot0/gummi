@@ -75,6 +75,9 @@ for r in repo-b repo-c; do
   echo y > "$WS/$r/README.md"; git -C "$WS/$r" add README.md; git -C "$WS/$r" commit -q -m init
 done
 ( cd "$WS" && "$BIN" init >/dev/null 2>&1 )
+# a profiles.yaml already there keeps the first-run wizard off the board
+mkdir -p "$WS/.gummi"
+printf 'default: e2e\nprofiles:\n  e2e:\n    implementer: { model: demo-session }\n' > "$WS/.gummi/profiles.yaml"
 printf '\nrepos:\n  b: repo-b\n  c: repo-c\n' >> "$WS/.gummi/config.yaml"
 
 pane() { tmux capture-pane -t $S -p 2>/dev/null; }

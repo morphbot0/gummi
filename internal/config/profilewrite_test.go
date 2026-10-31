@@ -163,3 +163,31 @@ func TestSaveProfileRefuses(t *testing.T) {
 		t.Errorf("a refused edit changed the file:\n%s", got)
 	}
 }
+
+func TestReplaceProfilesLeavesOnlyOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	if err := os.WriteFile(path, []byte(ProfilesTemplateFor("claude")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	edit := ProfileEdit{Roles: Profile{"implementer": {Backend: "claude", Model: "haiku"}}}
+	if err := ReplaceProfiles(path, "default", edit); err != nil {
+		t.Fatal(err)
+	}
+	p, err := LoadProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Default != "default" || len(p.Profiles) != 1 || p.Profiles["default"]["implementer"].Model != "haiku" {
+		t.Errorf("read back %+v", p)
+	}
+	if txt := readFile(t, path); strings.Contains(txt, "thrifty:") || strings.Contains(txt, "premium:") {
+		t.Errorf("the seed's profiles remain:\n%s", txt)
+	}
+	before, _ := os.ReadFile(path)
+	if err := ReplaceProfiles(path, "default", ProfileEdit{}); err == nil {
+		t.Error("an empty profile was accepted")
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Error("a refused replace changed the file")
+	}
+}

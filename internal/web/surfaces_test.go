@@ -110,7 +110,7 @@ func newBoardHarness(t *testing.T) *boardHarness {
 		roles[role] = config.RoleConfig{Backend: "fake", Model: "fake-model"}
 	}
 	eng := engine.New(engine.Config{
-		Agents: map[string]agent.Agent{"": ag, "fake": ag}, Store: store, Pool: pool, Workspace: ws, Model: "fake-model",
+		Agents: map[string]agent.Agent{"": ag, "fake": ag, "claude": ag}, Store: store, Pool: pool, Workspace: ws, Model: "fake-model",
 		Profiles: config.Profiles{Default: "balanced", Profiles: map[string]config.Profile{"balanced": roles, "thrifty": roles}},
 	})
 	pool.SetBaseLookup(eng.StackBaseFor)

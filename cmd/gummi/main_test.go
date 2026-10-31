@@ -12,6 +12,44 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
+func TestEnsureWorkspaceReportsFreshProfiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	ws, fresh, err := seedWorkspace(dir, dir)
+	if err != nil || !fresh {
+		t.Fatalf("first start: fresh=%v err=%v", fresh, err)
+	}
+	seed, err := os.ReadFile(ws.ProfilesFile())
+	if err != nil || len(seed) == 0 {
+		t.Fatalf("seed not written: %v", err)
+	}
+	if _, fresh, err = seedWorkspace(dir, dir); err != nil || fresh {
+		t.Errorf("second start: fresh=%v err=%v", fresh, err)
+	}
+
+	// a profiles.yaml a person wrote before the first start is left alone
+	other := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(other, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	w, err := state.Init(other, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine := []byte("default: mine\nprofiles:\n  mine:\n    implementer: { model: x }\n")
+	if err := os.WriteFile(w.ProfilesFile(), mine, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, fresh, err = seedWorkspace(other, other); err != nil || fresh {
+		t.Errorf("existing file: fresh=%v err=%v", fresh, err)
+	}
+	if got, _ := os.ReadFile(w.ProfilesFile()); string(got) != string(mine) {
+		t.Errorf("existing profiles.yaml rewritten: %q", got)
+	}
+}
+
 func TestEnsureWorkspaceLazyInit(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {

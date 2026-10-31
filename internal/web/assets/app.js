@@ -12,7 +12,7 @@ import { initTheme } from './theme.js?v=__ASSET_V__'
 import { initViewport } from './viewport.js?v=__ASSET_V__'
 import { initBack } from './back.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
-import { setViewContext, openModal, closeOverlay } from './views.js?v=__ASSET_V__'
+import { setViewContext, openModal, closeOverlay, openView } from './views.js?v=__ASSET_V__'
 import { onEvent } from './events.js?v=__ASSET_V__'
 import * as api from './api.js?v=__ASSET_V__'
 import { initTop } from './top.js?v=__ASSET_V__'
@@ -208,7 +208,7 @@ async function startBoard () {
     if (id !== state.sel || (tab && tab !== state.tab) || opens || closed) select(id, { tab })
   }, () => ({ id: state.sel, tab: shownTab() }))
   await loadBoard()
-  if (routed && state.sel) { startFocus(); return connectEvents(early) }
+  if (routed && state.sel) { startFocus(); offerFirstRun(); return connectEvents(early) }
   const route = parse()
   if (route.tab) set({ tab: route.tab })
   const first = (route.id && rows().some(r => r.id === route.id) && route.id) ||
@@ -229,8 +229,21 @@ async function startBoard () {
   if (!named) clearHash()
   await picking
   startFocus()
+  offerFirstRun()
 
   connectEvents()
+}
+
+// offerFirstRun shows the first-run setup when the board says it is still
+// pending (the start that seeded profiles.yaml). The page decides nothing:
+// it draws what GET /api/firstrun gives.
+async function offerFirstRun () {
+  try {
+    const wizard = await get('/api/firstrun')
+    if (wizard.pending) openView('firstrun', { wizard })
+  } catch (err) {
+    console.error(err)
+  }
 }
 
 // startFocus puts a keyboard's start at the top of the board: with nothing

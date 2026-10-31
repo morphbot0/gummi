@@ -122,7 +122,23 @@ Scaffolded on first run. Every key is optional.
 The first run seeds this file. Its default `thrifty` profile leaves
 `backend:` out, so the default backend drives it, and its model ids are
 written for that backend: the CLI's aliases for claude and
-`provider/model` for opencode. An existing file is never rewritten.
+`provider/model` for opencode. An existing file is never rewritten by a
+start; the one exception is the setup below, on the start that created it.
+
+The board start that creates the file also offers a first-run setup, on the
+terminal and on the web page: the agent (skipped when exactly one is
+usable; each one that is not installed or signed out says what to do;
+only copilot, claude and opencode are offered, and the one `agent:` or
+`GUMMI_AGENT` names is preselected when usable), a
+strong and an everyday model from that agent's list, and a confirm.
+Architect, planner and reviewer run on the strong model; implementer,
+tester, scribe and scout on the everyday one, each naming the backend.
+Saving rewrites the file to that one profile, `default`, as the default;
+Esc or Skip keeps the seeded file untouched, and so does Continue when no
+agent is usable (the starter profiles stay). `gummi run` and `gummi doctor`
+never show the setup, and a start that finds the file already there does
+not either. Edit the profile later with `P` in the terminal or Profiles on
+the page.
 
 A `default:` name plus a `profiles:` map. Each profile maps roles to
 `{backend, model}`. A session runs on `implementer`. A workflow run's step

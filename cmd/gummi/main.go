@@ -533,9 +533,16 @@ func toNamedRepos(list []config.NamedRepo) []worktree.NamedRepo {
 // repository root gummi manages, validated by state.Init. Idempotent: an
 // existing workspace and its files are left untouched.
 func ensureWorkspace(ws, repo string) (state.Workspace, error) {
+	w, _, err := seedWorkspace(ws, repo)
+	return w, err
+}
+
+// seedWorkspace is ensureWorkspace that also says whether this call wrote
+// profiles.yaml — the start the first-run wizard shows on.
+func seedWorkspace(ws, repo string) (_ state.Workspace, freshProfiles bool, _ error) {
 	w, err := state.Init(ws, repo)
 	if err != nil {
-		return state.Workspace{}, err
+		return state.Workspace{}, false, err
 	}
 	for _, f := range []struct{ path, body string }{
 		{w.ConfigFile(), config.Template},
@@ -543,7 +550,10 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 	} {
 		if _, err := os.Stat(f.path); os.IsNotExist(err) {
 			if err := os.WriteFile(f.path, []byte(f.body), 0o600); err != nil {
-				return state.Workspace{}, fmt.Errorf("writing %s: %w", filepath.Base(f.path), err)
+				return state.Workspace{}, false, fmt.Errorf("writing %s: %w", filepath.Base(f.path), err)
+			}
+			if f.path == w.ProfilesFile() {
+				freshProfiles = true
 			}
 		}
 	}
@@ -552,7 +562,7 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 	credentials.Use(credentials.Store{Dir: w.CredentialsDir()})
 	worktree.UseCoAuthorHooks(w.HooksDir(), w.Root)
 	useCoAuthors(w)
-	return w, nil
+	return w, freshProfiles, nil
 }
 
 // useCoAuthors names the workspace's configured co-authors for every

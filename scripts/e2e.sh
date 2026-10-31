@@ -21,6 +21,9 @@ fail() { echo "e2e FAIL: $*" >&2; exit 1; }
 
 [ -x "$bin" ] || fail "bin/gummi not built"
 "$root/scripts/demo.sh" "$dir" >/dev/null
+# a profiles.yaml already there keeps the first-run wizard off the board
+mkdir -p "$dir/.gummi"
+printf 'default: e2e\nprofiles:\n  e2e:\n    implementer: { model: demo-session }\n' > "$dir/.gummi/profiles.yaml"
 
 k() { tmux -L "$sock" send-keys "$@"; sleep 0.3; }
 pane() { tmux -L "$sock" capture-pane -p; }

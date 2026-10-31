@@ -79,6 +79,34 @@ func SaveProfile(path, name string, p ProfileEdit, makeDefault bool) error {
 	})
 }
 
+// ReplaceProfiles leaves the profiles file at path holding profile name
+// alone, as the default: every other profile is removed. It is validated
+// before anything is written, as SaveProfile is, in one write; the file's
+// other lines and its comments stay.
+func ReplaceProfiles(path, name string, p ProfileEdit) error {
+	name = strings.TrimSpace(name)
+	if !profileName.MatchString(name) {
+		return fmt.Errorf("profile name %q: letters, digits, '.', '_' and '-', at most 40, starting with a letter or digit", name)
+	}
+	if len(p.Roles) == 0 {
+		return errors.New("a profile needs at least one role")
+	}
+	value, err := profileNode(p)
+	if err != nil {
+		return err
+	}
+	return editProfiles(path, func(doc *profilesDoc) error {
+		for _, other := range doc.names() {
+			if other != name {
+				doc.remove(other)
+			}
+		}
+		doc.set(name, value)
+		doc.def = name
+		return nil
+	})
+}
+
 // DeleteProfile removes profile name from the profiles file at path. The
 // default is refused while another profile could take its place — a person
 // names the new default first — and the last profile takes the default
