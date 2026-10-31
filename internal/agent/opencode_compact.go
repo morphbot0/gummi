@@ -37,7 +37,12 @@ func (s *opencodeSession) Compact(context.Context) error {
 }
 
 func (s *opencodeSession) runCompact(ctx context.Context, srv opencodeServer, id, provider, model string) {
-	err := srv.summarize(ctx, id, provider, model)
+	var err error
+	if srv.v2 {
+		err = s.runCompactV2(ctx, srv, id)
+	} else {
+		err = srv.summarize(ctx, id, provider, model)
+	}
 	s.mu.Lock()
 	s.cancel = nil
 	closed := s.closed
