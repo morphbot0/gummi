@@ -48,10 +48,10 @@ func Agents(detected []agentcli.AgentCLI, signedOut func(name string) bool) []Ag
 		switch {
 		case !d.Installed:
 			a.Status = NotInstalled
-			a.Hint = fmt.Sprintf("install the %s CLI — `%s` is not on PATH", d.Name, d.Bin)
+			a.Hint = fmt.Sprintf("install the %s CLI — %q is not on PATH", d.Name, d.Bin)
 		case signedOut != nil && signedOut(d.Name):
 			a.Status = SignedOut
-			a.Hint = fmt.Sprintf("sign in to %s — run `%s` once and log in", d.Name, d.Bin)
+			a.Hint = fmt.Sprintf("sign in to %s — run %q once and log in", d.Name, d.Bin)
 		}
 		out = append(out, a)
 	}

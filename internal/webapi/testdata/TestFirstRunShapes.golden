@@ -5,7 +5,7 @@
       {
         "name": "copilot",
         "status": "not installed",
-        "hint": "install the copilot CLI — `copilot` is not on PATH",
+        "hint": "install the copilot CLI — \"copilot\" is not on PATH",
         "models": []
       },
       {

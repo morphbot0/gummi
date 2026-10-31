@@ -117,7 +117,7 @@ registerView('firstrun', {
       body.append(
         h('div', { class: 'frs-step', testid: 'firstrun-step' }, `${stepNo()}/${steps}`),
         ...{ agent: agentScreen, models: modelsScreen, confirm: confirmScreen }[v.screen](),
-        v.err ? errorBox(v.err, 'firstrun-error') : null)
+        ...(v.err ? [errorBox(v.err, 'firstrun-error')] : []))
       body.querySelector('.btn.pri')?.focus()
     }
 

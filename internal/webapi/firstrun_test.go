@@ -18,7 +18,7 @@ func TestFirstRunShapes(t *testing.T) {
 		Read: FirstRun{
 			Pending: true,
 			Agents: []FirstRunAgent{
-				{Name: "copilot", Status: "not installed", Hint: "install the copilot CLI — `copilot` is not on PATH", Models: []string{}},
+				{Name: "copilot", Status: "not installed", Hint: "install the copilot CLI — \"copilot\" is not on PATH", Models: []string{}},
 				{Name: "claude", Status: "usable", Models: []string{"haiku", "opus"}, Strong: "opus", Everyday: "haiku"},
 			},
 			Agent:    "claude",

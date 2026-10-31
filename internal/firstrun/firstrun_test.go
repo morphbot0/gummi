@@ -54,10 +54,10 @@ func TestFirstRunAgents(t *testing.T) {
 		})
 	}
 	as := Agents(det(false, true, true), out("claude"))
-	if as[0].Hint != "install the copilot CLI — `copilot` is not on PATH" {
+	if as[0].Hint != "install the copilot CLI — \"copilot\" is not on PATH" {
 		t.Errorf("not installed hint = %q", as[0].Hint)
 	}
-	if as[1].Hint != "sign in to claude — run `claude` once and log in" {
+	if as[1].Hint != "sign in to claude — run \"claude\" once and log in" {
 		t.Errorf("signed out hint = %q", as[1].Hint)
 	}
 }
