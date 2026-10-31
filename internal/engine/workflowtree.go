@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -138,6 +139,12 @@ type treeDiff struct {
 // diffEach diffs every tree the two snapshots both hold. A tree one of
 // them lacks (a repository attached after the run started) is left out.
 func (e *Engine) diffEach(ctx context.Context, session domain.FeatureID, a, b string) ([]treeDiff, error) {
+	return e.diffEachWith(ctx, session, a, b, false)
+}
+
+// diffEachWith is diffEach; pathsOnly leaves every Patch empty and never
+// builds one.
+func (e *Engine) diffEachWith(ctx context.Context, session domain.FeatureID, a, b string, pathsOnly bool) ([]treeDiff, error) {
 	trees, err := e.runTrees(ctx, session)
 	if err != nil {
 		return nil, err
@@ -155,7 +162,14 @@ func (e *Engine) diffEach(ctx context.Context, session domain.FeatureID, a, b st
 				continue
 			}
 		}
-		patch, paths, err := worktree.DiffTrees(ctx, t.Dir, from, to)
+		var patch string
+		var paths []string
+		var err error
+		if pathsOnly {
+			paths, err = worktree.DiffPaths(ctx, t.Dir, from, to)
+		} else {
+			patch, paths, err = worktree.DiffTrees(ctx, t.Dir, from, to)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -189,6 +203,25 @@ func (e *Engine) diffTrees(ctx context.Context, session domain.FeatureID, a, b s
 		}
 	}
 	return patch.String(), paths, nil
+}
+
+// diffPaths is diffTrees' paths alone: no patch is built, for a reader
+// that only names the files two snapshots differ in.
+func (e *Engine) diffPaths(ctx context.Context, session domain.FeatureID, a, b string) ([]string, error) {
+	each, err := e.diffEachWith(ctx, session, a, b, true)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, d := range each {
+		for _, p := range d.Paths {
+			if d.Repo != "" {
+				p = d.Repo + ":" + p
+			}
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
 }
 
 // runIgnoredFile is the file in a run's directory that lists the ignored
@@ -283,26 +316,72 @@ func (e *Engine) diffTreesCached(ctx context.Context, session domain.FeatureID, 
 	rt := e.wfRT()
 	rt.mu.Lock()
 	hit, ok := rt.diffs[key]
+	failed := time.Now().Before(rt.retryAfter["diff/"+key])
 	rt.mu.Unlock()
 	if ok {
 		return hit.patch, hit.paths, nil
 	}
+	if failed {
+		return "", nil, errors.New("the diff could not be read a moment ago: not tried again yet")
+	}
 	patch, paths, err := e.diffTrees(ctx, session, a, b)
 	if err != nil {
+		// a diff git cannot read (an object gone) is not asked again on
+		// every refresh of a face
+		rt.mu.Lock()
+		rt.retryAfter["diff/"+key] = time.Now().Add(10 * time.Second)
+		rt.mu.Unlock()
 		return "", nil, err
 	}
 	rt.mu.Lock()
-	if len(rt.diffs) >= maxCachedDiffs {
-		clear(rt.diffs)
+	if len(patch) <= maxCachedDiffBytes {
+		if len(rt.diffs) >= maxCachedDiffs || rt.diffBytes+len(patch) > maxCachedDiffBytes {
+			clear(rt.diffs)
+			rt.diffBytes = 0
+		}
+		rt.diffs[key] = cachedDiff{patch: patch, paths: paths}
+		rt.diffBytes += len(patch)
 	}
-	rt.diffs[key] = cachedDiff{patch: patch, paths: paths}
 	rt.mu.Unlock()
 	return patch, paths, nil
+}
+
+// diffPathsCached is diffPaths for two settled snapshots: a patch cached
+// under the same pair already holds the paths, and a paths-only read is
+// kept apart so it never pays for a patch (and holds none in memory).
+func (e *Engine) diffPathsCached(ctx context.Context, session domain.FeatureID, a, b string) ([]string, error) {
+	key := a + ".." + b
+	rt := e.wfRT()
+	rt.mu.Lock()
+	if hit, ok := rt.diffs[key]; ok {
+		rt.mu.Unlock()
+		return hit.paths, nil
+	}
+	if hit, ok := rt.diffPathsOnly[key]; ok {
+		rt.mu.Unlock()
+		return hit, nil
+	}
+	rt.mu.Unlock()
+	paths, err := e.diffPaths(ctx, session, a, b)
+	if err != nil {
+		return nil, err
+	}
+	rt.mu.Lock()
+	if len(rt.diffPathsOnly) >= maxCachedDiffs*16 {
+		clear(rt.diffPathsOnly)
+	}
+	rt.diffPathsOnly[key] = paths
+	rt.mu.Unlock()
+	return paths, nil
 }
 
 // maxCachedDiffs bounds diffTreesCached's memory: past it, the cache starts
 // again.
 const maxCachedDiffs = 64
+
+// maxCachedDiffBytes bounds the patches diffTreesCached holds, together:
+// past it the cache starts again, and a patch larger than it is not kept.
+const maxCachedDiffBytes = 32 << 20
 
 type cachedDiff struct {
 	patch string
@@ -376,7 +455,7 @@ func itemResults(items []domain.DoneWhen, checks map[string]verify.Result, lastO
 			r.Verdict = domain.ItemUnmet
 			switch {
 			case c.Status == verify.StatusTimeout:
-				r.Verdict, r.Detail = domain.ItemUnjudged, fmt.Sprintf("the check did not finish within %s", doneWhenCheckTimeout)
+				r.Verdict, r.Detail = domain.ItemUnjudged, fmt.Sprintf("the check did not finish (it is stopped at %s, or when the run is)", doneWhenCheckTimeout)
 			case c.Status == verify.StatusNotRun:
 				r.Verdict, r.Detail = domain.ItemUnjudged, "the check never ran"
 			case c.OK && c.RanNoTests:
@@ -478,7 +557,7 @@ func (e *Engine) WorkflowRevertPreviewTo(ctx context.Context, session domain.Fea
 	if err != nil {
 		return RevertPreview{}, err
 	}
-	_, paths, err := e.diffTrees(ctx, session, base, now)
+	paths, err := e.diffPaths(ctx, session, base, now)
 	if err != nil {
 		return RevertPreview{}, err
 	}
@@ -657,6 +736,13 @@ func (e *Engine) WorkflowRevertTo(ctx context.Context, session domain.FeatureID,
 	// (the index kept at the start is the primary tree's)
 	if err := worktree.RestoreIndex(ctx, dir, run.StartIndex, primaryPaths); err != nil {
 		return nil, fmt.Errorf("the files are put back, but not the index: %w", err)
+	}
+	run.RevertedTo = step
+	if step == "" {
+		run.RevertedTo = domain.RevertedToStart
+	}
+	if err := st.UpdateRun(ctx, run); err != nil {
+		slog.Warn("recording a run's revert", "session", session, "run", n, "err", err)
 	}
 	e.runNote(session, fmt.Sprintf("run %d reverted to %s: %d path%s put back", n, when, len(paths), plural(len(paths))))
 	e.workflowEvent(session)

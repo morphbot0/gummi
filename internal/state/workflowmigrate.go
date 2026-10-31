@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -157,7 +158,7 @@ func migrateToWorkflows(db *sql.DB, root string) error {
 	}
 	// PRAGMA user_version is transactional: a migration that fails here
 	// runs again on the next open.
-	if _, err := tx.ExecContext(ctx, `PRAGMA user_version = 1`); err != nil {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, workflowsVersion)); err != nil {
 		return err
 	}
 	return tx.Commit()

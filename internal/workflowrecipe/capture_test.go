@@ -17,6 +17,7 @@ func TestCaptureArtifact(t *testing.T) {
 			"review.json", "{\"verdict\": \"APPROVED\", \"findings\": [{\"at\": \"x.go\"}]}\n", true,
 		},
 		{"a brace that is no JSON is passed over", "{not json} but {\"verdict\":\"APPROVED\"} {oops", "review.JSON", "{\"verdict\":\"APPROVED\"}\n", true},
+		{"a trailing empty object in prose is not the artifact", "{\"verdict\":\"APPROVED\"}\nSee the {} placeholder.", "review.json", "{\"verdict\":\"APPROVED\"}\n", true},
 		{"no JSON at all", "APPROVED, all good", "review.json", "", false},
 		{"the last fenced block", "Design:\n```md\nfirst\n```\nand\n```\n# Design\n\nsecond\n```\n", "design.md", "# Design\n\nsecond\n", true},
 		{"no fence", "# Design\n\njust prose", "design.md", "", false},

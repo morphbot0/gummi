@@ -339,10 +339,9 @@ func FoldRuns(ins []RunInput, said time.Time) []Run {
 		all[i] = in.Run
 	}
 	for i, in := range ins {
-		out[i] = FoldRun(in)
+		out[i] = foldRun(in)
 		if domain.RetryRefusal(in.Run, in.Steps, all) == "" {
 			out[i].CanRetry = true
-			out[i].Rev = runRev(out[i])
 		}
 		if !in.Run.State.Ended() {
 			continue
@@ -364,8 +363,10 @@ func FoldRuns(ins []RunInput, said time.Time) []Run {
 		}
 		if fold {
 			out[i].Folded = true
-			out[i].Rev = runRev(out[i])
 		}
+	}
+	for i := range out {
+		out[i].Rev = runRev(out[i])
 	}
 	return out
 }
@@ -543,6 +544,14 @@ func placeRuns(items, runs []Item) []Item {
 
 // FoldRun folds one run into its block.
 func FoldRun(in RunInput) Run {
+	r := foldRun(in)
+	r.Rev = runRev(r)
+	return r
+}
+
+// foldRun is FoldRun without the block's Rev, which FoldRuns computes
+// once, after it has settled the fields it moves (Folded, CanRetry).
+func foldRun(in RunInput) Run {
 	run := in.Run
 	r := Run{
 		N: run.N, Recipe: runRecipe(run), Spec: run.Spec, SpecTitle: Sanitize(in.SpecTitle), SpecRev: run.SpecRev,
@@ -625,7 +634,9 @@ func FoldRun(in RunInput) Run {
 	r.CanPause = run.State == domain.RunRunning && !run.Stopping && !ending
 	r.CanResume = run.State == domain.RunPaused && !run.Stopping
 	r.CanStop = run.State.Open() && !run.Stopping && !ending
-	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0 && run.State != domain.RunRunning && r.Phase == ""
+	// a run reverted to its start has nothing of its own left to put back
+	r.CanRevert = run.StartTree != "" && !live && len(r.Files) > 0 && run.State != domain.RunRunning && r.Phase == "" &&
+		run.RevertedTo != domain.RevertedToStart
 	r.CanWithdraw = run.State == domain.RunQueued
 	if run.State.Open() && !run.Stopping {
 		for _, s := range in.Steps {
@@ -644,7 +655,6 @@ func FoldRun(in RunInput) Run {
 	if run.State.Ended() {
 		r.Mark, r.Line = endedLine(r)
 	}
-	r.Rev = runRev(r)
 	return r
 }
 
@@ -736,14 +746,21 @@ func repeatOver(run domain.Run, path string, iter int, steps []domain.RunStep) b
 	if a := run.OnMax[last]; a == "continue" || a == "stop" {
 		return true
 	}
-	// an entry after it begun: a step outside it started after its last
+	// an entry after it begun: a step outside it started after the
+	// earliest start in its last iteration
+	var first time.Time
+	seen := false
+	for _, o := range steps {
+		if under(o.Path, last) && (!seen || o.StartedAt.Before(first)) {
+			first, seen = o.StartedAt, true
+		}
+	}
+	if !seen {
+		return false
+	}
 	for _, s := range steps {
-		if !under(s.Path, path) && s.State != domain.StepWaiting {
-			for _, o := range steps {
-				if under(o.Path, last) && s.StartedAt.After(o.StartedAt) {
-					return true
-				}
-			}
+		if !under(s.Path, path) && s.State != domain.StepWaiting && s.StartedAt.After(first) {
+			return true
 		}
 	}
 	return false
@@ -829,28 +846,87 @@ func iterations(es []domain.Entry, prefix string, steps []domain.RunStep) []iter
 // finished reports whether an iteration has ended: every step in it
 // settled, and its stop condition judged, a later iteration begun or the
 // run over.
-func finished(run domain.Run, it iteration, steps []domain.RunStep) bool {
-	var mine []domain.RunStep
-	later := false
-	for _, s := range steps {
-		if under(s.Path, it.path) {
-			mine = append(mine, s)
-		}
-		base := strings.TrimSuffix(it.path, "/"+strconv.Itoa(it.n))
-		if n, ok := iterationOf(s.Path, base); ok && n > it.n {
-			later = true
-		}
-	}
-	if len(mine) == 0 {
+func finished(run domain.Run, it iteration, idx stepIndex) bool {
+	f := idx.under[it.path]
+	if f.n == 0 || f.unsettled {
 		return false
 	}
-	for _, s := range mine {
-		if !s.State.Settled() {
-			return false
-		}
-	}
+	later := idx.maxIter[strings.TrimSuffix(it.path, "/"+strconv.Itoa(it.n))] > it.n
 	_, judged := run.Until[it.path]
 	return judged || later || run.State.Ended()
+}
+
+// stepIndex is what the fold asks of a run's steps again and again, read
+// in one pass over them, so a run of many steps folds in time linear in
+// them rather than square.
+type stepIndex struct {
+	// under is, for every prefix of a step's path, how many steps sit
+	// under it and whether any of them has not settled
+	under map[string]underFacts
+	// maxIter is, for every repeat's path, the highest iteration a step
+	// sits in
+	maxIter map[string]int
+	// watch is the run's watch step's state, nil when there is none
+	watch *domain.WatchState
+	// passes is each watch pass's steps, oldest first, by pass number
+	passes map[int][]domain.RunStep
+}
+
+type underFacts struct {
+	n         int
+	unsettled bool
+}
+
+func indexSteps(run domain.Run, steps []domain.RunStep) stepIndex {
+	idx := stepIndex{under: map[string]underFacts{}, maxIter: map[string]int{}, passes: map[int][]domain.RunStep{}}
+	w, hasWatch := run.Recipe.WatchStep()
+	for i := range steps {
+		s := steps[i]
+		if hasWatch && s.Path == w.ID && s.Watch != nil && idx.watch == nil {
+			idx.watch = s.Watch
+		}
+		for end := 0; end <= len(s.Path); end++ {
+			if end < len(s.Path) && s.Path[end] != '/' {
+				continue
+			}
+			prefix := s.Path[:end]
+			f := idx.under[prefix]
+			f.n++
+			f.unsettled = f.unsettled || !s.State.Settled()
+			idx.under[prefix] = f
+			// a numeric segment is a repeat's iteration (or a watch's pass)
+			if cut := strings.LastIndexByte(prefix, '/'); cut > 0 {
+				if n, err := strconv.Atoi(prefix[cut+1:]); err == nil && n > idx.maxIter[prefix[:cut]] {
+					idx.maxIter[prefix[:cut]] = n
+				}
+			}
+		}
+		if hasWatch {
+			if rest, ok := strings.CutPrefix(s.Path, w.ID+"/"); ok {
+				// a pass's steps sit under it, never at it
+				if seg, _, inside := strings.Cut(rest, "/"); inside {
+					if n, err := strconv.Atoi(seg); err == nil {
+						idx.passes[n] = append(idx.passes[n], s)
+					}
+				}
+			}
+		}
+	}
+	return idx
+}
+
+// foldedInto is the folded iteration path sits under, if any: the folds
+// are outermost iterations, so at most one prefix of path is among them.
+func foldedInto(path string, fold map[string]iteration) (iteration, bool) {
+	for end := 0; end <= len(path); end++ {
+		if end < len(path) && path[end] != '/' {
+			continue
+		}
+		if it, ok := fold[path[:end]]; ok {
+			return it, true
+		}
+	}
+	return iteration{}, false
 }
 
 // WatchRow is what a watch step shows of its PR.
@@ -945,6 +1021,7 @@ func hasBucketFail(f *domain.WatchFacts) bool {
 }
 
 // passHeader is the folded row that heads one pass of a watch.
+// passHeader is a watch pass's row; steps are the pass's own, oldest first.
 func passHeader(watchPath string, p domain.WatchPass, steps []domain.RunStep) StepRow {
 	line := "running"
 	state := string(domain.StepRunning)
@@ -986,18 +1063,13 @@ func short(sha string) string {
 // stepRows draws the run's steps, oldest first, each finished outermost
 // iteration of a repeat folded to one row where its first step stood.
 func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) []StepRow {
+	idx := indexSteps(run, steps)
 	fold := map[string]iteration{}
 	for _, it := range iterations(run.Recipe.Steps, "", steps) {
-		if !finished(run, it, steps) {
+		if !finished(run, it, idx) {
 			continue
 		}
-		outer := true
-		for p := range fold {
-			if under(it.path, p) {
-				outer = false
-			}
-		}
-		if outer {
+		if _, inner := foldedInto(it.path, fold); !inner {
 			fold[it.path] = it
 		}
 	}
@@ -1010,17 +1082,14 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 			continue
 		}
 		var into *iteration
-		for p, it := range fold {
-			if under(s.Path, p) {
-				into = &it
-				break
-			}
+		if it, ok := foldedInto(s.Path, fold); ok {
+			into = &it
 		}
 		if into == nil {
-			if w, n, ok := passOf(run, steps, s.Path); ok {
+			if w, n, ok := passOf(run, idx, s.Path); ok {
 				if !passed[n] {
 					passed[n] = true
-					rows = append(rows, passHeader(w.path, w.state.Passes[n-1], steps))
+					rows = append(rows, passHeader(w.path, w.state.Passes[n-1], idx.passes[n]))
 				}
 				row := stepRow(s, live)
 				row.Pass, row.Event = n, string(w.state.Passes[n-1].Event)
@@ -1062,7 +1131,7 @@ func stepRows(run domain.Run, steps []domain.RunStep, live map[string]StepLive) 
 		}
 	}
 	for p, i := range placed {
-		rows[i].Steps = iterationSteps(fold[p], steps)
+		rows[i].Steps = iterationSteps(fold[p], idx)
 		rows[i].Line = rows[i].Verdict
 	}
 	return rows
@@ -1075,9 +1144,9 @@ type watchAt struct {
 
 // passOf reports whether the step at path is inside a pass of the run's
 // watch, and which.
-func passOf(run domain.Run, steps []domain.RunStep, path string) (watchAt, int, bool) {
+func passOf(run domain.Run, idx stepIndex, path string) (watchAt, int, bool) {
 	w, ok := run.Recipe.WatchStep()
-	if !ok {
+	if !ok || idx.watch == nil {
 		return watchAt{}, 0, false
 	}
 	rest, under := strings.CutPrefix(path, w.ID+"/")
@@ -1089,10 +1158,8 @@ func passOf(run domain.Run, steps []domain.RunStep, path string) (watchAt, int, 
 	if err != nil {
 		return watchAt{}, 0, false
 	}
-	for i := range steps {
-		if steps[i].Path == w.ID && steps[i].Watch != nil && n >= 1 && n <= len(steps[i].Watch.Passes) {
-			return watchAt{path: w.ID, state: steps[i].Watch}, n, true
-		}
+	if n >= 1 && n <= len(idx.watch.Passes) {
+		return watchAt{path: w.ID, state: idx.watch}, n, true
 	}
 	return watchAt{}, 0, false
 }
@@ -1259,15 +1326,8 @@ func verdictWords(run domain.Run, it iteration) string {
 
 // iterationSteps names what ran in an iteration, in recipe order: steps
 // joined by " · ", a parallel's branches by " ∥ ".
-func iterationSteps(it iteration, steps []domain.RunStep) string {
-	ran := func(id string) bool {
-		for _, s := range steps {
-			if under(s.Path, it.path+"/"+id) {
-				return true
-			}
-		}
-		return false
-	}
+func iterationSteps(it iteration, idx stepIndex) string {
+	ran := func(id string) bool { return idx.under[it.path+"/"+id].n > 0 }
 	var parts []string
 	for _, en := range it.repeat.Steps {
 		switch {

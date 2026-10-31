@@ -811,6 +811,14 @@ func (s *Session) SpecPath() string {
 	return s.specPath
 }
 
+// PendingAsk is the agent's open ask_user question, nil when none: the
+// one field of Snapshot that costs no copy of the transcript.
+func (s *Session) PendingAsk() *Ask {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pendingAsk
+}
+
 func (s *Session) setPendingAsk(a *Ask) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

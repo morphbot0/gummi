@@ -81,11 +81,17 @@ func (e *Engine) WorkflowSaveRecipe(ctx context.Context, session domain.FeatureI
 		return "", err
 	}
 	path := filepath.Join(dir, name+".yaml")
-	if err := atomicfile.Write(path, []byte(strings.TrimRight(text, "\n")+"\n"), 0o600); err != nil {
+	// created exclusively: another session saving the same name meanwhile
+	// does not overwrite this one
+	if err := atomicfile.WriteNew(path, []byte(strings.TrimRight(text, "\n")+"\n"), 0o600); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("the workspace has a recipe called %s already: pick another name", name)
+		}
 		return "", err
 	}
 	run.SavedAs = name
 	if err := st.UpdateRun(ctx, run); err != nil {
+		_ = os.Remove(path) // not saved: a retry must not read it as taken
 		return "", err
 	}
 	e.runNote(session, fmt.Sprintf("run %d's recipe saved as %s", n, name))

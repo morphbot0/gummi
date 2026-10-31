@@ -62,10 +62,9 @@ const MaxCheckTimeout = 30 * time.Minute
 // transcript/UI.
 const maxOutput = 8 << 10
 
-// maxRead bounds what is held of a check's output while it runs: enough
-// past maxOutput for RanNoTests to read, never the whole of a check that
-// prints without end.
-const maxRead = 64 << 10
+// maxLine bounds one line held while the output is read for RanNoTests:
+// never the whole of a check that prints without end.
+const maxLine = 64 << 10
 
 // Run executes each check in workDir via the shell and returns one result
 // per check, in order — always. A check that never started because the
@@ -113,7 +112,7 @@ func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCh
 	}
 	cmd := exec.CommandContext(runCtx, "sh", "-c", ch.Cmd) //nolint:gosec // from the human-gated artifact, surfaced before running (DESIGN §4.4)
 	cmd.Dir = workDir
-	buf := &capped{max: maxRead}
+	buf := newCapped(maxOutput)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	// Run the check in its own process group and kill the whole group on
@@ -140,9 +139,9 @@ func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCh
 		Cmd:        ch.Cmd,
 		Status:     status,
 		OK:         status == StatusPass,
-		Output:     truncate(out),
+		Output:     out,
 		Duration:   time.Since(start),
-		RanNoTests: status == StatusPass && RanNoTests(ch.Cmd, out),
+		RanNoTests: status == StatusPass && goTestRun(ch.Cmd) && buf.ranNone(),
 	}
 	if err != nil {
 		var exit *exec.ExitError
@@ -155,36 +154,98 @@ func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCh
 	return res
 }
 
-// capped is a buffer that keeps the first max bytes written to it and
-// drops the rest, reporting every write as whole.
+// capped keeps the first and the last bytes written to it, the middle
+// dropped, and reads the output line by line as it passes for what
+// RanNoTests needs, so a marker past the kept bytes is still seen. Every
+// write is reported whole.
 type capped struct {
-	mu  sync.Mutex
-	b   bytes.Buffer
-	max int
-	cut bool
+	mu       sync.Mutex
+	head     bytes.Buffer
+	tail     []byte
+	headMax  int
+	tailMax  int
+	cut      bool
+	partial  []byte
+	noTests  bool
+	didTests bool
 }
+
+func newCapped(total int) *capped { return &capped{headMax: total / 2, tailMax: total / 2} }
 
 func (c *capped) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if room := c.max - c.b.Len(); room < len(p) {
-		c.cut = true
-		if room > 0 {
-			c.b.Write(p[:room])
-		}
-		return len(p), nil
+	c.scan(p)
+	rest := p
+	if room := c.headMax - c.head.Len(); room > 0 {
+		n := min(room, len(rest))
+		c.head.Write(rest[:n])
+		rest = rest[n:]
 	}
-	c.b.Write(p)
+	if len(rest) > 0 {
+		c.tail = append(c.tail, rest...)
+		if over := len(c.tail) - c.tailMax; over > 0 {
+			c.cut = true
+			c.tail = append(c.tail[:0], c.tail[over:]...)
+		}
+	}
 	return len(p), nil
+}
+
+// scan feeds p to the line reader behind RanNoTests.
+func (c *capped) scan(p []byte) {
+	c.partial = append(c.partial, p...)
+	for {
+		i := bytes.IndexByte(c.partial, '\n')
+		if i < 0 {
+			break
+		}
+		c.line(string(c.partial[:i]))
+		c.partial = c.partial[i+1:]
+	}
+	// a line past maxLine is read in pieces, so a marker late in it is seen
+	for len(c.partial) > maxLine {
+		c.line(string(c.partial[:maxLine]))
+		c.partial = c.partial[maxLine:]
+	}
+}
+
+func (c *capped) line(l string) {
+	l = strings.TrimSpace(l)
+	if strings.Contains(l, "no tests to run") {
+		c.noTests = true
+	}
+	if ranTests(l) {
+		c.didTests = true
+	}
 }
 
 func (c *capped) String() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cut {
-		return c.b.String() + "\n…(truncated)"
+		return c.head.String() + "\n…(truncated)\n" + string(c.tail)
 	}
-	return c.b.String()
+	return c.head.String() + string(c.tail)
+}
+
+// ranNone reports whether the output read so far said it tested nothing
+// and showed nothing that did run.
+func (c *capped) ranNone() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.partial) > 0 {
+		l := strings.TrimSpace(string(c.partial))
+		return (c.noTests || strings.Contains(l, "no tests to run")) && !c.didTests && !ranTests(l)
+	}
+	return c.noTests && !c.didTests
+}
+
+// ranTests reports whether a trimmed output line shows a package or test
+// that did run.
+func ranTests(l string) bool {
+	return strings.HasPrefix(l, "ok ") && !strings.Contains(l, "no tests to run") ||
+		strings.HasPrefix(l, "=== RUN") || strings.HasPrefix(l, "--- PASS")
 }
 
 // RanNoTests reports whether a check's output says it tested nothing. It
@@ -193,25 +254,19 @@ func (c *capped) String() string {
 // package's "[no tests to run]") and shows no package or test that did
 // run — a -run pattern that matched nothing anywhere.
 func RanNoTests(cmd, output string) bool {
-	if !strings.Contains(cmd, "go test") || !strings.Contains(cmd, "-run") || !strings.Contains(output, "no tests to run") {
+	if !goTestRun(cmd) || !strings.Contains(output, "no tests to run") {
 		return false
 	}
 	for _, l := range strings.Split(output, "\n") {
-		l = strings.TrimSpace(l)
-		switch {
-		case strings.HasPrefix(l, "ok ") && !strings.Contains(l, "no tests to run"),
-			strings.HasPrefix(l, "=== RUN"), strings.HasPrefix(l, "--- PASS"):
+		if ranTests(strings.TrimSpace(l)) {
 			return false
 		}
 	}
 	return true
 }
 
-func truncate(s string) string {
-	if len(s) <= maxOutput {
-		return s
-	}
-	return s[:maxOutput] + "\n…(truncated)"
+func goTestRun(cmd string) bool {
+	return strings.Contains(cmd, "go test") && strings.Contains(cmd, "-run")
 }
 
 // AllOK reports whether every result passed (vacuously true for none).

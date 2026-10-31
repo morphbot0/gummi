@@ -115,7 +115,7 @@ func (e *Engine) startStepAsync(session domain.FeatureID, n int, path string) {
 	if !rt.claim(key) {
 		return
 	}
-	if !e.goBrief(func() {
+	if !e.goWorkflow(func() {
 		defer func() {
 			rt.release(key)
 			e.workflowEvent(session)
@@ -181,6 +181,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	}
 	brief := stepBrief(run, step, path, filled)
 	card := domain.Feature{}
+	minted := false
 	if inst.Card != "" {
 		if card, err = st.GetFeature(ctx, inst.Card); err != nil {
 			return err
@@ -192,11 +193,16 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 		if err != nil {
 			return err
 		}
+		minted = true
 	}
 	unlock := e.lockRuns(session)
 	cur, err := st.RunStep(ctx, session, n, path)
 	if err != nil || cur == nil || !cur.State.Live() {
 		unlock()
+		if minted {
+			// settled meanwhile, and the card is recorded nowhere
+			e.dropStepCard(ctx, card.ID)
+		}
 		return err
 	}
 	cur.Card, cur.StartTree = card.ID, startTree
@@ -227,12 +233,15 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 		}
 		return err
 	}
-	cur.Prompt = filled
-	if err := st.UpdateRunStep(ctx, cur); err != nil {
+	e.runNote(session, fmt.Sprintf("run %d: %s (%s) started", n, path, step.Role))
+	if err := ff.SendTurn(WithActor(ctx, state.ActorWorkflow), brief, nil); err != nil {
 		return err
 	}
-	e.runNote(session, fmt.Sprintf("run %d: %s (%s) started", n, path, step.Role))
-	return ff.SendTurn(WithActor(ctx, state.ActorWorkflow), brief, nil)
+	// the prompt marks the step briefed: written once the brief is sent, so
+	// a crash before it starts the step again instead of carrying on from a
+	// conversation that never got its brief
+	cur.Prompt = filled
+	return st.UpdateRunStep(ctx, cur)
 }
 
 // mintStepCard creates a step's hidden card, a child of the session. It
@@ -364,7 +373,7 @@ func stepBrief(run *domain.Run, step domain.Step, path, filled string) string {
 
 // sendStepTurn sends a step's card a turn under the workflow's actor.
 func (e *Engine) sendStepTurn(card domain.FeatureID, msg string) {
-	e.goBrief(func() {
+	e.goWorkflow(func() {
 		ctx := e.lifetime()
 		f, err := e.cfg.Store.GetFeature(ctx, card)
 		if err != nil {
@@ -395,7 +404,7 @@ func (ff *FreeformSession) workflowStepTurnEnded(sess *Session) bool {
 		return true
 	}
 	reply := lastAssistant(sess)
-	e.goBrief(func() { e.afterStepTurn(e.lifetime(), f, reply) })
+	e.goWorkflow(func() { e.afterStepTurn(e.lifetime(), f, reply) })
 	return true
 }
 
@@ -406,7 +415,7 @@ func (ff *FreeformSession) workflowStepErrored(sess *Session, err error) {
 		return
 	}
 	e := ff.engine
-	e.goBrief(func() {
+	e.goWorkflow(func() {
 		ctx := e.lifetime()
 		inst := e.stepOf(ctx, f)
 		if inst == nil {
@@ -476,7 +485,12 @@ func (e *Engine) plannerEnded(ctx context.Context, run *domain.Run, inst *domain
 		problems = []string{err.Error()}
 	} else if len(problems) == 0 {
 		steps, _ := e.cfg.Store.RunSteps(ctx, run.Session, run.N)
-		_, problems, _ = workflowrecipe.CheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
+		_, problems, _ = safeCheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
+		if len(problems) == 0 {
+			if _, ferr := e.freezePlan(run, entries); ferr != nil {
+				problems = []string{ferr.Error()}
+			}
+		}
 	}
 	if len(problems) == 0 {
 		unlock := e.lockRuns(run.Session)
@@ -524,6 +538,14 @@ func (e *Engine) endStep(ctx context.Context, inst *domain.RunStep, st domain.St
 	if st == domain.StepDone {
 		e.captureArtifacts(ctx, inst, output)
 	}
+	// the diff of a reading step's snapshots is git: read off the run lock,
+	// then put into the row read afresh under it
+	var changed []string
+	if pre, err := e.cfg.Store.RunStep(ctx, inst.Session, inst.Run, inst.Path); err == nil && pre != nil && pre.State.Live() {
+		pre.EndTree = endTree
+		e.flagReaderChanges(ctx, pre)
+		changed = pre.Changed
+	}
 	unlock := e.lockRuns(inst.Session)
 	cur, err := e.cfg.Store.RunStep(ctx, inst.Session, inst.Run, inst.Path)
 	if err != nil || cur == nil || !cur.State.Live() {
@@ -531,7 +553,7 @@ func (e *Engine) endStep(ctx context.Context, inst *domain.RunStep, st domain.St
 		return
 	}
 	cur.State, cur.Reason, cur.Output, cur.EndTree, cur.EndedAt = st, why, output, endTree, e.now()
-	e.flagReaderChanges(ctx, cur)
+	cur.Changed = changed
 	if cur.Card != "" {
 		if f, err := e.cfg.Store.GetFeature(ctx, cur.Card); err == nil {
 			cur.Spent = f.Spend.CreditEquivalent()
@@ -581,8 +603,13 @@ func (e *Engine) captureArtifacts(ctx context.Context, inst *domain.RunStep, out
 		// a verdict step that only printed its verdict would otherwise
 		// leave the last iteration's to be judged
 		if err == nil {
-			was, stamped := stamps[file]
-			if !stamped || !fi.ModTime().Equal(was) {
+			if stamps == nil {
+				// a restart lost the stamps: the file is the step's own only
+				// if written since the step started
+				if fi.ModTime().After(inst.StartedAt) {
+					continue
+				}
+			} else if was, stamped := stamps[file]; !stamped || !fi.ModTime().Equal(was) {
 				continue
 			}
 		}
@@ -672,7 +699,7 @@ func (e *Engine) flagReaderChanges(ctx context.Context, st *domain.RunStep) {
 	if !st.Role.Reads() || st.StartTree == "" || st.EndTree == "" || st.StartTree == st.EndTree {
 		return
 	}
-	_, paths, err := e.diffTrees(ctx, st.Session, st.StartTree, st.EndTree)
+	paths, err := e.diffPaths(ctx, st.Session, st.StartTree, st.EndTree)
 	if err != nil || len(paths) == 0 {
 		return
 	}
@@ -689,7 +716,7 @@ func (e *Engine) flagReaderChanges(ctx context.Context, st *domain.RunStep) {
 		if end == "" {
 			end = st.EndTree
 		}
-		if _, ps, err := e.diffTrees(ctx, st.Session, o.StartTree, end); err == nil {
+		if ps, err := e.diffPaths(ctx, st.Session, o.StartTree, end); err == nil {
 			for _, p := range ps {
 				theirs[p] = true
 			}
@@ -724,18 +751,27 @@ func overlaps(a, b domain.RunStep) bool {
 func (e *Engine) settleStep(ctx context.Context, session domain.FeatureID, n int, path string, st domain.StepState, why string) {
 	unlock := e.lockRuns(session)
 	defer unlock()
-	e.settleStepLocked(ctx, session, n, path, st, why)
+	e.settleStepLocked(ctx, session, n, path, st, why, "")
 }
 
-func (e *Engine) settleStepLocked(ctx context.Context, session domain.FeatureID, n int, path string, st domain.StepState, why string) {
+func (e *Engine) settleStepLocked(ctx context.Context, session domain.FeatureID, n int, path string, st domain.StepState, why, tree string) {
 	cur, err := e.cfg.Store.RunStep(ctx, session, n, path)
 	if err != nil || cur == nil || cur.State.Settled() {
 		return
 	}
 	cur.State, cur.Reason, cur.EndedAt = st, why, e.now()
 	if cur.EndTree == "" {
-		cur.EndTree, _ = e.snapshotRun(ctx, session, n)
+		cur.EndTree = tree
+		if tree == "" {
+			cur.EndTree, _ = e.snapshotRun(ctx, session, n)
+		}
 	}
+	if cur.Card != "" {
+		if f, err := e.cfg.Store.GetFeature(ctx, cur.Card); err == nil {
+			cur.Spent = f.Spend.CreditEquivalent()
+		}
+	}
+	e.takeStamps(session, n, path) // a step that never ends done is not captured
 	e.flagReaderChanges(ctx, cur)
 	if err := e.cfg.Store.UpdateRunStep(ctx, cur); err != nil {
 		return
@@ -748,7 +784,7 @@ func (e *Engine) interruptStep(card domain.FeatureID) {
 	if card == "" {
 		return
 	}
-	e.goBrief(func() {
+	e.goWorkflow(func() {
 		if e.freeformBusy(card) {
 			_ = e.InterruptFreeform(e.lifetime(), card)
 		}

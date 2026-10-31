@@ -8,8 +8,44 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// planFenceRe finds a gummi-workflow fenced block.
-var planFenceRe = regexp.MustCompile("(?s)```gummi-workflow[ \\t]*\\n(.*?)```")
+// planOpenRe is the line that opens a gummi-workflow fenced block.
+var planOpenRe = regexp.MustCompile("^```gummi-workflow[ \\t]*$")
+
+// planBlocks returns the body of every gummi-workflow block in output. A
+// fence inside a block (a step prompt that shows an example) is balanced
+// against its own close, so it does not end the block early; a block that
+// never closes is an error, not a silent cut.
+func planBlocks(output string) ([]string, error) {
+	var blocks []string
+	lines := strings.Split(output, "\n")
+	for i := 0; i < len(lines); i++ {
+		if !planOpenRe.MatchString(strings.TrimRight(lines[i], "\r")) {
+			continue
+		}
+		depth, closed := 0, false
+		var body []string
+		for i++; i < len(lines); i++ {
+			t := strings.TrimRight(lines[i], " \t\r")
+			switch {
+			case t == "```" && depth == 0:
+				closed = true
+			case t == "```":
+				depth--
+			case strings.HasPrefix(t, "```"):
+				depth++
+			}
+			if closed {
+				break
+			}
+			body = append(body, lines[i])
+		}
+		if !closed {
+			return nil, errors.New("the gummi-workflow block is never closed (a fence inside it is left open)")
+		}
+		blocks = append(blocks, strings.Join(body, "\n")+"\n")
+	}
+	return blocks, nil
+}
 
 // ErrNoPlanBlock is a planner's output without a gummi-workflow block.
 var ErrNoPlanBlock = errors.New("no gummi-workflow block")
@@ -20,11 +56,14 @@ var ErrNoPlanBlock = errors.New("no gummi-workflow block")
 // block in the output wins. The block is a list of entries, or a mapping
 // with a steps list.
 func ParsePlanBlock(output string) ([]domain.Entry, error) {
-	ms := planFenceRe.FindAllStringSubmatch(output, -1)
+	ms, err := planBlocks(output)
+	if err != nil {
+		return nil, err
+	}
 	if len(ms) == 0 {
 		return nil, ErrNoPlanBlock
 	}
-	body := ms[len(ms)-1][1]
+	body := ms[len(ms)-1]
 	if strings.HasPrefix(strings.TrimSpace(body), "-") {
 		return ParseEntries([]byte(body))
 	}

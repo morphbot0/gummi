@@ -139,3 +139,7 @@ The report comes as a turn. Then:
    for them, what is still open.
 6. If you wrote the recipe inline and it worked, suggest the person
    save it: the run's block has **Save as recipe…**.
+7. A recipe written inline is checked before it is proposed: a refusal
+   names the problem (an id repeated across the recipe and its handler
+   recipes, a `watch` that is not top level, an unterminated `{{` in
+   `trust`, an unknown field in a handler step) — fix it and propose again.

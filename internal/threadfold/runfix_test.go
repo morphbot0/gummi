@@ -87,6 +87,21 @@ func TestARunningRunIsNotRevertedAndAPausedOneIs(t *testing.T) {
 	}
 }
 
+// TestARunRevertedToItsStartOffersNoRevert: once a person reverted a run to
+// its start, nothing of the run is left to put back; a revert to a step's
+// start leaves the run's earlier work, so the run still offers one.
+func TestARunRevertedToItsStartOffersNoRevert(t *testing.T) {
+	run := domain.Run{N: 1, Recipe: oneLoop(), State: domain.RunDone, StartTree: "a", StartedAt: runAt, RevertedTo: "fix/1/look"}
+	steps := []domain.RunStep{{Path: "fix/1/look", StepID: "look", State: domain.StepDone, StartedAt: runAt}}
+	if !FoldRun(RunInput{Run: run, Steps: steps, Files: []string{"x"}}).CanRevert {
+		t.Error("a run reverted to a step offers no revert")
+	}
+	run.RevertedTo = domain.RevertedToStart
+	if FoldRun(RunInput{Run: run, Steps: steps, Files: []string{"x"}}).CanRevert {
+		t.Error("a run reverted to its start still offers a revert")
+	}
+}
+
 // TestAPausedRunsStepsAreNotAtWork: a step at work when its run paused has
 // no backend: its row says it stopped where it was, not that it works.
 func TestAPausedRunsStepsAreNotAtWork(t *testing.T) {

@@ -35,6 +35,10 @@ import (
 // reference to an *engine.Engine or a *driver.Driver; wiring those in
 // would immediately create the import cycle this package exists to avoid.
 type Input struct {
+	// Dispatch, when set, is the dispatch minting this session: the card
+	// and the dispatch record (its Card set to the new id) are written in
+	// one transaction, so a crash leaves both or neither.
+	Dispatch *state.Dispatch
 	// Description is the free-form input text: its first line is the
 	// title (domain.SplitFreeform), and the whole of it is the session's
 	// opening turn, which the caller sends.
@@ -222,6 +226,12 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	}
 	// A session has no artifact to seed: its description is the opening
 	// turn of its session and its thread is the record.
+	if in.Dispatch != nil {
+		if err := store.CreateDispatchedFeature(ctx, &f, *in.Dispatch); err != nil {
+			return domain.Feature{}, err
+		}
+		return f, nil
+	}
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		return domain.Feature{}, err
 	}

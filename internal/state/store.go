@@ -1082,6 +1082,16 @@ var migrations = []string{
 	// The GitHub repository the allowance was given for: a session pushes
 	// there and nowhere else. Empty on every row nobody allowed.
 	`ALTER TABLE features ADD COLUMN agent_publish_repo TEXT NOT NULL DEFAULT ''`,
+	// Whether an ended run's report still has to be delivered: set with the
+	// write that ends it, so a crash before the delivery is redelivered.
+	// 0 on every row from before, which were delivered or lost already.
+	`ALTER TABLE workflow_runs ADD COLUMN report_pending INTEGER NOT NULL DEFAULT 0`,
+	// The pool reads a session's legacy crews' cards by crew_of, on every
+	// tick and every step spawn.
+	`CREATE INDEX IF NOT EXISTS features_crew_of ON features(crew_of)`,
+	// Where a person last reverted a run's tree to, so a run reverted to
+	// its start stops offering a revert. Empty on every row from before.
+	`ALTER TABLE workflow_runs ADD COLUMN reverted_to TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -1100,6 +1110,37 @@ const timeFmt = time.RFC3339Nano
 
 // CreateFeature inserts a validated feature.
 func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
+	if err := s.insertFeature(ctx, s.db, f); err != nil {
+		return err
+	}
+	s.observeCreated(f)
+	return nil
+}
+
+// CreateDispatchedFeature inserts f and the dispatch d that minted it
+// (d.Card is set to f.ID) in one transaction: a crash leaves both or
+// neither, never a session no dispatch holds and no restart would find.
+func (s *Store) CreateDispatchedFeature(ctx context.Context, f *domain.Feature, d Dispatch) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if err := s.insertFeature(ctx, tx, f); err != nil {
+		return err
+	}
+	d.Card = f.ID
+	if err := insertDispatch(ctx, tx, d); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.observeCreated(f)
+	return nil
+}
+
+func (s *Store) insertFeature(ctx context.Context, db execer, f *domain.Feature) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
@@ -1110,7 +1151,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 	if kind == "" {
 		kind = domain.KindFeature
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, created_at, updated_at,
@@ -1144,6 +1185,10 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
+	return nil
+}
+
+func (s *Store) observeCreated(f *domain.Feature) {
 	// The observer-only created event: the features row is the record,
 	// but a hook hearing "a card was minted" should not have to poll for
 	// it. CreatedAt is the card's own truth; the observer carries no
@@ -1153,7 +1198,6 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		created = time.Now().UTC()
 	}
 	s.observe(CardEvent{Feature: f.ID, Stage: f.Stage, Kind: EventCreated, At: created})
-	return nil
 }
 
 const featureCols = `id, num, title, one_liner, slug, stage,

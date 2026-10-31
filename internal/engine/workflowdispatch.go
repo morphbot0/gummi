@@ -110,17 +110,13 @@ func (e *Engine) dispatchStep(ctx context.Context, run *domain.Run, agent domain
 			// person is present to retitle a title that is taken
 			MainCheckout: false,
 			Unattended:   true,
-		})
-		if err != nil {
-			unlock()
-			return fmt.Errorf("minting a session in %s: %w", d.Repo, err)
-		}
-		err = st.RecordDispatch(ctx, state.Dispatch{
-			Card: child.ID, Agent: agent.ID, Run: run.N, Path: inst.Path, Envelope: d.Envelope, CreatedAt: e.now(),
+			// the record goes in with the card, so a restart always finds
+			// the session this step minted and never mints a second
+			Dispatch: &state.Dispatch{Agent: agent.ID, Run: run.N, Path: inst.Path, Envelope: d.Envelope, CreatedAt: e.now()},
 		})
 		unlock()
 		if err != nil {
-			return err
+			return fmt.Errorf("minting a session in %s: %w", d.Repo, err)
 		}
 	}
 	// the session spans the repositories the person allowed; one an earlier
@@ -173,6 +169,16 @@ func (e *Engine) startDispatchedRun(ctx context.Context, agent, child domain.Fea
 	if runs, err := st.SessionRuns(ctx, child.ID); err != nil {
 		return err
 	} else if len(runs) > 0 {
+		// an earlier start created the run and may have died before it was
+		// allowed: it is the person's recipe all the same, and is allowed now
+		if last := runs[len(runs)-1]; last.State == domain.RunProposed && last.RecipeYAML == d.RecipeYAML {
+			unlock := e.lockRuns(child.ID)
+			defer unlock()
+			if err := e.allowRunLocked(ctx, &last, "allowed with "+agent.Name()+"'s schedule"); err != nil {
+				return err
+			}
+			e.workflowEvent(child.ID)
+		}
 		return nil
 	}
 	recipe, err := workflowrecipe.Parse([]byte(d.RecipeYAML))

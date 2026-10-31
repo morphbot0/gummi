@@ -47,7 +47,10 @@ func isRunSession(f domain.Feature) bool { return hasSessionSpec(f) }
 // its steps from the store, its spec's title, the files it has changed
 // (from its snapshots, never a fresh one), and the session of each live
 // step and of each ended one working again.
-func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
+//
+// A run that ended before start (threadfold.RunLeftBehind) is skipped
+// before any of its reads are made; a zero start skips none.
+func (d *WebDocs) runInputs(ctx context.Context, start time.Time) []threadfold.RunInput {
 	if !isRunSession(d.f) {
 		return nil
 	}
@@ -64,7 +67,10 @@ func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 	out := make([]threadfold.RunInput, 0, len(runs))
 	always := d.eng != nil && d.eng.WorkflowAlwaysAllows(ctx, d.f.ID)
 	for i, r := range runs {
-		steps, _ := d.store.RunSteps(ctx, d.f.ID, r.N)
+		if threadfold.RunLeftBehind(r.State, r.EndedAt, start) {
+			continue
+		}
+		steps, _ := d.store.RunStepsLite(ctx, d.f.ID, r.N)
 		in := threadfold.RunInput{Run: r, Steps: steps, SpecTitle: titles[r.Spec], Live: map[string]threadfold.StepLive{}, Envelope: float64(d.f.Budget.Envelope)}
 		in.AlwaysAllowed = always && i == len(runs)-1
 		if d.eng != nil {
@@ -94,12 +100,11 @@ func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 // and when a person last said something to the session, which folds the
 // run that ended last (threadfold.FoldRuns).
 func (d *WebDocs) runFold(ctx context.Context) ([]threadfold.RunInput, time.Time) {
-	ins := d.runInputs(ctx)
-	if len(ins) == 0 || d.eng == nil {
-		return ins, time.Time{}
+	if d.eng == nil {
+		return d.runInputs(ctx, time.Time{}), time.Time{}
 	}
 	tr := sessionTranscript(d.eng, d.f.ID)
-	return threadfold.CurrentRuns(ins, threadfold.ConversationStart(tr)), threadfold.PersonSaid(tr)
+	return d.runInputs(ctx, threadfold.ConversationStart(tr)), threadfold.PersonSaid(tr)
 }
 
 // sessionTranscript is the session's conversation as the engine holds it,
@@ -315,7 +320,7 @@ func (d *WebDocs) Specs(ctx context.Context) (webapi.SpecList, error) {
 // spend, and once ended its glyph, its checked items met and when it
 // ended — the words its folded line in the thread says (threadfold).
 func (d *WebDocs) specRun(ctx context.Context, r domain.Run) webapi.SpecRun {
-	steps, _ := d.store.RunSteps(ctx, d.f.ID, r.N)
+	steps, _ := d.store.RunStepsLite(ctx, d.f.ID, r.N)
 	f := threadfold.FoldRun(threadfold.RunInput{Run: r, Steps: steps})
 	out := webapi.SpecRun{N: r.N, Recipe: f.Recipe, State: f.State, Spent: f.Spent, Mark: f.Mark}
 	if r.State.Ended() {
@@ -397,7 +402,7 @@ func (d *WebDocs) Step(ctx context.Context, card string) (webapi.StepFace, error
 		out.Says = "a turn to " + st.StepID + " while it runs: its output is whatever it says last"
 	}
 	out.CanRevert = st.StartTree != "" && !st.State.Live() && run.State != domain.RunRunning &&
-		(d.eng == nil || d.eng.RunPhase(d.f.ID, run.N) == "")
+		run.RevertedTo != domain.RevertedToStart && (d.eng == nil || d.eng.RunPhase(d.f.ID, run.N) == "")
 	return out, nil
 }
 

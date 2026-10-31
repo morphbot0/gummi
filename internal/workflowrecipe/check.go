@@ -73,6 +73,11 @@ func check(r domain.Recipe, frozen bool) (problems, warnings []string) {
 		}
 	})
 	c.entries(r.Steps)
+	for id, where := range c.handlerIDs {
+		if _, dup := c.ids[id]; dup {
+			c.problem("the id %q is used by the recipe's own step and by a step of %s", id, where)
+		}
+	}
 	return c.problems, c.warnings
 }
 
@@ -97,6 +102,10 @@ type checker struct {
 	inRepeat   bool
 	inHandler  bool
 	topIDs     []string // the top-level ids before the watch
+	// handlerIDs is each step id a handler's recipe holds, by the handler
+	// that holds it: an id the recipe's own steps use too would resolve to
+	// the wrong step wherever a step is found by id
+	handlerIDs map[string]string
 	seenWatch  bool
 }
 
@@ -200,9 +209,10 @@ func (c *checker) repeat(rp domain.Repeat) {
 			c.problem("repeat %s: until reads artifact %q, which no step in its body declares", name, rp.Until.In)
 		}
 	}
+	outer := c.inRepeat
 	c.inRepeat = true
 	c.entries(rp.Steps)
-	c.inRepeat = false
+	c.inRepeat = outer
 }
 
 func (c *checker) step(s domain.Step, previous string) {
@@ -506,6 +516,10 @@ func (c *checker) trust(t, name string) {
 		return
 	}
 	m := templateRe.FindStringSubmatch(t)
+	if m == nil {
+		c.problem("step %s: trust has an unterminated or malformed {{ }}; it is a literal or one {{inputs.<name>}}", name)
+		return
+	}
 	head, input, ok := strings.Cut(m[1], ".")
 	if m[0] != t || !ok || head != "inputs" {
 		c.problem("step %s: trust is a literal or one {{inputs.<name>}}", name)
@@ -567,6 +581,10 @@ func (c *checker) handler(name string, ev domain.WatchEvent, h domain.Handler) {
 			}
 			held := ""
 			Walk(r.Steps, func(st domain.Step, _ []domain.Entry) {
+				if c.handlerIDs == nil {
+					c.handlerIDs = map[string]string{}
+				}
+				c.handlerIDs[st.ID] = fmt.Sprintf("the %s handler's recipe %s of step %s", ev, h.Recipe, name)
 				switch {
 				case st.Watch != nil:
 					held = "watch"

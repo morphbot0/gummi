@@ -122,12 +122,16 @@ func (e *Engine) baselineAsync(session domain.FeatureID, n int) {
 	if !rt.claim(key) {
 		return
 	}
-	if !e.goBrief(func() {
+	if !e.goWorkflow(func() {
 		defer func() {
 			rt.release(key)
 			e.workflowEvent(session)
 		}()
-		e.runBaseline(e.lifetime(), session, n)
+		// a stop or a withdrawal cancels the checks: they run in the tree
+		ctx, cancel := context.WithCancel(e.lifetime())
+		defer cancel()
+		defer rt.setCancel(key, cancel)()
+		e.runBaseline(ctx, session, n)
 	}) {
 		rt.release(key)
 	}
@@ -169,6 +173,10 @@ func (e *Engine) runBaseline(ctx context.Context, session domain.FeatureID, n in
 	} else {
 		// the checks could not be run: the run goes on without its baseline
 		b.Err, b.Tree, b.Started = err.Error(), run.StartTree, run.StartTree != ""
+	}
+	if ctx.Err() != nil {
+		// stopped or withdrawn meanwhile: what the checks found is no baseline
+		return
 	}
 
 	unlock := e.lockRuns(session)
