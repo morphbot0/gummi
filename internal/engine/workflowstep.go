@@ -163,7 +163,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	if err != nil {
 		return err
 	}
-	text, _ := e.frozenSpec(ctx, run)
+	text, _ := e.runItems(ctx, run)
 	vars := workflowrecipe.Vars{Spec: text, Inputs: run.Inputs, Artifacts: e.runArtifacts(run)}
 	vars.Outputs, vars.Previous, vars.PreviousOutput = stepOutputs(run.Recipe, steps, path)
 	e.passVars(ctx, run, path, &vars)
@@ -360,7 +360,8 @@ func stepBrief(run *domain.Run, step domain.Step, path, filled string) string {
 		}
 	}
 	b.WriteString("\nIf something your task and the spec do not settle blocks you, ask with ask_user. " +
-		"If you cannot do the task, make your last line FAILED: <why>. Your final message is your output, " +
+		"If you cannot do the task, make your last line FAILED: <why>. Otherwise write no FAILED: line at all, " +
+		"not even FAILED: none: a finding, however bad, is not a failure. Your final message is your output, " +
 		"which the steps after you read; DECISION: lines (a choice your task did not make for you) and " +
 		"OPEN: lines (what you left) go into the run's report.\n")
 	if step.Role == domain.RolePlanner {
@@ -537,6 +538,7 @@ func startedEntries(r domain.Recipe, steps []domain.RunStep) int {
 func (e *Engine) endStep(ctx context.Context, inst *domain.RunStep, st domain.StepState, why, output, endTree string) {
 	if st == domain.StepDone {
 		e.captureArtifacts(ctx, inst, output)
+		e.baselineAdded(ctx, inst, output, endTree)
 	}
 	// the diff of a reading step's snapshots is git: read off the run lock,
 	// then put into the row read afresh under it

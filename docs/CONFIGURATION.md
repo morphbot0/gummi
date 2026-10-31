@@ -143,7 +143,9 @@ not either. Edit the profile later with `P` in the terminal or Profiles on
 the page.
 
 A `default:` name plus a `profiles:` map. Each profile maps roles to
-`{backend, model}`. A session runs on `implementer`. A workflow run's step
+`{backend, model}`. A session runs on `session`, else `implementer`: a
+strong `session` with cheaper step slots has the strong model write the
+specs and plan the runs that the cheaper ones carry out. A workflow run's step
 runs on its role's slot — `scout`, `planner`, `contractor`, `implementer`,
 `tester`, `scribe` or `reviewer` — or on the slot its recipe names
 (`slot:`, as `deliver`'s second reviewer names `reviewer-alt`), falling

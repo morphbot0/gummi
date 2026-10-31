@@ -105,13 +105,34 @@ func label(line string) (string, string, bool) {
 }
 
 // Failed reports whether a step's output ends in FAILED: <why> as its last
-// line, and the why.
+// line, and the why. A why that says nothing failed — "FAILED: none",
+// "FAILED: not a failure", lines a step has ended a finished task with —
+// is not a failure.
 func Failed(output string) (bool, string) {
 	lab, why, ok := label(lastLine(output))
-	if !ok || lab != "FAILED" {
+	if !ok || lab != "FAILED" || saysNoFailure(why) {
 		return false, ""
 	}
 	return true, why
+}
+
+// noFailure are the whys that say nothing failed.
+var noFailure = map[string]bool{
+	"": true, "-": true, "none": true, "n/a": true, "na": true, "no": true, "nothing": true,
+	"no failure": true, "no failures": true, "not a failure": true, "nothing failed": true,
+}
+
+func saysNoFailure(why string) bool {
+	w := strings.ToLower(strings.TrimRight(strings.TrimSpace(why), ".!;"))
+	if noFailure[w] {
+		return true
+	}
+	for _, p := range []string{"not a failure", "no failure", "nothing failed", "none;", "none,", "none -", "none —"} {
+		if strings.HasPrefix(w, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // ItemLine is one MET: DW-n or UNMET: DW-n <why> line.

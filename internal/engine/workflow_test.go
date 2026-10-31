@@ -14,6 +14,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -1080,7 +1081,8 @@ func TestAProposalReadsAsItsCard(t *testing.T) {
 	// each step names what it runs on, and its prompt's first paragraph
 	// whole, not its first wrapped line
 	if im := kinds["implement"]; !strings.Contains(im.Model, "m on ") ||
-		im.Prompt != "Implement {{artifacts.design}} for the spec below. If {{artifacts.review}} exists, address its findings first." {
+		im.Prompt != "Implement {{artifacts.design}} for the spec below. If {{artifacts.review}} exists, address its findings first. "+
+			"Run the whole test suite of every package you changed, and keep it passing." {
 		t.Fatalf("implement %+v", im)
 	}
 	always := run.Pending.Options[1]
@@ -1858,5 +1860,34 @@ func TestATickThatStartsStepsTellsTheFacesAtOnce(t *testing.T) {
 		case <-deadline:
 			t.Fatal("the faces were not told the run's steps started until their backends came up")
 		}
+	}
+}
+
+// TestAProposalRefusesDoneWhenItCannotRead: a spec whose Done when holds
+// items as a plain list, outside a gummi-done-when block, is refused at
+// the proposal rather than run against no checks; written as a block, the
+// same spec proposes.
+func TestAProposalRefusesDoneWhenItCannotRead(t *testing.T) {
+	e, _, f, _ := wfEngine(t, newWFFake())
+	ctx := context.Background()
+	prose, _, err := spec.ReplaceSection(wfTestSpec, spec.SessionSectionDoneWhen, "- DW-1: made.txt exists. check: `test -f made.txt`\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.WriteSessionSpec(ctx, f, 1, prose, "user"); err != nil {
+		t.Fatal(err)
+	}
+	recipe := "name: one\nsteps:\n  - { id: one, role: scout, prompt: look }\n"
+	if _, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: recipe}); err == nil || !strings.Contains(err.Error(), "gummi-done-when") {
+		t.Fatalf("a plain-list Done when proposed: %v", err)
+	}
+	if runs, _ := e.cfg.Store.SessionRuns(ctx, f.ID); len(runs) != 0 {
+		t.Fatalf("the refusal left runs %+v", runs)
+	}
+	if _, err := e.WriteSessionSpec(ctx, f, 1, wfTestSpec, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.WorkflowPropose(ctx, f.ID, WorkflowRequest{RecipeYAML: recipe}); err != nil {
+		t.Fatalf("the block form was refused: %v", err)
 	}
 }

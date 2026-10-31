@@ -218,11 +218,11 @@ func (e *Engine) buildProposal(ctx context.Context, sess domain.Feature, run *do
 }
 
 // frozenSpecItems is the done-when items a run is judged against: its
-// frozen revision's, or for a run from before that froze none, the spec's
-// as it is now.
+// frozen revision's and the checks its steps added, or for a run from
+// before that froze none, the spec's as it is now.
 func (e *Engine) frozenSpecItems(ctx context.Context, sess domain.Feature, run *domain.Run) ([]domain.DoneWhen, error) {
 	if run.SpecRev > 0 {
-		_, items := e.frozenSpec(ctx, run)
+		_, items := e.runItems(ctx, run)
 		return items, nil
 	}
 	text, ok := e.SessionSpec(sess, run.Spec)

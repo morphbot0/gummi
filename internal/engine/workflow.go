@@ -564,6 +564,13 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 	if err != nil {
 		return nil, err
 	}
+	// a run is judged against the done-when items it can read, and items
+	// it cannot read would leave it judged against none
+	if text, ok := e.SessionSpec(sess, n); ok {
+		if why := spec.DoneWhenRefusal(text); why != "" {
+			return nil, fmt.Errorf("spec %d cannot be run: %s", n, why)
+		}
+	}
 
 	unlock := e.lockRuns(session)
 	defer unlock()
@@ -1979,8 +1986,8 @@ func (e *Engine) raisePlanDecision(run *domain.Run, steps []domain.RunStep) bool
 		} else {
 			b.WriteString("\nThey replace nothing: every step of the plan has run, and they would run after it.\n")
 		}
-		if _, items := e.frozenSpec(context.Background(), run); hasChecks(items) {
-			fmt.Fprintf(&b, "\nThe run is still judged against spec S%d revision %d's done-when checks:\n", run.Spec, run.SpecRev)
+		if _, items := e.runItems(context.Background(), run); hasChecks(items) {
+			fmt.Fprintf(&b, "\nThe run is still judged against spec S%d revision %d's done-when checks, and those its steps added:\n", run.Spec, run.SpecRev)
 			for _, it := range items {
 				if strings.TrimSpace(it.Check) != "" {
 					fmt.Fprintf(&b, "- %s: %s\n", it.ID, it.Check)
@@ -2135,7 +2142,7 @@ func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID
 		if err != nil {
 			return domain.UntilJudgement{Detail: err.Error()}
 		}
-		_, items := e.frozenSpec(ctx, run)
+		_, items := e.runItems(ctx, run)
 		checks := doneWhenChecks(ctx, dir, items)
 		if len(checks) == 0 {
 			// nothing to judge by is not done: the person decides
@@ -2266,7 +2273,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 	if treeErr != nil && end == domain.RunDone {
 		end, why = domain.RunPartial, "gummi could not read the tree at the end: "+treeErr.Error()
 	}
-	_, items := e.frozenSpec(ctx, run)
+	_, items := e.runItems(ctx, run)
 	steps := e.settleSpends(ctx, session, n)
 	last := ""
 	for _, s := range steps {

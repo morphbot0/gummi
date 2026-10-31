@@ -1,10 +1,41 @@
 name: fix-until-green
-description: Fix the tree until every done-when check of the spec passes
+description: Map the bug and what must keep working, then fix the tree until every done-when check of the spec passes
 inputs:
   event:
     hint: "what a PR watch saw fail, when it hands this recipe an event"
     default: ""
 steps:
+  - id: map
+    role: scout
+    prompt: |
+      Before anything is fixed, map the spec below in the tree. Change
+      nothing.
+      - The cause: where it lives, with file:line, and how you know.
+      - Every place it lives: the same mistake in a sibling function,
+        another case of the same type, another caller. Name each one.
+        Each is part of the fix, whatever the spec names: a place you
+        would leave out is one you can say what fixing it would break,
+        and then ask the person with ask_user, never leave it as a note.
+        Recommend including it unless you found a caller that depends on
+        the mistake: the same bug elsewhere is a bug, not a scope choice.
+      - What must keep working around it: the existing tests that cover
+        it, what its callers expect of it, and what its comments, docs
+        and defaults promise. A fix that breaks one of these is wrong.
+      End with the list of places to change and the list of behaviour to
+      keep, then a gummi-done-when block with one check command for each
+      place and kept behaviour no done-when item below checks yet, so the
+      run proves them too. A place's check must fail now, run it to see:
+      one that already passes proves nothing, so name a test the fix step
+      will write (`go test -run '^TestName$'`) rather than one that exists.
+      A kept behaviour's check passes now and must keep passing:
+
+      ```gummi-done-when
+      - id: DW-1
+        says: <what holds once fixed>
+        check: <a command that exits 0 when it does>
+      ```
+
+      {{spec}}
   - id: fix
     repeat:
       max: 5
@@ -14,8 +45,15 @@ steps:
         - id: implement
           role: implementer
           prompt: |
-            Run the done-when checks of the spec below, and fix the code
-            until they pass. Do not weaken a check to make it pass.
+            Fix the spec below at every place the map names, keeping
+            every behaviour it says must keep working. Add a test for the
+            fix, and one for any kept behaviour no test covers yet. Run
+            the done-when checks and the whole test suite of every
+            package you changed, and fix the code until they pass. Do not
+            weaken a check or a test to make it pass.
+
+            The map:
+            {{map.output}}
 
             {{inputs.event}}
 

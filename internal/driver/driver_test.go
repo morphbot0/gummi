@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -154,5 +155,18 @@ func TestARunNeedsAPromptAndAnEnvelope(t *testing.T) {
 	}
 	if ev := h.last("error"); ev == nil || ev["error"] == "" {
 		t.Fatalf("error event %v", ev)
+	}
+}
+
+// A session that times out is still charged on the stream: the timeout
+// line carries what it spent, as done does.
+func TestATimeoutCarriesTheSpend(t *testing.T) {
+	h := newHarness(t, newSessionFake("hang"))
+	out, _ := h.run(Options{Envelope: 500, Timeout: time.Second}, "look into it")
+	if out.Status != StatusTimeout {
+		t.Fatalf("outcome %+v, want timeout; stream %v", out, h.eventKinds())
+	}
+	if ev := h.last("timeout"); ev == nil || ev["spent_credits"] != float64(2) {
+		t.Fatalf("timeout event %v, want spent_credits 2", ev)
 	}
 }

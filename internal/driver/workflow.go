@@ -134,9 +134,7 @@ func writtenSpec(title, prompt string, recipe domain.Recipe, inputs map[string]s
 		label = "an inline"
 	}
 	fmt.Fprintf(&b, "## Approach\n\nThe %s workflow, run by `gummi run` with the inputs above.\n\n## Done when\n\n", label)
-	if len(checks) == 0 {
-		b.WriteString("Nothing is checked: the run's report is the result.\n\n")
-	} else {
+	if len(checks) > 0 {
 		type item struct {
 			ID    string `yaml:"id"`
 			Says  string `yaml:"says"`
@@ -153,6 +151,10 @@ func writtenSpec(title, prompt string, recipe domain.Recipe, inputs map[string]s
 		b.WriteString("```gummi-done-when\n" + string(y) + "```\n\n")
 	}
 	b.WriteString("## Limits\n\n## Notes\n")
+	if len(checks) == 0 {
+		// prose under Done when would be refused as items nothing checks
+		b.WriteString("\nNothing is checked: the run's report is the result.\n")
+	}
 	return b.String(), nil
 }
 

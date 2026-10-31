@@ -82,6 +82,39 @@ func ParseDoneWhen(content string) (items []domain.DoneWhen, found bool, err err
 	return items, true, nil
 }
 
+// doneWhenShape is how a refusal shows the block to write.
+const doneWhenShape = "```gummi-done-when\n" +
+	"- id: DW-1\n" +
+	"  says: \"what is true when the work is done\"\n" +
+	"  check: \"a command that exits 0 when it is\"\n" +
+	"- id: DW-2\n" +
+	"  says: \"what a reviewer judges\"\n" +
+	"  judge: true\n" +
+	"```"
+
+// DoneWhenRefusal says why a doc's Done when section cannot be read as
+// done-when items — it says something outside a gummi-done-when block, or
+// its block does not parse — or "" when it can. A section with nothing in
+// it is read: a spec need not have checks. Items written as a plain list
+// would otherwise be read as none, and a run judged against nothing.
+func DoneWhenRefusal(content string) string {
+	_, found, err := ParseDoneWhen(content)
+	if err != nil {
+		return err.Error() + "; write the items as:\n" + doneWhenShape
+	}
+	if found {
+		return ""
+	}
+	body, _ := ViewSection(content, SessionSectionDoneWhen)
+	for line := range strings.Lines(body) {
+		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "%%") {
+			return "the Done when section has items outside a gummi-done-when block, so none of them would be " +
+				"checked; write them inside one:\n" + doneWhenShape
+		}
+	}
+	return ""
+}
+
 // SetDoneWhen rewrites a doc's gummi-done-when block with items.
 func SetDoneWhen(content string, items []domain.DoneWhen) (string, error) {
 	return rewriteFence(content, SessionSectionDoneWhen, doneWhenFenceRe, "gummi-done-when", items)

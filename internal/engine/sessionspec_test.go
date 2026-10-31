@@ -171,3 +171,68 @@ func TestSessionSpecToolsTakeASpec(t *testing.T) {
 		t.Error("withSpecArg changed the shared definition")
 	}
 }
+
+// A section's text under another name — claude has sent "content" — is
+// refused and writes nothing, rather than emptying the section and
+// reporting it updated; a call with no body is refused too, while an empty
+// body still clears the section.
+func TestReplaceSectionRefusesABodyUnderAnotherName(t *testing.T) {
+	e, s, _ := specToolsSession(t)
+	if got := specCall(t, e, s, "s1", specStartToolName, `{"title":"Export as JSON"}`); !strings.Contains(got, "created spec 1") {
+		t.Fatalf("spec_start = %q", got)
+	}
+	if got := specCall(t, e, s, "r1", specReplaceSectionToolName, `{"section":"Problem","body":"json export\n"}`); got != "updated Problem section" {
+		t.Fatalf("replace = %q", got)
+	}
+	problem := func() string {
+		t.Helper()
+		doc := specCall(t, e, s, "v", specViewToolName, `{}`)
+		_, after, ok := strings.Cut(doc, "## Problem\n")
+		if !ok {
+			t.Fatalf("spec_view = %q", doc)
+		}
+		body, _, _ := strings.Cut(after, "## ")
+		return strings.TrimSpace(body)
+	}
+	for _, args := range []string{
+		`{"spec":1,"section":"Problem","content":"lost\n"}`,
+		`{"section":"Problem","body":"lost\n","text":"lost\n"}`,
+		`{"section":"Problem"}`,
+	} {
+		got := specCall(t, e, s, "bad", specReplaceSectionToolName, args)
+		if !strings.Contains(got, "Nothing was written") || !strings.Contains(got, "body") {
+			t.Errorf("%s = %q, want a refusal naming body", args, got)
+		}
+		if p := problem(); p != "json export" {
+			t.Errorf("after %s the Problem section reads %q", args, p)
+		}
+	}
+	if got := specCall(t, e, s, "r2", specReplaceSectionToolName, `{"section":"Problem","body":""}`); got != "updated Problem section" {
+		t.Fatalf("an empty body = %q", got)
+	}
+	if p := problem(); p != "" {
+		t.Errorf("an empty body left %q", p)
+	}
+}
+
+// TestReplaceSectionRefusesADoneWhenItCannotRead: Done when items written
+// as a plain list would be read as none, so the write is refused with the
+// block's shape and nothing is written; the block form is taken.
+func TestReplaceSectionRefusesADoneWhenItCannotRead(t *testing.T) {
+	e, s, _ := specToolsSession(t)
+	if got := specCall(t, e, s, "s1", specStartToolName, `{"title":"Export as JSON"}`); !strings.Contains(got, "created spec 1") {
+		t.Fatalf("spec_start = %q", got)
+	}
+	before := specCall(t, e, s, "v1", specViewToolName, `{}`)
+	got := specCall(t, e, s, "r1", specReplaceSectionToolName, `{"section":"Done when","body":"- DW-1: export works. check: `+"`go test ./...`"+`\n"}`)
+	if !strings.Contains(got, "```gummi-done-when") || !strings.Contains(got, "Nothing was written") {
+		t.Fatalf("a plain-list Done when = %q", got)
+	}
+	if after := specCall(t, e, s, "v2", specViewToolName, `{}`); after != before {
+		t.Errorf("the refused write changed the spec:\n%s", after)
+	}
+	block := `{"section":"Done when","body":"` + "```gummi-done-when\\n- id: DW-1\\n  says: export works\\n  check: go test ./...\\n```\\n" + `"}`
+	if got := specCall(t, e, s, "r2", specReplaceSectionToolName, block); got != "updated Done when section" {
+		t.Fatalf("the block form = %q", got)
+	}
+}

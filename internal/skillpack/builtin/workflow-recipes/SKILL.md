@@ -90,8 +90,8 @@ not repeat it. A step's model is the person's profile choice per role;
 | `{{<id>.output}}` | an earlier step's; in a `repeat`, its latest round |
 | `{{run.diff}}` | a file: the diff from the run's start to now |
 
-A step sees only its filled prompt. Name every output and artifact it
-needs; it has no other way to know what came before.
+A step sees only its filled prompt: name every output and artifact it
+needs.
 
 ## Lines a step's output may carry
 
@@ -101,6 +101,7 @@ needs; it has no other way to know what came before.
 - `MET: DW-n` / `UNMET: DW-n <why>`, in the **run's last step**, judge
   the items without a check. End with a reviewer that writes them, or
   every `judge: true` item stays unjudged.
+- A `gummi-done-when` block adds checks to the run.
 
 ## Loops: `until` and `onMax`
 
@@ -111,8 +112,8 @@ needs; it has no other way to know what came before.
 | `{contains: LGTM}` | the loop's last step's output contains the text |
 
 `onMax`: `pause` (the default) asks the person; `continue` goes on;
-`abort` ends the run partial. A loop gummi cannot judge — the verdict
-artifact was never written, a check ran no tests — always asks.
+`abort` ends the run partial. A loop gummi cannot judge (no verdict
+artifact, a check ran no tests) always asks.
 
 Give a verdict step an artifact and the exact JSON to write: a missing
 file is captured from the output's last JSON object, but only if there

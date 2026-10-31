@@ -6,7 +6,26 @@ steps:
     role: contractor
     prompt: |
       Write the design for the spec below into {{artifacts.design}}.
-      Do not edit code.
+      Do not edit code. Read the code first, and name in the design every
+      place the change must reach (a sibling function, another case of the
+      same type, another caller) and the behaviour around it that must keep
+      working: the existing tests that cover it, what its callers expect,
+      what its comments, docs and defaults promise. Every place the same
+      change belongs is part of it, whatever the spec names: one you would
+      leave out is one you can say what changing it would break, and then
+      ask the person with ask_user, never leave it as a note; recommend
+      including it unless you found a caller that depends on it as it is.
+      End your reply with a gummi-done-when block with one check command
+      for each place and kept behaviour no done-when item below checks
+      yet, so the run proves them too. A place's check must fail now, run it to see:
+      name a test the implementer will write rather than one that exists.
+      A kept behaviour's check passes now and must keep passing:
+
+      ```gummi-done-when
+      - id: DW-1
+        says: <what holds once built>
+        check: <a command that exits 0 when it does>
+      ```
 
       {{spec}}
     artifacts: { design: design.md }
@@ -20,7 +39,9 @@ steps:
           role: implementer
           prompt: |
             Implement {{artifacts.design}} for the spec below. If
-            {{artifacts.review}} exists, address its findings first.
+            {{artifacts.review}} exists, address its findings first. Run
+            the whole test suite of every package you changed, and keep
+            it passing.
 
             {{spec}}
         - id: reviews
@@ -29,8 +50,8 @@ steps:
             steps:
               # two reviews on two models: review-b reads the profile's
               # reviewer-alt slot, its reviewer when the profile has none
-              - { id: review-a, role: reviewer,                     prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
-              - { id: review-b, role: reviewer, slot: reviewer-alt, prompt: "Review {{run.diff}} against the spec. List findings.\n\n{{spec}}" }
+              - { id: review-a, role: reviewer,                     prompt: "Review {{run.diff}} against the spec and {{artifacts.design}}. List findings, including any place the change misses and any behaviour it breaks that worked before.\n\n{{spec}}" }
+              - { id: review-b, role: reviewer, slot: reviewer-alt, prompt: "Review {{run.diff}} against the spec and {{artifacts.design}}. List findings, including any place the change misses and any behaviour it breaks that worked before.\n\n{{spec}}" }
         - id: verdict
           role: reviewer
           prompt: |
