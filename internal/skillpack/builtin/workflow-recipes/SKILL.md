@@ -90,8 +90,8 @@ not repeat it. A step's model is the person's profile choice per role;
 | `{{<id>.output}}` | an earlier step's; in a `repeat`, its latest round |
 | `{{run.diff}}` | a file: the diff from the run's start to now |
 
-A step sees only its filled prompt. Name every output and artifact it
-needs; it has no other way to know what came before.
+A step sees only its filled prompt: name every output and artifact it
+needs.
 
 ## Lines a step's output may carry
 
@@ -100,8 +100,8 @@ needs; it has no other way to know what came before.
 - `DECISION: …` and `OPEN: …` go into the run's report.
 - `MET: DW-n` / `UNMET: DW-n <why>`, in the **run's last step**, judge
   the items without a check. End with a reviewer that writes them, or
-  each `judge: true` item stays unjudged.
-- A `gummi-done-when` block adds its checks to the run.
+  every `judge: true` item stays unjudged.
+- A `gummi-done-when` block adds checks to the run.
 
 ## Loops: `until` and `onMax`
 

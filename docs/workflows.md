@@ -119,7 +119,7 @@ that copy: editing the file later changes the next run, not this one.
 | recipe | what it does |
 |---|---|
 | `deliver` | A contractor writes a design; then an implementer builds and two reviewers on two models review, round a loop until a merged verdict says `APPROVED` (at most 3 rounds); then a reviewer judges every done-when item. For features and changes across packages. |
-| `fix-until-green` | One implementer, round a loop until every done-when check passes (at most 5 rounds). For checks that fail and a fix that needs no design. |
+| `fix-until-green` | A scout first maps the cause, every place it lives and the behaviour that must keep working, and adds a check for each; then one implementer, round a loop until every done-when check passes (at most 5 rounds). For checks that fail and a fix that needs no design. |
 | `investigate` | A scout reads and reproduces; a scribe writes `report.md`. Changes no code. For a question that needs a written answer. |
 | `ship` | Builds, opens a draft PR, then waits on it without a model and fixes red checks, requested changes and trusted comments until a person merges. Needs the session's "agent may publish". |
 | `merge-base` | Merges a PR's moved base into the branch and resolves the conflicts. Meant as a `ship` handler. |
@@ -585,6 +585,7 @@ gummi reads these lines in a step's final message:
 | `MET: DW-n` / `UNMET: DW-n <why>` | in the run's last step, judge items marked `judge: true` |
 | `DECISION: <what>` | a choice the step made that nobody asked it to; goes into the report |
 | `OPEN: <what>` | something left open; goes into the report |
+| a fenced `gummi-done-when` block | adds its checks to the run, after the spec's items; a step that maps a bug's reach uses it to make the run prove each place it found |
 | a fenced `gummi-workflow` block | from a `planner`, replaces the remaining steps once you allow it |
 
 A step also fails when its agent errors.
